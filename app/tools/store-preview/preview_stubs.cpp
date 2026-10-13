@@ -86,7 +86,8 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *)
         FsEntry f; f.name = n; f.path = path + "/" + n;
         struct stat st; if (stat(f.path.c_str(), &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) { f.is_dir = true; dirs.push_back(f); }
-        else if (n.size() > 4 && (n.substr(n.size() - 4) == ".iso" || n.substr(n.size() - 4) == ".ISO")) { f.size = 7834566656ull; isos.push_back(f); }
+        else if ((n.size() > 4 && (n.substr(n.size() - 4) == ".iso" || n.substr(n.size() - 4) == ".ISO" || n.substr(n.size() - 4) == ".gcm")) ||
+                 (n.size() > 5 && n.substr(n.size() - 5) == ".ciso")) { f.size = n.find("Wind") != std::string::npos ? 1459978240ull : 7834566656ull; isos.push_back(f); }
     }
     closedir(d);
     auto by = [](const FsEntry &a, const FsEntry &b) { return a.name < b.name; };
@@ -112,6 +113,14 @@ std::string Engine::store_update() const { const char *v = std::getenv("PREVIEW_
 bool update_store(std::string &) { return true; }
 bool Engine::download_store_update() { return true; }
 bool Engine::take_auto_update(std::string &) { return false; }
+std::string Engine::newest_version(const App &a) const
+{
+    if (const char *e = std::getenv("PREVIEW_NEWEST"))
+        if (a.id == "PPSA99309") return e;
+    return "";
+}
+void Engine::check_updates_now() {}
+int Engine::update_check() const { const char *e = std::getenv("PREVIEW_CHECK"); return e ? std::atoi(e) : 0; }
 int update_store_state() { return 0; }
 void update_store_cancel() {}
 /* PREVIEW_NOTES: a GitHub releases answer (JSON) shown as every game's patch notes. */

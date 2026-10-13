@@ -12,7 +12,8 @@
  * and this writes its progress, at least twice a second, to status.txt there:
  *     token=  phase=copying|done|failed  done=  total=  error=  seconds=
  * kind=delete (path0=, path1=, ...) deletes a game's folder and the game files set up
- * for it instead.
+ * for it instead; kind=copy copies one file (a disc image the game reads as it is) into
+ * the target folder.
  * A file called "cancel" in that folder stops it. Files already in place at
  * their full size are kept, so a stopped setup carries on. It writes only
  * inside the target folder, never the port's own eboot.bin, sce_sys or
@@ -335,6 +336,86 @@ int stfs_job(const std::string &package, const std::string &target)
     return 0;
 }
 
+/* kind "copy": one file - a disc image the game reads as it is - into target, beside the
+ * game: written as <name>.part, checked for its size, then renamed into place. */
+int copy_job(const std::string &src, const std::string &target)
+{
+    log_line("copy started (pid %d): %s -> %s", int(getpid()), src.c_str(), target.c_str());
+    struct stat st;
+    if (stat(src.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return fail("The disc image can't be read.");
+    const std::string leaf = src.substr(src.find_last_of('/') + 1);
+    if (leaf.empty() || leaf[0] == '.' || protected_name(leaf))
+        return fail("The copier won't write " + leaf + " into the game's folder.");
+    const std::string dst = target + "/" + leaf, part = dst + ".part";
+    const unsigned long long total = (unsigned long long)st.st_size;
+    const int in = open(src.c_str(), O_RDONLY);
+    if (in < 0)
+        return fail("The disc image can't be read.");
+    const int out = open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
+    if (out < 0)
+    {
+        close(in);
+        return fail("The game's folder can't be written to.");
+    }
+    constexpr std::size_t kChunk = 8u << 20;
+    std::uint8_t *buf = static_cast<std::uint8_t *>(std::malloc(kChunk));
+    const double t0 = now_s();
+    double last_log = t0;
+    std::string error;
+    unsigned long long done = 0;
+    g_status.phase = "copying";
+    g_status.total = total;
+    write_status(true);
+    while (buf && error.empty())
+    {
+        const ssize_t n = pread(in, buf, kChunk, off_t(done));
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0)
+            error = "The disc image couldn't be read at " + std::to_string(done >> 20) + " MB. It may be incomplete.";
+        if (n <= 0)
+            break;
+        if (!write_all(out, buf, std::size_t(n)))
+            error = "Writing the disc image failed. Is the storage full?";
+        done += (unsigned long long)n;
+        g_status.done = done;
+        g_status.seconds = now_s() - t0;
+        write_status();
+        if (now_s() - last_log > 5)
+        {
+            last_log = now_s();
+            log_line("%llu MB of %llu MB in %.0f s", done >> 20, total >> 20, now_s() - t0);
+        }
+        if (cancelled())
+            error = "Stopped.";
+    }
+    if (!buf)
+        error = "The copier couldn't get memory to copy with.";
+    std::free(buf);
+    close(in);
+    if (close(out) != 0 && error.empty())
+        error = "Writing the disc image failed. Is the storage full?";
+    struct stat ds;
+    if (error.empty() && (done != total || rename(part.c_str(), dst.c_str()) != 0 || stat(dst.c_str(), &ds) != 0 ||
+                          (unsigned long long)ds.st_size != total))
+        error = "The disc image didn't copy whole. Set it up again.";
+    if (!error.empty())
+    {
+        unlink(part.c_str());
+        return fail(error);
+    }
+    chmod(dst.c_str(), 0777);
+    g_status.seconds = now_s() - t0;
+    g_status.done = total;
+    g_status.files = 1;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("copy done: %llu MB in %.1f s", total >> 20, now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
 /* kind "delete": a game's folder and the game files set up for it elsewhere (path0=,
  * path1=, ... in the job), each only if it's somewhere a game's files can be. Done here
  * because these files were written by this copier, and checked afterwards: a path that
@@ -464,6 +545,8 @@ int main()
         return stfs_job(image, target);
     if (kind == "delete")
         return delete_job(job);
+    if (kind == "copy")
+        return copy_job(image, target);
     if (kind != "setup")
         return fail("The copier doesn't know the job \"" + kind + "\".");
     log_line("started (pid %d): %s -> %s", int(getpid()), image.c_str(), target.c_str());

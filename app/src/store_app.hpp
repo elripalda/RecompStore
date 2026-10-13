@@ -60,6 +60,7 @@ private:
     Art &art(const App &a);
     const App *find(const std::string &id) const;
     std::string state_of(const App &a, bool *update_ready) const;
+    std::string version_of(const App &a) const;
     std::vector<const App *> installed_apps() const;
     std::vector<const App *> featured_apps() const;
     void open(const std::string &id);

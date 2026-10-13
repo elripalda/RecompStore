@@ -13,6 +13,7 @@
 #include "porpoise_sound.hpp"
 #include "ui_app_common.hpp"
 
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -269,21 +270,34 @@ const App *Store::find(const std::string &id) const
     return nullptr;
 }
 
+/* The version to have: the newest release on GitHub with the game's zip once the store
+ * has looked, else the one the catalog names. */
+std::string Store::version_of(const App &a) const
+{
+    std::string n = engine().newest_version(a);
+    if (n.empty() || (!a.version.empty() && version_newer(a.version, n))) return a.version; /* the catalog may know first */
+    if (n.size() > 1 && (n[0] == 'v' || n[0] == 'V') && std::isdigit(static_cast<unsigned char>(n[1]))) n.erase(0, 1); /* "v1.0.4" reads 1.0.4 */
+    return n;
+}
+
 std::string Store::state_of(const App &a, bool *update_ready) const
 {
     const std::string v = engine().installed(a.id);
     if (update_ready)
         *update_ready = false;
+    if (store_too_old(a) && (v.empty() || v == "?"))
+        return "Needs Recomp Store " + a.min_store;
     if (v.empty())
         return a.kind == "original" ? "Not installed" + (a.size.empty() ? std::string() : " \xC2\xB7 " + a.size)
                                     : (a.author.empty() ? "Not installed" : a.author);
     if (v == "?")
         return "On your PS5 \xC2\xB7 not managed yet";
-    if (!a.version.empty() && version_key(v) != version_key(a.version))
+    const std::string want = version_of(a);
+    if (!want.empty() && version_key(v) != version_key(want) && !version_newer(v, want) && !store_too_old(a))
     {
         if (update_ready)
             *update_ready = true;
-        return "Update " + a.version + " ready";
+        return "Update " + want + " ready";
     }
     return "Installed \xC2\xB7 " + v;
 }
@@ -402,6 +416,14 @@ void Store::press_primary()
         play(int(Sfx::Error));
         return;
     }
+    /* A game this store is too old for: only one already here and set up opens. */
+    if (store_too_old(*a) && !(game_ready(*a) && !engine().installed(a->id).empty() && engine().installed(a->id) != "?"))
+    {
+        notice_ = a->name + " needs Recomp Store " + a->min_store + " or newer. Update the store from Latest Updates first.";
+        notice_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
     bool update = false;
     state_of(*a, &update);
     const std::string inst = engine().installed(a->id);
@@ -413,7 +435,7 @@ void Store::press_primary()
         {
             bool up2 = false;
             state_of(*a, &up2);
-            notice_ = up2 ? "Recomp Store now looks after " + a->name + ". Version " + v + " is on your PS5; " + a->version + " is ready to install."
+            notice_ = up2 ? "Recomp Store now looks after " + a->name + ". Version " + v + " is on your PS5; " + version_of(*a) + " is ready to install."
                           : "Recomp Store now looks after " + a->name + ". Its updates will show up here.";
             notice_bad_ = false;
             play(int(Sfx::Complete));
@@ -503,7 +525,7 @@ void Store::press_setup(const App &a)
     for (const Slot &s : a.slots)
     {
         auto it = chosen_.find(a.id + "/" + s.key);
-        if (it == chosen_.end() || (s.kind != "iso" && s.kind != "stfs"))
+        if (it == chosen_.end() || !slot_kind_known(s.kind))
             continue;
         if (engine().setup(a.id, s.key, it->second))
         {
@@ -573,8 +595,12 @@ void Store::picker_go(const std::string &path)
     if (picker_mode_ == 1)
         ext = ".elf";
     else if (const App *a = find(page_id_))
-        if (picker_slot_ >= 0 && picker_slot_ < int(a->slots.size()) && a->slots[std::size_t(picker_slot_)].kind == "stfs")
-            ext = "stfs";
+        if (picker_slot_ >= 0 && picker_slot_ < int(a->slots.size()))
+        {
+            const std::string &k = a->slots[std::size_t(picker_slot_)].kind;
+            if (k == "stfs") ext = "stfs";
+            else if (k == "image") ext = "image";
+        }
     picker_err_ = !list_dir(path, entries_, ext);
 }
 
@@ -949,7 +975,7 @@ bool Store::update(const pad::State &p, float dt)
             else if (c.kind == Control::Slot)
             {
                 const std::string &kind = a->slots[std::size_t(c.slot)].kind;
-                if (kind != "iso" && kind != "stfs") play(int(Sfx::Error));
+                if (!slot_kind_known(kind)) play(int(Sfx::Error));
                 else open_picker(*a, c.slot);
             }
             else if (c.kind == Control::Delete)
@@ -1068,7 +1094,7 @@ bool Store::update(const pad::State &p, float dt)
         }
         else
         {
-            const int g = std::clamp(gen_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, 2);
+            const int g = std::clamp(gen_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, 3);
             if (g != gen_row_) { gen_row_ = g; play(int(Sfx::Move)); }
             if (pressed(pad::BtnCross))
             {
@@ -1079,6 +1105,17 @@ bool Store::update(const pad::State &p, float dt)
                 }
                 else if (gen_row_ == 1)
                     open_smp_picker();
+                else if (gen_row_ == 3)
+                {
+                    if (engine().update_check() == 1)
+                        play(int(Sfx::Error));
+                    else
+                    {
+                        engine().check_updates_now();
+                        settings_note_.clear();
+                        play(int(Sfx::Select));
+                    }
+                }
                 else
                 {
                     std::string why;
@@ -1489,7 +1526,7 @@ void Store::draw_updates(Gfx &gfx)
         const float tx = x + 28 + 104 + 28;
         gfx.text_mid(Font::ExtraBold, 26, tx, yy + 40 * s, C(kFrost), Align::Left, a.name);
         gfx.text_mid(Font::SemiBold, 20, tx + gfx.measure(Font::ExtraBold, 26, a.name) + 10, yy + 41 * s, C(kCyan),
-                     Align::Left, a.version);
+                     Align::Left, version_of(a));
         bool up = false;
         state_of(a, &up);
         const bool inst = !engine().installed(a.id).empty();
@@ -1555,6 +1592,40 @@ void Store::draw_settings(Gfx &gfx)
         option(2, "Refresh ShadowMountPlus", "Has it look for new games now, or starts it (port 9021) if it isn't running.");
         gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, C(kFrost), Align::Right, "Refresh");
         ry += 104;
+        {
+            /* What the last check found: the store's own update and the games', from GitHub. */
+            const int st = engine().update_check();
+            std::string result;
+            if (st == 2)
+            {
+                int games = 0;
+                for (const App &a : catalog_.apps)
+                {
+                    bool up = false;
+                    state_of(a, &up);
+                    games += up ? 1 : 0;
+                }
+                std::string su = engine().store_update();
+                if (!su.empty() && (su[0] == 'v' || su[0] == 'V')) su.erase(0, 1);
+                const std::string g = games == 1 ? "1 game" : std::to_string(games) + " games";
+                if (su.empty() && !games)
+                    result = "Everything is up to date.";
+                else if (!games)
+                    result = "Recomp Store " + su + " is ready: see Latest Updates.";
+                else if (su.empty())
+                    result = g + (games == 1 ? " has an update" : " have updates") + ": see Latest Updates.";
+                else
+                    result = "Recomp Store " + su + " and " + g + " have updates: see Latest Updates.";
+            }
+            option(3, "Check for updates",
+                   st == 1   ? "Asking GitHub about the store and your games\xE2\x80\xA6"
+                   : st == 3 ? "GitHub couldn't be reached. Check your connection and try again."
+                   : st == 2 ? result
+                             : "The store and your games look on GitHub on their own; this looks now.");
+            gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, st == 1 ? C(kMuted) : C(kFrost), Align::Right,
+                         st == 1 ? "Checking\xE2\x80\xA6" : "Check now");
+            ry += 104;
+        }
         if (!settings_note_.empty())
         {
             gfx.text_mid(Font::SemiBold, 18, cx + 8, ry + 18, settings_note_bad_ ? C(0xFFB4A8) : C(0x9FF0C6), Align::Left,
@@ -2010,7 +2081,7 @@ void Store::draw_page(Gfx &gfx)
     const float slot_h = 74;
     const float setup_h = setup ? 22 + 14 + slot_h * float(a.slots.size()) + 14 + 64 + (setting_up ? 14 + 10 + 12 + 22 : 0) : 0;
     const std::pair<std::string, std::string> rows[] = {
-        {"Version", a.version},
+        {"Version", version_of(a)},
         {"Download", a.size},
         {"Installs to", app_folder(a.id)},
         {"You bring", "Your " + (a.needs.empty() ? std::string("own game") : a.needs)},
@@ -2071,6 +2142,12 @@ void Store::draw_page(Gfx &gfx)
             bg = C(kFrost, 0.10f);
             fg = C(kSoft);
         }
+        else if (store_too_old(a) && (inst.empty() || inst == "?"))
+        {
+            label = "Needs Recomp Store " + a.min_store;
+            bg = C(kFrost, 0.12f);
+            fg = C(kMuted);
+        }
         else if (inst.empty())
             label = "Install";
         else if (inst == "?")
@@ -2080,7 +2157,7 @@ void Store::draw_page(Gfx &gfx)
         }
         else if (up)
         {
-            label = "Update to " + a.version;
+            label = "Update to " + version_of(a);
             bg = C(kCyan);
         }
         else if (game_ready(a))
@@ -2122,7 +2199,7 @@ void Store::draw_page(Gfx &gfx)
     {
         ry += 28;
         gfx.text_mid(Font::Bold, 15, ix, ry + 11, C(kCyan), Align::Left, "YOUR GAME FILES", 2);
-        const std::string dir = a.data_dir.empty() ? std::string(kHomebrew) + "/" + a.id : a.data_dir;
+        const std::string dir = a.data_dir.empty() ? app_folder(a.id) : a.data_dir;
         gfx.text_mid(Font::Regular, 16, ix + iw, ry + 11, C(kDim), Align::Right, fit(gfx, Font::Regular, 16, iw - 240, dir));
         ry += 22 + 14;
         bool all_ready = true, any_chosen = false;
@@ -2137,7 +2214,7 @@ void Store::draw_page(Gfx &gfx)
             gfx.panel(ix, ry, iw, 1.25f, kLine, 1.f, 0);
             const Color dot = ready && !chosen ? C(kGreen) : chosen ? C(kCyan) : s.required ? C(kCyan, 0.55f) : C(kFrost, 0.3f);
             gfx.panel(ix, ry + slot_h / 2 - 6, 12, 12, dot, 1.f, 6);
-            const bool can = s.kind == "iso" || s.kind == "stfs";
+            const bool can = slot_kind_known(s.kind);
             std::string status;
             if (!can) status = ready ? "In place" : "Not something this version of the store sets up";
             else if (chosen) status = base_name(ch->second);
@@ -2265,6 +2342,9 @@ void Store::draw_picker(Gfx &gfx)
         if (slot.kind == "stfs")
             hint_line = slot.multiple ? "Any one of your DLC files from the console: every pack in that folder is set up"
                                       : "Your Title Update from the console: the file whose name starts with TU_";
+        else if (slot.kind == "image")
+            hint_line = "Your own " + a->name + " disc image" + (slot.disc_id.empty() ? std::string() : ", " + slot.disc_id) +
+                        " (.iso, .gcm or .ciso)";
         else
             hint_line = slot.title_id.empty() ? std::string("Your own Xbox 360 disc image (.iso)") : "Your own " + a->name + " disc image (.iso)";
     }
