@@ -141,7 +141,12 @@ std::string slot_target(const App &a, const Slot &s) { return a.data_dir + "/" +
 bool slot_ready(const App &a, const Slot &) { const char *r = std::getenv("PREVIEW_READY"); return r && a.id == r; }
 std::string slot_source(const App &a, const Slot &) { const char *r = std::getenv("PREVIEW_READY"); return r && a.id == r ? "/mnt/usb0/Games/SmackDown vs Raw 2011.iso" : ""; }
 void Engine::acknowledge() {}
-std::string Engine::installed(const std::string &id) const { return id == "PPSA92011" ? "v1.0" : id == "PPSA92007" ? "v0.9.0" : ""; }
+std::string Engine::installed(const std::string &id) const
+{
+    if (const char *e = std::getenv("PREVIEW_INSTALLED"))
+        if (id == e) return "1.0";
+    return id == "PPSA92011" ? "v1.0" : id == "PPSA92007" ? "v0.9.0" : "";
+}
 Engine &engine() { static Engine e; return e; }
 } // namespace recomp
 

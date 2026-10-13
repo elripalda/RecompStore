@@ -19,6 +19,7 @@
 
 #include "store_disc.hpp"
 #include "store_zip.hpp"
+#include "store_stfs.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -301,6 +302,36 @@ int unzip_job(const std::string &zip_path, const std::string &root)
     return 0;
 }
 
+/* kind "stfs": a Title Update or DLC package (an Xbox 360 content package) unpacked into
+ * the folder the game reads it from. */
+int stfs_job(const std::string &package, const std::string &target)
+{
+    log_line("package started (pid %d): %s -> %s", int(getpid()), package.c_str(), target.c_str());
+    const double t0 = now_s();
+    g_status.phase = "copying";
+    write_status(true);
+    std::string error;
+    std::size_t files = 0;
+    const bool ok = recomp::stfs::unpack(
+        package, target,
+        [](std::uint64_t done, std::uint64_t total) {
+            g_status.phase = "copying";
+            g_status.done = done;
+            g_status.total = total;
+            write_status();
+        },
+        [](const std::string &line) { log_line("%s", line.c_str()); }, [] { return cancelled(); }, error, files);
+    g_status.seconds = now_s() - t0;
+    if (!ok)
+        return fail(error);
+    g_status.files = files;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("package done: %zu files in %.1f s", files, now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
 int main()
 {
     make_dirs(kDir + "/logs");
@@ -354,6 +385,8 @@ int main()
         return fail("The game's folder isn't somewhere the store sets games up.");
     if (kind == "unzip")
         return unzip_job(image, target);
+    if (kind == "stfs")
+        return stfs_job(image, target);
     if (kind != "setup")
         return fail("The copier doesn't know the job \"" + kind + "\".");
     log_line("started (pid %d): %s -> %s", int(getpid()), image.c_str(), target.c_str());

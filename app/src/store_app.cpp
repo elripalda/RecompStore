@@ -503,7 +503,7 @@ void Store::press_setup(const App &a)
     for (const Slot &s : a.slots)
     {
         auto it = chosen_.find(a.id + "/" + s.key);
-        if (it == chosen_.end() || s.kind != "iso")
+        if (it == chosen_.end() || (s.kind != "iso" && s.kind != "stfs"))
             continue;
         if (engine().setup(a.id, s.key, it->second))
         {
@@ -569,7 +569,13 @@ void Store::picker_go(const std::string &path)
     picker_path_ = path;
     picker_sel_ = 0;
     picker_top_ = 0;
-    picker_err_ = !list_dir(path, entries_, picker_mode_ == 1 ? ".elf" : ".iso");
+    const char *ext = ".iso";
+    if (picker_mode_ == 1)
+        ext = ".elf";
+    else if (const App *a = find(page_id_))
+        if (picker_slot_ >= 0 && picker_slot_ < int(a->slots.size()) && a->slots[std::size_t(picker_slot_)].kind == "stfs")
+            ext = "stfs";
+    picker_err_ = !list_dir(path, entries_, ext);
 }
 
 bool Store::update_picker(float dt)
@@ -798,7 +804,9 @@ bool Store::update(const pad::State &p, float dt)
     {
         play(int(Sfx::Complete));
         const std::string done = job.kind == "setup" ? "Game files are ready. " : "Installed. ";
-        if (job.kind == "delete")
+        if (!job.note.empty())
+            notice_ = job.note;
+        else if (job.kind == "delete")
             notice_ = job.home == 2 ? "Deleted. Its folder and everything in it are gone, and ShadowMountPlus took it off your home screen."
                                     : "Deleted. Its folder and everything in it are gone. If its tile is still on your home screen, delete it there.";
         else if (job.home == 2)
@@ -811,6 +819,17 @@ bool Store::update(const pad::State &p, float dt)
         if (job.kind == "setup")
             chosen_.erase(job.app_id + "/" + job.slot);
         engine().acknowledge();
+        /* More files chosen for this game: on to the next, one after another. */
+        if (job.kind == "setup")
+            if (const App *a = find(job.app_id))
+                for (const Slot &sl : a->slots)
+                    if (chosen_.count(a->id + "/" + sl.key))
+                    {
+                        const std::string keep = notice_;
+                        press_setup(*a);
+                        notice_ = keep;
+                        break;
+                    }
     }
     else if (job.phase == Phase::Failed && job.kind == "bench")
     {
@@ -906,7 +925,8 @@ bool Store::update(const pad::State &p, float dt)
                 press_primary();
             else if (c.kind == Control::Slot)
             {
-                if (a->slots[std::size_t(c.slot)].kind != "iso") play(int(Sfx::Error));
+                const std::string &kind = a->slots[std::size_t(c.slot)].kind;
+                if (kind != "iso" && kind != "stfs") play(int(Sfx::Error));
                 else open_picker(*a, c.slot);
             }
             else if (c.kind == Control::Delete)
@@ -2094,31 +2114,44 @@ void Store::draw_page(Gfx &gfx)
             gfx.panel(ix, ry, iw, 1.25f, kLine, 1.f, 0);
             const Color dot = ready && !chosen ? C(kGreen) : chosen ? C(kCyan) : s.required ? C(kCyan, 0.55f) : C(kFrost, 0.3f);
             gfx.panel(ix, ry + slot_h / 2 - 6, 12, 12, dot, 1.f, 6);
+            const bool can = s.kind == "iso" || s.kind == "stfs";
             std::string status;
-            if (s.kind != "iso") status = ready ? "In place" : "Setting this up here arrives in a later build";
+            if (!can) status = ready ? "In place" : "Not something this version of the store sets up";
             else if (chosen) status = base_name(ch->second);
+            else if (ready && s.multiple)
+            {
+                /* DLC: each package in a folder of its own. */
+                int packs = 0;
+                std::vector<FsEntry> sub;
+                if (list_dir(slot_target(a, s), sub, "\x01"))
+                    for (const FsEntry &e : sub) packs += e.is_dir ? 1 : 0;
+                status = packs == 1 ? "1 package in place" : std::to_string(packs) + " packages in place";
+            }
             else if (ready)
             {
                 const std::string src = slot_source(a, s);
                 status = src.empty() ? "Ready" : "Ready \xC2\xB7 from " + base_name(src);
             }
             else status = s.required ? "Not set up yet" : "Not set up \xC2\xB7 optional";
-            const char *btn = s.kind != "iso" ? "Later" : (chosen || ready) ? "Change" : "Choose\xE2\x80\xA6";
+            const char *btn = !can ? "Later" : (chosen || ready) ? (s.multiple && !chosen ? "Add" : "Change") : "Choose\xE2\x80\xA6";
             const float bw = gfx.measure(Font::SemiBold, 17, btn) + 36;
             gfx.text_mid(Font::SemiBold, 19, ix + 28, ry + slot_h / 2 - 11, C(kFrost), Align::Left, s.label);
             gfx.text_mid(Font::Regular, 16, ix + 28, ry + slot_h / 2 + 13, C(kMuted), Align::Left,
                          fit(gfx, Font::Regular, 16, iw - 28 - bw - 24, status));
             const float bx = ix + iw - bw, by = ry + slot_h / 2 - 21;
-            glass(gfx, bx, by, bw, 42, 14, s.kind != "iso" ? Color{1, 1, 1, 0.04f} : kGlass, false);
+            glass(gfx, bx, by, bw, 42, 14, !can ? Color{1, 1, 1, 0.04f} : kGlass, false);
             ring(gfx, bx, by, bw, 42, 14, focused(Control::Slot, i) ? 1.f : 0.f, true);
-            gfx.text_mid(Font::SemiBold, 17, bx + bw / 2, by + 21, s.kind != "iso" ? C(kDim) : C(kFrost), Align::Center, btn);
+            gfx.text_mid(Font::SemiBold, 17, bx + bw / 2, by + 21, !can ? C(kDim) : C(kFrost), Align::Center, btn);
             ry += slot_h;
         }
         ry += 14;
         std::string label;
         Color bg = C(kFrost, 0.12f), fg = C(kMuted);
         if (setting_up)
-            label = job.step.rfind("Checking", 0) == 0 ? "Checking the copied files\xE2\x80\xA6" : job.step.rfind("Reading", 0) == 0 ? "Reading the disc image\xE2\x80\xA6" : "Copying the game's files\xE2\x80\xA6";
+            label = job.step.rfind("Checking", 0) == 0  ? "Checking the copied files\xE2\x80\xA6"
+                    : job.step.rfind("Reading", 0) == 0 ? job.step + "\xE2\x80\xA6"
+                    : job.step.rfind("Setting up", 0) == 0 ? job.step + "\xE2\x80\xA6"
+                                                            : "Copying the game's files\xE2\x80\xA6";
         else if (any_chosen)
         {
             label = "Set up game files";
@@ -2206,7 +2239,11 @@ void Store::draw_picker(Gfx &gfx)
             return;
         const Slot &slot = a->slots[std::size_t(picker_slot_)];
         title = "Choose: " + slot.label;
-        hint_line = slot.title_id.empty() ? std::string("Your own Xbox 360 disc image (.iso)") : "Your own " + a->name + " disc image (.iso)";
+        if (slot.kind == "stfs")
+            hint_line = slot.multiple ? "Any one of your DLC files from the console: every pack in that folder is set up"
+                                      : "Your Title Update from the console: the file whose name starts with TU_";
+        else
+            hint_line = slot.title_id.empty() ? std::string("Your own Xbox 360 disc image (.iso)") : "Your own " + a->name + " disc image (.iso)";
     }
     const float k = ease_out(picker_t_);
     const float W = gfx.design_w(), H = gfx.design_h();
@@ -2253,7 +2290,9 @@ void Store::draw_picker(Gfx &gfx)
         gfx.text_mid(Font::Regular, 19, rx, ry + 30, C(kMuted), Align::Left, "This folder can't be opened.");
     else if (entries_.empty())
         gfx.text_mid(Font::Regular, 19, rx, ry + 30, C(kMuted), Align::Left,
-                     picker_mode_ == 1 ? "No .elf files or folders here." : "No disc images or folders here.");
+                     picker_mode_ == 1 ? "No .elf files or folders here."
+                     : hint_line.rfind("Your own", 0) == 0 ? "No disc images or folders here."
+                                                           : "No Xbox 360 packages or folders here.");
     for (int i = picker_top_; i < int(entries_.size()) && i < picker_top_ + rows; ++i)
     {
         const FsEntry &e = entries_[std::size_t(i)];
@@ -2300,10 +2339,10 @@ void Store::draw_confirm(Gfx &gfx)
     gfx.set_layer(0, (1 - k) * 20, k);
     const float bw = 820, bx = (W - bw) / 2, pad = 48, iw = bw - pad * 2;
     const std::string folder = app_folder(a->id);
-    std::string body = "This deletes " + folder + " and everything in it: the game, the files from your disc, your saves and mods. "
-                       "It can't be undone.";
-    if (!a->data_dir.empty() && a->data_dir.rfind(folder + "/", 0) != 0 && a->data_dir != folder)
-        body += " Its game files in " + a->data_dir + " are kept.";
+    std::string body = "This deletes " + folder + " and everything in it: the game, the files from your disc, your saves and mods.";
+    if (a->has_setup && !a->data_dir.empty() && a->data_dir.rfind(folder + "/", 0) != 0 && a->data_dir != folder)
+        body += " The game files the store set up in " + a->data_dir + " go too.";
+    body += " It can't be undone.";
     const auto title = wrap(gfx, Font::ExtraBold, 32, iw, "Delete " + a->name + "?", 2);
     const auto lines = wrap(gfx, Font::Regular, 20, iw, body, 5);
     const float bh = pad + 40 * float(title.size()) + 18 + 30 * float(lines.size()) + 36 + 64 + pad;

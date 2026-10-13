@@ -8,6 +8,7 @@
 #include "store_disc.hpp"
 #include "store_json.hpp"
 #include "store_zip.hpp"
+#include "store_stfs.hpp"
 #include "store_sha256.hpp"
 #include "title_threads.hpp"
 #include "ui_app_common.hpp"
@@ -836,6 +837,90 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
     }
 }
 
+/* A Title Update (one package) or DLC (every package of the game's in the chosen file's
+ * folder), unpacked where the port reads them: the update's files into the slot's folder,
+ * each piece of DLC into a folder of its own named after it. By the copier payload at the
+ * drive's full speed, or here when there's no loader. */
+void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
+{
+    const std::string id = a.id;
+    stfs::Package first;
+    std::string err;
+    if (!first.open(image, err)) return fail_job(err);
+    const bool several = slot.multiple;
+    char tid[16];
+    std::snprintf(tid, sizeof tid, "%08X", first.title_id());
+    slog("setup %s: %s is a package for title %s, type %08X, \"%s\", %zu files", id.c_str(), image.c_str(), tid,
+         first.content_type(), first.display_name().c_str(), first.entries().size());
+    if (!slot.title_id.empty() && std::strtoul(slot.title_id.c_str(), nullptr, 16) != first.title_id())
+        return fail_job(std::string("This package is for a different game (title ID ") + tid + ").");
+    if (!several && first.content_type() != stfs::kTitleUpdate)
+        return fail_job("That isn't a Title Update. It's the file whose name starts with TU_.");
+    if (several && first.content_type() != stfs::kMarketplace)
+        return fail_job("That isn't DLC. Choose one of the game's downloadable content files.");
+
+    /* The packages: this one, and for DLC every other one of the same game beside it. */
+    std::vector<std::pair<std::string, std::string>> work; /* package, target */
+    const std::string base = slot_target(a, slot);
+    auto add = [&](const std::string &path, const stfs::Package &p) {
+        std::string leaf = path.substr(path.find_last_of('/') + 1);
+        work.push_back({path, several ? base + "/" + stfs::folder_name(p, leaf) : base});
+    };
+    add(image, first);
+    if (several)
+    {
+        const std::string dir = image.substr(0, image.find_last_of('/'));
+        if (DIR *d = opendir(dir.c_str()))
+        {
+            std::vector<std::string> others;
+            while (dirent *e = readdir(d))
+                if (e->d_name[0] != '.') others.push_back(dir + "/" + e->d_name);
+            closedir(d);
+            std::sort(others.begin(), others.end());
+            for (const std::string &o : others)
+            {
+                if (o == image || !stfs::looks_like(o)) continue;
+                stfs::Package p;
+                std::string why;
+                if (p.open(o, why) && p.title_id() == first.title_id() && p.content_type() == stfs::kMarketplace)
+                    add(o, p);
+            }
+        }
+    }
+    first.close();
+    slog("setup %s: %zu package(s) to set up", id.c_str(), work.size());
+
+    std::size_t n = 0;
+    for (const auto &w : work)
+    {
+        ++n;
+        make_dirs(w.second);
+        const Copier c = run_copier("stfs", w.first, w.second);
+        if (c == Copier::Failed)
+            return; /* run_copier said why */
+        if (c == Copier::Unavailable)
+        {
+            std::string error;
+            std::size_t files = 0;
+            const std::string step = work.size() > 1 ? "Setting up " + std::to_string(n) + " of " + std::to_string(work.size()) : "Setting up";
+            if (!stfs::unpack(
+                    w.first, w.second, [&](std::uint64_t d, std::uint64_t t) { set_job(step, d, t); },
+                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, files))
+                return fail_job(error);
+        }
+        slog("setup %s: %s -> %s done", id.c_str(), w.first.c_str(), w.second.c_str());
+    }
+    make_dirs(g.data + "/setup");
+    write_file(g.data + "/setup/" + id + "." + slot.key + ".txt", image.data(), image.size());
+    std::lock_guard<std::mutex> l(g.m);
+    g.job.phase = Phase::Done;
+    g.job.step = several ? std::to_string(work.size()) + (work.size() == 1 ? " pack is ready" : " packs are ready")
+                         : "The Title Update is ready";
+    g.job.note = several ? (work.size() == 1 ? "Your DLC is set up: 1 package." : "Your DLC is set up: " + std::to_string(work.size()) + " packages.")
+                         : "The Title Update is set up.";
+    g.job.done = g.job.total;
+}
+
 void run_setup(const std::string &id, const std::string &slot_key, const std::string &image)
 {
     App a;
@@ -848,9 +933,10 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
                 for (const Slot &s : x.slots)
                     if (s.key == slot_key) { a = x; slot = s; found = true; }
     }
-    set_job("Reading the disc image", 0, 0);
+    set_job(slot.kind == "stfs" ? "Reading the package" : "Reading the disc image", 0, 0);
     if (!found) return fail_job("This game doesn't take that file.");
-    if (slot.kind != "iso") return fail_job("Setting up " + slot.label + " from here arrives in a later build.");
+    if (slot.kind == "stfs") return run_setup_stfs(a, slot, image);
+    if (slot.kind != "iso") return fail_job("Setting up " + slot.label + " isn't something this version of the store can do.");
 
     Disc disc;
     std::string err;
@@ -1239,14 +1325,57 @@ void run_delete(const std::string &id)
     }
     if (!exists(folder))
         slog("delete %s: %s is already gone", id.c_str(), folder.c_str());
+    /* The game files the store set up outside the game's folder (a port that reads them
+     * from a data folder of its own): each slot's folder, never anything above it. */
+    std::vector<std::string> data_dirs;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const App &x : g.catalog.apps)
+            if (x.id == id && x.has_setup)
+                for (const Slot &sl : x.slots)
+                {
+                    const std::string t = slot_target(x, sl);
+                    int depth = 0;
+                    for (char c : t) depth += c == '/';
+                    const bool inside = t == folder || t.rfind(folder + "/", 0) == 0;
+                    if (!inside && depth >= 3 && (t.rfind("/data/", 0) == 0 || t.rfind("/mnt/", 0) == 0) &&
+                        t.find("..") == std::string::npos && t.find("/homebrew") == std::string::npos &&
+                        t.find("/recompstore") == std::string::npos)
+                        data_dirs.push_back(t);
+                }
+    }
+    /* ShadowMountPlus lets go of the game first, so nothing of it is in use. */
+    unmount_smp(id);
     std::size_t files = 0;
     std::string bad;
     const double t0 = mono_s();
     if (!remove_tree(folder, files, bad))
     {
-        slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), errno, files);
+        const int e = errno;
+        slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), e, files);
         scan_homebrew();
-        return fail_job("Couldn't delete everything: " + bad.substr(folder.size()) + " is still there.");
+        return fail_job("Couldn't delete everything: " + bad + " is still there (error " + std::to_string(e) +
+                        "). Close the game if it's running, then try again.");
+    }
+    for (const std::string &d : data_dirs)
+    {
+        std::size_t n = 0;
+        if (!remove_tree(d, n, bad))
+        {
+            const int e = errno;
+            slog("delete %s: game files in %s stopped at %s (errno %d)", id.c_str(), d.c_str(), bad.c_str(), e);
+            scan_homebrew();
+            return fail_job("The game's folder is gone, but " + bad + " is still there (error " + std::to_string(e) + ").");
+        }
+        files += n;
+        slog("delete %s: game files in %s, %zu files", id.c_str(), d.c_str(), n);
+        /* Its parent folders too, while they're empty (rmdir refuses one that isn't: saves stay). */
+        std::string up = d.substr(0, d.find_last_of('/'));
+        for (int i = 0; i < 2 && up.size() > 6 && rmdir(up.c_str()) == 0; ++i)
+        {
+            slog("delete %s: removed the empty folder %s", id.c_str(), up.c_str());
+            up = up.substr(0, up.find_last_of('/'));
+        }
     }
     std::remove((g.data + "/installed/" + id + ".txt").c_str());
     if (DIR *d = opendir((g.data + "/setup").c_str()))
@@ -1259,11 +1388,17 @@ void run_delete(const std::string &id)
     }
     slog("deleted %s: %s, %zu files in %.1f s", id.c_str(), folder.c_str(), files, mono_s() - t0);
     scan_homebrew();
-    const bool tile_gone = forget_smp(id); /* the folder first, so a scan can't add it back */
+    /* Another copy of the same game elsewhere in the homebrew folder? Say where. */
+    const std::string other = app_folder(id);
+    const bool another = other != folder && exists(other + "/eboot.bin");
+    if (another) slog("delete %s: another copy is still at %s", id.c_str(), other.c_str());
+    const bool tile_gone = !another && forget_smp(id); /* the folder first, so a scan can't add it back */
     std::lock_guard<std::mutex> l(g.m);
     g.job.phase = Phase::Done;
     g.job.home = tile_gone ? 2 : 0;
     g.job.step = "Deleted";
+    if (another)
+        g.job.note = "Deleted " + folder + ". Another copy of this game is still at " + other + ": press Delete again to remove it too.";
 }
 
 /* ---- Recomp Store's own updates ------------------------------------------------------ */
@@ -1538,11 +1673,15 @@ void scan_homebrew()
             if (read_file(dir + "/sce_sys/param.json", text) && Json::parse(text, pj))
             {
                 const std::string tid = pj["titleId"].str();
-                if (!tid.empty() && exists(dir + "/eboot.bin") && !found.count(tid))
+                /* Two copies of one game: the folder named after its title ID (where the
+                 * store installs) wins over any other. */
+                if (!tid.empty() && exists(dir + "/eboot.bin") && (!found.count(tid) || tid == e->d_name))
                     found[tid] = dir;
             }
             if (!found.count(e->d_name) && exists(dir + "/eboot.bin"))
                 found[e->d_name] = dir;
+            else if (found.count(e->d_name) && found[e->d_name] != dir && exists(dir + "/eboot.bin"))
+                found[e->d_name] = dir; /* a folder named after a title ID is that game's */
         }
         closedir(d);
     }
@@ -1899,6 +2038,16 @@ int refresh_smp(std::string &why)
     return start_smp(why) ? 1 : 0;
 }
 
+bool unmount_smp(const std::string &title_id)
+{
+    if (!title_id_ok(title_id)) return false;
+    std::string reply;
+    bool answered = false;
+    const bool ok = smp_api("/api/v1/games/unmount", "{\"title_id\":\"" + title_id + "\"}", reply, &answered);
+    if (answered) slog("ShadowMountPlus unmount %s: %s", title_id.c_str(), reply.c_str());
+    return ok;
+}
+
 bool forget_smp(const std::string &title_id)
 {
     if (!title_id_ok(title_id)) return false;
@@ -2183,7 +2332,10 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ex
             std::string low = name;
             for (char &c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
             const std::size_t el = std::strlen(ext);
-            if (low.size() > el && low.compare(low.size() - el, el, ext) == 0)
+            /* "stfs": Xbox 360 content packages, which have no extension: known by their first bytes. */
+            const bool want = std::strcmp(ext, "stfs") == 0 ? stfs::looks_like(f.path)
+                                                            : low.size() > el && low.compare(low.size() - el, el, ext) == 0;
+            if (want)
             {
                 f.size = std::uint64_t(st.st_size);
                 isos.push_back(f);
