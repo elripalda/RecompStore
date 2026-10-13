@@ -129,6 +129,9 @@ public:
     /* Download and check that newer store (a job, kind "storeupdate"); when it's done,
      * update_store() hands it to the installer. */
     bool download_store_update();
+    /* Once, when this store came from an installer's own copy and a newer one is on
+     * GitHub: true and its tag, and the app starts that update right away. */
+    bool take_auto_update(std::string &version);
 
     /* Every release's patch notes from a game's GitHub repo, newest first. want_notes
      * asks for them (fetched in the background, kept on disk for when the console is

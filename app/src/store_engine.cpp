@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "store_engine.hpp"
+#include "store_fs.hpp"
 
 #include "porpoise_http.hpp"
 #include "store_disc.hpp"
@@ -173,6 +174,9 @@ struct Shared
      * the store has fetched and checked it for the installer. */
     std::string store_update;
     bool pending_store_dl = false;
+    /* Installed from a copy built into an installer that couldn't reach GitHub: the store
+     * updates itself to the newest as soon as it has found it (selfupdate/autoupdate). */
+    bool auto_update = false;
     std::string store_zip, store_zip_sha, store_zip_ver;
     /* Patch notes by repo, and when each was last asked of GitHub (mono seconds). */
     std::map<std::string, std::vector<Release>> notes;
@@ -385,7 +389,8 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
 }
 
 enum class Copier : int { Done, Failed, Unavailable };
-Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed = nullptr);
+Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed = nullptr,
+                  const std::string &extra = "");
 
 void run_install(const std::string &id)
 {
@@ -717,13 +722,15 @@ bool send_to_loader(const std::string &elf, int &err)
 }
 
 /* kind "setup": copy a disc image's files into target. kind "unzip": unpack the store's
- * verified download (image) into the game's folder (target). *changed (unzip) says
- * whether an old file had been replaced before a failure. */
-Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed)
+ * verified download (image) into the game's folder (target). kind "delete": delete the
+ * paths in extra (path0=, path1=, ...). *changed (unzip) says whether an old file had
+ * been replaced before a failure. */
+Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed,
+                  const std::string &extra)
 {
-    const bool unzip = kind == "unzip";
-    const char *what = unzip ? "install" : "setup";
-    const char *fallback = unzip ? "installing in the store" : "copying in the store";
+    const bool unzip = kind == "unzip", del = kind == "delete";
+    const char *what = unzip ? "install" : del ? "delete" : "setup";
+    const char *fallback = unzip ? "installing in the store" : del ? "deleting in the store" : "copying in the store";
     if (changed) *changed = false;
     const std::string elf_path = std::string(PORPOISE_APP) + "/assets/payloads/recompstore-copier.elf";
     std::string elf;
@@ -753,7 +760,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
     std::remove((jd + "/status.txt").c_str());
     char token[48];
     std::snprintf(token, sizeof token, "%lld-%d", (long long)std::time(nullptr), int(mono_s() * 1000) % 100000);
-    const std::string job = std::string("token=") + token + "\nkind=" + kind + "\nimage=" + image + "\ntarget=" + target + "\n";
+    const std::string job = std::string("token=") + token + "\nkind=" + kind + "\nimage=" + image + "\ntarget=" + target + "\n" + extra;
     if (!write_file(jd + "/job.txt", job.data(), job.size()))
     {
         slog("%s: couldn't write the copier's job; %s", what, fallback);
@@ -766,7 +773,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
         return Copier::Unavailable;
     }
     slog("%s: sent the copier (%zu KB) to the payload loader on port 9021", what, elf.size() / 1024);
-    set_job(unzip ? "Installing" : "Starting the copy", 0, 0);
+    set_job(unzip ? "Installing" : del ? "Deleting" : "Starting the copy", 0, 0);
 
     const double sent = mono_s();
     double last_change = sent;
@@ -792,13 +799,15 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                 set_job("Copying the game's files", done, total);
             else if (phase == "installing")
                 set_job("Installing", done, total);
+            else if (phase == "deleting")
+                set_job("Deleting", 0, 0);
             else if (phase == "checking")
                 set_job(unzip ? "Checking the installed files" : "Checking the copied files", unzip ? done : total, total);
             else if (phase == "done")
             {
                 const double secs = std::strtod(field_of(st, "seconds").c_str(), nullptr);
-                if (unzip)
-                    slog("install: the copier finished: %s files in %.1f s", field_of(st, "files").c_str(), secs);
+                if (unzip || del)
+                    slog("%s: the copier finished: %s files in %.1f s", what, field_of(st, "files").c_str(), secs);
                 else
                 {
                     char line[160];
@@ -816,7 +825,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                 fail_job(why.empty() ? std::string("The copier stopped with an error.") : why);
                 return Copier::Failed;
             }
-            else if (!unzip)
+            else if (!unzip && !del)
                 set_job("Reading the disc image", 0, 0);
         }
         if (!started && mono_s() - sent > 15)
@@ -831,6 +840,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
         {
             if (changed) *changed = true; /* can't tell how far it got */
             fail_job(unzip ? "The copier stopped answering. Install the game again."
+                     : del ? "The copier stopped answering. Press Delete again to finish."
                            : "The copier stopped answering. Set up again to carry on where it stopped.");
             return Copier::Failed;
         }
@@ -1283,31 +1293,12 @@ void run_bench()
 std::string smp_file() { return g.data + "/shadowmountplus.txt"; }
 
 /* ---- Deleting a game -------------------------------------------------------------- */
-/* Everything under path, deepest first; never follows a link (a link is removed, not
- * what it points to). Counts what it removed. */
-bool remove_tree(const std::string &path, std::size_t &files, std::string &bad)
-{
-    struct stat st;
-    if (lstat(path.c_str(), &st) != 0) return true;
-    if (!S_ISDIR(st.st_mode))
-    {
-        if (unlink(path.c_str()) != 0) { bad = path; return false; }
-        ++files;
-        return true;
-    }
-    std::vector<std::string> names;
-    if (DIR *d = opendir(path.c_str()))
-    {
-        while (dirent *e = readdir(d))
-            if (std::strcmp(e->d_name, ".") && std::strcmp(e->d_name, "..")) names.push_back(e->d_name);
-        closedir(d);
-    }
-    for (const std::string &n : names)
-        if (!remove_tree(path + "/" + n, files, bad)) return false;
-    if (rmdir(path.c_str()) != 0) { bad = path; return false; }
-    return true;
-}
-
+/* The game's folder, and the game files the store set up for it outside that folder
+ * (the setup's data folder, e.g. Unleashed's ressources: the disc's files, the update,
+ * the DLC and what the port builds from them; saves live beside it and stay). By the
+ * copier payload, which wrote those files, or here without a loader - never with
+ * lstat(), which fails on the PS5 - and checked afterwards: anything still there is a
+ * failure that says so, never "Deleted". */
 void run_delete(const std::string &id)
 {
     set_job("Deleting", 0, 0);
@@ -1318,65 +1309,73 @@ void run_delete(const std::string &id)
     const bool place_ok = folder.rfind("/data/homebrew/", 0) == 0 || (folder.rfind("/mnt/", 0) == 0 && hb != std::string::npos);
     const std::string leaf = hb == std::string::npos ? "" : folder.substr(hb + 10);
     if (!place_ok || leaf.empty() || leaf.find('/') != std::string::npos || folder.find("..") != std::string::npos ||
-        id == "PPSA92000" || leaf == "PPSA92000")
+        id == "PPSA92000" || leaf == "PPSA92000" || !fs::deletable(folder, g.data))
     {
         slog("delete %s: refused for %s", id.c_str(), folder.c_str());
         return fail_job("The store won't delete that folder.");
     }
-    if (!exists(folder))
-        slog("delete %s: %s is already gone", id.c_str(), folder.c_str());
-    /* The game files the store set up outside the game's folder (a port that reads them
-     * from a data folder of its own): each slot's folder, never anything above it. */
-    std::vector<std::string> data_dirs;
+    std::vector<std::string> paths{folder};
     {
         std::lock_guard<std::mutex> l(g.m);
         for (const App &x : g.catalog.apps)
             if (x.id == id && x.has_setup)
-                for (const Slot &sl : x.slots)
-                {
-                    const std::string t = slot_target(x, sl);
-                    int depth = 0;
-                    for (char c : t) depth += c == '/';
+            {
+                auto add = [&](const std::string &t) {
                     const bool inside = t == folder || t.rfind(folder + "/", 0) == 0;
-                    if (!inside && depth >= 3 && (t.rfind("/data/", 0) == 0 || t.rfind("/mnt/", 0) == 0) &&
-                        t.find("..") == std::string::npos && t.find("/homebrew") == std::string::npos &&
-                        t.find("/recompstore") == std::string::npos)
-                        data_dirs.push_back(t);
-                }
+                    bool covered = false;
+                    for (const std::string &p : paths)
+                        covered = covered || t == p || t.rfind(p + "/", 0) == 0;
+                    if (!inside && !covered && t.rfind("/data/", 0) == 0 && t.find("/homebrew") == std::string::npos &&
+                        paths.size() < 16 && fs::deletable(t, g.data))
+                        paths.push_back(t);
+                };
+                add(x.data_dir);
+                for (const Slot &sl : x.slots) add(slot_target(x, sl));
+            }
     }
-    /* ShadowMountPlus lets go of the game first, so nothing of it is in use. */
+    for (const std::string &p : paths) slog("delete %s: %s", id.c_str(), p.c_str());
+    /* ShadowMountPlus lets go of the game first, if it will (it won't while the store is
+     * the app on screen; deleting works anyway). */
     unmount_smp(id);
-    std::size_t files = 0;
-    std::string bad;
     const double t0 = mono_s();
-    if (!remove_tree(folder, files, bad))
+    std::string extra;
+    for (std::size_t i = 0; i < paths.size(); ++i) extra += "path" + std::to_string(i) + "=" + paths[i] + "\n";
+    std::size_t files = 0;
+    const Copier c = run_copier("delete", "", folder, nullptr, extra);
+    if (c == Copier::Failed)
     {
-        const int e = errno;
-        slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), e, files);
         scan_homebrew();
-        return fail_job("Couldn't delete everything: " + bad + " is still there (error " + std::to_string(e) +
-                        "). Close the game if it's running, then try again.");
+        return; /* run_copier said why */
     }
-    for (const std::string &d : data_dirs)
+    if (c == Copier::Unavailable)
     {
-        std::size_t n = 0;
-        if (!remove_tree(d, n, bad))
+        /* The game files first, the game's own folder last (as the copier does). */
+        for (std::size_t k = 0; k < paths.size(); ++k)
         {
-            const int e = errno;
-            slog("delete %s: game files in %s stopped at %s (errno %d)", id.c_str(), d.c_str(), bad.c_str(), e);
-            scan_homebrew();
-            return fail_job("The game's folder is gone, but " + bad + " is still there (error " + std::to_string(e) + ").");
-        }
-        files += n;
-        slog("delete %s: game files in %s, %zu files", id.c_str(), d.c_str(), n);
-        /* Its parent folders too, while they're empty (rmdir refuses one that isn't: saves stay). */
-        std::string up = d.substr(0, d.find_last_of('/'));
-        for (int i = 0; i < 2 && up.size() > 6 && rmdir(up.c_str()) == 0; ++i)
-        {
-            slog("delete %s: removed the empty folder %s", id.c_str(), up.c_str());
-            up = up.substr(0, up.find_last_of('/'));
+            const std::size_t i = (k + 1) % paths.size();
+            std::size_t n = 0;
+            std::string bad;
+            int e = 0;
+            if (!fs::remove_tree(paths[i], n, bad, e, [&](std::size_t so_far) { set_job("Deleting", files + so_far, 0); }))
+            {
+                slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), e, files + n);
+                scan_homebrew();
+                return fail_job(bad + " couldn't be deleted (error " + std::to_string(e) + "). Close the game if it's running, then try again.");
+            }
+            files += n;
+            slog("delete %s: %s, %zu files", id.c_str(), paths[i].c_str(), n);
+            if (!fs::gone(paths[i])) break; /* said below, before the game's own folder goes */
+            if (i > 0) fs::remove_empty_parents(paths[i], [&](const std::string &up) { slog("delete %s: removed the empty folder %s", id.c_str(), up.c_str()); });
         }
     }
+    /* Checked here too, whoever deleted: still there is a failure (in the order deleted). */
+    for (std::size_t k = 0; k < paths.size(); ++k)
+        if (const std::string &p = paths[(k + 1) % paths.size()]; !fs::gone(p))
+        {
+            slog("delete %s: %s is still there afterwards", id.c_str(), p.c_str());
+            scan_homebrew();
+            return fail_job(p + " is still there. Close the game if it's running, then press Delete again.");
+        }
     std::remove((g.data + "/installed/" + id + ".txt").c_str());
     if (DIR *d = opendir((g.data + "/setup").c_str()))
     {
@@ -1386,7 +1385,10 @@ void run_delete(const std::string &id)
         closedir(d);
         for (const std::string &n : mine) std::remove((g.data + "/setup/" + n).c_str());
     }
-    slog("deleted %s: %s, %zu files in %.1f s", id.c_str(), folder.c_str(), files, mono_s() - t0);
+    if (c == Copier::Done)
+        slog("deleted %s: %s and %zu more folder(s), by the copier, in %.1f s", id.c_str(), folder.c_str(), paths.size() - 1, mono_s() - t0);
+    else
+        slog("deleted %s: %s and %zu more folder(s), %zu files in %.1f s", id.c_str(), folder.c_str(), paths.size() - 1, files, mono_s() - t0);
     scan_homebrew();
     /* Another copy of the same game elsewhere in the homebrew folder? Say where. */
     const std::string other = app_folder(id);
@@ -1404,13 +1406,16 @@ void run_delete(const std::string &id)
 /* ---- Recomp Store's own updates ------------------------------------------------------ */
 const char *kStoreRepo = "elripalda/RecompStore";
 
-void check_store_update(porpoise::http::Session &http)
+/* 1 once GitHub answered (whether or not there's anything newer), 0 when it couldn't be
+ * reached, -1 when it answered with an error. */
+int check_store_update(porpoise::http::Session &http)
 {
     std::vector<std::uint8_t> body;
     const int status = http.get(std::string("https://api.github.com/repos/") + kStoreRepo + "/releases?per_page=10", body, {}, 4u << 20);
     Json j;
     std::string newest;
-    if (status == 200 && Json::parse(std::string(body.begin(), body.end()), j) && j.is_array())
+    const bool answered = status == 200 && Json::parse(std::string(body.begin(), body.end()), j) && j.is_array();
+    if (answered)
         for (std::size_t i = 0; i < j.size() && newest.empty(); ++i)
         {
             const Json &r = j[i];
@@ -1422,7 +1427,16 @@ void check_store_update(porpoise::http::Session &http)
     slog("store: newest release on GitHub: %s (HTTP %d; this is %s)%s", newest.empty() ? "none" : newest.c_str(), status, kVersion,
          newer ? "; an update is ready" : "");
     std::lock_guard<std::mutex> l(g.m);
-    if (status == 200) g.store_update = newer ? newest : "";
+    if (!answered) return status <= 0 ? 0 : -1;
+    g.store_update = newer ? newest : "";
+    if (g.auto_update && !newer)
+    {
+        /* Already the newest: nothing to do after all. */
+        g.auto_update = false;
+        std::remove((g.data + "/selfupdate/autoupdate").c_str());
+        slog("store: installed from an installer's own copy, and it's already the newest");
+    }
+    return 1;
 }
 
 /* The store's own update: the newest full release's PPSA92000.zip, downloaded and checked
@@ -1583,8 +1597,10 @@ void *worker(void *)
                     fetch_art(http);
                     if (now >= next_store_check)
                     {
-                        check_store_update(http); /* at start, then every 6 hours */
-                        next_store_check = now + 6 * 3600;
+                        /* At start, then every 6 hours; a minute after GitHub couldn't be reached,
+                         * half an hour after it answered with an error. */
+                        const int r = check_store_update(http);
+                        next_store_check = now + (r > 0 ? 6 * 3600 : r == 0 ? 60 : 1800);
                     }
                     ok = true;
                 }
@@ -1595,6 +1611,8 @@ void *worker(void *)
                 if (!ok) g.online = false;
             }
             next_refresh = now + (ok ? 600 : 60);
+            if (next_store_check > now && next_store_check < next_refresh)
+                next_refresh = next_store_check; /* the store's own check, retried sooner */
         }
         std::string id, sapp, sslot, simage;
         bool bench = false;
@@ -1793,6 +1811,16 @@ void Engine::start(const std::string &data_dir)
                  double(fs.f_blocks) * fs.f_frsize / 1073741824.0);
     }
     scan_homebrew();
+    {
+        std::string a;
+        if (read_file(data_dir + "/selfupdate/autoupdate", a))
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.auto_update = true;
+            slog("store: installed from an installer's own copy (%s); updating to the newest as soon as GitHub answers",
+                 field_of(a, "version").empty() ? "?" : field_of(a, "version").c_str());
+        }
+    }
     {
         std::string v;
         if (read_file(data_dir + "/write_mode.txt", v) && !v.empty())
@@ -2123,6 +2151,20 @@ std::string Engine::store_update() const
 {
     std::lock_guard<std::mutex> l(g.m);
     return g.store_update;
+}
+
+bool Engine::take_auto_update(std::string &version)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    /* Only with nothing else going on, and no result the app hasn't shown yet. */
+    if (!g.auto_update || g.store_update.empty() || g.job.phase != Phase::Idle || g.pending_store_dl ||
+        !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench || !g.pending_delete.empty())
+        return false;
+    g.auto_update = false; /* once: if it doesn't work out, Latest Updates still offers it */
+    std::remove((g.data + "/selfupdate/autoupdate").c_str());
+    version = g.store_update;
+    slog("store: updating itself to %s on its own (it came from an installer's own copy)", version.c_str());
+    return true;
 }
 
 bool Engine::download_store_update()

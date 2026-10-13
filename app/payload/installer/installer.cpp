@@ -55,7 +55,11 @@
 #endif
 #define STORE_TITLE "PPSA92000"
 #define STORE_ASSET "PPSA92000.zip"
-#define INSTALLER_VERSION "1.0.0"
+#ifdef RS_EMBEDDED_VERSION
+#define INSTALLER_VERSION RS_EMBEDDED_VERSION
+#else
+#define INSTALLER_VERSION "1.0.2"
+#endif
 
 #ifdef RECOMP_DESKTOP_TEST
 /* Desktop tests: what the console's system calls would do, written down. */
@@ -496,7 +500,7 @@ int main()
     toast(updating ? "Recomp Store: updating\xE2\x80\xA6" : "Recomp Store: installing\xE2\x80\xA6");
 
     std::string why, installed, newer;
-    bool ok = false;
+    bool ok = false, own_copy = false;
     {
         /* Where the store's zip comes from, first that works:
          *  1. the store's own download (an update: the store fetched and checked it),
@@ -556,7 +560,7 @@ int main()
             if (wrote)
             {
                 tag = RS_EMBEDDED_VERSION;
-                have = true;
+                have = own_copy = true;
                 why.clear();
                 log_line("using the copy built into the installer (%s, %zu KB)", tag.c_str(), n / 1024);
             }
@@ -598,6 +602,16 @@ int main()
     if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
     if (ok)
     {
+        /* Its own copy may not be the newest: the store, which can reach GitHub, updates
+         * itself to the newest the first time it opens. */
+        const std::string marker = kJobDir + "/autoupdate";
+        if (own_copy && !updating)
+        {
+            write_file(marker, "version=" + installed + "\n");
+            log_line("the store updates itself to the newest version when it first opens");
+        }
+        else
+            std::remove(marker.c_str());
         const bool smp = smp_rescan();
         if (updating)
             toast("Recomp Store updated to " + v + ".");
