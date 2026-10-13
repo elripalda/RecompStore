@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recomp Store</title>
+<meta name="description" content="Recomp Store: native PS5 ports of recompiled games, ready to install on a jailbroken PS5. Bring your own disc.">
+<meta name="theme-color" content="#0B1220">
+<meta property="og:title" content="Recomp Store">
+<meta property="og:description" content="Native PS5 ports of recompiled games. Bring your own disc.">
+<meta property="og:image" content="https://recompstore.com/assets/logo-1024.png">
+<link rel="icon" href="/assets/logo-512.png">
+<link rel="apple-touch-icon" href="/assets/logo-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/site.css?v=2">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><img id="backdrop-img" alt=""></div>
+
+<header class="top">
+  <a class="brand" href="#/"><img src="/assets/logo-512.png" alt=""><span>Recomp Store</span></a>
+  <nav aria-label="Main">
+    <a href="#/" data-nav="home">Games</a>
+    <a href="#/report" data-nav="report">Report a bug</a>
+    <a href="#/about" data-nav="about">About</a>
+    <a class="get" href="#/get">Get Recomp Store</a>
+  </nav>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<footer class="foot">
+  <p><strong>No game files here.</strong> Recomp Store and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.</p>
+  <p class="links" id="foot-links"></p>
+  <p class="small">Not affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, or any game's publisher or developer.</p>
+</footer>
+
+<dialog id="get" aria-labelledby="get-title">
+  <div class="dlg">
+    <div class="dlg-head">
+      <img src="/assets/logo-512.png" alt="">
+      <div><h2 id="get-title">Get Recomp Store</h2><p>Installs once, then keeps itself and your games up to date.</p></div>
+      <button class="close" data-close aria-label="Close">✕</button>
+    </div>
+    <ol class="steps">
+      <li><strong>Jailbreak your PS5 and start your payload loader.</strong> Any loader on port 9021 works, such as etaHEN's or elfldr. You'll also need kstuff and ShadowMountPlus 1.7 Beta 5 or newer.</li>
+      <li><strong>Download the installer payload.</strong>
+        <span class="payload" id="payload-slot"></span></li>
+      <li><strong>Send it to your PS5.</strong> Use any payload sender, or from a computer on the same network:
+        <code class="cmd" id="send-cmd">nc -N &lt;your PS5's IP&gt; 9021 &lt; RecompStore-Installer.elf</code>
+        <button class="copy" data-copy="#send-cmd">Copy</button></li>
+      <li><strong>Open Recomp Store from your home screen.</strong> The installer has ShadowMountPlus add it. From then on the store updates itself.</li>
+    </ol>
+    <details class="manual">
+      <summary>Install by hand instead</summary>
+      <p>Download the Recomp Store zip from <a href="https://github.com/elripalda/RecompStore/releases/latest" target="_blank" rel="noopener">its GitHub releases</a>, unzip it, and copy the folder into <code>/data/homebrew/</code> on your PS5 over FTP. Then register it the way you register your other homebrew.</p>
+    </details>
+  </div>
+</dialog>
+
+<script src="/assets/site.js?v=2"></script>
+</body>
+</html>

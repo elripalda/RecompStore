@@ -1,0 +1,9 @@
+# Build output and downloaded dependencies
+app/.deps/
+app/build/
+app/dist/
+app/payload/*/*.elf
+app/assets/payloads/*.elf
+# The live catalog and uploaded art are made by the site admin, not kept here
+site/public_html/catalog.json
+site/public_html/media/

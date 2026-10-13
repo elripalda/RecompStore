@@ -1,0 +1,454 @@
+/* Porpoise - asking the HEN to free Porpoise from the app sandbox.
+ * Copyright (C) 2026 Ruben (Project Porpoise)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Porpoise needs to see the whole console: /data for its own folder and the
+ * player's games, USB drives, and so on. Most setups start it that way
+ * already (etaHEN or the launcher frees each homebrew app). Where it starts
+ * inside the sandbox, /data is missing or empty and the folder browser shows
+ * only a few folders; Porpoise then asks a jailbreak daemon itself. This is
+ * the etaHEN jailbreak-on-demand API, which OnionHEN and standalone daemons
+ * (a Lapy-style daemon) carry too: a process writes its PID to a request
+ * file in its own sandbox and the daemon, watching every sandbox, bumps it.
+ * Porpoise keeps asking for a short while, the way PS5SX2 does
+ * (ps5/coreorbis/orbis-shims/ProsperoHenJailbreak.cpp and main-boot.cpp in
+ * PS5SX2, GPL-3.0-or-later; this is a port of its approach):
+ *
+ *   1. etaHEN / OnionHEN's request file: {"PID":<pid>} written to
+ *      /download0/etahen_jailbreak (atomically, through a .tmp). The HEN
+ *      consumes it and frees the process, if the title ID is on its app
+ *      jailbreak list.
+ *   2. Failing that, the legacy command servers on 127.0.0.1 (etaHEN 9028,
+ *      the SharpProspero unjail daemon 9069): command 5, jailbreak this PID.
+ *
+ * Different daemons watch for different file names in /download0: etaHEN and
+ * old Lapy want "etahen_jailbreak", OnionHEN also takes "onionhen_jailbreak",
+ * and the Lapy owned-root daemon wants "elevate_proc" from a process that has
+ * cloned its own credential first (prepare(), called before any thread). So
+ * each round publishes all three names; whichever daemon is up takes its own.
+ *
+ * Every step goes to trace.txt. Nothing here runs when /data is reachable.
+ *
+ * A player's trace (12.40, the Lapy daemon and LegacyJB) stops right after
+ * "asking the HEN" on every launch: these daemons seem to set the process's
+ * root to the console's, where /app0 doesn't exist, so trace.txt (in /app0)
+ * stops and Porpoise can't load anything of its own. When that happens -
+ * /app0 there before the daemon acted and gone after - Porpoise makes the
+ * sandbox it started in its root again (the "/" it held open from before),
+ * which brings /app0 back. Setups where /app0 stays (every one that works
+ * today) never reach that code. */
+#include "porpoise_jailbreak.hpp"
+
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstdint>
+#include <initializer_list>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include "porpoise_paths.hpp"
+#include "trace.hpp"
+
+extern "C" int sceKernelUsleep(unsigned microseconds);
+extern "C" int sceKernelDlsym(int handle, const char *name, void **address);
+/* Weak: on some firmware (12.70) the title's libkernel doesn't give these
+ * out, and a call through the empty import was a crash right after the
+ * jailbreak freed Porpoise. Each is checked, then looked up by name. */
+extern "C" int chroot(const char *path) __attribute__((weak));
+extern "C" int fchdir(int fd) __attribute__((weak));
+
+namespace porpoise::jailbreak
+{
+bool data_reachable();
+bool data_visible();
+
+namespace
+{
+/* The request-file names daemons watch for, in /download0. */
+const char *const kRequests[] = {
+    "/download0/etahen_jailbreak",  /* etaHEN, OnionHEN, old Lapy */
+    "/download0/onionhen_jailbreak", /* OnionHEN also takes this name */
+    "/download0/elevate_proc",       /* Lapy owned-root daemon */
+};
+constexpr int kRequestCount = int(sizeof kRequests / sizeof kRequests[0]);
+
+int g_sandbox_root = -1; /* "/" as the console started Porpoise: the sandbox, /app0 in it */
+bool g_app_before = false; /* /app0 was there before asking the HEN */
+bool g_put_back = false;
+bool g_attempt = false; /* the note below is out: an attempt in flight */
+
+constexpr const char *kAttempt = PORPOISE_APP "/porpoise/.jailbreak-attempt";
+constexpr const char *kStay = PORPOISE_APP "/porpoise/stay-in-sandbox";
+
+/* Written straight to the disk: a close is exactly when it has to survive. */
+void write_note(const char *path, const char *text)
+{
+    mkdir(PORPOISE_APP "/porpoise", 0777);
+    const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+    if (fd < 0)
+        return;
+    const std::size_t n = std::strlen(text);
+    if (write(fd, text, n) == ssize_t(n))
+        fsync(fd);
+    close(fd);
+}
+
+bool app_folder_here()
+{
+    struct stat st;
+    return stat("/app0/eboot.bin", &st) == 0;
+}
+
+void note(const char *fmt, int a = 0, int b = 0, int c = 0)
+{
+    char line[200];
+    std::snprintf(line, sizeof line, fmt, a, b, c);
+    ps5::debug::mark(line);
+}
+
+/* Publishes the request file (the daemon, etaHEN / OnionHEN / a Lapy-style
+ * daemon, watches each sandbox for it and bumps the process it names). Waits
+ * a short while for it to be taken; true when the daemon took it (the file is
+ * gone), so the caller can then wait for /data. One round: ensure() publishes
+ * again and again, because the daemon may start a moment after Porpoise and
+ * because the first bump can lose a timing race. */
+/* Writes {"PID":n} to one request path atomically (through a .tmp). */
+bool publish_one(const char *path, int pid)
+{
+    char staged[64];
+    std::snprintf(staged, sizeof staged, "%s.tmp", path);
+    unlink(staged);
+    unlink(path);
+    const int fd = open(staged, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+    if (fd < 0)
+        return false;
+    fchmod(fd, 0666);
+    char body[32];
+    const int n = std::snprintf(body, sizeof body, "{\"PID\":%d}\n", pid);
+    const bool written = write(fd, body, std::size_t(n)) == n && fsync(fd) == 0;
+    close(fd);
+    if (!written || rename(staged, path) != 0)
+    {
+        unlink(staged);
+        return false;
+    }
+    return true;
+}
+
+bool request_file()
+{
+    const int pid = int(getpid());
+    int published = 0;
+    for (int i = 0; i < kRequestCount; ++i)
+        if (publish_one(kRequests[i], pid))
+            ++published;
+    if (published == 0)
+    {
+        note("jailbreak: no request file could be made (errno %d)", errno);
+        return false;
+    }
+    /* Up to ~1.5 s for a daemon to take one of the files this round; a daemon
+     * consumes (deletes) the name it watches. */
+    bool taken = false;
+    for (int polls = 0; polls < 90 && !taken; ++polls)
+    {
+        sceKernelUsleep(16667);
+        for (int i = 0; i < kRequestCount; ++i)
+            if (access(kRequests[i], F_OK) != 0)
+            {
+                taken = true;
+                note("jailbreak: request taken after %d polls; uid now %d", polls, int(geteuid()));
+                break;
+            }
+    }
+    /* Leave nothing behind for the next round, whoever took what. */
+    for (int i = 0; i < kRequestCount; ++i)
+        unlink(kRequests[i]);
+    return taken;
+}
+
+/* The legacy command servers: magic, command 5 (jailbreak), the PID. */
+bool request_port()
+{
+    struct Command
+    {
+        int magic;
+        int cmd;
+        int pid;
+        int ret;
+        char msg1[0x500];
+        char msg2[0x500];
+    } cmd{};
+    for (int port : {9028, 9069})
+    {
+        cmd = Command{};
+        cmd.magic = int(0xDEADBEEF);
+        cmd.cmd = 5;
+        cmd.pid = int(getpid());
+        cmd.ret = -1337;
+        const int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0)
+            return false;
+        /* A server that takes the connection but never answers mustn't hold
+         * Porpoise's start: 2 s each way. */
+        timeval limit{};
+        limit.tv_sec = 2;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof limit);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof limit);
+        sockaddr_in sa{};
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(std::uint16_t(port));
+        sa.sin_addr.s_addr = htonl(0x7F000001);
+        if (connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof sa) != 0)
+        {
+            close(fd);
+            note("jailbreak: nothing on port %d", port);
+            continue;
+        }
+        const bool sent = send(fd, &cmd, sizeof cmd, 0) == ssize_t(sizeof cmd);
+        int got = 0;
+        while (sent && got < int(sizeof cmd))
+        {
+            const ssize_t r = recv(fd, reinterpret_cast<char *>(&cmd) + got, sizeof cmd - std::size_t(got), 0);
+            if (r <= 0)
+                break;
+            got += int(r);
+        }
+        close(fd);
+        note("jailbreak: port %d answered %d (%d bytes)", port, cmd.ret, got);
+        if (sent && got == int(sizeof cmd) && cmd.ret == 0)
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+void prepare()
+{
+    /* Give this process its own credential before any thread exists. The Lapy
+     * owned-root daemon only frees a process that did this (and is still
+     * single-threaded) first; for etaHEN and OnionHEN it does no harm. A
+     * no-op when euid already equals the real uid. */
+    if (seteuid(geteuid()) != 0)
+        note("jailbreak: seteuid(self) failed (errno %d)", errno);
+}
+
+bool data_reachable()
+{
+    struct stat st;
+    if (stat("/data", &st) != 0 || !S_ISDIR(st.st_mode))
+        return false;
+    mkdir("/data/porpoise", 0777);
+    const char probe[] = "/data/porpoise/.write-test";
+    const int fd = open(probe, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+    {
+        static bool told = false;
+        if (!told && data_visible())
+        {
+            told = true;
+            note("jailbreak: the console's /data is there but Porpoise can't write /data/porpoise (errno %d, uid %d)",
+                 errno, int(geteuid()));
+        }
+        return false;
+    }
+    close(fd);
+    unlink(probe);
+    return true;
+}
+
+bool data_visible()
+{
+    /* Folders only the console's own /data has (the sandbox's has none). */
+    struct stat st;
+    for (const char *path : {"/data/homebrew", "/data/etaHEN", "/data/OnionHEN", "/data/games", "/data/porpoise"})
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+            return true;
+    return false;
+}
+
+/* A system call through libkernel's own "syscall" instruction (the console
+ * takes them only from there), as the payload SDK makes them: libkernel's
+ * getpid is "mov rax, 20; mov r10, rcx; syscall; jb error; ret", so ten
+ * bytes in, with our number in rax, it makes ours and returns its result
+ * (-1 on failure). For the two above, when the title's libkernel gives out
+ * neither. */
+extern "C" long porpoise_kernel_call(long number, long argument, const void *at);
+asm(".text\n"
+    ".p2align 4\n"
+    ".type porpoise_kernel_call, @function\n"
+    "porpoise_kernel_call:\n"
+    "  mov %rdi, %rax\n"
+    "  mov %rsi, %rdi\n"
+    "  jmp *%rdx\n"
+    ".size porpoise_kernel_call, . - porpoise_kernel_call\n");
+static long raw_call(long number, long argument)
+{
+    const auto getpid_at = reinterpret_cast<std::uintptr_t>(&getpid);
+    if (getpid_at == 0)
+        return -1;
+    return porpoise_kernel_call(number, argument, reinterpret_cast<const void *>(getpid_at + 0xa));
+}
+static int raw_fchdir(int fd) { return int(raw_call(13 /* SYS_fchdir */, fd)); }
+static int raw_chroot(const char *path) { return int(raw_call(61 /* SYS_chroot */, reinterpret_cast<long>(path))); }
+
+/* The daemon made the console's root Porpoise's root, so /app0 is gone:
+ * the sandbox Porpoise started in becomes its root again. */
+bool put_root_back()
+{
+    using FchdirFn = int (*)(int);
+    using ChrootFn = int (*)(const char *);
+    FchdirFn to_dir = fchdir;
+    ChrootFn to_root = chroot;
+    /* Not linked: libkernel by name (its handle in a title, then libc's). */
+    for (int handle : {0x2001, 0x2, 0x1})
+    {
+        void *address = nullptr;
+        if (!to_dir && sceKernelDlsym(handle, "fchdir", &address) == 0 && address)
+            to_dir = reinterpret_cast<FchdirFn>(address);
+        address = nullptr;
+        if (!to_root && sceKernelDlsym(handle, "chroot", &address) == 0 && address)
+            to_root = reinterpret_cast<ChrootFn>(address);
+    }
+    if (!to_dir || !to_root)
+    {
+        note("jailbreak: fchdir %d, chroot %d from libkernel; the rest as system calls", to_dir != nullptr,
+             to_root != nullptr);
+        if (!to_dir)
+            to_dir = raw_fchdir;
+        if (!to_root)
+            to_root = raw_chroot;
+    }
+    if (g_sandbox_root < 0 || to_dir(g_sandbox_root) != 0 || to_root(".") != 0)
+        return false;
+    chdir("/");
+    g_put_back = true;
+    return app_folder_here();
+}
+
+bool ensure()
+{
+    if (data_reachable())
+        return true;
+    note("jailbreak: /data isn't reachable (uid %d); asking the HEN", int(geteuid()));
+    write_note(kAttempt, "asking the jailbreak");
+    g_attempt = true;
+    /* Held for put_root_back(), in case the daemon takes /app0 away. */
+    g_app_before = app_folder_here();
+    if (g_sandbox_root < 0)
+        g_sandbox_root = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    /* A daemon may not be up the instant Porpoise starts (a cold launch from
+     * the home screen, or the daemon still loading), and the first bump can
+     * lose a timing race, so Porpoise keeps asking for a while rather than
+     * once. Each round re-publishes the request file and tries the legacy
+     * command ports; after any round that is taken, /data is given a moment
+     * to open. The common case (a daemon is up and bumps Porpoise) returns in
+     * the first round or two; the full ten rounds only run when there is no
+     * daemon at all, where Porpoise falls back to its own folder anyway. */
+    for (int round = 0; round < 10; ++round)
+    {
+        const bool taken = request_file();
+        if (!taken)
+            request_port();
+        /* Up to ~1.5 s for /data to open after a daemon acts (not every one
+         * makes the app root the same instant). */
+        int visible_polls = 0;
+        for (int grace = 0; grace < 90; ++grace)
+        {
+            /* Freed, but /data/porpoise can't be written (a fresh install
+             * where the jailbreak didn't make Porpoise root): Porpoise still
+             * sees /data and USB drives and keeps its things in its own
+             * folder. Given half a second to become writable first. */
+            const bool writable = data_reachable();
+            const bool visible_only = !writable && data_visible() && ++visible_polls >= 30;
+            if (writable || visible_only)
+            {
+                if (g_app_before && !app_folder_here())
+                {
+                    /* Freed, but Porpoise's own folder went with the old
+                     * root: without it Porpoise would close. */
+                    const bool back = put_root_back();
+                    const bool data = back && data_reachable();
+                    note("jailbreak: freed with the console's root (no /app0); sandbox root back %d, /data %d (round %d)",
+                         back, data, round);
+                    if (back)
+                        stage("freed (root put back)");
+                    return data;
+                }
+                note("jailbreak: /data is reachable now (round %d); /app0 %d", round, app_folder_here());
+                close(g_sandbox_root);
+                g_sandbox_root = -1;
+                stage("freed");
+                return true;
+            }
+            sceKernelUsleep(16667);
+        }
+    }
+    note("jailbreak: still sandboxed; using the app's own folder");
+    /* No daemon acted: nothing to blame a close on. */
+    unlink(kAttempt);
+    g_attempt = false;
+    return false;
+}
+
+bool root_put_back()
+{
+    return g_put_back;
+}
+
+bool stay_wanted()
+{
+    return access(kStay, F_OK) == 0;
+}
+
+void set_stay(bool stay)
+{
+    if (stay == stay_wanted())
+        return;
+    if (stay)
+        write_note(kStay, "Porpoise doesn't ask the jailbreak to free it (Settings > Storage > Stay in the sandbox)\n");
+    else
+        unlink(kStay);
+    note("jailbreak: stay in the sandbox %d", stay);
+}
+
+std::string closed_last()
+{
+    const int fd = open(kAttempt, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return "";
+    char text[128] = {0};
+    const ssize_t n = read(fd, text, sizeof text - 1);
+    close(fd);
+    std::string what = n > 0 ? std::string(text, std::size_t(n)) : std::string("asking the jailbreak");
+    while (!what.empty() && (what.back() == '\n' || what.back() == ' '))
+        what.pop_back();
+    return what.empty() ? std::string("asking the jailbreak") : what;
+}
+
+void forget_closed()
+{
+    unlink(kAttempt);
+}
+
+void stage(const char *what)
+{
+    if (g_attempt)
+        write_note(kAttempt, what);
+}
+
+void survived()
+{
+    if (!g_attempt)
+        return;
+    g_attempt = false;
+    unlink(kAttempt);
+    note("jailbreak: Porpoise is up after being freed");
+}
+} // namespace porpoise::jailbreak

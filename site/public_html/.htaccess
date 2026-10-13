@@ -1,0 +1,21 @@
+Options -Indexes
+DirectoryIndex index.html index.php
+
+# Always HTTPS.
+RewriteEngine On
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  # The catalog is read by the PS5 store and the site: always fresh, readable from anywhere.
+  <Files "catalog.json">
+    Header set Cache-Control "no-cache, must-revalidate"
+    Header set Access-Control-Allow-Origin "*"
+  </Files>
+</IfModule>
+<Files "seed.json">
+  Require all denied
+</Files>
