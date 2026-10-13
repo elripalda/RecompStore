@@ -19,52 +19,101 @@ namespace recomp::fs
 {
 namespace
 {
-bool remove_at(const std::string &path, int depth, std::size_t &files, std::string &bad, int &err,
-               const std::function<void(std::size_t)> &progress)
+struct Ctx
+{
+    std::size_t &files;
+    std::string &bad;
+    int &err;
+    const std::function<void(std::size_t)> &progress;
+    const ActAs &act_as;
+    const std::function<void(const std::string &)> &log;
+};
+
+/* The folder as a folder, only if it really is one and not a link to one. */
+int open_folder(const std::string &path)
+{
+    int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0 && errno == EINVAL) /* a system that refuses those flags: opendir says if it's a folder */
+        fd = open(path.c_str(), O_RDONLY);
+    return fd;
+}
+
+/* cur: who this process is acting as here (nullptr: as it started). It is that again
+ * whenever this returns. */
+bool remove_at(const std::string &path, int depth, const Who *cur, Ctx &c)
 {
     /* A file or a link: unlinked, and that's all (a link's target is never touched). */
     if (unlink(path.c_str()) == 0)
     {
-        ++files;
-        if (progress && files % 64 == 0) progress(files);
+        ++c.files;
+        if (c.progress && c.files % 64 == 0) c.progress(c.files);
         return true;
     }
     const int e = errno;
     if (e == ENOENT || e == ENOTDIR) return true; /* nothing there */
     if (e != EPERM && e != EISDIR)
     {
-        bad = path;
-        err = e;
+        c.bad = path;
+        c.err = e;
         return false;
     }
-    /* A folder (unlink refuses those), or something that can't be removed. Opened as a
-     * folder only if it really is one and not a link to one. */
+    /* A folder (unlink refuses those), or something that can't be removed. */
     if (depth > 64)
     {
-        bad = path;
-        err = ELOOP;
+        c.bad = path;
+        c.err = ELOOP;
         return false;
     }
-    int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-    if (fd < 0 && errno == EINVAL) /* a system that refuses those flags: opendir says if it's a folder */
-        fd = open(path.c_str(), O_RDONLY);
+    /* Into a folder this process is refused, as the folder's owner (a game's own). */
+    Who owner;
+    const Who *here = cur;
+    bool switched = false;
+    auto become_owner = [&]() -> bool {
+        if (!c.act_as || switched) return false;
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0) return false;
+        owner.uid = unsigned(st.st_uid);
+        owner.gid = unsigned(st.st_gid);
+        if (cur && cur->uid == owner.uid && cur->gid == owner.gid) return false; /* it is already */
+        if (!c.act_as(&owner))
+        {
+            c.act_as(cur); /* a switch that failed part way: back to who it was */
+            return false;
+        }
+        if (c.log) c.log("acting as " + path + "'s owner (uid " + std::to_string(owner.uid) + ") to delete it");
+        here = &owner;
+        switched = true;
+        return true;
+    };
+    /* Back to who it was for this folder's parent: what removing the folder itself needs. */
+    auto back = [&]() -> bool { return !switched || c.act_as(cur); };
+    auto fail = [&](const std::string &p, int er) {
+        if (!back() && c.log) c.log("couldn't go back from acting as " + path + "'s owner");
+        c.bad = p;
+        c.err = er;
+        return false;
+    };
+
+    int fd = open_folder(path);
+    int o = fd < 0 ? errno : 0;
+    if (fd < 0 && o == EACCES && become_owner())
+    {
+        fd = open_folder(path);
+        o = fd < 0 ? errno : 0;
+    }
     if (fd < 0)
     {
-        const int o = errno;
-        if (o == ENOENT) return true;
-        bad = path;
-        err = (o == ENOTDIR || o == ELOOP || o == EMLINK) ? e : o; /* a file or link unlink refused: its error */
-        return false;
+        if (o == ENOENT)
+        {
+            if (back()) return true;
+            return fail(path, EPERM);
+        }
+        return fail(path, (o == ENOTDIR || o == ELOOP || o == EMLINK) ? e : o); /* a file or link unlink refused: its error */
     }
     close(fd);
     std::vector<std::string> names;
     DIR *d = opendir(path.c_str());
-    if (!d)
-    {
-        bad = path;
-        err = errno;
-        return false;
-    }
+    if (!d) return fail(path, errno);
     while (dirent *x = readdir(d))
         if (std::strcmp(x->d_name, ".") != 0 && std::strcmp(x->d_name, "..") != 0) names.push_back(x->d_name);
     closedir(d);
@@ -76,11 +125,29 @@ bool remove_at(const std::string &path, int depth, std::size_t &files, std::stri
         std::stable_sort(names.begin(), names.end(), [&](const std::string &a, const std::string &b) { return rank(a) < rank(b); });
     }
     for (const std::string &n : names)
-        if (!remove_at(path + "/" + n, depth + 1, files, bad, err, progress)) return false;
+    {
+        if (remove_at(path + "/" + n, depth + 1, here, c)) continue;
+        /* A folder this process could read but not change (its owner's alone to change):
+         * once more as its owner. */
+        if (c.err == EACCES && become_owner() && remove_at(path + "/" + n, depth + 1, here, c))
+        {
+            c.bad.clear();
+            c.err = 0;
+            continue;
+        }
+        return fail(c.bad, c.err);
+    }
+    if (!back())
+    {
+        c.bad = path;
+        c.err = EPERM;
+        if (c.log) c.log("couldn't go back from acting as " + path + "'s owner");
+        return false;
+    }
     if (rmdir(path.c_str()) != 0 && errno != ENOENT)
     {
-        bad = path;
-        err = errno;
+        c.bad = path;
+        c.err = errno;
         return false;
     }
     return true;
@@ -102,12 +169,14 @@ std::vector<std::string> parts(const std::string &path)
 } // namespace
 
 bool remove_tree(const std::string &path, std::size_t &files, std::string &bad, int &err,
-                 const std::function<void(std::size_t)> &progress)
+                 const std::function<void(std::size_t)> &progress, const ActAs &act_as,
+                 const std::function<void(const std::string &)> &log)
 {
     bad.clear();
     err = 0;
     if (path.empty() || path[0] != '/') { bad = path; err = EINVAL; return false; }
-    const bool ok = remove_at(path, 0, files, bad, err, progress);
+    Ctx c{files, bad, err, progress, act_as, log};
+    const bool ok = remove_at(path, 0, nullptr, c);
     if (progress) progress(files);
     return ok;
 }

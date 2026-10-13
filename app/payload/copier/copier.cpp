@@ -416,6 +416,57 @@ int copy_job(const std::string &src, const std::string &target)
     return 0;
 }
 
+/* Acting as a folder's owner, to delete a folder a game made for itself alone (its user,
+ * mode 0700): on the PS5 root with every capability is refused those, and their owner
+ * isn't (seen on the console with RecompStore-PermTest.elf: as started, as root with
+ * every capability and with three other auth IDs, Dusklight's userdata refused listing
+ * and writing; as its owner, uid 1 and gid 0 with every capability, it listed, made a
+ * file and removed it). Exactly that is done here: uid, ruid and svuid the owner's, rgid
+ * and svgid its group, every capability; and with nullptr, everything put back. */
+#ifdef __PROSPERO__
+#include <ps5/kernel.h>
+static struct StartCreds
+{
+    bool saved = false;
+    uid_t uid = 0, ruid = 0, svuid = 0;
+    gid_t rgid = 0, svgid = 0;
+    std::uint8_t caps[16] = {};
+} g_start;
+
+static bool act_as(const recomp::fs::Who *who)
+{
+    const pid_t pid = getpid();
+    if (!g_start.saved)
+    {
+        if (!who) return true; /* never changed */
+        g_start.uid = kernel_get_ucred_uid(pid);
+        g_start.ruid = kernel_get_ucred_ruid(pid);
+        g_start.svuid = kernel_get_ucred_svuid(pid);
+        g_start.rgid = kernel_get_ucred_rgid(pid);
+        g_start.svgid = kernel_get_ucred_svgid(pid);
+        if (kernel_get_ucred_caps(pid, g_start.caps) != 0) return false;
+        g_start.saved = true;
+    }
+    if (!who)
+        return (kernel_set_ucred_uid(pid, g_start.uid) | kernel_set_ucred_ruid(pid, g_start.ruid) |
+                kernel_set_ucred_svuid(pid, g_start.svuid) | kernel_set_ucred_rgid(pid, g_start.rgid) |
+                kernel_set_ucred_svgid(pid, g_start.svgid) | kernel_set_ucred_caps(pid, g_start.caps)) == 0;
+    static const std::uint8_t all[16] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    return (kernel_set_ucred_uid(pid, uid_t(who->uid)) | kernel_set_ucred_ruid(pid, uid_t(who->uid)) |
+            kernel_set_ucred_svuid(pid, uid_t(who->uid)) | kernel_set_ucred_rgid(pid, gid_t(who->gid)) |
+            kernel_set_ucred_svgid(pid, gid_t(who->gid)) | kernel_set_ucred_caps(pid, all)) == 0;
+}
+#else
+/* The desktop tests: a stand-in (test/private.so) that refuses a folder to anyone but its
+ * owner takes the uid acted as. */
+extern "C" __attribute__((weak)) int recomp_test_act_as(int uid);
+static bool act_as(const recomp::fs::Who *who)
+{
+    return recomp_test_act_as && recomp_test_act_as(who ? int(who->uid) : -1) == 0;
+}
+#endif
+
 /* kind "delete": a game's folder and the game files set up for it elsewhere (path0=,
  * path1=, ... in the job), each only if it's somewhere a game's files can be. Done here
  * because these files were written by this copier, and checked afterwards: a path that
@@ -461,10 +512,13 @@ int delete_job(const std::string &job)
         std::size_t n = 0;
         std::string bad;
         int err = 0;
-        const bool ok = recomp::fs::remove_tree(p, n, bad, err, [&](std::size_t so_far) {
-            g_status.done = files + so_far;
-            write_status();
-        });
+        const bool ok = recomp::fs::remove_tree(
+            p, n, bad, err,
+            [&](std::size_t so_far) {
+                g_status.done = files + so_far;
+                write_status();
+            },
+            act_as, [](const std::string &line) { log_line("%s", line.c_str()); });
         files += n;
         if (!ok)
         {

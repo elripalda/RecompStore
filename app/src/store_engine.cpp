@@ -1475,6 +1475,12 @@ void run_delete(const std::string &id)
             {
                 slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), e, files + n);
                 scan_homebrew();
+                /* A folder the game made for itself alone: only the copier payload can act as
+                 * its owner, and it wasn't there. */
+                if (e == EACCES)
+                    return fail_job(bad + " couldn't be deleted: the game made it for itself, and only the store's "
+                                          "helper payload can remove it. Make sure your payload loader is running "
+                                          "(port 9021), then press Delete again.");
                 return fail_job(bad + " couldn't be deleted (error " + std::to_string(e) + "). Close the game if it's running, then try again.");
             }
             files += n;
