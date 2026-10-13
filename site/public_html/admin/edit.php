@@ -21,7 +21,7 @@ $slotTemplate = json_encode([
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'url', 'sha256', 'data_dir', 'slots'];
+             'repo', 'asset', 'url', 'sha256', 'data_dir', 'slots', 'min_store'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -39,6 +39,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($g['source'] === 'github' && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
     elseif ($g['source'] === 'url' && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
     elseif ($g['sha256'] !== '' && !preg_match('/^[A-Fa-f0-9]{64}$/', $g['sha256'])) $error = 'The SHA-256 should be 64 letters and numbers (0-9, a-f), or left empty.';
+    elseif ($g['min_store'] !== '' && !preg_match('/^\d+(\.\d+){0,3}$/', $g['min_store'])) $error = 'Needs Recomp Store: a version like 1.0.3, or leave it empty.';
+    elseif ($g['source'] === 'github' && strpbrk($g['asset'], '*?') !== false && !preg_match('/\.zip$/i', $g['asset'])) $error = 'A zip name with * has to end in .zip, so it can only match the release\'s zip (not a checksum or another file).';
     elseif ($g['setup'] && $g['slots'] !== '' && !is_array(json_decode($g['slots'], true))) $error = 'The game files list isn\'t valid. Use the template\'s format.';
     elseif (($isNew || $g['id'] !== $oldId) && rs_game($g['id'])) $error = 'Another game already uses that title ID.';
 
@@ -108,9 +110,10 @@ $hero = $g['hero_web'] ?: $g['hero'];
       </select>
     </label>
     <label data-gh>GitHub repo<input name="repo" value="<?= h($g['repo']) ?>" placeholder="elripalda/SvR2011-Recomp-PS5"></label>
-    <label data-gh>Zip name on the release<input name="asset" value="<?= h($g['asset']) ?>" placeholder="PPSA92011.zip"><small>The file the store downloads from each release.</small></label>
+    <label data-gh>Zip name on the release<input name="asset" value="<?= h($g['asset']) ?>" placeholder="PPSA92011.zip"><small>The file the store downloads from each release. When its name changes with each version, put * for that part, like WindWaker-PS5-*.zip: the store then finds the newest itself (needs Recomp Store 1.0.3, set for you).</small></label>
     <label data-url>Download link<input name="url" value="<?= h($g['url']) ?>" placeholder="https://…/PPSA92011.zip"></label>
-    <label>Version<input name="version" value="<?= h($g['version']) ?>" placeholder="1.0.0"></label>
+    <label>Version<input name="version" value="<?= h($g['version']) ?>" placeholder="1.0.0"><small>Shown until the store and the site have read GitHub; updates come from GitHub's newest release.</small></label>
+    <label>Needs Recomp Store<input name="min_store" value="<?= h($g['min_store']) ?>" placeholder="any version"><small>The oldest store that can install it; older ones are told to update first (before 1.0.3 they don't list it at all). <?php $auto = rs_min_store(array_merge($g, ['min_store' => ''])); echo $auto !== '' ? 'This game needs at least ' . h($auto) . ' for its zip name or its game files.' : 'Leave empty for any.'; ?></small></label>
     <label>Build<input type="number" min="1" name="build" value="<?= h((string)$g['build']) ?>"></label>
     <label>Release date<input type="date" name="released" value="<?= h($g['released']) ?>"></label>
     <label>Download size<input name="size" value="<?= h($g['size']) ?>" placeholder="55 MB"></label>
@@ -177,7 +180,7 @@ $hero = $g['hero_web'] ?: $g['hero'];
   <div class="grid2" data-setup-fields>
     <label class="span2">Where the port reads its files<input name="data_dir" value="<?= h($g['data_dir']) ?>" placeholder="/data/homebrew/PPSA92011"></label>
     <label class="span2">Files to ask for<textarea name="slots" rows="9" class="mono"><?= h($g['slots'] !== '' ? $g['slots'] : $slotTemplate) ?></textarea>
-      <small>One entry per file: what it's called, its kind (iso for a disc image, stfs for a Title Update or DLC package from the console), and the folder it goes in, relative to the folder above ("." means right in it). titleId is optional: when set, the store refuses a disc that isn't this game.</small></label>
+      <small>One entry per file: what it's called, its kind, and the folder it goes in, relative to the folder above ("." means right in it). Kinds: iso (an Xbox 360 disc image, unpacked), stfs (a Title Update or DLC package from the console), image (a GameCube or Wii disc image copied as it is, .iso/.gcm/.ciso; needs Recomp Store 1.0.3). titleId (Xbox 360) or discId (GameCube/Wii, like GZLE01) is optional: when set, the store refuses a disc that isn't this game.</small></label>
   </div>
 </section>
 

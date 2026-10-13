@@ -3,11 +3,60 @@
 
 #include "store_engine.hpp"
 #include "store_json.hpp"
+#include "ui_app_common.hpp"
 
 #include <algorithm>
 
 namespace recomp
 {
+/* True when version a is newer than b ("v1.0.10" > "1.0.9"; a pre-release tag's
+ * "-beta" part is ignored). */
+bool version_newer(const std::string &a, const std::string &b)
+{
+    auto parts = [](std::string v) {
+        std::vector<long> out;
+        std::size_t at = (!v.empty() && (v[0] == 'v' || v[0] == 'V')) ? 1 : 0;
+        while (at < v.size() && out.size() < 4)
+        {
+            long n = 0;
+            bool digits = false;
+            while (at < v.size() && v[at] >= '0' && v[at] <= '9') { n = n * 10 + (v[at++] - '0'); digits = true; }
+            if (!digits) break;
+            out.push_back(n);
+            if (at < v.size() && v[at] == '.') ++at;
+            else break;
+        }
+        while (out.size() < 4) out.push_back(0);
+        return out;
+    };
+    return parts(a) > parts(b);
+}
+
+bool store_too_old(const App &a)
+{
+    return !a.min_store.empty() && version_newer(a.min_store, kVersion);
+}
+
+bool slot_kind_known(const std::string &kind)
+{
+    return kind == "iso" || kind == "stfs" || kind == "image";
+}
+
+bool asset_matches(const std::string &pattern, const std::string &name)
+{
+    /* * any run of characters, ? any one; everything else as it is. */
+    std::size_t p = 0, n = 0, star = std::string::npos, mark = 0;
+    while (n < name.size())
+    {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) { ++p; ++n; }
+        else if (p < pattern.size() && pattern[p] == '*') { star = p++; mark = n; }
+        else if (star != std::string::npos) { p = star + 1; n = ++mark; }
+        else return false;
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
 bool parse_catalog(const std::string &text, Catalog &out)
 {
     Json j;
@@ -25,13 +74,16 @@ bool parse_catalog(const std::string &text, Catalog &out)
     out.kofi = site["kofi"].str();
     out.payload = site["payload"].str();
     for (std::size_t i = 0; i < j["featured"].size(); ++i) out.featured.push_back(j["featured"][i].str());
-    const Json &apps = j["apps"];
-    for (std::size_t i = 0; i < apps.size(); ++i)
-    {
-        const Json &x = apps[i];
+    /* "apps": every store sees them. "newerStoreApps": games that need Recomp Store 1.0.3 or
+     * newer (each says which in "minStore"), which older stores don't read at all. */
+    auto add = [&](const Json &x) {
         App a;
         a.id = x["id"].str();
-        if (a.id.empty() || a.id.find('/') != std::string::npos || a.id.find("..") != std::string::npos) continue;
+        if (a.id.empty() || a.id.find('/') != std::string::npos || a.id.find("..") != std::string::npos) return;
+        for (const App &o : out.apps)
+            if (o.id == a.id) return; /* listed twice: the first */
+        a.min_store = x["minStore"].str();
+        a.order = int(x["order"].integer(int(out.apps.size()) + 1000));
         a.name = x["name"].str(a.id);
         a.kind = x["kind"].str("community");
         a.author = x["author"].str();
@@ -81,13 +133,18 @@ bool parse_catalog(const std::string &text, Catalog &out)
                 s.kind = slots[k]["kind"].str("iso");
                 s.to = slots[k]["to"].str(".");
                 s.title_id = slots[k]["titleId"].str();
+                s.disc_id = slots[k]["discId"].str();
                 s.required = slots[k]["required"].boolean(true);
                 s.multiple = slots[k]["multiple"].boolean(false);
                 a.slots.push_back(s);
             }
         }
         out.apps.push_back(a);
-    }
+    };
+    for (std::size_t i = 0; i < j["apps"].size(); ++i) add(j["apps"][i]);
+    for (std::size_t i = 0; i < j["newerStoreApps"].size(); ++i) add(j["newerStoreApps"][i]);
+    /* Both lists back in the admin's order. */
+    std::stable_sort(out.apps.begin(), out.apps.end(), [](const App &x, const App &y) { return x.order < y.order; });
     return true;
 }
 

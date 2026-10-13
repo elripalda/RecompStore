@@ -20,9 +20,14 @@ constexpr const char *kHomebrew = "/data/homebrew";
 
 struct Slot
 {
-    std::string key, label, kind /* iso, stfs */, to /* folder under data_dir; "." = in it */, title_id;
+    std::string key, label, kind /* iso, stfs, image */, to /* folder under data_dir; "." = in it */, title_id;
+    /* kind "image": a GameCube or Wii disc image copied as it is (.iso, .gcm, .ciso), and the
+     * disc's ID it has to be (GZLE01), "" for any. */
+    std::string disc_id;
     bool required = true, multiple = false;
 };
+/* The slot kinds this store can set up. */
+bool slot_kind_known(const std::string &kind);
 
 /* Where a game's logo sits: nudged x/y (design pixels, from where its name would be)
  * and its size (% of the space the name has). */
@@ -37,7 +42,13 @@ struct Release
     std::string tag, name, date; /* date: YYYY-MM-DD */
     std::string body;            /* as written on GitHub (Markdown) */
     bool prerelease = false;
+    std::vector<std::string> assets; /* its files' names */
 };
+
+/* A release file's name against the catalog's: the same, or for a name with * (any run
+ * of characters) or ? (any one), matching it. "WindWaker-PS5-*.zip" matches each
+ * release's "WindWaker-PS5-v1.0.3.zip". */
+bool asset_matches(const std::string &pattern, const std::string &name);
 
 struct App
 {
@@ -45,7 +56,11 @@ struct App
     std::string blurb, description, news, credits;
     std::string version, released, size, needs;
     int build = 0;
-    std::string source /* github, url */, repo, asset, url, sha256;
+    std::string source /* github, url */, repo, asset /* may hold * and ? */, url, sha256;
+    /* The oldest Recomp Store that can install it ("" for any): an older one is told to
+     * update first. Stores before 1.0.3 never see such a game (the site lists it apart). */
+    std::string min_store;
+    int order = 0; /* where the admin lists it */
     std::string icon_url, hero_url, hero_web_url;
     int banner_x = 50, banner_y = 30, banner_zoom = 100;
     /* A logo to show instead of the name (PNG with transparency), and where it sits on
@@ -70,6 +85,10 @@ struct Catalog
 };
 
 bool parse_catalog(const std::string &text, Catalog &out);
+/* True when a game needs a newer Recomp Store than this one. */
+bool store_too_old(const App &a);
+/* True when version a is newer than b ("v1.0.10" > "1.0.9"). */
+bool version_newer(const std::string &a, const std::string &b);
 
 enum class Phase
 {
@@ -133,6 +152,14 @@ public:
      * GitHub: true and its tag, and the app starts that update right away. */
     bool take_auto_update(std::string &version);
 
+    /* The newest release on GitHub that has the game's zip, as last read ("" before the
+     * store has looked, or for a game from a fixed link). Updates come from it. */
+    std::string newest_version(const App &a) const;
+    /* Settings > Check for updates: the store's own and every installed game's, now.
+     * update_check: 0 not asked, 1 checking, 2 done, 3 GitHub couldn't be reached. */
+    void check_updates_now();
+    int update_check() const;
+
     /* Every release's patch notes from a game's GitHub repo, newest first. want_notes
      * asks for them (fetched in the background, kept on disk for when the console is
      * offline); notes: 1 here they are, 0 still coming, -1 none to show. */
@@ -162,6 +189,8 @@ std::vector<Place> places();
 /* A folder's sub-folders, then its files ending in ext (".iso"), or for ext "stfs" its Xbox 360
  * content packages; false when it can't be read. */
 bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ext = ".iso");
+/* A GameCube or Wii disc image's ID (GZLE01), "" when the file isn't one. */
+std::string disc_image_id(const std::string &path);
 /* Where a slot's files go: the game's data folder plus the slot's own folder. */
 std::string slot_target(const App &a, const Slot &s);
 /* True when the slot's files are in place (a disc: its default.xex is there). */

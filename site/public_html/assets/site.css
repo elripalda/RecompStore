@@ -101,6 +101,7 @@ dl div{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border
 dt{color:var(--muted)}dd{margin:0;text-align:right;word-break:break-all}
 .src{font-weight:600;text-decoration:none}
 .note{font-size:15px;color:#cdd6e2;margin:0}
+.note.needs{color:#ffd98a;background:rgba(255,200,90,.08);border:1px solid rgba(255,200,90,.35);border-radius:14px;padding:10px 14px;margin:0 0 4px}
 
 /* About */
 .about{padding:48px 0 0;max-width:900px}

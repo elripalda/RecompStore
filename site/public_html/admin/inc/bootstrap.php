@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.1.0';
+const RS_VERSION = '1.2.0';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -98,7 +98,27 @@ function rs_game_defaults(): array {
         'logo' => '', 'logo_bx' => 0, 'logo_by' => 0, 'logo_bs' => 100, 'logo_px' => 0, 'logo_py' => 0, 'logo_ps' => 100,
         'featured' => false, 'hidden' => false,
         'setup' => false, 'data_dir' => '', 'slots' => '',
+        // The oldest Recomp Store that can install it ('' for any; see rs_min_store()).
+        'min_store' => '',
     ];
+}
+
+// The oldest Recomp Store a game needs: what the admin set, and at least 1.0.3 when it
+// uses something older stores can't do (a zip name with * or ?, a disc image copied as it
+// is). Stores before 1.0.3 never see a game that needs 1.0.3 or newer: publish lists those
+// apart, in newerStoreApps, which those stores don't read.
+const RS_GATED_FROM = '1.0.3';
+function rs_min_store(array $g): string {
+    $min = trim((string)$g['min_store']);
+    $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
+    if ($g['source'] === 'github' && strpbrk((string)$g['asset'], '*?') !== false) $needs(RS_GATED_FROM);
+    if ($g['setup']) {
+        $slots = json_decode((string)$g['slots'], true);
+        foreach (is_array($slots) ? $slots : [] as $sl) {
+            if (is_array($sl) && !in_array($sl['kind'] ?? 'iso', ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
+        }
+    }
+    return $min;
 }
 
 function rs_games(bool $includeHidden = true): array {
@@ -217,10 +237,11 @@ function rs_build_catalog(): array {
     $base = rs_setting('site_url', 'https://recompstore.com');
     $abs = fn(string $p) => $p === '' ? '' : (preg_match('#^https?://#', $p) ? $p : rtrim($base, '/') . $p);
     $apps = [];
+    $newer = [];
     $featured = [];
-    foreach (rs_games(false) as $g) {
+    foreach (rs_games(false) as $i => $g) {
         $app = [
-            'id' => $g['id'], 'name' => $g['name'],
+            'id' => $g['id'], 'name' => $g['name'], 'order' => $i,
             'kind' => $g['kind'], 'author' => $g['author'],
             'blurb' => $g['blurb'], 'description' => $g['description'], 'news' => $g['news'], 'credits' => $g['credits'],
             'version' => $g['version'], 'build' => (int)$g['build'], 'released' => $g['released'],
@@ -242,7 +263,10 @@ function rs_build_catalog(): array {
             $slots = json_decode((string)$g['slots'], true);
             $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
         }
-        $apps[] = $app;
+        $min = rs_min_store($g);
+        if ($min !== '') $app['minStore'] = $min;
+        if ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;
+        else $apps[] = $app;
         if ($g['featured']) $featured[] = $g['id'];
     }
     return [
@@ -262,6 +286,7 @@ function rs_build_catalog(): array {
         ],
         'featured' => $featured,
         'apps' => $apps,
+        'newerStoreApps' => $newer,
     ];
 }
 
@@ -273,7 +298,7 @@ function rs_publish(): int {
         throw new RuntimeException('Could not write catalog.json. Check that public_html is writable.');
     }
     rs_set_setting('published_at', gmdate('c'));
-    return count($cat['apps']);
+    return count($cat['apps']) + count($cat['newerStoreApps']);
 }
 
 // ---- Inbox: bug reports and recomp submissions from the website -----------------

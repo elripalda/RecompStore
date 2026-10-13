@@ -103,7 +103,7 @@
     const repoUrl = a.source && a.source.type === 'github' && /^[\w.-]+\/[\w.-]+$/.test(a.source.repo || '') ? `https://github.com/${a.source.repo}` : '';
     const rows = [
       ['Title ID', a.id], ['Version', a.version], ['Download', a.size], ['You bring', 'Your ' + (a.needs || 'own game')],
-      ['Installs to', '/data/homebrew/' + a.id],
+      ['Installs to', '/data/homebrew/' + a.id], ['Needs', a.minStore ? 'Recomp Store ' + a.minStore + ' or newer' : ''],
     ].filter((r) => r[1]);
     view.innerHTML = `
       <article class="game">
@@ -127,8 +127,9 @@
           <aside class="glass panel">
             <div class="panel-head">${iconHTML(a, 112)}<div><strong>${esc(a.name)}</strong><span>${a.kind === 'original' ? 'Recomp Store' : 'By ' + esc(a.author)}</span></div></div>
             <a class="btn primary" href="#/get" data-get>Install with Recomp Store</a>
+            ${a.minStore ? `<p class="note needs">Needs Recomp Store ${esc(a.minStore)} or newer. On your PS5, update the store from Latest Updates first.</p>` : ''}
             <a class="btn" id="dl" href="${esc(a.url || (repoUrl ? repoUrl + '/releases/latest' : '#'))}" target="_blank" rel="noopener">Download the zip</a>
-            <dl>${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>
+            <dl>${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd${r[0] === 'Version' ? ' data-version' : ''}>${esc(r[1])}</dd></div>`).join('')}</dl>
             ${repoUrl ? `<a class="src" href="${esc(repoUrl)}" target="_blank" rel="noopener">Source on GitHub ↗</a>` : ''}
             <p class="note">Updates through Recomp Store replace only the app. Your game install, saves, DLC and mods stay where they are.</p>
           </aside>
@@ -181,18 +182,29 @@
       .catch(() => { el.innerHTML = `<p class="muted">GitHub's notes couldn't be loaded. <a href="https://github.com/${esc(repo)}/releases" target="_blank" rel="noopener">See them on GitHub</a>.</p>`; });
   }
 
-  // For a GitHub source, point the download straight at the zip on the newest release.
+  // A zip name with * (any run of characters) or ? (any one), as the store matches it.
+  const nameMatches = (pattern, name) => new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$').test(name);
+
+  // For a GitHub source, point the download straight at the zip on the newest release that
+  // has it (as the store does), and show that release's version.
   function resolveDownload(a) {
     if (!a.source || a.source.type !== 'github' || !a.source.repo || !a.source.asset) return;
-    fetch(`https://api.github.com/repos/${a.source.repo}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } })
+    fetch(`https://api.github.com/repos/${a.source.repo}/releases?per_page=10`, { headers: { Accept: 'application/vnd.github+json' } })
       .then((r) => (r.ok ? r.json() : null))
-      .then((rel) => {
-        if (!rel || !Array.isArray(rel.assets)) return;
-        const asset = rel.assets.find((x) => x.name === a.source.asset);
-        const link = document.getElementById('dl');
-        if (asset && link) {
-          link.href = asset.browser_download_url;
-          link.textContent = `Download ${asset.name} (${(asset.size / 1048576).toFixed(0)} MB)`;
+      .then((list) => {
+        if (!Array.isArray(list)) return;
+        for (const rel of list) {
+          if (rel.draft || !Array.isArray(rel.assets)) continue;
+          const asset = rel.assets.find((x) => nameMatches(a.source.asset, x.name));
+          if (!asset) continue;
+          const link = document.getElementById('dl');
+          if (link) {
+            link.href = asset.browser_download_url;
+            link.textContent = `Download ${asset.name} (${(asset.size / 1048576).toFixed(0)} MB)`;
+          }
+          const ver = document.querySelector('[data-version]');
+          if (ver && rel.tag_name) ver.textContent = rel.tag_name.replace(/^v(?=\d)/i, '');
+          return;
         }
       })
       .catch(() => {});
@@ -201,7 +213,8 @@
   function setupHTML(a) {
     const s = a.setup || {};
     const slots = Array.isArray(s.slots) ? s.slots : [];
-    const what = (sl) => sl.kind === 'iso' ? 'the files inside your disc image' : sl.kind === 'stfs' ? 'unpacked from the package' : '';
+    const what = (sl) => sl.kind === 'iso' ? 'the files inside your disc image' : sl.kind === 'stfs' ? 'unpacked from the package'
+      : sl.kind === 'image' ? 'your disc image as it is' + (sl.discId ? ', disc ' + sl.discId : '') : '';
     const lines = slots.map((sl) => sl.to === '.' || sl.to === ''
       ? `└── (${esc(sl.label)}: ${what(sl)}, right in this folder)`
       : `├── ${esc(sl.to)}/   ${esc(sl.label)}${what(sl) ? ' (' + what(sl) + ')' : ''}`);
@@ -330,6 +343,9 @@
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then((c) => {
       cat = c;
+      // Games that need Recomp Store 1.0.3 or newer are listed apart (older stores don't read them).
+      cat.apps = (c.apps || []).concat(c.newerStoreApps || []);
+      cat.apps.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9)); // the admin's order, both lists together
       const s = cat.site || {};
       document.getElementById('payload-slot').innerHTML = s.payload
         ? `<a class="btn primary" href="${esc(s.payload)}">Download RecompStore-Installer.elf</a>`

@@ -305,5 +305,18 @@ int main(int argc, char **argv)
     store.preview_general(1); settle(30); if (want("settings")) frame("settings-general-smp");
     store.preview_general(2); store.preview_settings_note("ShadowMountPlus is running; it's looking for new games now.", false); settle(30);
     if (want("settings")) frame("settings-general-refresh");
+    store.preview_settings_note("", false);
+    store.preview_general(3); settle(30); if (want("check")) frame("settings-general-check");
+    /* A game set up from a GameCube disc image, and one that needs a newer store. */
+    store.preview_open("PPSA99309"); settle(60); if (want("ww")) frame("page-windwaker");
+    store.preview_focus(1); if (want("ww")) frame("page-windwaker-slot");
+    if (const char *usb = std::getenv("PREVIEW_USB"))
+    {
+        store.preview_picker("game", std::string(usb) + "/Games");
+        if (want("ww")) frame("picker-windwaker");
+        store.preview_open("PPSA99309");
+    }
+    store.preview_open("PPSA99310"); settle(60); if (want("ww")) frame("page-needs-newer");
+    store.preview_tab(2); settle(90); if (want("ww")) frame("updates-windwaker");
     return 0;
 }

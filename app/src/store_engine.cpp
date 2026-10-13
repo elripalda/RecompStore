@@ -121,29 +121,6 @@ std::string version_key(std::string v)
     return v;
 }
 
-/* True when version a is newer than b ("v1.0.10" > "1.0.9"; a pre-release tag's
- * "-beta" part is ignored). */
-bool version_newer(const std::string &a, const std::string &b)
-{
-    auto parts = [](std::string v) {
-        std::vector<long> out;
-        std::size_t at = (!v.empty() && (v[0] == 'v' || v[0] == 'V')) ? 1 : 0;
-        while (at < v.size() && out.size() < 4)
-        {
-            long n = 0;
-            bool digits = false;
-            while (at < v.size() && v[at] >= '0' && v[at] <= '9') { n = n * 10 + (v[at++] - '0'); digits = true; }
-            if (!digits) break;
-            out.push_back(n);
-            if (at < v.size() && v[at] == '.') ++at;
-            else break;
-        }
-        while (out.size() < 4) out.push_back(0);
-        return out;
-    };
-    return parts(a) > parts(b);
-}
-
 std::string art_name(const std::string &url)
 {
     unsigned long long hsh = 1469598103934665603ULL;
@@ -177,6 +154,9 @@ struct Shared
     /* Installed from a copy built into an installer that couldn't reach GitHub: the store
      * updates itself to the newest as soon as it has found it (selfupdate/autoupdate). */
     bool auto_update = false;
+    /* Settings > Check for updates: asked (the worker checks everything now), and how it went. */
+    bool force_check = false;
+    int update_check = 0;
     std::string store_zip, store_zip_sha, store_zip_ver;
     /* Patch notes by repo, and when each was last asked of GitHub (mono seconds). */
     std::map<std::string, std::vector<Release>> notes;
@@ -337,6 +317,8 @@ struct Target
     std::uint64_t size = 0;
 };
 
+void remember_releases(const std::string &repo, const std::string &text);
+
 bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string &err)
 {
     if (a.source != "github")
@@ -350,7 +332,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
     /* The newest release that has the game's zip. Pre-releases count: many ports ship as
      * one before they call a version final. */
     std::vector<std::uint8_t> body;
-    const int status = http.get("https://api.github.com/repos/" + a.repo + "/releases?per_page=10", body, {}, 8u << 20);
+    const int status = http.get("https://api.github.com/repos/" + a.repo + "/releases?per_page=30", body, {}, 8u << 20);
     Json list;
     if (status != 200 || !Json::parse(std::string(body.begin(), body.end()), list) || !list.is_array())
     {
@@ -364,7 +346,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
         if (list[r]["draft"].boolean()) continue;
         const Json &assets = list[r]["assets"];
         for (std::size_t i = 0; i < assets.size(); ++i)
-            if (assets[i]["name"].str() == a.asset)
+            if (asset_matches(a.asset, assets[i]["name"].str()))
             {
                 pick = &list[r];
                 t.url = assets[i]["browser_download_url"].str();
@@ -380,6 +362,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
                                : "None of this game's GitHub releases has " + a.asset + ".";
         return false;
     }
+    remember_releases(a.repo, std::string(body.begin(), body.end()));
     const Json &rel = *pick;
     if (!a.sha256.empty() && version_key(rel["tag_name"].str()) == version_key(a.version))
         t.sha256 = a.sha256; /* the catalog's own hash for the release it names */
@@ -408,6 +391,8 @@ void run_install(const std::string &id)
         g.job.step = "Finding the newest release";
     }
     if (!found) return fail_job("That game isn't in the catalog.");
+    if (store_too_old(a))
+        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
     if (!http.init()) return fail_job("Your PS5 isn't online.");
 
     Target t;
@@ -931,6 +916,102 @@ void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
     g.job.done = g.job.total;
 }
 
+/* A GameCube or Wii disc image, copied as it is into the game's folder, where the port
+ * reads it (Wind Waker). Checked first: a disc image, and the disc the slot names. By the
+ * copier payload at the drive's full speed, or here without a loader. */
+void run_setup_image(const App &a, const Slot &slot, const std::string &image)
+{
+    const std::string id = a.id;
+    const std::string got = disc_image_id(image);
+    slog("setup %s: %s is disc %s (wants %s)", id.c_str(), image.c_str(), got.empty() ? "?" : got.c_str(),
+         slot.disc_id.empty() ? "any" : slot.disc_id.c_str());
+    if (got.empty())
+        return fail_job("That isn't a GameCube or Wii disc image. Choose your own " + a.name + " disc (.iso, .gcm or .ciso).");
+    std::string want_id = slot.disc_id;
+    for (char &c : want_id) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A'); /* gzle01 is GZLE01 */
+    if (!want_id.empty() && got != want_id)
+        return fail_job("That's a different disc (" + got + "). " + a.name + " needs " + want_id + ".");
+    const std::string target = slot_target(a, slot);
+    if (!exists(app_folder(id) + "/eboot.bin")) return fail_job("Install " + a.name + " first.");
+    make_dirs(target);
+    const std::string leaf = image.substr(image.find_last_of('/') + 1), dst = target + "/" + leaf;
+    struct stat src;
+    if (stat(image.c_str(), &src) != 0) return fail_job("The disc image can't be read.");
+    const std::uint64_t size = std::uint64_t(src.st_size);
+
+    /* The right disc already in the folder (the one chosen, or another copy of it): nothing
+     * to copy. Another disc there may be what the game finds first: said afterwards. */
+    std::string already, other;
+    std::vector<FsEntry> here;
+    if (list_dir(target, here, "image"))
+        for (const FsEntry &e : here)
+        {
+            if (e.is_dir) continue;
+            const std::string hid = disc_image_id(e.path);
+            if (hid == got && (e.path == image || (e.name == leaf && e.size == size))) already = e.path;
+            else if (hid != got && e.name != leaf) other = e.name;
+        }
+    auto finish = [&](const std::string &note) {
+        make_dirs(g.data + "/setup");
+        write_file(g.data + "/setup/" + id + "." + slot.key + ".txt", image.data(), image.size());
+        std::string n = note;
+        if (!other.empty())
+            n += " There's also " + other + " in the game's folder, which isn't this disc: if the game won't start, delete it over FTP.";
+        std::lock_guard<std::mutex> l(g.m);
+        g.job.phase = Phase::Done;
+        g.job.step = "The disc image is ready";
+        g.job.note = n;
+        g.job.done = g.job.total;
+    };
+    if (!already.empty())
+    {
+        slog("setup %s: %s is already in the game's folder", id.c_str(), already.c_str());
+        return finish("Your disc image is already in the game's folder.");
+    }
+    struct statvfs fs;
+    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (64ull << 20))
+        return fail_job("There isn't room for the disc image: it needs " + fmt_mb(size) + " free.");
+
+    const Copier c = run_copier("copy", image, target);
+    if (c == Copier::Failed) return; /* run_copier said why */
+    if (c == Copier::Unavailable)
+    {
+        /* Here, a piece at a time, into <name>.part, then renamed into place. */
+        std::FILE *in = std::fopen(image.c_str(), "rb");
+        const std::string part = dst + ".store-part"; /* not the copier's .part: one that starts late removes its own */
+        std::FILE *out = in ? std::fopen(part.c_str(), "wb") : nullptr;
+        if (!in || !out)
+        {
+            if (in) std::fclose(in);
+            return fail_job(in ? "The game's folder can't be written to." : "The disc image can't be read.");
+        }
+        std::vector<char> buf(8u << 20);
+        std::uint64_t done = 0;
+        bool ok = true;
+        for (;;)
+        {
+            const std::size_t n = std::fread(buf.data(), 1, buf.size(), in);
+            if (n == 0) break; /* the end, or a read that failed: the size check below says which */
+            if (std::fwrite(buf.data(), 1, n, out) != n) { ok = false; break; }
+            done += n;
+            set_job("Copying the game's files", done, size);
+        }
+        std::fclose(in);
+        ok = std::fclose(out) == 0 && ok && done == size;
+        if (!ok || std::rename(part.c_str(), dst.c_str()) != 0)
+        {
+            std::remove(part.c_str());
+            return fail_job("Copying the disc image failed. Is the storage full?");
+        }
+        chmod(dst.c_str(), 0777);
+    }
+    struct stat st;
+    if (stat(dst.c_str(), &st) != 0 || std::uint64_t(st.st_size) != size)
+        return fail_job("The disc image didn't copy whole. Set it up again.");
+    slog("setup %s: %s -> %s (%s)", id.c_str(), image.c_str(), dst.c_str(), fmt_mb(size).c_str());
+    finish("Your disc image is in place.");
+}
+
 void run_setup(const std::string &id, const std::string &slot_key, const std::string &image)
 {
     App a;
@@ -945,7 +1026,10 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     }
     set_job(slot.kind == "stfs" ? "Reading the package" : "Reading the disc image", 0, 0);
     if (!found) return fail_job("This game doesn't take that file.");
+    if (store_too_old(a))
+        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
     if (slot.kind == "stfs") return run_setup_stfs(a, slot, image);
+    if (slot.kind == "image") return run_setup_image(a, slot, image);
     if (slot.kind != "iso") return fail_job("Setting up " + slot.label + " isn't something this version of the store can do.");
 
     Disc disc;
@@ -1542,13 +1626,27 @@ bool parse_releases(const std::string &text, std::vector<Release> &out)
         x.date = r["published_at"].str().substr(0, 10);
         x.body = r["body"].str();
         x.prerelease = r["prerelease"].boolean(false);
+        for (std::size_t k = 0; k < r["assets"].size(); ++k) x.assets.push_back(r["assets"][k]["name"].str());
         if (x.tag.empty() && x.name.empty()) continue;
         out.push_back(x);
     }
     return true;
 }
 
-void fetch_notes(porpoise::http::Session &http, const std::string &repo)
+/* A repo's releases as GitHub just gave them (an install asked too): kept as its notes. */
+void remember_releases(const std::string &repo, const std::string &text)
+{
+    std::vector<Release> rel;
+    if (!parse_releases(text, rel)) return;
+    make_dirs(g.data + "/notes");
+    write_file(notes_file(repo), text.data(), text.size());
+    std::lock_guard<std::mutex> l(g.m);
+    g.notes[repo] = rel;
+    g.notes_at[repo] = mono_s();
+    g.notes_failed.erase(repo);
+}
+
+bool fetch_notes(porpoise::http::Session &http, const std::string &repo)
 {
     std::vector<std::uint8_t> body;
     const int status = http.get("https://api.github.com/repos/" + repo + "/releases?per_page=30", body, {}, 8u << 20);
@@ -1570,6 +1668,41 @@ void fetch_notes(porpoise::http::Session &http, const std::string &repo)
     }
     else if (!g.notes.count(repo))
         g.notes_failed.insert(repo);
+    return status > 0; /* GitHub answered, even if only to say no (a repo gone private) */
+}
+
+/* The GitHub repos of the games on this console that come from GitHub releases: their
+ * releases say when there's an update. */
+std::vector<std::string> installed_repos()
+{
+    std::vector<std::string> out;
+    Catalog c;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        c = g.catalog;
+    }
+    for (const App &a : c.apps)
+        if (a.source == "github" && !a.repo.empty() && exists(app_folder(a.id) + "/eboot.bin") &&
+            std::find(out.begin(), out.end(), a.repo) == out.end())
+            out.push_back(a.repo);
+    return out;
+}
+
+/* A repo's releases as last saved, when that was less than half an hour ago (so opening
+ * the store again and again doesn't use up GitHub's hourly allowance). */
+bool fresh_notes(const std::string &repo, long long max_age)
+{
+    struct stat st;
+    if (stat(notes_file(repo).c_str(), &st) != 0) return false;
+    const long long age = (long long)std::time(nullptr) - (long long)st.st_mtime;
+    if (age < 0 || age > max_age) return false; /* a date ahead of the clock: stale */
+    std::string text;
+    std::vector<Release> rel;
+    if (!read_file(notes_file(repo), text) || !parse_releases(text, rel)) return false;
+    std::lock_guard<std::mutex> l(g.m);
+    g.notes[repo] = rel;
+    g.notes_at[repo] = mono_s();
+    return true;
 }
 
 void *worker(void *)
@@ -1579,16 +1712,24 @@ void *worker(void *)
         std::lock_guard<std::mutex> l(g.m);
         attach_art(g.catalog);
     }
-    long long next_refresh = 0, next_store_check = 0;
+    long long next_refresh = 0, next_store_check = 0, next_games_check = 0;
     for (;;)
     {
         timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         const long long now = ts.tv_sec;
+        bool forced = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            forced = g.force_check;
+            g.force_check = false;
+        }
+        if (forced)
+            next_refresh = next_store_check = next_games_check = 0;
         if (now >= next_refresh)
         {
             /* At start, then every 10 minutes (or a minute after a failed try). */
-            bool ok = false;
+            bool ok = false, store_ok = true, games_ok = true;
             {
                 porpoise::http::Session http("store", "RecompStore/1.0");
                 if (http.init())
@@ -1600,7 +1741,20 @@ void *worker(void *)
                         /* At start, then every 6 hours; a minute after GitHub couldn't be reached,
                          * half an hour after it answered with an error. */
                         const int r = check_store_update(http);
+                        store_ok = r > 0;
                         next_store_check = now + (r > 0 ? 6 * 3600 : r == 0 ? 60 : 1800);
+                    }
+                    if (now >= next_games_check)
+                    {
+                        /* The installed games' releases: at start, then every 6 hours (ten
+                         * minutes after a try GitHub didn't answer). */
+                        /* Check for updates asks GitHub again, but not about a repo it read
+                         * in the last two minutes (GitHub allows 60 questions an hour). */
+                        for (const std::string &repo : installed_repos())
+                            if (!fresh_notes(repo, forced ? 120 : 1800) && !fetch_notes(http, repo)) games_ok = false;
+                        next_games_check = now + (games_ok ? 6 * 3600 : 600);
+                        std::lock_guard<std::mutex> l(g.m);
+                        ++g.revision; /* the screens show what's newer */
                     }
                     ok = true;
                 }
@@ -1609,6 +1763,7 @@ void *worker(void *)
                 std::lock_guard<std::mutex> l(g.m);
                 g.loading = false;
                 if (!ok) g.online = false;
+                if (forced) g.update_check = ok && store_ok && games_ok ? 2 : 3;
             }
             next_refresh = now + (ok ? 600 : 60);
             if (next_store_check > now && next_store_check < next_refresh)
@@ -2153,6 +2308,43 @@ std::string Engine::store_update() const
     return g.store_update;
 }
 
+std::string Engine::newest_version(const App &a) const
+{
+    if (a.source != "github" || a.repo.empty() || a.asset.empty()) return "";
+    std::lock_guard<std::mutex> l(g.m);
+    auto it = g.notes.find(a.repo);
+    if (it == g.notes.end())
+    {
+        /* From disk, once a minute at most (this is asked every frame). */
+        static std::map<std::string, double> tried;
+        auto t = tried.find(a.repo);
+        if (t != tried.end() && mono_s() - t->second < 60) return "";
+        tried[a.repo] = mono_s();
+        std::string text;
+        std::vector<Release> rel;
+        if (!read_file(notes_file(a.repo), text) || !parse_releases(text, rel)) return "";
+        it = g.notes.emplace(a.repo, rel).first;
+    }
+    for (const Release &r : it->second)
+        for (const std::string &n : r.assets)
+            if (asset_matches(a.asset, n)) return r.tag;
+    return "";
+}
+
+void Engine::check_updates_now()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.force_check = true;
+    g.update_check = 1;
+    slog("check for updates: asked");
+}
+
+int Engine::update_check() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.update_check;
+}
+
 bool Engine::take_auto_update(std::string &version)
 {
     std::lock_guard<std::mutex> l(g.m);
@@ -2374,9 +2566,15 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ex
             std::string low = name;
             for (char &c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
             const std::size_t el = std::strlen(ext);
-            /* "stfs": Xbox 360 content packages, which have no extension: known by their first bytes. */
-            const bool want = std::strcmp(ext, "stfs") == 0 ? stfs::looks_like(f.path)
-                                                            : low.size() > el && low.compare(low.size() - el, el, ext) == 0;
+            /* "stfs": Xbox 360 content packages, which have no extension: known by their first bytes.
+             * "image": GameCube and Wii disc images. */
+            auto ends = [&](const char *x) {
+                const std::size_t xl = std::strlen(x);
+                return low.size() > xl && low.compare(low.size() - xl, xl, x) == 0;
+            };
+            const bool want = std::strcmp(ext, "stfs") == 0    ? stfs::looks_like(f.path)
+                              : std::strcmp(ext, "image") == 0 ? ends(".iso") || ends(".gcm") || ends(".ciso")
+                                                               : low.size() > el && low.compare(low.size() - el, el, ext) == 0;
             if (want)
             {
                 f.size = std::uint64_t(st.st_size);
@@ -2401,7 +2599,7 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ex
 
 std::string slot_target(const App &a, const Slot &s)
 {
-    std::string dir = a.data_dir.empty() ? std::string(kHomebrew) + "/" + a.id : a.data_dir;
+    std::string dir = a.data_dir.empty() ? app_folder(a.id) : a.data_dir;
     while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
     if (!s.to.empty() && s.to != "." && safe_name(s.to)) dir += "/" + s.to;
     return dir;
@@ -2410,6 +2608,29 @@ std::string slot_target(const App &a, const Slot &s)
 bool slot_ready(const App &a, const Slot &s)
 {
     if (s.kind == "iso") return exists(slot_target(a, s) + "/default.xex");
+    if (s.kind == "image")
+    {
+        /* The right disc in the folder. Asked every frame, so looked at every two seconds. */
+        static std::mutex m;
+        static std::map<std::string, std::pair<double, bool>> seen;
+        const std::string dir = slot_target(a, s), key = dir + "|" + s.disc_id;
+        std::lock_guard<std::mutex> l(m);
+        auto it = seen.find(key);
+        if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
+        bool ok = false;
+        std::string want = s.disc_id;
+        for (char &c : want) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+        std::vector<FsEntry> here;
+        if (list_dir(dir, here, "image"))
+            for (const FsEntry &e : here)
+                if (!e.is_dir)
+                {
+                    const std::string id = disc_image_id(e.path);
+                    if (!id.empty() && (want.empty() || id == want)) { ok = true; break; }
+                }
+        seen[key] = {mono_s(), ok};
+        return ok;
+    }
     std::vector<FsEntry> any;
     DIR *d = opendir(slot_target(a, s).c_str());
     if (!d) return false;
@@ -2456,5 +2677,27 @@ Engine &engine()
 {
     static Engine e;
     return e;
+}
+/* A GameCube or Wii disc image's ID (GZLE01): the first six bytes of an .iso or .gcm, or
+ * of the disc inside a .ciso (after its 32 KB header), with the disc's magic word there
+ * to prove it. "" for anything else. */
+std::string disc_image_id(const std::string &path)
+{
+    std::FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f) return "";
+    unsigned char h[0x20] = {};
+    std::size_t n = std::fread(h, 1, sizeof h, f);
+    if (n >= 4 && std::memcmp(h, "CISO", 4) == 0)
+        n = std::fseek(f, 0x8000, SEEK_SET) == 0 ? std::fread(h, 1, sizeof h, f) : 0;
+    std::fclose(f);
+    if (n < sizeof h) return "";
+    auto be32 = [&](int at) {
+        return std::uint32_t(h[at]) << 24 | std::uint32_t(h[at + 1]) << 16 | std::uint32_t(h[at + 2]) << 8 | h[at + 3];
+    };
+    if (be32(0x1C) != 0xC2339F3Du && be32(0x18) != 0x5D1C9EA3u) return "";
+    std::string id(reinterpret_cast<const char *>(h), 6);
+    for (char c : id)
+        if (!std::isalnum(static_cast<unsigned char>(c))) return "";
+    return id;
 }
 } // namespace recomp
