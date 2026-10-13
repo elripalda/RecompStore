@@ -439,4 +439,166 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
     files = written.size();
     return true;
 }
+
+bool take_inner(const std::string &zip_path, const std::function<bool(const std::string &)> &wanted,
+                const std::string &out, const Progress &progress, std::string &name, std::string &why)
+{
+    name.clear();
+    const int fd = ::open(zip_path.c_str(), O_RDONLY);
+    if (fd < 0)
+    {
+        why = "The download couldn't be opened.";
+        return false;
+    }
+    struct Closer
+    {
+        int fd;
+        ~Closer() { ::close(fd); }
+    } closer{fd};
+    std::vector<Entry> entries;
+    if (!list(fd, entries) || entries.empty())
+    {
+        why = "The download isn't a zip the store can read.";
+        return false;
+    }
+    const Entry *pick = nullptr;
+    for (const Entry &e : entries)
+    {
+        if (e.name.empty() || e.name.back() == '/' || !wanted(e.name))
+            continue;
+        if (pick)
+        {
+            why = "The download has more than one file where the store looks for the game's PS5 files, so it can't tell "
+                  "which to install. The store's listing for it needs updating.";
+            return false;
+        }
+        pick = &e;
+    }
+    if (!pick)
+    {
+        why = "The game's PS5 files aren't where the store looks for them in the download: the developer may have moved "
+              "them. The store's listing for it needs updating.";
+        return false;
+    }
+
+    std::uint8_t lh[30];
+    if (!read_at(fd, pick->local, lh, sizeof lh) || le32(lh) != 0x04034b50)
+    {
+        why = "The download is damaged. Try again.";
+        return false;
+    }
+    const std::uint64_t data = std::uint64_t(pick->local) + 30 + le16(lh + 26) + le16(lh + 28);
+    const std::string part = out + ".part";
+    std::remove(part.c_str());
+    std::remove(out.c_str());
+    if (pick->method == 8)
+    {
+        /* Packed: unpacked in memory (a zip inside a zip is already packed, so this is rare).
+         * Both copies are held at once, so both sizes are capped; a packed size bigger than
+         * what it unpacks to (plus deflate's few bytes) is a damaged directory. */
+        if (pick->usize > (256u << 20) || pick->csize > pick->usize + (pick->usize >> 8) + 1024)
+        {
+            why = "The game's PS5 files in the download are packed in a way this store can't take out.";
+            return false;
+        }
+        std::vector<std::uint8_t> bytes;
+        std::string w;
+        if (!extract(fd, *pick, bytes))
+        {
+            why = "Taking the game's PS5 files out of the download failed its check. Try again.";
+            return false;
+        }
+        if (progress)
+            progress("Taking out the game's files", bytes.size(), bytes.size());
+        if (!write_whole(part, bytes.data(), bytes.size(), w))
+        {
+            std::remove(part.c_str());
+            why = "The store couldn't save the game's PS5 files on your PS5 (" + w + ").";
+            return false;
+        }
+    }
+    else if (pick->method == 0)
+    {
+        /* Stored as it is: copied across in pieces, its CRC-32 worked out on the way. */
+        if (pick->csize != pick->usize)
+        {
+            why = "The download is damaged. Try again.";
+            return false;
+        }
+        const int o = ::open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        if (o < 0)
+        {
+            why = "The store couldn't save the game's PS5 files on your PS5.";
+            return false;
+        }
+        std::vector<std::uint8_t> buf(8u << 20);
+        std::uint32_t crc = 0;
+        std::uint64_t at = 0;
+        bool ok = true;
+        while (ok && at < pick->usize)
+        {
+            const std::size_t n = std::size_t(std::min<std::uint64_t>(buf.size(), pick->usize - at));
+            if (!read_at(fd, data + at, buf.data(), n))
+            {
+                why = "The download couldn't be read. Try again.";
+                ok = false;
+                break;
+            }
+            std::size_t put = 0;
+            while (put < n)
+            {
+                const ssize_t w = ::write(o, buf.data() + put, n - put);
+                if (w < 0 && errno == EINTR)
+                    continue;
+                if (w <= 0)
+                {
+                    why = "Your PS5 ran out of room taking out the game's files.";
+                    ok = false;
+                    break;
+                }
+                put += std::size_t(w);
+            }
+            crc = crc32(buf.data(), n, crc);
+            at += n;
+            if (progress)
+                progress("Taking out the game's files", at, pick->usize);
+        }
+        fsync(o);
+        if (::close(o) != 0 && ok)
+        {
+            why = "The store couldn't save the game's PS5 files on your PS5.";
+            ok = false;
+        }
+        if (ok && crc != pick->crc)
+        {
+            why = "The game's PS5 files in the download failed their check. Try again.";
+            ok = false;
+        }
+        if (!ok)
+        {
+            std::remove(part.c_str());
+            return false;
+        }
+    }
+    else
+    {
+        why = "The game's PS5 files in the download are packed in a way this store can't take out.";
+        return false;
+    }
+    std::string w;
+    if (!file_matches(part, pick->usize, pick->crc, &w))
+    {
+        std::remove(part.c_str());
+        why = "The game's PS5 files didn't read back right after saving them (" + w + "). Try again.";
+        return false;
+    }
+    if (std::rename(part.c_str(), out.c_str()) != 0)
+    {
+        std::remove(part.c_str());
+        why = "The store couldn't save the game's PS5 files on your PS5.";
+        return false;
+    }
+    name = pick->name;
+    return true;
+}
 } // namespace recomp::zip

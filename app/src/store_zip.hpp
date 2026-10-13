@@ -43,4 +43,12 @@ using Stop = std::function<bool()>;
  * changed says whether any old file had already been replaced. */
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
             const Stop &stop, std::string &error, bool &changed, std::size_t &files);
+
+/* A game whose PS5 files come as a zip inside its release's bigger zip (a source
+ * archive): the one file in zip_path whose name wanted() accepts, written to out as it is
+ * (not unpacked), its size and CRC-32 checked as it's written and again read back.
+ * name is the name it has in the zip. On failure why says why, for the player; out is
+ * never left half written. */
+bool take_inner(const std::string &zip_path, const std::function<bool(const std::string &)> &wanted,
+                const std::string &out, const Progress &progress, std::string &name, std::string &why);
 } // namespace recomp::zip

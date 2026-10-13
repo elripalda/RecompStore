@@ -452,6 +452,37 @@ void run_install(const std::string &id)
         for (char &c : want) c = char(std::tolower(static_cast<unsigned char>(c)));
         if (sha.hex() != want) return fail_job("The download doesn't match its checksum, so it wasn't installed.");
     }
+    /* A release that only has a bigger zip (a source archive): the game's own zip is taken
+     * out of it, the big one deleted, and the game's zip installed as any other. */
+    std::string install_zip = zip_path;
+    struct InnerFile
+    {
+        std::string path;
+        ~InnerFile() { if (!path.empty()) std::remove(path.c_str()); }
+    } inner;
+    if (!a.inside.empty())
+    {
+        set_job("Taking out the game's files", 0, 0);
+        const std::string pattern = a.inside;
+        std::string name, why;
+        inner.path = g.data + "/downloads/" + a.id + ".inner.zip";
+        /* As many folders deep as the pattern: its * never reaches into a deeper copy. */
+        const auto depth = [](const std::string &s) { return std::count(s.begin(), s.end(), '/'); };
+        if (!zip::take_inner(
+                zip_path, [&](const std::string &n) { return depth(n) == depth(pattern) && asset_matches(pattern, n); },
+                inner.path,
+                [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); }, name, why))
+        {
+            slog("install %s: taking %s out of the download failed: %s", a.id.c_str(), pattern.c_str(), why.c_str());
+            return fail_job(why);
+        }
+        struct stat st;
+        slog("install %s: took %s out of the download (%lld bytes)", a.id.c_str(), name.c_str(),
+             stat(inner.path.c_str(), &st) == 0 ? (long long)st.st_size : -1LL);
+        std::remove(zip_path.c_str()); /* its room back before unpacking */
+        install_zip = inner.path;
+    }
+
     /* Unpacking: by the copier payload at the drive's full speed (the PS5 holds an app's
      * writes back after about a gigabyte), or here when there's no payload loader. */
     const std::string root = app_folder(a.id); /* where it already is, if it's on the console */
@@ -459,7 +490,7 @@ void run_install(const std::string &id)
     std::size_t nfiles = 0;
     {
         bool changed = false;
-        const Copier c = run_copier("unzip", zip_path, root, &changed);
+        const Copier c = run_copier("unzip", install_zip, root, &changed);
         if (c == Copier::Failed)
         {
             if (changed) std::remove(record.c_str()); /* half updated: offer the install again */
@@ -469,7 +500,7 @@ void run_install(const std::string &id)
         {
             std::string error;
             if (!zip::unpack(
-                    zip_path, root, [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); },
+                    install_zip, root, [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); },
                     [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles))
             {
                 if (changed) std::remove(record.c_str());
@@ -480,7 +511,7 @@ void run_install(const std::string &id)
         {
             /* The store checks the copier's work itself: every file read back against the zip. */
             std::vector<zip::Entry> entries;
-            const int zfd = open(zip_path.c_str(), O_RDONLY);
+            const int zfd = open(install_zip.c_str(), O_RDONLY);
             const bool listed = zfd >= 0 && zip::list(zfd, entries);
             if (zfd >= 0) close(zfd);
             if (!listed)

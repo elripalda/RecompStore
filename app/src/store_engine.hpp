@@ -57,6 +57,12 @@ struct App
     std::string version, released, size, needs;
     int build = 0;
     std::string source /* github, url */, repo, asset /* may hold * and ? */, url, sha256;
+    /* Where the game's own zip is inside that download, when the release only has a bigger
+     * zip (a source archive), its whole name in that zip: The Simpsons Game's is a star then
+     * /prospero/builder/Assets/payload.zip (the star stands for the source folder's
+     * versioned name). "" = the download is the game's zip. May hold * and ?, as asset
+     * does. Needs Recomp Store 1.0.4. */
+    std::string inside;
     /* The oldest Recomp Store that can install it ("" for any): an older one is told to
      * update first. Stores before 1.0.3 never see such a game (the site lists it apart). */
     std::string min_store;
