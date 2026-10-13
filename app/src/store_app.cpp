@@ -733,6 +733,29 @@ bool Store::update(const pad::State &p, float dt)
         if (store_updating_)
             return true;
     }
+    /* Installed from the copy built into an installer that couldn't reach GitHub: the
+     * newest version, straight away, as soon as the store has found it. */
+    {
+        std::string v;
+        if (engine().take_auto_update(v))
+        {
+            picker_ = confirm_ = false;
+            page_open_ = notes_focus_ = notes_open_ = false;
+            if (tab_ != Updates)
+            {
+                tab_dir_ = 1;
+                tab_ = Updates;
+                tab_t_ = 0;
+            }
+            col_ = row_ = 0;
+            in_section_ = false;
+            start_store_update();
+            if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
+            if (!store_note_bad_)
+                store_note_ = "Getting the newest version, " + v + ", for you. The store closes, updates itself and opens again.";
+            return true;
+        }
+    }
     /* Back from a game that wouldn't open: its page, saying why (once). */
     if (!open_checked_ && !catalog_.apps.empty())
     {

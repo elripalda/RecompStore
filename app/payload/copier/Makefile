@@ -7,12 +7,12 @@ else
 endif
 
 ELF := recompstore-copier.elf
-SRC := copier.cpp ../../src/store_disc.cpp ../../src/store_zip.cpp ../../src/store_stfs.cpp
+SRC := copier.cpp ../../src/store_disc.cpp ../../src/store_zip.cpp ../../src/store_stfs.cpp ../../src/store_fs.cpp
 CXXFLAGS := -std=c++20 -O2 -Wall -Werror -I../../src -I../../third_party
 
 all: $(ELF)
 
-$(ELF): $(SRC) ../../src/store_disc.hpp ../../src/store_zip.hpp ../../src/store_stfs.hpp
+$(ELF): $(SRC) ../../src/store_disc.hpp ../../src/store_zip.hpp ../../src/store_stfs.hpp ../../src/store_fs.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $(SRC) -lpthread
 	$(PS5_PAYLOAD_SDK)/bin/llvm-strip --strip-debug $@ 2>/dev/null || true
 

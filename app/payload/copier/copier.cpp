@@ -11,6 +11,8 @@
  *     target=<the folder its files go in>
  * and this writes its progress, at least twice a second, to status.txt there:
  *     token=  phase=copying|done|failed  done=  total=  error=  seconds=
+ * kind=delete (path0=, path1=, ...) deletes a game's folder and the game files set up
+ * for it instead.
  * A file called "cancel" in that folder stops it. Files already in place at
  * their full size are kept, so a stopped setup carries on. It writes only
  * inside the target folder, never the port's own eboot.bin, sce_sys or
@@ -18,6 +20,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "store_disc.hpp"
+#include "store_fs.hpp"
 #include "store_zip.hpp"
 #include "store_stfs.hpp"
 
@@ -332,6 +335,78 @@ int stfs_job(const std::string &package, const std::string &target)
     return 0;
 }
 
+/* kind "delete": a game's folder and the game files set up for it elsewhere (path0=,
+ * path1=, ... in the job), each only if it's somewhere a game's files can be. Done here
+ * because these files were written by this copier, and checked afterwards: a path that
+ * is still there is a failure, never "deleted". */
+int delete_job(const std::string &job)
+{
+#ifdef RECOMP_TEST_ROOT
+    const std::string root = RECOMP_TEST_ROOT;
+#else
+    const std::string root = "/data/";
+#endif
+    std::vector<std::string> paths;
+    for (int i = 0; i < 16; ++i)
+    {
+        const std::string key = "path" + std::to_string(i);
+        const std::string p = field(job, key.c_str());
+        if (p.empty())
+            break;
+        if (!recomp::fs::deletable(p, kDir, root))
+            return fail("The copier won't delete " + p + ".");
+        paths.push_back(p);
+    }
+    if (paths.empty())
+        return fail("Nothing to delete.");
+    if (cancelled())
+    {
+        log_line("the store took this delete over before the copier started; leaving it to the store");
+        unlink((kJobDir + "/running").c_str());
+        return 0;
+    }
+    log_line("delete started (pid %d): %s%s", int(getpid()), paths[0].c_str(),
+             paths.size() > 1 ? (" and " + std::to_string(paths.size() - 1) + " more").c_str() : "");
+    const double t0 = now_s();
+    g_status.phase = "deleting";
+    write_status(true);
+    std::size_t files = 0;
+    /* The game files first and the game's own folder (path0) last, so a delete that stops
+     * part way leaves the game showing as installed, with Delete there to press again. */
+    for (std::size_t k = 0; k < paths.size(); ++k)
+    {
+        const std::size_t i = (k + 1) % paths.size();
+        const std::string &p = paths[i];
+        std::size_t n = 0;
+        std::string bad;
+        int err = 0;
+        const bool ok = recomp::fs::remove_tree(p, n, bad, err, [&](std::size_t so_far) {
+            g_status.done = files + so_far;
+            write_status();
+        });
+        files += n;
+        if (!ok)
+        {
+            g_status.files = files;
+            const char *why = err == EACCES || err == EPERM ? "the console refused" : err == EBUSY ? "it's in use" : "error";
+            return fail(bad + " couldn't be deleted (" + why + ", error " + std::to_string(err) + ").");
+        }
+        if (!recomp::fs::gone(p))
+            return fail(p + " is still there after deleting it.");
+        log_line("deleted %s: %zu files", p.c_str(), n);
+        if (i > 0) /* the game files' folders: their empty parents too, never the homebrew folder's */
+            recomp::fs::remove_empty_parents(p, [](const std::string &up) { log_line("removed the empty folder %s", up.c_str()); });
+    }
+    g_status.files = files;
+    g_status.done = files;
+    g_status.seconds = now_s() - t0;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("delete done: %zu files in %.1f s", files, now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
 int main()
 {
     make_dirs(kDir + "/logs");
@@ -387,6 +462,8 @@ int main()
         return unzip_job(image, target);
     if (kind == "stfs")
         return stfs_job(image, target);
+    if (kind == "delete")
+        return delete_job(job);
     if (kind != "setup")
         return fail("The copier doesn't know the job \"" + kind + "\".");
     log_line("started (pid %d): %s -> %s", int(getpid()), image.c_str(), target.c_str());

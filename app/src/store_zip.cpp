@@ -91,7 +91,7 @@ bool replace(const std::string &src, const std::string &dst, const Log &log)
     const int first = errno;
     const std::string old = dst + ".old";
     struct stat st;
-    const bool had = lstat(dst.c_str(), &st) == 0;
+    const bool had = stat(dst.c_str(), &st) == 0; /* not lstat: it fails on the PS5 */
     if (had)
     {
         std::remove(old.c_str());
