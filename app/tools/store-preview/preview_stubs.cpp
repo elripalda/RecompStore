@@ -110,6 +110,7 @@ bool Engine::adopt(const std::string &, std::string &v) { v = "1.0.0"; return tr
 void Engine::want_notes(const std::string &) {}
 std::string Engine::store_update() const { const char *v = std::getenv("PREVIEW_STORE_UPDATE"); return v ? v : ""; }
 bool update_store(std::string &) { return true; }
+bool Engine::download_store_update() { return true; }
 int update_store_state() { return 0; }
 void update_store_cancel() {}
 /* PREVIEW_NOTES: a GitHub releases answer (JSON) shown as every game's patch notes. */

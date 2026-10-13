@@ -55,3 +55,14 @@ APP_LINK_FLAGS="$vulkan_flags --wrap=malloc --wrap=calloc --wrap=realloc --wrap=
 APP_LINKER_SCRIPT="$linker_script" \
     make app
 echo "==> [store] dist/PPSA92000 ready"
+# The release: the store's zip, and the installer with that zip built in (it installs with
+# no network; the store ships the lighter one above, for its own updates).
+version=$(sed -n 's/.*kVersion = "\([^"]*\)".*/\1/p' "$root/src/ui_app_common.hpp")
+content=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['contentVersion'])" "$root/dist/PPSA92000/sce_sys/param.json")
+mkdir -p "$root/release"
+rm -f "$root/release/PPSA92000.zip"
+(cd "$root/dist" && zip -qr -X "$root/release/PPSA92000.zip" PPSA92000)
+make -s -C "$root/payload/installer" PS5_PAYLOAD_SDK="$sdk" ELF=RecompStore-Installer-full.elf \
+    EMBED_ZIP="$root/release/PPSA92000.zip" EMBED_VERSION="$version" EMBED_CONTENT="$content" clean all
+cp "$root/payload/installer/RecompStore-Installer-full.elf" "$root/release/RecompStore-Installer.elf"
+echo "==> [store] release/ ready: PPSA92000.zip and RecompStore-Installer.elf ($version, $content)"

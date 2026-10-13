@@ -482,20 +482,14 @@ void Store::start_store_update()
         play(int(Sfx::Error));
         return;
     }
-    std::string why;
-    if (!update_store(why))
+    if (!engine().download_store_update())
     {
-        store_note_ = why;
-        store_note_bad_ = true;
         play(int(Sfx::Error));
         return;
     }
-    store_updating_ = true;
-    store_upd_t_ = 0;
-    store_upd_poll_ = 0;
-    store_note_ = "Starting the update. The store closes, updates itself and opens again.";
+    store_note_.clear();
     store_note_bad_ = false;
-    play(int(Sfx::Install));
+    play(int(Sfx::Select));
 }
 
 void Store::press_setup(const App &a)
@@ -774,7 +768,28 @@ bool Store::update(const pad::State &p, float dt)
     }
     else
         speed_step_.clear();
-    if (job.phase == Phase::Done && job.kind == "bench")
+    if (job.kind == "storeupdate" && (job.phase == Phase::Done || job.phase == Phase::Failed))
+    {
+        /* The store's own update: downloaded and checked, it goes to the installer. */
+        engine().acknowledge();
+        std::string why;
+        if (job.phase == Phase::Done && update_store(why))
+        {
+            store_updating_ = true;
+            store_upd_t_ = 0;
+            store_upd_poll_ = 0;
+            store_note_ = "Downloaded. The store closes, updates itself and opens again.";
+            store_note_bad_ = false;
+            play(int(Sfx::Install));
+        }
+        else
+        {
+            store_note_ = job.phase == Phase::Failed ? job.error : why;
+            store_note_bad_ = true;
+            play(int(Sfx::Error));
+        }
+    }
+    else if (job.phase == Phase::Done && job.kind == "bench")
     {
         play(int(Sfx::Complete));
         engine().acknowledge();
@@ -1393,10 +1408,14 @@ void Store::draw_updates(Gfx &gfx)
         if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
         gfx.text_mid(Font::ExtraBold, 26, tx, yy + 40 * s, C(kFrost), Align::Left, "Recomp Store");
         gfx.text_mid(Font::SemiBold, 20, tx + gfx.measure(Font::ExtraBold, 26, "Recomp Store") + 10, yy + 41 * s, C(kCyan), Align::Left, v);
-        const char *label = store_updating_ ? "Starting\xE2\x80\xA6" : "Update";
+        const JobState sj = engine().job();
+        const bool fetching = sj.phase == Phase::Working && sj.kind == "storeupdate";
+        const char *label = store_updating_ ? "Starting\xE2\x80\xA6" : fetching ? "Downloading\xE2\x80\xA6" : "Update";
         const float bw = gfx.measure(Font::Bold, 20, label) + 60;
-        const std::string line = !store_note_.empty() ? store_note_
-                                                      : "A new version of the store. It closes, updates itself and opens again.";
+        std::string line = !store_note_.empty() ? store_note_
+                                                : "A new version of the store. It downloads, then closes, updates itself and opens again.";
+        if (fetching)
+            line = sj.total ? "Downloading " + size_text(sj.done) + " of " + size_text(sj.total) : sj.step + "\xE2\x80\xA6";
         gfx.text_mid(Font::Regular, 19, tx, yy + 76 * s, store_note_bad_ ? C(0xFFB4A8) : C(kSoft), Align::Left,
                      fit(gfx, Font::Regular, 19, w - (tx - x) - bw - 80, line));
         gfx.text_mid(Font::Regular, 16, tx, yy + 108 * s, C(kDim), Align::Left,

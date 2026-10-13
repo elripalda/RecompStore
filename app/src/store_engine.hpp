@@ -124,6 +124,9 @@ public:
 
     /* A newer Recomp Store release on GitHub (its tag), or "" when this is the newest. */
     std::string store_update() const;
+    /* Download and check that newer store (a job, kind "storeupdate"); when it's done,
+     * update_store() hands it to the installer. */
+    bool download_store_update();
 
     /* Every release's patch notes from a game's GitHub repo, newest first. want_notes
      * asks for them (fetched in the background, kept on disk for when the console is
@@ -190,9 +193,9 @@ bool forget_smp(const std::string &title_id);
  * open_game_cancel: it took too long; it does nothing if it starts later.
  * open_game_failure: when the store opens again because a game wouldn't (once). */
 bool open_game(const std::string &title_id, std::string &why);
-/* Updating the store itself: its installer payload (assets/payloads) is handed to the
- * loader, waits for the store to close, installs the newest release, and opens the store
- * again. update_store_state, as open_game_state: 1 close now, 0 not yet, -1 it gave up. */
+/* Updating the store itself, once download_store_update() is done: its installer payload
+ * (assets/payloads) is handed to the loader with the checked download, waits for the store
+ * to close, installs it, and opens the store again. update_store_state, as open_game_state: 1 close now, 0 not yet, -1 it gave up. */
 bool update_store(std::string &why);
 int update_store_state();
 void update_store_cancel();
