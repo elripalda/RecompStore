@@ -168,8 +168,11 @@ struct Shared
     bool pending_bench = false;
     std::string pending_delete;
     bool started = false;
-    /* A newer Recomp Store on GitHub ("" when this is the newest). */
+    /* A newer Recomp Store on GitHub ("" when this is the newest), and its download once
+     * the store has fetched and checked it for the installer. */
     std::string store_update;
+    bool pending_store_dl = false;
+    std::string store_zip, store_zip_sha, store_zip_ver;
     /* Patch notes by repo, and when each was last asked of GitHub (mono seconds). */
     std::map<std::string, std::vector<Release>> notes;
     std::map<std::string, double> notes_at;
@@ -1287,6 +1290,85 @@ void check_store_update(porpoise::http::Session &http)
     if (status == 200) g.store_update = newer ? newest : "";
 }
 
+/* The store's own update: the newest full release's PPSA92000.zip, downloaded and checked
+ * here (the store can always reach GitHub; a payload may not), for the installer. */
+void run_store_download()
+{
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        g.job = JobState();
+        g.job.phase = Phase::Working;
+        g.job.kind = "storeupdate";
+        g.job.app_id = "PPSA92000";
+        g.job.step = "Finding the newest release";
+        g.store_zip.clear();
+    }
+    porpoise::http::Session http("store-update", "RecompStore/1.0");
+    if (!http.init()) return fail_job("Your PS5 isn't online.");
+    std::vector<std::uint8_t> body;
+    const int status = http.get(std::string("https://api.github.com/repos/") + kStoreRepo + "/releases?per_page=10", body, {}, 4u << 20);
+    Json j;
+    std::string url, digest, tag;
+    std::uint64_t size = 0;
+    if (status == 200 && Json::parse(std::string(body.begin(), body.end()), j) && j.is_array())
+        for (std::size_t i = 0; i < j.size() && url.empty(); ++i)
+        {
+            const Json &r = j[i];
+            if (r["draft"].boolean(false) || r["prerelease"].boolean(false)) continue;
+            for (std::size_t k = 0; k < r["assets"].size(); ++k)
+                if (r["assets"][k]["name"].str() == "PPSA92000.zip")
+                {
+                    url = r["assets"][k]["browser_download_url"].str();
+                    size = std::uint64_t(r["assets"][k]["size"].integer());
+                    digest = r["assets"][k]["digest"].str();
+                    tag = r["tag_name"].str();
+                    break;
+                }
+        }
+    if (url.rfind("https://", 0) != 0)
+        return fail_job(status == 200 ? "There's no Recomp Store release to update to." : "GitHub didn't answer. Try again in a moment.");
+    make_dirs(g.data + "/downloads");
+    const std::string zip = g.data + "/downloads/PPSA92000.zip", part = zip + ".part";
+    std::FILE *out = std::fopen(part.c_str(), "wb");
+    if (!out) return fail_job("The store couldn't save the download on your PS5.");
+    Sha256 sha;
+    std::uint64_t got = 0;
+    bool write_ok = true;
+    set_job("Downloading", 0, size);
+    const int st = http.get_stream(url, [&](const std::uint8_t *p, std::size_t n) {
+        if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
+        sha.update(p, n);
+        got += n;
+        set_job("Downloading", got, size);
+        return got < (std::uint64_t(512) << 20);
+    });
+    std::fclose(out);
+    const std::string hash = sha.hex();
+    slog("store update: %s: HTTP %d, %llu bytes, SHA-256 %s", url.c_str(), st, (unsigned long long)got, hash.c_str());
+    if (!write_ok || st != 200 || got == 0 || (size && got != size))
+    {
+        std::remove(part.c_str());
+        return fail_job(write_ok ? "The download didn't finish. Check your connection and try again." : "Your PS5 ran out of room while downloading.");
+    }
+    if (digest.rfind("sha256:", 0) == 0 && digest.substr(7) != hash)
+    {
+        std::remove(part.c_str());
+        return fail_job("The download doesn't match its checksum, so nothing changed.");
+    }
+    if (std::rename(part.c_str(), zip.c_str()) != 0)
+    {
+        std::remove(part.c_str());
+        return fail_job("The store couldn't save the download on your PS5.");
+    }
+    std::lock_guard<std::mutex> l(g.m);
+    g.store_zip = zip;
+    g.store_zip_sha = hash;
+    g.store_zip_ver = tag;
+    g.job.phase = Phase::Done;
+    g.job.step = "Downloaded";
+    g.job.installed_version = tag;
+}
+
 /* ---- Patch notes from GitHub --------------------------------------------------------- */
 std::string notes_file(const std::string &repo)
 {
@@ -1382,8 +1464,11 @@ void *worker(void *)
         std::string id, sapp, sslot, simage;
         bool bench = false;
         std::string del;
+        bool store_dl = false;
         {
             std::lock_guard<std::mutex> l(g.m);
+            store_dl = g.pending_store_dl;
+            g.pending_store_dl = false;
             bench = g.pending_bench;
             g.pending_bench = false;
             del.swap(g.pending_delete);
@@ -1400,6 +1485,8 @@ void *worker(void *)
             run_bench();
         else if (!del.empty())
             run_delete(del);
+        else if (store_dl)
+            run_store_download();
         else
         {
             std::set<std::string> repos;
@@ -1889,6 +1976,14 @@ std::string Engine::store_update() const
     return g.store_update;
 }
 
+bool Engine::download_store_update()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase == Phase::Working || g.pending_store_dl) return false;
+    g.pending_store_dl = true;
+    return true;
+}
+
 /* The store updates itself through its installer payload (as a first install does):
  * it leaves the job, hands the payload to the loader, and closes once it has started. */
 static std::string g_update_token;
@@ -1910,7 +2005,19 @@ bool update_store(std::string &why)
     std::remove((jd + "/cancel").c_str());
     char token[48];
     std::snprintf(token, sizeof token, "%lld-%d", (long long)std::time(nullptr), int(mono_s() * 1000) % 100000);
-    const std::string job = std::string("token=") + token + "\nmode=update\n";
+    std::string zip, zsha, zver;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        zip = g.store_zip;
+        zsha = g.store_zip_sha;
+        zver = g.store_zip_ver;
+    }
+    if (zip.empty() || !exists(zip))
+    {
+        why = "The update's download is missing. Try again.";
+        return false;
+    }
+    const std::string job = std::string("token=") + token + "\nmode=update\nzip=" + zip + "\nsha256=" + zsha + "\nversion=" + zver + "\n";
     if (!write_file(jd + "/job.txt", job.data(), job.size()))
     {
         why = "The store couldn't write to its folder.";

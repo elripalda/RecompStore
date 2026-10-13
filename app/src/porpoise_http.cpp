@@ -113,9 +113,13 @@ int Session::get(const std::string &url, std::vector<std::uint8_t> &out,
     out.clear();
     if (tmpl_ < 0)
         return -1;
+    last_error_ = 0;
     const int req = sceHttp2CreateRequestWithURL(tmpl_, "GET", url.c_str(), 0);
     if (req < 0)
+    {
+        last_error_ = req;
         return -1;
+    }
     sceHttp2SetResolveTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetConnectTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetSendTimeOut(req, 10 * 1000 * 1000);
@@ -123,8 +127,16 @@ int Session::get(const std::string &url, std::vector<std::uint8_t> &out,
     sceHttp2SetTimeOut(req, progress ? 600 * 1000 * 1000 : 25 * 1000 * 1000);
     sceHttp2SetAutoRedirect(req, 1);
     int status = -1;
-    if (sceHttp2SendRequest(req, nullptr, 0) != 0 || sceHttp2GetStatusCode(req, &status) != 0)
+    if (const int e = sceHttp2SendRequest(req, nullptr, 0); e != 0)
+    {
+        last_error_ = e;
         status = -1;
+    }
+    else if (const int e2 = sceHttp2GetStatusCode(req, &status); e2 != 0)
+    {
+        last_error_ = e2;
+        status = -1;
+    }
     else if (status == 200)
     {
         std::vector<std::uint8_t> buf(64 * 1024);
@@ -133,6 +145,7 @@ int Session::get(const std::string &url, std::vector<std::uint8_t> &out,
             const int n = sceHttp2ReadData(req, buf.data(), buf.size());
             if (n < 0)
             {
+                last_error_ = n;
                 status = -1;
                 break;
             }
@@ -154,9 +167,13 @@ int Session::get_stream(const std::string &url,
 {
     if (tmpl_ < 0)
         return -1;
+    last_error_ = 0;
     const int req = sceHttp2CreateRequestWithURL(tmpl_, "GET", url.c_str(), 0);
     if (req < 0)
+    {
+        last_error_ = req;
         return -1;
+    }
     sceHttp2SetResolveTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetConnectTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetSendTimeOut(req, 10 * 1000 * 1000);
@@ -164,8 +181,16 @@ int Session::get_stream(const std::string &url,
     sceHttp2SetTimeOut(req, 3600u * 1000 * 1000); /* a big game on a slow line */
     sceHttp2SetAutoRedirect(req, 1);
     int status = -1;
-    if (sceHttp2SendRequest(req, nullptr, 0) != 0 || sceHttp2GetStatusCode(req, &status) != 0)
+    if (const int e = sceHttp2SendRequest(req, nullptr, 0); e != 0)
+    {
+        last_error_ = e;
         status = -1;
+    }
+    else if (const int e2 = sceHttp2GetStatusCode(req, &status); e2 != 0)
+    {
+        last_error_ = e2;
+        status = -1;
+    }
     else if (status == 200)
     {
         std::vector<std::uint8_t> buf(256 * 1024);
@@ -174,6 +199,7 @@ int Session::get_stream(const std::string &url,
             const int n = sceHttp2ReadData(req, buf.data(), buf.size());
             if (n < 0)
             {
+                last_error_ = n;
                 status = -1;
                 break;
             }
@@ -195,10 +221,14 @@ int Session::request(const std::string &url, const std::string *form, std::vecto
     out.clear();
     if (tmpl_ < 0)
         return -1;
+    last_error_ = 0;
     const int req = sceHttp2CreateRequestWithURL(tmpl_, form ? "POST" : "GET", url.c_str(),
                                                  form ? std::uint64_t(form->size()) : 0);
     if (req < 0)
+    {
+        last_error_ = req;
         return -1;
+    }
     sceHttp2SetResolveTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetConnectTimeOut(req, 10 * 1000 * 1000);
     sceHttp2SetSendTimeOut(req, 10 * 1000 * 1000);
@@ -208,9 +238,16 @@ int Session::request(const std::string &url, const std::string *form, std::vecto
     if (form)
         sceHttp2AddRequestHeader(req, "Content-Type", "application/x-www-form-urlencoded", 0 /* overwrite */);
     int status = -1;
-    if (sceHttp2SendRequest(req, form ? form->data() : nullptr, form ? form->size() : 0) != 0 ||
-        sceHttp2GetStatusCode(req, &status) != 0)
+    if (const int e = sceHttp2SendRequest(req, form ? form->data() : nullptr, form ? form->size() : 0); e != 0)
+    {
+        last_error_ = e;
         status = -1;
+    }
+    else if (const int e2 = sceHttp2GetStatusCode(req, &status); e2 != 0)
+    {
+        last_error_ = e2;
+        status = -1;
+    }
     else
     {
         std::vector<std::uint8_t> buf(16 * 1024);
@@ -219,6 +256,7 @@ int Session::request(const std::string &url, const std::string *form, std::vecto
             const int n = sceHttp2ReadData(req, buf.data(), buf.size());
             if (n < 0)
             {
+                last_error_ = n;
                 status = -1;
                 break;
             }

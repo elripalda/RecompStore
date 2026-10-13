@@ -37,11 +37,14 @@ public:
      * -1 when there was no answer. */
     int request(const std::string &url, const std::string *form, std::vector<std::uint8_t> &out,
                 std::size_t limit = std::size_t(4) << 20);
+    /* The console's error code from the last request that failed (0 if none). */
+    int last_error() const { return last_error_; }
 
 private:
     const char *name_;
     const char *agent_;
     int pool_ = -1, ssl_ = -1, ctx_ = -1, tmpl_ = -1;
     bool netctl_ = false, locked_ = false;
+    int last_error_ = 0;
 };
 } // namespace porpoise::http

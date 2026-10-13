@@ -1,17 +1,19 @@
 /* Recomp Store installer - puts Recomp Store on a PS5, or updates it.
  *
  * A payload: send RecompStore-Installer.elf to the console's payload loader on
- * port 9021 (etaHEN, elfldr, or any other). It finds the newest Recomp Store
- * release on GitHub (elripalda/RecompStore, the PPSA92000.zip on it), downloads
- * it, checks it (GitHub's SHA-256 of the file, then every file's CRC-32 as it
- * is unpacked and read back), and unpacks it into the store's folder:
+ * port 9021 (etaHEN, elfldr, or any other). It takes the newest Recomp Store
+ * release from GitHub (elripalda/RecompStore, the PPSA92000.zip on it) when the
+ * console lets a payload use HTTPS, and otherwise the copy of the store built
+ * into it (RS_EMBEDDED). It checks it (GitHub's SHA-256, then every file's
+ * CRC-32 as it is unpacked and read back), and unpacks it into the store's folder:
  * wherever a folder under /data/homebrew already holds PPSA92000, else
  * /data/homebrew/PPSA92000. Then it asks ShadowMountPlus (its API on
  * 127.0.0.1:10101) to look for new games, so the store shows up on the home
  * screen. A toast says how it went.
  *
- * The store updates itself the same way: it leaves /data/recompstore/selfupdate/
- * job.txt (token=, mode=update), sends this, and closes once status.txt there
+ * The store updates itself the same way: it downloads and checks the new zip
+ * itself, leaves /data/recompstore/selfupdate/job.txt (token=, mode=update,
+ * zip=, sha256=, version=), sends this, and closes once status.txt there
  * says phase=waiting. This waits for the store to be gone, installs, and opens
  * the store again (also when the update failed: the old store is still whole).
  *
@@ -61,6 +63,7 @@ static int sceSystemServiceGetAppIdOfRunningBigApp() { return std::getenv("STORE
 static int sceUserServiceInitialize(void *) { return 0; }
 static int sceUserServiceGetForegroundUser(std::uint32_t *u) { *u = 0x10000001; return 0; }
 static int sceSystemServiceLaunchApp(const char *id, char **, void *) { std::printf("[launch %s]\n", id); return 0x60000200; }
+static int sceNotificationSend(int, bool, const char *json) { std::printf("[toast json] %.120s\n", json); return std::getenv("NO_RICH_TOAST") ? -1 : 0; }
 static int sceKernelSendNotificationRequest(int, void *req, std::size_t, int)
 {
     std::printf("[toast] %s\n", static_cast<const char *>(req) + 45);
@@ -74,7 +77,14 @@ extern "C"
     int sceUserServiceGetForegroundUser(std::uint32_t *user_id);
     int sceSystemServiceLaunchApp(const char *title_id, char **argv, void *ctx);
     int sceKernelSendNotificationRequest(int device, void *request, std::size_t size, int blocking);
+    int sceNotificationSend(int user_id, bool logged, const char *payload);
 }
+#endif
+
+#ifdef RS_EMBEDDED
+/* The store's own zip, built into this installer (embed.S): installs with no network. */
+extern "C" const unsigned char rs_embedded_zip[];
+extern "C" const unsigned char rs_embedded_zip_end[];
 #endif
 
 /* porpoise_http.cpp's trace lines go to the installer's log. */
@@ -165,8 +175,38 @@ struct KernelToast
 } __attribute__((packed));
 static_assert(sizeof(KernelToast) == 0xc30, "the kernel toast is 0xc30 bytes");
 
+std::string json_quote(const std::string &s)
+{
+    std::string o = "\"";
+    for (unsigned char c : s)
+    {
+        if (c == '"' || c == '\\') { o += '\\'; o += char(c); }
+        else if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+        else o += char(c);
+    }
+    return o + "\"";
+}
+
 void toast(const std::string &text)
 {
+    /* A system toast, the way Porpoise's notification relay posts one (logged, so it shows). */
+    static unsigned count = 0;
+    char id[32];
+    std::snprintf(id, sizeof id, "%u", 100000000u + (unsigned(std::time(nullptr)) % 800000u) * 1000u + (count++ % 1000u));
+    char created[40];
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+    gmtime_r(&now, &tm);
+    std::strftime(created, sizeof created, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
+    const std::string j = "{\"rawData\":{\"viewTemplateType\":\"InteractiveToastTemplateB\",\"channelType\":\"Downloads\","
+                          "\"useCaseId\":\"IDC\",\"toastOverwriteType\":\"No\",\"isImmediate\":true,\"priority\":100,"
+                          "\"viewData\":{\"message\":{\"body\":" + json_quote(text) + "}}},\"createdDateTime\":" +
+                          json_quote(created) + ",\"localNotificationId\":" + json_quote(id) + "}";
+    if (sceNotificationSend(0xFE, true, j.c_str()) == 0)
+    {
+        log_line("toast: %s", text.c_str());
+        return;
+    }
     KernelToast req;
     std::memset(&req, 0, sizeof req);
     std::snprintf(req.message, sizeof req.message, "%s", text.c_str());
@@ -260,6 +300,18 @@ int open_store()
     return r;
 }
 
+std::string sha256_of(const std::string &path)
+{
+    std::FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f) return "";
+    recomp::Sha256 sha;
+    std::vector<std::uint8_t> buf(1 << 16);
+    std::size_t n;
+    while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0) sha.update(buf.data(), n);
+    std::fclose(f);
+    return sha.hex();
+}
+
 struct Release
 {
     std::string tag, url, sha256;
@@ -272,7 +324,7 @@ bool newest_release(porpoise::http::Session &http, Release &out, std::string &wh
 {
     std::vector<std::uint8_t> body;
     const int status = http.get(RELEASES_URL, body, {}, 4u << 20);
-    log_line("GitHub releases: HTTP %d, %zu bytes", status, body.size());
+    log_line("GitHub releases: HTTP %d, %zu bytes (console error 0x%08x)", status, body.size(), unsigned(http.last_error()));
     recomp::Json j;
     if (status != 200 || !recomp::Json::parse(std::string(body.begin(), body.end()), j) || !j.is_array())
     {
@@ -332,7 +384,8 @@ bool download(porpoise::http::Session &http, const Release &rel, const std::stri
     });
     std::fclose(f);
     const std::string hash = sha.hex();
-    log_line("download %s: HTTP %d, %llu bytes, SHA-256 %s", rel.url.c_str(), status, (unsigned long long)got, hash.c_str());
+    log_line("download %s: HTTP %d, %llu bytes, SHA-256 %s (console error 0x%08x)", rel.url.c_str(), status, (unsigned long long)got,
+             hash.c_str(), unsigned(http.last_error()));
     if (status != 200 || !write_ok || got == 0 || (rel.size && got != rel.size))
     {
         std::remove(part.c_str());
@@ -442,19 +495,79 @@ int main()
     }
     toast(updating ? "Recomp Store: updating\xE2\x80\xA6" : "Recomp Store: installing\xE2\x80\xA6");
 
-    std::string why, installed;
+    std::string why, installed, newer;
     bool ok = false;
     {
-        porpoise::http::Session http("installer", "RecompStore-Installer/" INSTALLER_VERSION);
-        Release rel;
-        const std::string zip = kDir + "/downloads/" STORE_ASSET;
-        if (!http.init())
-            why = "The PS5 isn't online, or its network couldn't be set up.";
-        else if (newest_release(http, rel, why) && download(http, rel, zip, why))
+        /* Where the store's zip comes from, first that works:
+         *  1. the store's own download (an update: the store fetched and checked it),
+         *  2. GitHub's newest release (some consoles refuse HTTPS from a payload),
+         *  3. the copy built into this installer. */
+        std::string zip = kDir + "/downloads/" STORE_ASSET, tag;
+        bool have = false, from_store = false;
+        if (updating && !field(job, "zip").empty())
         {
-            http.term(); /* the network's done: let it go before the long part */
+            const std::string given = field(job, "zip"), want = field(job, "sha256");
+            if (given.rfind(kDir + "/downloads/", 0) == 0 && given.find("..") == std::string::npos && sha256_of(given) == want && !want.empty())
+            {
+                zip = given;
+                tag = field(job, "version");
+                have = from_store = true;
+                log_line("using the store's download %s (%s)", zip.c_str(), tag.c_str());
+            }
+            else
+                log_line("the store's download %s is missing or doesn't match its checksum", given.c_str());
+        }
+        if (!have)
+        {
+            porpoise::http::Session http("installer", "RecompStore-Installer/" INSTALLER_VERSION);
+            Release rel;
+            if (!http.init())
+                why = "The PS5 isn't online, or its network couldn't be set up.";
+            else if (newest_release(http, rel, why) && download(http, rel, zip, why))
+            {
+                tag = rel.tag;
+                have = true;
+            }
+            else
+                log_line("GitHub didn't work from here (console error 0x%08x)", unsigned(http.last_error()));
+        }
+#ifdef RS_EMBEDDED
+        /* Never over a newer store than the copy built in (param.json's contentVersion,
+         * fixed-width, so it compares as text). */
+        if (!have)
+        {
+            std::string text, cv;
+            recomp::Json pj;
+            if (read_file(store_folder() + "/sce_sys/param.json", text) && recomp::Json::parse(text, pj))
+                cv = pj["contentVersion"].str();
+            if (!cv.empty() && cv > RS_EMBEDDED_CONTENT)
+            {
+                newer = cv;
+                log_line("the store on the console (%s) is newer than this installer's copy (%s); nothing changed", cv.c_str(),
+                         RS_EMBEDDED_CONTENT);
+            }
+        }
+        if (!have && newer.empty())
+        {
+            const std::size_t n = std::size_t(rs_embedded_zip_end - rs_embedded_zip);
+            std::FILE *f = std::fopen(zip.c_str(), "wb");
+            const bool wrote = f && std::fwrite(rs_embedded_zip, 1, n, f) == n;
+            if (f) std::fclose(f);
+            if (wrote)
+            {
+                tag = RS_EMBEDDED_VERSION;
+                have = true;
+                why.clear();
+                log_line("using the copy built into the installer (%s, %zu KB)", tag.c_str(), n / 1024);
+            }
+            else
+                why = "Couldn't write to /data/recompstore. Check the PS5's free space.";
+        }
+#endif
+        if (have)
+        {
             const std::string root = store_folder();
-            log_line("installing %s into %s", rel.tag.c_str(), root.c_str());
+            log_line("installing %s into %s", tag.c_str(), root.c_str());
             std::string error;
             bool changed = false;
             std::size_t files = 0;
@@ -468,15 +581,16 @@ int main()
                 [](const std::string &l) { log_line("%s", l.c_str()); }, nullptr, error, changed, files);
             if (ok)
             {
-                installed = rel.tag;
-                std::remove(zip.c_str());
-                log_line("installed Recomp Store %s: %zu files in %s", rel.tag.c_str(), files, root.c_str());
+                installed = tag;
+                log_line("installed Recomp Store %s: %zu files in %s", tag.c_str(), files, root.c_str());
             }
             else
             {
                 why = error.empty() ? "Unpacking the store failed." : error;
                 log_line("unpacking failed (%s): %s", changed ? "some files were replaced" : "nothing was changed", why.c_str());
             }
+            std::remove(zip.c_str()); /* the download, or this installer's copy of it */
+            (void)from_store;
         }
     }
 
@@ -491,6 +605,8 @@ int main()
             toast(smp ? "Recomp Store " + v + " is installed. It shows up on your home screen in a few seconds."
                       : "Recomp Store " + v + " is installed. Start ShadowMountPlus to add it to your home screen.");
     }
+    else if (!newer.empty())
+        toast("Recomp Store is already installed, and it's newer than this installer. Update it from Latest Updates.");
     else
     {
         log_line("failed: %s", why.c_str());
