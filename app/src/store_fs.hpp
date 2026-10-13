@@ -14,11 +14,26 @@
 
 namespace recomp::fs
 {
+/* Who to act as to get into a folder: a game makes its own folders (saves, settings) for
+ * itself alone - its own user, mode 0700 - and on the PS5 even root with every capability
+ * is refused them (seen on the console: Dusklight's userdata, owner uid 1). Its owner
+ * isn't. */
+struct Who
+{
+    unsigned uid = 0, gid = 0;
+};
+/* Takes on who's credentials, or with nullptr goes back to how this process started; false
+ * if it can't. Only the copier payload can (it can change its own credentials). */
+using ActAs = std::function<bool(const Who *who)>;
+
 /* path and everything under it. files counts the files and links removed; progress, if
  * set, is told that count now and then. On failure, bad is the path that stayed and err
- * its errno. A path that isn't there is a success. */
+ * its errno. A path that isn't there is a success. With act_as, a folder that refuses
+ * this process (EACCES) is gone into as its owner, and this process is itself again
+ * before it returns. log, if set, hears when that happens. */
 bool remove_tree(const std::string &path, std::size_t &files, std::string &bad, int &err,
-                 const std::function<void(std::size_t)> &progress = {});
+                 const std::function<void(std::size_t)> &progress = {}, const ActAs &act_as = {},
+                 const std::function<void(const std::string &)> &log = {});
 
 /* Nothing at path any more (stat says it doesn't exist). */
 bool gone(const std::string &path);
