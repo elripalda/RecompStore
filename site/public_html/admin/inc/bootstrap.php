@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.2.0';
+const RS_VERSION = '1.2.1';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -91,6 +91,9 @@ function rs_game_defaults(): array {
         'blurb' => '', 'description' => '', 'news' => '', 'credits' => '',
         'version' => '', 'build' => 1, 'released' => '', 'size' => '', 'needs' => 'Xbox 360 ISO',
         'source' => 'github', 'repo' => '', 'asset' => '', 'url' => '', 'sha256' => '',
+        // When the release only has a bigger zip (a source archive): where the game's own zip
+        // is inside it, its whole name there (* and ? allowed). Needs Recomp Store 1.0.4.
+        'inside' => '',
         'icon' => '', 'hero' => '', 'hero_web' => '',
         'focus_x' => 50, 'focus_y' => 30, 'zoom' => 100,
         // A logo in place of the name: where it sits on the banner (b) and the game page (p),
@@ -105,13 +108,16 @@ function rs_game_defaults(): array {
 
 // The oldest Recomp Store a game needs: what the admin set, and at least 1.0.3 when it
 // uses something older stores can't do (a zip name with * or ?, a disc image copied as it
-// is). Stores before 1.0.3 never see a game that needs 1.0.3 or newer: publish lists those
-// apart, in newerStoreApps, which those stores don't read.
+// is), 1.0.4 when its zip is inside the release's zip. Stores before 1.0.3 never see a
+// game that needs 1.0.3 or newer: publish lists those apart, in newerStoreApps, which those
+// stores don't read; 1.0.3 lists it and says to update first.
 const RS_GATED_FROM = '1.0.3';
+const RS_INSIDE_FROM = '1.0.4';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
     if ($g['source'] === 'github' && strpbrk((string)$g['asset'], '*?') !== false) $needs(RS_GATED_FROM);
+    if (trim((string)$g['inside']) !== '') $needs(RS_INSIDE_FROM);
     if ($g['setup']) {
         $slots = json_decode((string)$g['slots'], true);
         foreach (is_array($slots) ? $slots : [] as $sl) {
@@ -263,6 +269,7 @@ function rs_build_catalog(): array {
             $slots = json_decode((string)$g['slots'], true);
             $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
         }
+        if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
         $min = rs_min_store($g);
         if ($min !== '') $app['minStore'] = $min;
         if ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;

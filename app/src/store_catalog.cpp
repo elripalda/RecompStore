@@ -99,6 +99,7 @@ bool parse_catalog(const std::string &text, Catalog &out)
         a.source = x["source"]["type"].str("github");
         a.repo = x["source"]["repo"].str();
         a.asset = x["source"]["asset"].str();
+        a.inside = x["source"]["inside"].str();
         a.url = x["url"].str();
         a.sha256 = x["sha256"].str();
         a.icon_url = x["icon"].str();

@@ -128,7 +128,7 @@
             <div class="panel-head">${iconHTML(a, 112)}<div><strong>${esc(a.name)}</strong><span>${a.kind === 'original' ? 'Recomp Store' : 'By ' + esc(a.author)}</span></div></div>
             <a class="btn primary" href="#/get" data-get>Install with Recomp Store</a>
             ${a.minStore ? `<p class="note needs">Needs Recomp Store ${esc(a.minStore)} or newer. On your PS5, update the store from Latest Updates first.</p>` : ''}
-            <a class="btn" id="dl" href="${esc(a.url || (repoUrl ? repoUrl + '/releases/latest' : '#'))}" target="_blank" rel="noopener">Download the zip</a>
+            <a class="btn" id="dl" href="${esc(a.url || (repoUrl ? repoUrl + '/releases/latest' : '#'))}" target="_blank" rel="noopener">${repoUrl && a.source.inside ? "The developer's release" : 'Download the zip'}</a>
             <dl>${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd${r[0] === 'Version' ? ' data-version' : ''}>${esc(r[1])}</dd></div>`).join('')}</dl>
             ${repoUrl ? `<a class="src" href="${esc(repoUrl)}" target="_blank" rel="noopener">Source on GitHub ↗</a>` : ''}
             <p class="note">Updates through Recomp Store replace only the app. Your game install, saves, DLC and mods stay where they are.</p>
@@ -198,7 +198,12 @@
           const asset = rel.assets.find((x) => nameMatches(a.source.asset, x.name));
           if (!asset) continue;
           const link = document.getElementById('dl');
-          if (link) {
+          if (link && a.source.inside) {
+            // The PS5 files are a zip inside this bigger one: the release page, where the
+            // developer explains their own way to set it up.
+            link.href = rel.html_url || `https://github.com/${a.source.repo}/releases`;
+            link.textContent = `The developer's release${rel.tag_name ? ' (' + rel.tag_name + ')' : ''}`;
+          } else if (link) {
             link.href = asset.browser_download_url;
             link.textContent = `Download ${asset.name} (${(asset.size / 1048576).toFixed(0)} MB)`;
           }
@@ -222,7 +227,7 @@
       <section class="glass setup">
         <span class="kicker">Your game files</span>
         <p>Recomp Store sets this game up from your own ${slots.length > 1 ? 'files' : 'disc image'}: on the game's page in the store, choose ${slots.length > 1 ? 'them' : 'it'} under Your game files and press Set up. Done by hand, it looks like this:</p>
-        <pre class="tree">${esc(s.dataDir || '')}/\n${lines.join('\n')}</pre>
+        <pre class="tree">${esc(s.dataDir || '/data/homebrew/' + a.id)}/\n${lines.join('\n')}</pre>
       </section>`;
   }
 
