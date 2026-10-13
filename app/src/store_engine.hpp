@@ -92,6 +92,8 @@ struct JobState
     /* Done: what ShadowMountPlus did about the home screen. 2 it was running and is
      * adding (or, after a delete, took off) the game's tile; 1 the store started it; 0 neither. */
     int home = 0;
+    /* Done: what to tell the player, when the job has its own words for it. */
+    std::string note;
 };
 
 class Engine
@@ -154,7 +156,8 @@ struct FsEntry
     std::uint64_t size = 0;
 };
 std::vector<Place> places();
-/* A folder's sub-folders, then its disc images (.iso); false when it can't be read. */
+/* A folder's sub-folders, then its files ending in ext (".iso"), or for ext "stfs" its Xbox 360
+ * content packages; false when it can't be read. */
 bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ext = ".iso");
 /* Where a slot's files go: the game's data folder plus the slot's own folder. */
 std::string slot_target(const App &a, const Slot &s);
@@ -184,6 +187,8 @@ void set_smp_path(const std::string &path);
 int refresh_smp(std::string &why);
 /* After a delete: a running ShadowMountPlus takes the game's tile off the home screen. */
 bool forget_smp(const std::string &title_id);
+/* Before a delete: a running ShadowMountPlus lets go of the game's folder. */
+bool unmount_smp(const std::string &title_id);
 
 /* Opening an installed game. An app may not start another app, so the store hands the
  * launcher payload to the loader on port 9021 and closes; the launcher opens the game

@@ -4,7 +4,7 @@
 
 namespace recomp
 {
-constexpr const char *kVersion = "1.0.0";
-constexpr int kVersionMajor = 1, kVersionMinor = 0, kVersionPatch = 0;
-constexpr int kBuild = 15; /* rises with every build: shown in Settings > About and at the top of the log */
+constexpr const char *kVersion = "1.0.1";
+constexpr int kVersionMajor = 1, kVersionMinor = 0, kVersionPatch = 1;
+constexpr int kBuild = 16; /* rises with every build: shown in Settings > About and at the top of the log */
 } // namespace recomp
