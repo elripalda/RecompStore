@@ -13,6 +13,8 @@
 
 namespace recomp
 {
+/* (1.0.8) What chosen_ holds for a Title Update the store downloads itself: never a path. */
+constexpr const char *kDownloadChoice = "\x01" "download";
 class Store
 {
 public:
@@ -178,7 +180,7 @@ private:
     int page_focus_ = 0;
     std::string notice_; /* a line under the button after an install or setup */
     bool notice_bad_ = false;
-    std::map<std::string, std::string> chosen_; /* "<id>/<slot>" -> the disc image picked */
+    std::map<std::string, std::string> chosen_; /* "<id>/<slot>" -> the disc image picked, or kDownloadChoice */
 
     /* The file browser for a slot's disc image. */
     bool picker_ = false;

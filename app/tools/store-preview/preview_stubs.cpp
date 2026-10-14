@@ -57,12 +57,19 @@ int open_game_state() { return 0; }
 void open_game_cancel() {}
 bool open_game_failure(std::string &, unsigned &) { return false; }
 bool Engine::setup(const std::string &, const std::string &, const std::string &) { return true; }
+bool Engine::fetch_update(const std::string &, const std::string &) { return true; }
+bool slot_fetchable(const Slot &s)
+{
+    return s.kind == "stfs" && !s.multiple && s.title_id.size() == 8 && s.update_id.size() == 40 && s.update_sha1.size() == 40;
+}
+bool store_downloaded(const std::string &path) { return path.rfind("/data/recompstore/updates/", 0) == 0; }
 static std::string g_job_kind, g_job_app;
 void preview_job(const char *kind, const char *app) { g_job_kind = kind ? kind : ""; g_job_app = app ? app : ""; }
 JobState Engine::job() const
 {
     JobState j;
     if (g_job_kind == "install") { j.phase = Phase::Working; j.kind = "install"; j.app_id = g_job_app; j.step = "Downloading"; j.done = 312ull << 20; j.total = 476ull << 20; }
+    if (g_job_kind == "fetch") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "update"; j.app_id = g_job_app; j.step = "Downloading the update"; j.done = 150ull << 10; j.total = 240ull << 10; }
     if (g_job_kind == "setup") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "game"; j.app_id = g_job_app; j.step = "Copying the game's files"; j.done = 2900ull << 20; j.total = 7300ull << 20; }
     return j;
 }
@@ -150,7 +157,12 @@ int Engine::notes(const std::string &, std::vector<Release> &out) const
 }
 std::string slot_target(const App &a, const Slot &s) { return a.data_dir + "/" + s.to; }
 bool slot_ready(const App &a, const Slot &) { const char *r = std::getenv("PREVIEW_READY"); return r && a.id == r; }
-std::string slot_source(const App &a, const Slot &) { const char *r = std::getenv("PREVIEW_READY"); return r && a.id == r ? "/mnt/usb0/Games/SmackDown vs Raw 2011.iso" : ""; }
+std::string slot_source(const App &a, const Slot &s)
+{
+    const char *r = std::getenv("PREVIEW_READY");
+    if (!r || a.id != r) return "";
+    return s.kind == "stfs" ? "/data/recompstore/updates/415608B2/d8b9fb4dc4bb36e0b07c4842bde4cb5612e9b5e7" : "/mnt/usb0/Games/SmackDown vs Raw 2011.iso";
+}
 void Engine::acknowledge() {}
 std::string Engine::installed(const std::string &id) const
 {

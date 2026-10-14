@@ -333,5 +333,14 @@ int main(int argc, char **argv)
         store.preview_open("PPSA92011"); settle(60); store.preview_focus(3); store.preview_confirm(1); frame("c106-keep-saves");
         store.preview_confirm(2); frame("c106-delete-everything");
     }
+    /* 1.0.8: a Title Update the store downloads itself (Spider-Man: Edge of Time). */
+    if (want("v108"))
+    {
+        store.preview_open("PPSA99300"); settle(60); store.preview_focus(2); frame("p108-download");
+        store.preview_choose("update", recomp::kDownloadChoice); store.preview_focus(3); frame("p108-chosen");
+        recomp::preview_job("fetch", "PPSA99300"); frame("p108-downloading");
+        recomp::preview_job("", "");
+        store.preview_row(0, 0); store.preview_settings(2); settle(90); frame("p108-about");
+    }
     return 0;
 }
