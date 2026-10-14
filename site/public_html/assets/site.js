@@ -307,6 +307,7 @@
     const s = a.setup || {};
     const slots = Array.isArray(s.slots) ? s.slots : [];
     const what = (sl) => sl.kind === 'iso' ? 'the files inside your disc image' : sl.kind === 'stfs' ? 'unpacked from the package'
+      : sl.kind === 'arcade' ? 'unpacked from your Xbox Live Arcade game file'
       : sl.kind === 'image' ? 'your disc image as it is' + (sl.discId ? ', disc ' + sl.discId : '') : '';
     const lines = slots.map((sl) => sl.to === '.' || sl.to === ''
       ? `└── (${esc(sl.label)}: ${what(sl)}, right in this folder)`
@@ -314,7 +315,7 @@
     return `
       <section class="glass setup">
         <span class="kicker">Your game files</span>
-        <p>Recomp Store sets this game up from your own ${slots.length > 1 ? 'files' : 'disc image'}: on the game's page in the store, choose ${slots.length > 1 ? 'them' : 'it'} under Your game files and press Set up. Done by hand, it looks like this:</p>
+        <p>Recomp Store sets this game up from your own ${slots.length > 1 ? 'files' : slots[0] && slots[0].kind === 'arcade' ? 'game file (from the console\'s 000D0000 folder)' : slots[0] && slots[0].kind === 'file' ? 'file' : 'disc image'}: on the game's page in the store, choose ${slots.length > 1 ? 'them' : 'it'} under Your game files and press Set up. Done by hand, it looks like this:</p>
         <pre class="tree">${esc(s.dataDir || '/data/homebrew/' + a.id)}/\n${lines.join('\n')}</pre>
       </section>`;
   }

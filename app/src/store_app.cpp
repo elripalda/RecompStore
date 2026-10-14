@@ -710,7 +710,7 @@ void Store::picker_go(const std::string &path)
         if (picker_slot_ >= 0 && picker_slot_ < int(a->slots.size()))
         {
             const Slot &sl = a->slots[std::size_t(picker_slot_)];
-            if (sl.kind == "stfs") ext = "stfs";
+            if (sl.kind == "stfs" || sl.kind == "arcade") ext = "stfs";
             else if (sl.kind == "image") ext = "image";
             else if (sl.kind == "file")
             {
@@ -2759,6 +2759,8 @@ void Store::draw_picker(Gfx &gfx)
         if (slot.kind == "stfs")
             hint_line = slot.multiple ? "Any one of your DLC files from the console: every pack in that folder is set up"
                                       : "Your Title Update from the console: the file whose name starts with TU_";
+        else if (slot.kind == "arcade")
+            hint_line = "The game's own file from the console, in its 000D0000 folder";
         else if (slot.kind == "image")
             hint_line = "Your own " + a->name + " disc image" + (slot.disc_id.empty() ? std::string() : ", " + slot.disc_id) +
                         " (.iso, .gcm or .ciso)";

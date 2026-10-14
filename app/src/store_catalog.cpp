@@ -65,7 +65,7 @@ bool plain_path(const std::string &p)
 
 bool slot_kind_known(const std::string &kind)
 {
-    return kind == "iso" || kind == "stfs" || kind == "image" || kind == "file";
+    return kind == "iso" || kind == "stfs" || kind == "image" || kind == "file" || kind == "arcade";
 }
 
 bool asset_matches(const std::string &pattern, const std::string &name)

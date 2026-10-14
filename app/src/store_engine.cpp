@@ -888,27 +888,57 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
     }
 }
 
-/* A Title Update (one package) or DLC (every package of the game's in the chosen file's
- * folder), unpacked where the port reads them: the update's files into the slot's folder,
- * each piece of DLC into a folder of its own named after it. By the copier payload at the
- * drive's full speed, or here when there's no loader. */
+/* A Title Update (one package), DLC (every package of the game's in the chosen file's
+ * folder) or, kind "arcade" (1.0.7), an Xbox Live Arcade game's own package, unpacked where
+ * the port reads them: an update's or an Arcade game's files into the slot's folder, each
+ * piece of DLC into a folder of its own named after it. By the copier payload at the drive's
+ * full speed, or here when there's no loader. */
 void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
 {
     const std::string id = a.id;
+    const bool arcade = slot.kind == "arcade";
+    if (arcade && !exists(app_folder(id) + "/eboot.bin")) return fail_job("Install " + a.name + " first.");
     stfs::Package first;
     std::string err;
     if (!first.open(image, err)) return fail_job(err);
-    const bool several = slot.multiple;
+    const bool several = slot.multiple && !arcade;
     char tid[16];
     std::snprintf(tid, sizeof tid, "%08X", first.title_id());
     slog("setup %s: %s is a package for title %s, type %08X, \"%s\", %zu files", id.c_str(), image.c_str(), tid,
          first.content_type(), first.display_name().c_str(), first.entries().size());
     if (!slot.title_id.empty() && std::strtoul(slot.title_id.c_str(), nullptr, 16) != first.title_id())
         return fail_job(std::string("This package is for a different game (title ID ") + tid + ").");
-    if (!several && first.content_type() != stfs::kTitleUpdate)
+    if (arcade && first.content_type() != stfs::kArcade)
+        return fail_job(std::string(first.content_type() == stfs::kTitleUpdate || first.content_type() == stfs::kMarketplace
+                                        ? "That's a Title Update or DLC, not the game."
+                                        : "That isn't an Xbox Live Arcade game.") +
+                        " Choose " + a.name + "'s own file, from its 000D0000 folder on the console.");
+    if (!arcade && !several && first.content_type() != stfs::kTitleUpdate)
         return fail_job("That isn't a Title Update. It's the file whose name starts with TU_.");
     if (several && first.content_type() != stfs::kMarketplace)
         return fail_job("That isn't DLC. Choose one of the game's downloadable content files.");
+    std::size_t arcade_files = 0;
+    if (arcade)
+    {
+        /* A game: its default.xex at the top, where the port and slot_ready look for it. */
+        const stfs::Entry *xex = first.find("default.xex");
+        if (!xex || xex->name != "default.xex")
+            return fail_job("That package has no default.xex, so it isn't a game " + a.name + " can use.");
+        /* Room for the game's files, less the ones already there whole (an unpack that stopped
+         * carries on from them). */
+        const std::string base = slot_target(a, slot);
+        make_dirs(base);
+        std::uint64_t need = 0;
+        for (const stfs::Entry &e : first.entries())
+        {
+            struct stat st;
+            if (stat((base + "/" + e.name).c_str(), &st) != 0 || std::uint64_t(st.st_size) != e.size) need += e.size;
+        }
+        arcade_files = first.entries().size();
+        struct statvfs fs;
+        if (statvfs(base.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < need + (64ull << 20))
+            return fail_job("There isn't room for the game's files: they need " + fmt_mb(need) + " free.");
+    }
 
     /* The packages: this one, and for DLC every other one of the same game beside it. */
     std::vector<std::pair<std::string, std::string>> work; /* package, target */
@@ -965,10 +995,12 @@ void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
     write_file(g.data + "/setup/" + id + "." + slot.key + ".txt", image.data(), image.size());
     std::lock_guard<std::mutex> l(g.m);
     g.job.phase = Phase::Done;
-    g.job.step = several ? std::to_string(work.size()) + (work.size() == 1 ? " pack is ready" : " packs are ready")
-                         : "The Title Update is ready";
-    g.job.note = several ? (work.size() == 1 ? "Your DLC is set up: 1 package." : "Your DLC is set up: " + std::to_string(work.size()) + " packages.")
-                         : "The Title Update is set up.";
+    g.job.step = arcade    ? "The game's files are ready"
+                 : several ? std::to_string(work.size()) + (work.size() == 1 ? " pack is ready" : " packs are ready")
+                           : "The Title Update is ready";
+    g.job.note = arcade    ? "Unpacked " + std::to_string(arcade_files) + (arcade_files == 1 ? " file" : " files") + " from your Xbox Live Arcade game."
+                 : several ? (work.size() == 1 ? "Your DLC is set up: 1 package." : "Your DLC is set up: " + std::to_string(work.size()) + " packages.")
+                           : "The Title Update is set up.";
     g.job.done = g.job.total;
 }
 
@@ -1423,11 +1455,11 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
                 for (const Slot &s : x.slots)
                     if (s.key == slot_key) { a = x; slot = s; found = true; }
     }
-    set_job(slot.kind == "stfs" ? "Reading the package" : slot.kind == "file" ? "Reading your file" : "Reading the disc image", 0, 0);
+    set_job(slot.kind == "stfs" || slot.kind == "arcade" ? "Reading the package" : slot.kind == "file" ? "Reading your file" : "Reading the disc image", 0, 0);
     if (!found) return fail_job("This game doesn't take that file.");
     if (store_too_old(a))
         return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
-    if (slot.kind == "stfs") return run_setup_stfs(a, slot, image);
+    if (slot.kind == "stfs" || slot.kind == "arcade") return run_setup_stfs(a, slot, image);
     if (slot.kind == "image") return run_setup_image(a, slot, image);
     if (slot.kind == "file") return run_setup_file(a, slot, image);
     if (slot.kind != "iso") return fail_job("Setting up " + slot.label + " isn't something this version of the store can do.");
@@ -3087,7 +3119,7 @@ std::string slot_target(const App &a, const Slot &s)
 
 bool slot_ready(const App &a, const Slot &s)
 {
-    if (s.kind == "iso") return exists(slot_target(a, s) + "/default.xex");
+    if (s.kind == "iso" || s.kind == "arcade") return exists(slot_target(a, s) + "/default.xex");
     if (s.kind == "image")
     {
         /* The right disc in the folder. Asked every frame, so looked at every two seconds. */

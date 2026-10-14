@@ -16,8 +16,8 @@
 
 namespace recomp::stfs
 {
-/* Content types in the header. */
-constexpr std::uint32_t kTitleUpdate = 0x000B0000, kMarketplace = 0x00000002;
+/* Content types in the header: a Title Update, DLC, an Xbox Live Arcade game. */
+constexpr std::uint32_t kTitleUpdate = 0x000B0000, kMarketplace = 0x00000002, kArcade = 0x000D0000;
 
 struct Entry
 {

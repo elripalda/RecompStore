@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.3.0';
+const RS_VERSION = '1.3.1';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -118,6 +118,7 @@ function rs_game_defaults(): array {
 const RS_GATED_FROM = '1.0.3';
 const RS_INSIDE_FROM = '1.0.4';
 const RS_FILE_FROM = '1.0.6';
+const RS_ARCADE_FROM = '1.0.7';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
@@ -129,6 +130,7 @@ function rs_min_store(array $g): string {
             if (!is_array($sl)) continue;
             $kind = $sl['kind'] ?? 'iso';
             if ($kind === 'file') $needs(RS_FILE_FROM);
+            elseif ($kind === 'arcade') $needs(RS_ARCADE_FROM);
             elseif (!in_array($kind, ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
         }
     }
@@ -162,7 +164,7 @@ function rs_slots_error(array $slots): ?string {
         if (in_array($key, $keys, true)) return "$n: another file already uses the key $key.";
         $keys[] = $key;
         $kind = $sl['kind'] ?? 'iso';
-        if (!in_array($kind, ['iso', 'stfs', 'image', 'file'], true)) return "$n: kind has to be iso, stfs, image or file.";
+        if (!in_array($kind, ['iso', 'stfs', 'image', 'file', 'arcade'], true)) return "$n: kind has to be iso, stfs, image, file or arcade.";
         $to = (string)($sl['to'] ?? '.');
         if ($to !== '.' && ($to === '' || $to[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $to))) return "$n: to is a folder inside the game's, like game or baseq3 (or . for right in it).";
         if ($kind !== 'file') continue;
