@@ -28,7 +28,7 @@ To install by hand instead, unzip `PPSA92000.zip` into `/data/homebrew/` over FT
 ## What it does
 
 - **Installs and updates games** from their GitHub releases, keeping your game files, saves, DLC and mods when a port updates.
-- **Sets games up from your disc image.** Pick the `.iso` on the game's page and the store copies its files where the port expects them, at the drive's full speed.
+- **Sets games up from your own files.** Pick your disc image, your Xbox Live Arcade game's file, a Title Update or DLC, or a ROM on the game's page, and the store puts what the port needs where it expects it, at the drive's full speed.
 - **Opens games**, refreshes ShadowMountPlus so new games appear on the home screen, and deletes a game (after asking) when you're done with it.
 - **Shows every release's patch notes** from each game's GitHub repository.
 

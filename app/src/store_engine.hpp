@@ -20,10 +20,13 @@ constexpr const char *kHomebrew = "/data/homebrew";
 
 struct Slot
 {
-    std::string key, label, kind /* iso, stfs, image, file */, to /* folder under data_dir; "." = in it */, title_id;
+    std::string key, label, kind /* iso, stfs, image, file, arcade */, to /* folder under data_dir; "." = in it */, title_id;
     /* kind "image": a GameCube or Wii disc image copied as it is (.iso, .gcm, .ciso), and the
      * disc's ID it has to be (GZLE01), "" for any. */
     std::string disc_id;
+    /* kind "arcade" (1.0.7): an Xbox Live Arcade game's own package, the file from the
+     * console's 000D0000 folder, unpacked into the slot's folder (title_id: the game's, or ""
+     * for any); set up once default.xex is there. */
     /* kind "file" (1.0.6): one of the player's own files copied into the game's folder.
      *   ext     the extensions it may have, space-separated (".z64 .n64 .v64"); "" any
      *   pick    the name it must have (a pattern, any case: "pak0.pk3"); "" any
