@@ -99,6 +99,45 @@
     }).join('');
   }
 
+  // ---- How it works: the steps from the store to playing, and that no game files are here ----
+  const HOW_ICONS = {
+    install: '<path d="M12 3.5v10m0 0-4-4m4 4 4-4"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/>',
+    pick: '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+    backup: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.4"/><path d="M12 6.2a5.8 5.8 0 0 1 5.8 5.8"/>',
+    setup: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="m9 13.6 2.2 2.2 4-4.2"/>',
+    play: '<circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/>',
+    shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.3 2.3 4.2-4.3"/>',
+  };
+  const howIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${HOW_ICONS[k]}</svg>`;
+  function howHTML() {
+    const steps = [
+      ['install', 'Install Recomp Store', 'Send the installer to your jailbroken PS5\'s payload loader. The store lands on your home screen and keeps itself up to date.', '<a href="#/get">How to get it</a>'],
+      ['pick', 'Pick a game', 'Browse the store and install a port. It comes straight from its developer\'s GitHub release.'],
+      ['backup', 'Bring your own backup', 'Back up a game you own: a disc image, or the game\'s file from your console. Copy it to a USB drive or your PS5.'],
+      ['setup', 'Set it up', 'On the game\'s page, choose your backup under Your game files. The store puts every file where the port expects it, and can fetch a Title Update the game needs.'],
+      ['play', 'Play', 'Start it from the store or your home screen. Updates keep your game files and saves.'],
+    ];
+    return `
+      <section class="how" aria-labelledby="how-title">
+        <span class="kicker">How it works</span>
+        <h2 id="how-title">From your own copy to your PS5, in five steps</h2>
+        <ol class="flow">${steps.map(([icon, title, text, more], i) => `
+          <li>
+            <span class="flow-icon">${howIcon(icon)}<span class="flow-n" aria-hidden="true">${i + 1}</span></span>
+            <strong>${title}</strong>
+            <p>${text}${more ? ' ' + more : ''}</p>
+          </li>`).join('')}
+        </ol>
+        <div class="glass byo">
+          ${howIcon('shield')}
+          <div>
+            <strong>No game files here. Ever.</strong>
+            <p>Recomp Store and this website don't host, sell or share games, disc images, ROMs or any other game files, and neither do the GitHub repositories they link to. They hold only the ports and their tools. Every game needs a backup of your own legally obtained copy: you bring it, the store sets it up.</p>
+          </div>
+        </div>
+      </section>`;
+  }
+
   function home() {
     const featured = (cat.featured || []).map(byId).filter(Boolean);
     const slides = featured.length ? featured : cat.apps.filter((a) => art(a)).slice(0, 3);
@@ -135,7 +174,8 @@
           <strong>Submit your port</strong>
           <span>Send us your PS5 port of a recompiled game and we'll get in touch about listing it.</span>
         </a>
-      </section>`;
+      </section>
+      ${howHTML()}`;
     setBackdrop(slides[0]);
     // Slider: crossfade every 7 seconds, with dots to jump.
     const els = [...view.querySelectorAll('.slide')];
@@ -306,7 +346,7 @@
   function setupHTML(a) {
     const s = a.setup || {};
     const slots = Array.isArray(s.slots) ? s.slots : [];
-    const what = (sl) => sl.kind === 'iso' ? 'the files inside your disc image' : sl.kind === 'stfs' ? 'unpacked from the package'
+    const what = (sl) => sl.kind === 'iso' ? 'the files inside your disc image' : sl.kind === 'stfs' ? 'unpacked from the package' + (sl.updateId ? ', or downloaded by the store' : '')
       : sl.kind === 'arcade' ? 'unpacked from your Xbox Live Arcade game file'
       : sl.kind === 'image' ? 'your disc image as it is' + (sl.discId ? ', disc ' + sl.discId : '') : '';
     const lines = slots.map((sl) => sl.to === '.' || sl.to === ''
@@ -329,14 +369,15 @@
         <div class="glass notice">
           <span class="kicker">Bring your own disc</span>
           <p>Recomp Store doesn't host any game files or copyrighted game content, and neither do the GitHub repositories it links to. They hold only the ports and their tools. Every game needs your own legally obtained copy, which you set up yourself.</p>
+          <p>Title Updates the store downloads for you come from XboxUnity's community archive; Recomp Store doesn't host them either.</p>
           <p class="small">Recomp Store and the games listed in it aren't affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, or any game's publisher or developer. All trademarks belong to their owners.</p>
         </div>
         <h2>Adding your game</h2>
         <ol class="steps plain">
           <li><strong>Install the game from Recomp Store.</strong> The port lands in /data/homebrew/&lt;title ID&gt;.</li>
-          <li><strong>Make a disc image of your own copy.</strong> Neither the store nor this site ever downloads games.</li>
-          <li><strong>Copy the image to your PS5.</strong> Anywhere on the console over FTP, or on a USB drive.</li>
-          <li><strong>Set up the game files in the store.</strong> On the game's page, choose your disc image under Your game files and press Set up. You do this once: updates keep your install and saves.</li>
+          <li><strong>Back up your own copy.</strong> A disc image, or the game's file from your Xbox 360 for an Xbox Live Arcade game. Neither the store nor this site ever downloads games.</li>
+          <li><strong>Copy it to your PS5.</strong> Anywhere on the console over FTP, or on a USB drive.</li>
+          <li><strong>Set up the game files in the store.</strong> On the game's page, choose your backup under Your game files and press Set up. If the game needs a Title Update, the store can download it for you. You do this once: updates keep your install and saves.</li>
         </ol>
         <p class="links">${[
           '<a href="#/report">Report a bug</a>',

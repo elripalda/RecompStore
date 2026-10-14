@@ -6,6 +6,7 @@
 #include "ui_app_common.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace recomp
 {
@@ -178,6 +179,20 @@ bool parse_catalog(const std::string &text, Catalog &out)
                 s.sha1 = slots[k]["sha1"].str();
                 s.made = slots[k]["made"].str();
                 s.n64 = slots[k]["n64"].boolean(false);
+                {
+                    /* (1.0.8) A set-up file, and a Title Update the store may download. */
+                    const std::string r = slots[k]["ready"].str();
+                    if (plain_path(r) && r[0] != '/') s.ready = r;
+                    auto hex40 = [](std::string h) {
+                        for (char &c : h) c = char(std::tolower(static_cast<unsigned char>(c)));
+                        if (h.size() != 40) return std::string();
+                        for (char c : h)
+                            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return std::string();
+                        return h;
+                    };
+                    s.update_id = hex40(slots[k]["updateId"].str());
+                    s.update_sha1 = hex40(slots[k]["updateSha1"].str());
+                }
                 s.need = int(std::clamp<long long>(slots[k]["need"].integer(1), 1, 64));
                 /* A name or a made file that isn't one plain name: a slot this store won't set up. */
                 if (s.kind == "file" && ((!s.name.empty() && !plain_leaf(s.name)) || (!s.made.empty() && !plain_leaf(s.made))))

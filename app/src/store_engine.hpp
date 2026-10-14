@@ -37,6 +37,11 @@ struct Slot
      *   need    how many of pick + also must be there to call it set up (default 1)
      *   made    a file the game makes from it: there, the slot is set up too ("sm64.o2r") */
     std::string ext, pick, also, name, sha1, made;
+    /* (1.0.8) ready: a file in the slot's folder whose being there means it's set up
+     * ("Default.xexp"), any case; "" for the kind's own test. update_id and update_sha1: a
+     * Title Update (kind "stfs") the store can download itself: the package's content ID
+     * (its header's, as XboxUnity lists it) and the whole file's SHA-1, both lowercase. */
+    std::string ready, update_id, update_sha1;
     bool n64 = false;
     int need = 1;
     bool required = true, multiple = false;
@@ -179,6 +184,8 @@ public:
     /* Copy a game's files out of the player's own disc image into its data folder.
      * Files already there at the right size are kept (a stopped setup carries on). */
     bool setup(const std::string &app_id, const std::string &slot_key, const std::string &image);
+    /* (1.0.8) The same, for a Title Update the store downloads itself (slot_fetchable). */
+    bool fetch_update(const std::string &app_id, const std::string &slot_key);
     /* Settings > Diagnostics: write a test file on the console's storage each way the store
      * can, and copy game files the fastest way from then on. */
     bool bench();
@@ -240,6 +247,10 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ex
 std::string disc_image_id(const std::string &path);
 /* Where a slot's files go: the game's data folder plus the slot's own folder. */
 std::string slot_target(const App &a, const Slot &s);
+/* (1.0.8) A slot whose Title Update the store can download itself. */
+bool slot_fetchable(const Slot &s);
+/* (1.0.8) A file the store downloaded itself (a Title Update, in its own folder). */
+bool store_downloaded(const std::string &path);
 /* True when the slot's files are in place (a disc: its default.xex is there). */
 bool slot_ready(const App &a, const Slot &s);
 /* The disc image last used for a slot, "" when none. */

@@ -215,3 +215,28 @@ details.news summary:hover .more{color:var(--cyan)}
 .slider.still .slide-art img{animation:none;transform:scale(var(--z,1))}
 .soon-btn{cursor:default;background:rgba(244,248,252,.1)}
 .soon-btn:hover{transform:none;background:rgba(244,248,252,.1)}
+
+/* How it works (home page): the steps, and that no game files are here */
+.how{margin-top:72px}
+.how h2{font-size:clamp(28px,3.4vw,42px);max-width:780px;margin-bottom:34px}
+.flow{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:24px;position:relative}
+.flow::before{content:"";position:absolute;left:10%;right:10%;top:35px;height:2px;background:linear-gradient(90deg,rgba(53,214,244,0),rgba(53,214,244,.55) 10%,rgba(53,214,244,.55) 90%,rgba(53,214,244,0))}
+.flow li{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px}
+.flow-icon{position:relative;width:70px;height:70px;border-radius:22px;display:grid;place-items:center;color:var(--cyan);background:#0f1d30;border:1px solid rgba(53,214,244,.45);box-shadow:0 0 0 7px rgba(11,18,32,.55),0 14px 30px rgba(0,0,0,.35);margin-bottom:6px}
+.flow-icon svg{width:30px;height:30px}
+.flow-n{position:absolute;top:-9px;right:-9px;min-width:26px;height:26px;border-radius:999px;background:var(--cyan);color:var(--midnight);font:800 13px Figtree,sans-serif;display:grid;place-items:center}
+.flow strong{font:700 20px Sora,sans-serif;letter-spacing:-.3px}
+.flow p{margin:0;color:#cfd8e5;font-size:16px}
+.byo{display:flex;gap:20px;align-items:flex-start;padding:26px 30px;margin-top:44px;background:rgba(53,214,244,.08);border-color:rgba(53,214,244,.42)}
+.byo>svg{flex:none;width:42px;height:42px;color:var(--cyan)}
+.byo strong{display:block;font:700 22px Sora,sans-serif;letter-spacing:-.3px;margin-bottom:6px}
+.byo p{margin:0;color:#d6deea}
+@media (max-width:900px){
+  .flow{grid-template-columns:minmax(0,1fr);gap:26px}
+  .flow::before{left:34px;right:auto;top:35px;bottom:35px;width:2px;height:auto;background:linear-gradient(180deg,rgba(53,214,244,.55),rgba(53,214,244,.55) 85%,rgba(53,214,244,0))}
+  .flow li{display:grid;grid-template-columns:70px minmax(0,1fr);grid-template-areas:"icon title" "icon text";column-gap:18px;row-gap:4px;text-align:left;align-items:start}
+  .flow-icon{grid-area:icon;margin:0}
+  .flow strong{grid-area:title;padding-top:8px}
+  .flow p{grid-area:text}
+}
+@media (max-width:520px){.byo{flex-direction:column;gap:12px;padding:22px}}

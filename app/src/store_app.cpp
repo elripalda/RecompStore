@@ -639,7 +639,7 @@ void Store::press_setup(const App &a)
         auto it = chosen_.find(a.id + "/" + s.key);
         if (it == chosen_.end() || !slot_kind_known(s.kind))
             continue;
-        if (engine().setup(a.id, s.key, it->second))
+        if (it->second == kDownloadChoice ? engine().fetch_update(a.id, s.key) : engine().setup(a.id, s.key, it->second))
         {
             notice_.clear();
             play(int(Sfx::Install));
@@ -1113,8 +1113,20 @@ bool Store::update(const pad::State &p, float dt)
                 press_primary();
             else if (c.kind == Control::Slot)
             {
-                const std::string &kind = a->slots[std::size_t(c.slot)].kind;
-                if (!slot_kind_known(kind)) play(int(Sfx::Error));
+                const Slot &sl = a->slots[std::size_t(c.slot)];
+                const std::string key = a->id + "/" + sl.key;
+                if (!slot_kind_known(sl.kind)) play(int(Sfx::Error));
+                else if (slot_fetchable(sl) && !chosen_.count(key) && !slot_ready(*a, sl))
+                {
+                    /* (1.0.8) A Title Update the store downloads itself: chosen as any file
+                     * is, and fetched when the player sets up. Change picks a file instead. */
+                    chosen_[key] = kDownloadChoice;
+                    notice_.clear();
+                    const auto ctl2 = page_controls(*a);
+                    for (int i = 0; i < int(ctl2.size()); ++i)
+                        if (ctl2[std::size_t(i)].kind == Control::Setup) page_focus_ = i;
+                    play(int(Sfx::Select));
+                }
                 else open_picker(*a, c.slot);
             }
             else if (c.kind == Control::Delete)
@@ -2018,7 +2030,8 @@ void Store::draw_settings(Gfx &gfx)
         const auto l1 = wrap(gfx, Font::Regular, 21, bw - 64,
                              "Recomp Store doesn't host any game files or copyrighted game content, and neither do the GitHub "
                              "repositories it links to. They hold only the ports and their tools. Every game needs your own legally "
-                             "obtained copy, which you set up yourself.", 4);
+                             "obtained copy, which you set up yourself. Title Updates the store downloads for you come from "
+                             "XboxUnity's community archive; Recomp Store doesn't host them either.", 5);
         const auto l2 = wrap(gfx, Font::Regular, 18, bw - 64,
                              "Recomp Store and the games listed in it aren't affiliated with or endorsed by Sony Interactive "
                              "Entertainment, Microsoft, or any game's publisher or developer. All trademarks belong to their owners.", 3);
@@ -2634,7 +2647,7 @@ void Store::draw_page(Gfx &gfx)
             const bool can = slot_kind_known(s.kind);
             std::string status;
             if (!can) status = ready ? "In place" : "Not something this version of the store sets up";
-            else if (chosen) status = base_name(ch->second);
+            else if (chosen) status = ch->second == kDownloadChoice ? "Downloaded when you set up" : base_name(ch->second);
             else if (ready && s.multiple)
             {
                 /* DLC: each package in a folder of its own. */
@@ -2647,10 +2660,14 @@ void Store::draw_page(Gfx &gfx)
             else if (ready)
             {
                 const std::string src = slot_source(a, s);
-                status = src.empty() ? "Ready" : "Ready \xC2\xB7 from " + base_name(src);
+                status = src.empty() ? "Ready" : store_downloaded(src) ? "Ready \xC2\xB7 downloaded" : "Ready \xC2\xB7 from " + base_name(src);
             }
+            else if (slot_fetchable(s)) status = s.required ? "Not set up yet \xC2\xB7 the store can download it" : "Not set up \xC2\xB7 optional \xC2\xB7 the store can download it";
             else status = s.required ? "Not set up yet" : "Not set up \xC2\xB7 optional";
-            const char *btn = !can ? "Later" : (chosen || ready) ? (s.multiple && !chosen ? "Add" : "Change") : "Choose\xE2\x80\xA6";
+            const char *btn = !can                          ? "Later"
+                              : (chosen || ready)           ? (s.multiple && !chosen ? "Add" : "Change")
+                              : slot_fetchable(s)           ? "Download"
+                                                            : "Choose\xE2\x80\xA6";
             const float bw = gfx.measure(Font::SemiBold, 17, btn) + 36;
             gfx.text_mid(Font::SemiBold, 19, ix + 28, ry + slot_h / 2 - 11, C(kFrost), Align::Left, s.label);
             gfx.text_mid(Font::Regular, 16, ix + 28, ry + slot_h / 2 + 13, C(kMuted), Align::Left,
@@ -2665,7 +2682,8 @@ void Store::draw_page(Gfx &gfx)
         std::string label;
         Color bg = C(kFrost, 0.12f), fg = C(kMuted);
         if (setting_up)
-            label = job.step.rfind("Checking", 0) == 0  ? "Checking the copied files\xE2\x80\xA6"
+            label = job.step.rfind("Finding", 0) == 0 || job.step.rfind("Downloading", 0) == 0 ? job.step + "\xE2\x80\xA6"
+                    : job.step.rfind("Checking", 0) == 0  ? "Checking the copied files\xE2\x80\xA6"
                     : job.step.rfind("Reading", 0) == 0 ? job.step + "\xE2\x80\xA6"
                     : job.step.rfind("Setting up", 0) == 0 ? job.step + "\xE2\x80\xA6"
                                                             : "Copying the game's files\xE2\x80\xA6";

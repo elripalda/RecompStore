@@ -156,3 +156,13 @@ h3.sub{font:700 15px Figtree,sans-serif;letter-spacing:1.5px;text-transform:uppe
 .dstage .d-empty{border:2px dashed rgba(244,248,252,.25);border-radius:20px;display:flex;align-items:center;padding:0 24px;font:600 20px Figtree,sans-serif;color:#AAB6C6}
 .dstage .d-fold{height:0;border-top:3px dashed rgba(53,214,244,.8)}
 .dstage .d-fold span{position:absolute;right:96px;top:8px;font:700 18px Figtree,sans-serif;color:#35D6F4;background:rgba(11,18,32,.8);padding:4px 12px;border-radius:10px}
+/* Games list: drag to reorder (games.js) */
+.order-tip{margin:-6px 0 14px}
+.list[data-order]{position:relative}
+.grip{width:34px;min-height:56px;padding:0;margin:-6px -6px -6px -8px;border:0;border-radius:10px;background:transparent;color:var(--muted);justify-content:center;cursor:grab;touch-action:none;flex:none}
+.grip:hover{background:rgba(244,248,252,.08);color:var(--frost)}
+.grip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;color:var(--frost)}
+.row.dragging{position:relative;z-index:3;border-color:rgba(53,214,244,.75);background:rgba(20,32,52,.97);box-shadow:0 18px 42px rgba(0,0,0,.5);transition:none!important}
+.row.dragging .grip{cursor:grabbing;color:var(--cyan)}
+body.dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}
+.order-bar[hidden]{display:none}

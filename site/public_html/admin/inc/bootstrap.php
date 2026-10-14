@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.3.1';
+const RS_VERSION = '1.4.0';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -119,6 +119,7 @@ const RS_GATED_FROM = '1.0.3';
 const RS_INSIDE_FROM = '1.0.4';
 const RS_FILE_FROM = '1.0.6';
 const RS_ARCADE_FROM = '1.0.7';
+const RS_READY_FROM = '1.0.8';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
@@ -132,6 +133,8 @@ function rs_min_store(array $g): string {
             if ($kind === 'file') $needs(RS_FILE_FROM);
             elseif ($kind === 'arcade') $needs(RS_ARCADE_FROM);
             elseif (!in_array($kind, ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
+            // A set-up file, or a Title Update the store downloads itself (store 1.0.8).
+            if (($sl['ready'] ?? '') !== '' || ($sl['updateSha1'] ?? '') !== '' || ($sl['updateId'] ?? '') !== '') $needs(RS_READY_FROM);
         }
     }
     return $min;
@@ -165,6 +168,15 @@ function rs_slots_error(array $slots): ?string {
         $keys[] = $key;
         $kind = $sl['kind'] ?? 'iso';
         if (!in_array($kind, ['iso', 'stfs', 'image', 'file', 'arcade'], true)) return "$n: kind has to be iso, stfs, image, file or arcade.";
+        if (isset($sl['ready']) && $sl['ready'] !== '' && (!is_string($sl['ready']) || strlen($sl['ready']) > 200 || $sl['ready'][0] === '/' || substr($sl['ready'], -1) === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $sl['ready'])))
+            return "$n: ready is a file inside the slot's folder, like Default.xexp or Data/GameLogic.dllp.";
+        foreach (['updateId', 'updateSha1'] as $f)
+            if (isset($sl[$f]) && $sl[$f] !== '' && (!is_string($sl[$f]) || !preg_match('/^[0-9A-Fa-f]{40}\z/', $sl[$f])))
+                return "$n: $f is 40 letters and numbers.";
+        if ((($sl['updateId'] ?? '') !== '') !== (($sl['updateSha1'] ?? '') !== ''))
+            return "$n: a Title Update the store downloads needs both updateId and updateSha1.";
+        if (($sl['updateId'] ?? '') !== '' && ($kind !== 'stfs' || !empty($sl['multiple']) || !preg_match('/^[0-9A-Fa-f]{8}\z/', (string)($sl['titleId'] ?? ''))))
+            return "$n: only a Title Update (kind stfs, with its titleId) can be downloaded by the store.";
         $to = (string)($sl['to'] ?? '.');
         if ($to !== '.' && ($to === '' || $to[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $to))) return "$n: to is a folder inside the game's, like game or baseq3 (or . for right in it).";
         if ($kind !== 'file') continue;

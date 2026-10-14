@@ -17,6 +17,7 @@
 #include "porpoise_paths.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <dirent.h>
 #include <cerrno>
@@ -159,6 +160,7 @@ struct Shared
     JobState job;
     std::string pending_install; /* asked for, not yet started */
     std::string pending_setup_app, pending_setup_slot, pending_setup_image;
+    bool pending_setup_fetch = false; /* (1.0.8) the slot's Title Update, downloaded first */
     bool pending_bench = false;
     std::string pending_delete;
     bool pending_delete_keep = false; /* the game's saves stay */
@@ -920,9 +922,9 @@ void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
     std::size_t arcade_files = 0;
     if (arcade)
     {
-        /* A game: its default.xex at the top, where the port and slot_ready look for it. */
+        /* A game: its default.xex at the top (in any case), where the port and slot_ready look. */
         const stfs::Entry *xex = first.find("default.xex");
-        if (!xex || xex->name != "default.xex")
+        if (!xex || xex->name.find('/') != std::string::npos)
             return fail_job("That package has no default.xex, so it isn't a game " + a.name + " can use.");
         /* Room for the game's files, less the ones already there whole (an unpack that stopped
          * carries on from them). */
@@ -1443,7 +1445,171 @@ void run_setup_file(const App &a, const Slot &slot, const std::string &file)
     finish(have < slot.need ? "Some files are missing" : "Your files are ready", note);
 }
 
-void run_setup(const std::string &id, const std::string &slot_key, const std::string &image)
+/* ---- (1.0.8) A Title Update the store downloads itself -------------------------------- *
+ * From XboxUnity's archive of Xbox 360 Title Updates: the update the game's listing names
+ * (by its content ID) is looked up under the game's title ID, downloaded into the store's
+ * own updates folder, and used only if the whole file has the SHA-1 the listing gives.
+ * Then it is set up like one the player chose. HTTPS first, plain HTTP if the console can't
+ * make the secure connection: the SHA-1 is what makes the file trusted either way. */
+constexpr const char *kUpdateLookup = "xboxunity.net/Resources/Lib/TitleUpdateInfo.php?titleid=";
+constexpr const char *kUpdateFile = "xboxunity.net/Resources/Lib/TitleUpdate.php?tuid=";
+
+std::string updates_folder()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.data + "/updates";
+}
+
+/* A file's SHA-1, read through (lowercase hex), or "" when it can't be read. */
+std::string file_sha1(const std::string &path)
+{
+    const int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return "";
+    Sha1 h;
+    std::vector<std::uint8_t> buf(1u << 20);
+    std::uint64_t at = 0;
+    for (;;)
+    {
+        const ssize_t n = pread(fd, buf.data(), buf.size(), off_t(at));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) { close(fd); return ""; }
+        if (n == 0) break;
+        h.update(buf.data(), std::size_t(n));
+        at += std::uint64_t(n);
+    }
+    close(fd);
+    return h.hex();
+}
+
+/* The slot's Title Update in path, downloaded if it isn't already. false: fail_job said why. */
+bool fetch_title_update(const App &a, const Slot &slot, std::string &path)
+{
+    if (!exists(app_folder(a.id) + "/eboot.bin"))
+    {
+        fail_job("Install " + a.name + " first.");
+        return false;
+    }
+    std::string tid = slot.title_id;
+    for (char &c : tid) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A'); /* (no toupper: not among the proven imports) */
+    const std::string dir = updates_folder() + "/" + tid;
+    path = dir + "/" + slot.update_id;
+    if (exists(path) && file_sha1(path) == slot.update_sha1)
+    {
+        slog("update %s: %s is already here", a.id.c_str(), path.c_str());
+        return true;
+    }
+    const std::string own = "Choose it from your own files instead.";
+    porpoise::http::Session http("store-update", "RecompStore/1.0");
+    if (!http.init())
+    {
+        fail_job("Your PS5 isn't online, so the update can't be downloaded. " + own);
+        return false;
+    }
+
+    /* Which of the game's updates it is. */
+    set_job("Finding the update", 0, 0);
+    std::vector<std::uint8_t> body;
+    std::string scheme = "https://";
+    int status = http.get(scheme + kUpdateLookup + tid, body, {}, 1u << 20);
+    if (status < 0)
+    {
+        slog("update %s: HTTPS failed (%d), trying HTTP", a.id.c_str(), http.last_error());
+        scheme = "http://";
+        status = http.get(scheme + kUpdateLookup + tid, body, {}, 1u << 20);
+    }
+    Json j;
+    if (status != 200 || !Json::parse(std::string(body.begin(), body.end()), j))
+    {
+        slog("update %s: the update list answered HTTP %d", a.id.c_str(), status);
+        fail_job("The update couldn't be found online just now. Try again later, or " + std::string("choose it from your own files."));
+        return false;
+    }
+    std::string tuid;
+    std::uint64_t expect = 0;
+    const Json &media = j["MediaIDS"];
+    for (std::size_t m = 0; m < media.size() && tuid.empty(); ++m)
+    {
+        const Json &ups = media[m]["Updates"];
+        for (std::size_t u = 0; u < ups.size(); ++u)
+        {
+            std::string h = ups[u]["hash"].str();
+            for (char &c : h) c = char(std::tolower(static_cast<unsigned char>(c)));
+            if (h != slot.update_id) continue;
+            tuid = ups[u]["TitleUpdateID"].str();
+            expect = std::uint64_t(std::strtoul(ups[u]["Size"].str().c_str(), nullptr, 10)) * 1024;
+            break;
+        }
+    }
+    bool digits = !tuid.empty() && tuid.size() < 12;
+    for (char c : tuid) digits = digits && c >= '0' && c <= '9';
+    if (!digits)
+    {
+        slog("update %s: %s isn't in the list for %s", a.id.c_str(), slot.update_id.c_str(), tid.c_str());
+        fail_job("The update this game needs isn't available online. " + own);
+        return false;
+    }
+
+    /* Room for it, then the file itself, into <id>.part and renamed once it checks out. */
+    make_dirs(dir);
+    struct statvfs fs;
+    if (statvfs(dir.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < expect + (64ull << 20))
+    {
+        fail_job("There isn't room for the update: it needs " + fmt_mb(expect) + " free.");
+        return false;
+    }
+    const std::string part = path + ".part";
+    std::FILE *out = std::fopen(part.c_str(), "wb");
+    if (!out)
+    {
+        fail_job("The store couldn't save the update on your PS5.");
+        return false;
+    }
+    Sha1 sha;
+    std::uint64_t got = 0;
+    bool write_ok = true, too_big = false;
+    const std::uint64_t cap = expect ? expect + (1u << 20) : (8ull << 30);
+    set_job("Downloading the update", 0, expect);
+    status = http.get_stream(scheme + kUpdateFile + tuid, [&](const std::uint8_t *p, std::size_t n) {
+        if (got + n > cap) { too_big = true; return false; }
+        if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
+        sha.update(p, n);
+        got += n;
+        set_job("Downloading the update", got, expect ? expect : got);
+        return true;
+    });
+    const bool closed = std::fclose(out) == 0;
+    const std::string hex = sha.hex();
+    slog("update %s: HTTP %d, %llu bytes, SHA-1 %s (want %s)", a.id.c_str(), status, (unsigned long long)got, hex.c_str(),
+         slot.update_sha1.c_str());
+    if (!write_ok || !closed)
+    {
+        std::remove(part.c_str());
+        fail_job("Your PS5 ran out of room while downloading the update.");
+        return false;
+    }
+    if (status != 200 || too_big || got == 0)
+    {
+        std::remove(part.c_str());
+        fail_job("The update didn't download. Check your connection and try again, or " + std::string("choose it from your own files."));
+        return false;
+    }
+    if (hex != slot.update_sha1)
+    {
+        std::remove(part.c_str());
+        fail_job("The downloaded update isn't the one this game needs, so it wasn't used. " + own);
+        return false;
+    }
+    if (std::rename(part.c_str(), path.c_str()) != 0)
+    {
+        std::remove(part.c_str());
+        fail_job("The store couldn't save the update on your PS5.");
+        return false;
+    }
+    chmod(path.c_str(), 0666);
+    return true;
+}
+
+void run_setup(const std::string &id, const std::string &slot_key, const std::string &image, bool fetch)
 {
     App a;
     Slot slot;
@@ -1459,6 +1625,14 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     if (!found) return fail_job("This game doesn't take that file.");
     if (store_too_old(a))
         return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
+    if (fetch)
+    {
+        if (!slot_fetchable(slot)) return fail_job("The store can't download this update. Choose it from your own files instead.");
+        std::string path;
+        if (!fetch_title_update(a, slot, path)) return; /* fetch_title_update said why */
+        set_job("Reading the package", 0, 0);
+        return run_setup_stfs(a, slot, path);
+    }
     if (slot.kind == "stfs" || slot.kind == "arcade") return run_setup_stfs(a, slot, image);
     if (slot.kind == "image") return run_setup_image(a, slot, image);
     if (slot.kind == "file") return run_setup_file(a, slot, image);
@@ -2262,7 +2436,7 @@ void *worker(void *)
                 next_refresh = next_store_check; /* the store's own check, retried sooner */
         }
         std::string id, sapp, sslot, simage;
-        bool bench = false;
+        bool bench = false, sfetch = false;
         std::string del;
         bool store_dl = false, del_keep = false;
         {
@@ -2277,11 +2451,13 @@ void *worker(void *)
             sapp.swap(g.pending_setup_app);
             sslot.swap(g.pending_setup_slot);
             simage.swap(g.pending_setup_image);
+            sfetch = g.pending_setup_fetch;
+            g.pending_setup_fetch = false;
         }
         if (!id.empty())
             run_install(id);
         else if (!sapp.empty())
-            run_setup(sapp, sslot, simage);
+            run_setup(sapp, sslot, simage, sfetch);
         else if (bench)
             run_bench();
         else if (!del.empty())
@@ -2995,12 +3171,30 @@ bool Engine::setup(const std::string &app_id, const std::string &slot_key, const
     g.pending_setup_app = app_id;
     g.pending_setup_slot = slot_key;
     g.pending_setup_image = image;
+    g.pending_setup_fetch = false;
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "setup";
     g.job.slot = slot_key;
     g.job.app_id = app_id;
     g.job.step = "Reading the disc image";
+    return true;
+}
+
+bool Engine::fetch_update(const std::string &app_id, const std::string &slot_key)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
+    g.pending_setup_app = app_id;
+    g.pending_setup_slot = slot_key;
+    g.pending_setup_image.clear();
+    g.pending_setup_fetch = true;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = "setup";
+    g.job.slot = slot_key;
+    g.job.app_id = app_id;
+    g.job.step = "Finding the update";
     return true;
 }
 
@@ -3117,16 +3311,79 @@ std::string slot_target(const App &a, const Slot &s)
     return dir;
 }
 
+bool slot_fetchable(const Slot &s)
+{
+    if (s.kind != "stfs" || s.multiple || s.title_id.size() != 8 || s.update_id.size() != 40 || s.update_sha1.size() != 40) return false;
+    for (char c : s.title_id) /* it names a folder: hex digits only */
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    return true;
+}
+
+bool store_downloaded(const std::string &path)
+{
+    const std::string dir = updates_folder() + "/";
+    return path.size() > dir.size() && path.compare(0, dir.size(), dir) == 0;
+}
+
+/* (1.0.8) rel ("Data/GameLogic.dllp") under dir, each part in any case: a disc's own
+ * spelling is kept when it is copied ("Default.xex"), and the console's storage tells the
+ * cases apart. */
+bool exists_any_case(const std::string &dir, const std::string &rel)
+{
+    std::string at = dir;
+    std::size_t from = 0;
+    while (from <= rel.size())
+    {
+        std::size_t end = rel.find('/', from);
+        if (end == std::string::npos) end = rel.size();
+        const std::string part = rel.substr(from, end - from);
+        from = end + 1;
+        if (part.empty()) continue;
+        if (exists(at + "/" + part)) { at += "/" + part; continue; }
+        const std::string want = lower_ascii(part);
+        std::string found;
+        if (DIR *d = opendir(at.c_str()))
+        {
+            while (dirent *e = readdir(d))
+                if (lower_ascii(e->d_name) == want) { found = e->d_name; break; }
+            closedir(d);
+        }
+        if (found.empty()) return false;
+        at += "/" + found;
+    }
+    return true;
+}
+
+/* Raised whenever a job ends (Engine::acknowledge): slot_ready's two-second answers from
+ * before it are looked at again, so a slot just set up (or a game just deleted) shows at once. */
+std::atomic<unsigned> g_slot_epoch{0};
+
 bool slot_ready(const App &a, const Slot &s)
 {
-    if (s.kind == "iso" || s.kind == "arcade") return exists(slot_target(a, s) + "/default.xex");
+    if (!s.ready.empty() || s.kind == "iso" || s.kind == "arcade")
+    {
+        /* The slot's own set-up file, or a disc's or Arcade game's default.xex, in any case.
+         * Asked every frame, so looked at every two seconds. */
+        static std::mutex m;
+        static std::map<std::string, std::pair<double, bool>> seen;
+        const std::string dir = slot_target(a, s), file = s.ready.empty() ? std::string("default.xex") : s.ready;
+        const std::string key = dir + "|" + file + "|" + std::to_string(g_slot_epoch.load());
+        std::lock_guard<std::mutex> l(m);
+        if (seen.size() > 256) seen.clear();
+        auto it = seen.find(key);
+        if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
+        const bool ok = exists_any_case(dir, file);
+        seen[key] = {mono_s(), ok};
+        return ok;
+    }
     if (s.kind == "image")
     {
         /* The right disc in the folder. Asked every frame, so looked at every two seconds. */
         static std::mutex m;
         static std::map<std::string, std::pair<double, bool>> seen;
-        const std::string dir = slot_target(a, s), key = dir + "|" + s.disc_id;
+        const std::string dir = slot_target(a, s), key = dir + "|" + s.disc_id + "|" + std::to_string(g_slot_epoch.load());
         std::lock_guard<std::mutex> l(m);
+        if (seen.size() > 256) seen.clear();
         auto it = seen.find(key);
         if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
         bool ok = false;
@@ -3150,8 +3407,9 @@ bool slot_ready(const App &a, const Slot &s)
          * seconds, as the image's. */
         static std::mutex m;
         static std::map<std::string, std::pair<double, bool>> seen;
-        const std::string key = a.id + "|" + s.key;
+        const std::string key = a.id + "|" + s.key + "|" + std::to_string(g_slot_epoch.load());
         std::lock_guard<std::mutex> l(m);
+        if (seen.size() > 256) seen.clear();
         auto it = seen.find(key);
         if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
         const bool ok = (plain_leaf(s.made) && exists(slot_target(a, s) + "/" + s.made)) || files_in_place(a, s) >= s.need;
@@ -3185,6 +3443,7 @@ void Engine::acknowledge()
 {
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Done || g.job.phase == Phase::Failed) g.job = JobState();
+    ++g_slot_epoch;
 }
 
 std::string Engine::installed(const std::string &app_id) const
