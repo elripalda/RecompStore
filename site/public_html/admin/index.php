@@ -11,7 +11,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($action === 'publish') {
             $n = rs_publish();
-            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . '; the PS5 store and the site pick it up on their next load.');
+            $soon = rs_soon_count();
+            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . ($soon ? " and $soon Coming soon" : '') . '; the PS5 store and the site pick it up on their next load.');
         } elseif ($action === 'move' && isset($_POST['id'], $_POST['dir'])) {
             $games = rs_games();
             $ids = array_column($games, 'id');
@@ -58,8 +59,9 @@ rs_head('Games');
         <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'Recomp Store' : 'By ' . h($g['author']) ?></span>
         <?php if ($g['featured']): ?><span class="tag">Featured</span><?php endif; ?>
         <?php if ($g['hidden']): ?><span class="tag">Hidden</span><?php endif; ?>
-        <?php if ($g['setup']): ?><span class="tag">Store sets up files</span><?php endif; ?>
-        <span class="muted"><?= h($g['id']) ?> · <?= h($g['version'] ?: 'no version') ?></span>
+        <?php if ($g['soon']): ?><span class="tag soon">Coming soon<?= $g['date'] !== '' ? ' · ' . h($g['date']) : '' ?></span><?php endif; ?>
+        <?php if ($g['setup'] && !$g['soon']): ?><span class="tag">Store sets up files</span><?php endif; ?>
+        <span class="muted"><?= h($g['id']) ?><?= $g['soon'] ? '' : ' · ' . h($g['version'] ?: 'no version') ?></span>
       </p>
     </div>
     <div class="row-actions">

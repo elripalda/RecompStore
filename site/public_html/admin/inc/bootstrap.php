@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.2.1';
+const RS_VERSION = '1.3.0';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -103,6 +103,10 @@ function rs_game_defaults(): array {
         'setup' => false, 'data_dir' => '', 'slots' => '',
         // The oldest Recomp Store that can install it ('' for any; see rs_min_store()).
         'min_store' => '',
+        // Coming soon (store 1.0.6): listed, with its art and an optional date, but not installable yet.
+        'soon' => false, 'date' => '',
+        // Where the game keeps its saves, one per line, inside its folder (store 1.0.6: Delete can keep them).
+        'saves' => '',
     ];
 }
 
@@ -113,6 +117,7 @@ function rs_game_defaults(): array {
 // stores don't read; 1.0.3 lists it and says to update first.
 const RS_GATED_FROM = '1.0.3';
 const RS_INSIDE_FROM = '1.0.4';
+const RS_FILE_FROM = '1.0.6';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
@@ -121,10 +126,94 @@ function rs_min_store(array $g): string {
     if ($g['setup']) {
         $slots = json_decode((string)$g['slots'], true);
         foreach (is_array($slots) ? $slots : [] as $sl) {
-            if (is_array($sl) && !in_array($sl['kind'] ?? 'iso', ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
+            if (!is_array($sl)) continue;
+            $kind = $sl['kind'] ?? 'iso';
+            if ($kind === 'file') $needs(RS_FILE_FROM);
+            elseif (!in_array($kind, ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
         }
     }
     return $min;
+}
+
+// A game's save folders: one per line (or comma), inside its folder (or a full /data path),
+// spelled plainly. '' when one isn't, with $bad set to it.
+function rs_saves_list(string $text, ?string &$bad = null): array {
+    $out = [];
+    foreach (preg_split('/[\r\n,]+/', $text) as $p) {
+        $p = trim($p);
+        if ($p === '') continue;
+        if (strlen($p) > 200 || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $p) || ($p[0] === '/' && !str_starts_with($p, '/data/'))) { $bad = $p; return []; }
+        $out[] = rtrim($p, '/');
+        if (count($out) >= 16) break;
+    }
+    return $out;
+}
+
+// What's wrong with a game's file list, or null. The store checks these too and won't set
+// up a slot that breaks them; here they're caught before they're published.
+function rs_slots_error(array $slots): ?string {
+    $leaf = fn($v) => is_string($v) && $v !== '' && strlen($v) <= 128 && $v[0] !== '.' && !preg_match('#[/\\\\:\x00-\x1f\x7f]#', $v);
+    $keys = [];
+    foreach ($slots as $i => $sl) {
+        $n = 'File ' . ($i + 1);
+        if (!is_array($sl)) return "$n isn't an entry like the template's.";
+        $key = $sl['key'] ?? '';
+        if (!is_string($key) || !preg_match('/^[A-Za-z0-9_-]{1,32}$/', $key)) return "$n: key has to be letters, numbers, - or _ (like game).";
+        if (in_array($key, $keys, true)) return "$n: another file already uses the key $key.";
+        $keys[] = $key;
+        $kind = $sl['kind'] ?? 'iso';
+        if (!in_array($kind, ['iso', 'stfs', 'image', 'file'], true)) return "$n: kind has to be iso, stfs, image or file.";
+        $to = (string)($sl['to'] ?? '.');
+        if ($to !== '.' && ($to === '' || $to[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $to))) return "$n: to is a folder inside the game's, like game or baseq3 (or . for right in it).";
+        if ($kind !== 'file') continue;
+        foreach (['name', 'made'] as $f) if (isset($sl[$f]) && $sl[$f] !== '' && !$leaf($sl[$f])) return "$n: $f has to be one file name, with no / or \\ (like DIABDAT.MPQ).";
+        foreach (['ext', 'pick', 'also'] as $f) if (isset($sl[$f]) && (!is_string($sl[$f]) || preg_match('#[/\\\\\x00-\x1f\x7f]#', $sl[$f]))) return "$n: $f is names or patterns only, with no / or \\.";
+        if (isset($sl['sha1']) && (!is_string($sl['sha1']) || !preg_match('/^\s*([0-9A-Fa-f]{40}[\s,]*)*$/', $sl['sha1']))) return "$n: sha1 is SHA-1s (40 letters and numbers each), separated by spaces.";
+        if (isset($sl['need']) && (!is_int($sl['need']) || $sl['need'] < 1 || $sl['need'] > 64)) return "$n: need is a number from 1 to 64.";
+        if (isset($sl['n64']) && !is_bool($sl['n64'])) return "$n: n64 is true or false.";
+    }
+    return null;
+}
+
+// ---- Discover: the store's and the site's sections -------------------------------------
+
+// Before any are set: every game in a grid, then what's coming.
+function rs_discover_default(): array {
+    return [
+        ['type' => 'games', 'title' => 'Latest games', 'layout' => 'grid', 'all' => true, 'games' => []],
+        ['type' => 'soon', 'title' => 'Coming soon', 'layout' => 'row'],
+    ];
+}
+
+// Sections as the admin saved them, cleaned: known types and layouts, titles of a sane
+// length, game IDs that look like IDs. At most 32.
+function rs_clean_sections($in): array {
+    $out = [];
+    foreach (is_array($in) ? $in : [] as $s) {
+        if (!is_array($s) || count($out) >= 32) continue;
+        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight'], true) ? $s['type'] : null;
+        if (!$type) continue;
+        $title = mb_substr(trim((string)($s['title'] ?? '')), 0, 60);
+        $id = fn($v) => is_string($v) && preg_match('/^[A-Za-z0-9_-]{3,32}$/', $v) ? $v : null;
+        if ($type === 'spotlight') {
+            $game = $id($s['game'] ?? '');
+            if ($game) $out[] = ['type' => 'spotlight', 'title' => $title, 'game' => $game];
+            continue;
+        }
+        $layouts = $type === 'soon' ? ['row', 'wide'] : ['row', 'grid', 'wide'];
+        $layout = in_array($s['layout'] ?? '', $layouts, true) ? $s['layout'] : ($type === 'soon' ? 'row' : 'grid');
+        if ($type === 'soon') { $out[] = ['type' => 'soon', 'title' => $title, 'layout' => $layout]; continue; }
+        $games = [];
+        foreach (is_array($s['games'] ?? null) ? $s['games'] : [] as $g) if (($g = $id($g)) && !in_array($g, $games, true) && count($games) < 64) $games[] = $g;
+        $out[] = ['type' => 'games', 'title' => $title, 'layout' => $layout, 'all' => !empty($s['all']), 'games' => $games];
+    }
+    return $out;
+}
+
+function rs_discover_sections(): array {
+    $saved = rs_setting('discover_sections');
+    if ($saved === null) return rs_discover_default();
+    return rs_clean_sections(json_decode($saved, true));
 }
 
 function rs_games(bool $includeHidden = true): array {
@@ -245,7 +334,26 @@ function rs_build_catalog(): array {
     $apps = [];
     $newer = [];
     $featured = [];
+    $soon = [];
     foreach (rs_games(false) as $i => $g) {
+        if ($g['soon']) {
+            // Not out yet: what the store and the site show of it, nothing to install.
+            $entry = [
+                'id' => $g['id'], 'name' => $g['name'], 'order' => $i, 'kind' => $g['kind'], 'author' => $g['author'],
+                'blurb' => $g['blurb'], 'description' => $g['description'], 'date' => trim((string)$g['date']),
+                'icon' => $abs($g['icon']), 'hero' => $abs($g['hero']), 'heroWeb' => $abs($g['hero_web']),
+                'banner' => ['x' => (int)$g['focus_x'], 'y' => (int)$g['focus_y'], 'zoom' => (int)$g['zoom']],
+                'logo' => $g['logo'] === '' ? null : [
+                    'url' => $abs($g['logo']),
+                    'banner' => ['x' => (int)$g['logo_bx'], 'y' => (int)$g['logo_by'], 'scale' => (int)$g['logo_bs']],
+                    'page' => ['x' => (int)$g['logo_px'], 'y' => (int)$g['logo_py'], 'scale' => (int)$g['logo_ps']],
+                ],
+            ];
+            if ($g['source'] === 'github' && preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', (string)$g['repo'])) $entry['source'] = ['type' => 'github', 'repo' => $g['repo']];
+            elseif (preg_match('#^https://#', (string)$g['url'])) $entry['url'] = $g['url'];
+            $soon[] = $entry;
+            continue;
+        }
         $app = [
             'id' => $g['id'], 'name' => $g['name'], 'order' => $i,
             'kind' => $g['kind'], 'author' => $g['author'],
@@ -270,11 +378,21 @@ function rs_build_catalog(): array {
             $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
         }
         if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
+        $saves = rs_saves_list((string)$g['saves']);
+        if ($saves) $app['saves'] = $saves;
         $min = rs_min_store($g);
         if ($min !== '') $app['minStore'] = $min;
         if ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;
         else $apps[] = $app;
         if ($g['featured']) $featured[] = $g['id'];
+    }
+    // Discover's sections, as the admin arranged them: a spotlight only on a game that's listed.
+    $listed = array_merge(array_column($apps, 'id'), array_column($newer, 'id'));
+    $sections = [];
+    foreach (rs_discover_sections() as $s) {
+        if ($s['type'] === 'spotlight' && !in_array($s['game'], $listed, true)) continue;
+        if ($s['type'] === 'games') $s['games'] = array_values(array_filter($s['games'], fn($id) => in_array($id, $listed, true)));
+        $sections[] = $s;
     }
     return [
         'catalogVersion' => 1,
@@ -294,6 +412,9 @@ function rs_build_catalog(): array {
         'featured' => $featured,
         'apps' => $apps,
         'newerStoreApps' => $newer,
+        // Read by Recomp Store 1.0.6 and newer, and the site; older stores skip them.
+        'comingSoon' => $soon,
+        'discover' => ['sections' => $sections],
     ];
 }
 
@@ -306,6 +427,12 @@ function rs_publish(): int {
     }
     rs_set_setting('published_at', gmdate('c'));
     return count($cat['apps']) + count($cat['newerStoreApps']);
+}
+
+// How many Coming soon entries the last build listed (for Publish's message).
+function rs_soon_count(): int {
+    $c = json_decode((string)@file_get_contents(RS_CATALOG), true);
+    return is_array($c) && is_array($c['comingSoon'] ?? null) ? count($c['comingSoon']) : 0;
 }
 
 // ---- Inbox: bug reports and recomp submissions from the website -----------------

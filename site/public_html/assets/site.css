@@ -195,3 +195,23 @@ details.news summary:hover .more{color:var(--cyan)}
 .status{color:#d6deea}.status.bad{color:#ffb4a8}
 .sent{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .sent strong{font:700 24px Sora,sans-serif}.sent p{margin:0;color:#d6deea}
+
+/* Discover's sections (as in the store): rows that scroll sideways, wide tiles, a still spotlight */
+.games{margin-top:8px}
+.games+.games,.slider.still+.games,.games+.slider.still{margin-top:44px}
+.rowscroll{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(180px,220px);gap:28px;overflow-x:auto;padding:10px 4px 18px;margin:-10px -4px 0;scroll-snap-type:x proximity;scrollbar-width:thin}
+.rowscroll>a{scroll-snap-align:start}
+.rowscroll.wides{grid-auto-columns:minmax(280px,420px)}
+.wide{display:flex;flex-direction:column;gap:12px;color:var(--frost);text-decoration:none}
+.wide-art{position:relative;aspect-ratio:16/9;border-radius:24px;overflow:hidden;background:var(--glass);border:1px solid var(--line);transition:transform .38s cubic-bezier(.2,.8,.2,1),box-shadow .38s}
+.wide-art>img:first-child{width:100%;height:100%;object-fit:cover;display:block}
+.wide-art .wide-icon{position:absolute;left:14px;bottom:14px;width:56px;height:56px;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.4)}
+.wide-art .ico.mono{position:absolute;inset:0}
+.wide:hover .wide-art,.wide:focus-visible .wide-art{transform:translateY(-6px) scale(1.03);box-shadow:0 0 0 3px rgba(244,248,252,.9),0 28px 60px rgba(0,0,0,.5)}
+.wide:focus-visible{outline:none}
+.tile-art{position:relative}
+.badge-soon{position:absolute;right:12px;top:12px;font:700 12px Figtree,sans-serif;letter-spacing:1.2px;text-transform:uppercase;background:var(--frost);color:var(--midnight);border-radius:999px;padding:4px 10px}
+.slider.still{margin:44px 0 0}
+.slider.still .slide-art img{animation:none;transform:scale(var(--z,1))}
+.soon-btn{cursor:default;background:rgba(244,248,252,.1)}
+.soon-btn:hover{transform:none;background:rgba(244,248,252,.1)}

@@ -9,11 +9,17 @@
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const byId = (id) => cat.apps.find((a) => a.id === id);
+  const soonById = (id) => (cat.soon || []).find((a) => a.id === id);
   const art = (a) => a.heroWeb || a.hero || '';
   const tagFor = (a) => a.kind === 'original'
     ? '<span class="tag cyan">Recomp Store</span>'
     : `<span class="tag">By ${esc(a.author)}</span>`;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Catalog values that go inside style="": numbers as numbers, a picture's URL with nothing
+  // that could end the url() or the attribute.
+  const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const frame = (b) => { b = b || {}; return { x: num(b.x, 50, 0, 100), y: num(b.y, 30, 0, 100), z: num(b.zoom, 100, 100, 400) / 100 }; };
+  const cssUrl = (u) => esc(String(u || '').replace(/[()'"\\\s\x00-\x1f]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')));
 
   function setBackdrop(a) {
     const src = a ? art(a) : '';
@@ -31,7 +37,68 @@
       : `<span class="ico mono">${esc((a.name || '?').slice(0, 2))}</span>`;
   }
 
-  // ---- Home --------------------------------------------------------------------
+  // ---- Home: the featured banner, then the sections the admin arranged (as in the store) --
+  const DEFAULT_SECTIONS = [
+    { type: 'games', title: 'Latest games', layout: 'grid', all: true },
+    { type: 'soon', title: 'Coming soon', layout: 'row' },
+  ];
+  function tileHTML(a, soon) {
+    const href = soon ? `#/soon/${encodeURIComponent(a.id)}` : `#/game/${encodeURIComponent(a.id)}`;
+    const sub = soon ? (a.date || 'Coming soon') : (a.kind === 'original' ? 'Recomp Store' : esc(a.author)) + (a.version ? ' · ' + esc(a.version) : '');
+    return `
+      <a class="tile" href="${href}" data-id="${esc(a.id)}"${soon ? ' data-soon' : ''}>
+        <span class="tile-art">${iconHTML(a, 256)}${soon ? '<span class="badge-soon">Soon</span>' : ''}</span>
+        <span class="tile-name">${esc(a.name)}</span>
+        <span class="tile-sub">${soon ? esc(sub) : sub}</span>
+      </a>`;
+  }
+  function wideHTML(a, soon) {
+    const href = soon ? `#/soon/${encodeURIComponent(a.id)}` : `#/game/${encodeURIComponent(a.id)}`;
+    const b = frame(a.banner);
+    return `
+      <a class="wide" href="${href}" data-id="${esc(a.id)}"${soon ? ' data-soon' : ''}>
+        <span class="wide-art">${art(a)
+          ? `<img src="${esc(art(a))}" alt="" loading="lazy" style="object-position:${b.x}% ${b.y}%;transform-origin:${b.x}% ${b.y}%;transform:scale(${b.z})">${a.icon ? `<img class="wide-icon" src="${esc(a.icon)}" alt="" loading="lazy">` : ''}`
+          : iconHTML(a, 256)}${soon ? '<span class="badge-soon">Soon</span>' : ''}</span>
+        <span class="tile-name">${esc(a.name)}</span>
+        <span class="tile-sub">${esc(soon ? (a.date || 'Coming soon') : (a.kind === 'original' ? 'Recomp Store' : a.author))}</span>
+      </a>`;
+  }
+  function spotlightHTML(a, kicker) {
+    const b = frame(a.banner);
+    return `
+      <section class="slider still" aria-label="${esc(kicker)}">
+        <a class="slide on" href="#/game/${encodeURIComponent(a.id)}">
+          <span class="slide-blur" style="background-image:url('${cssUrl(art(a))}')"></span>
+          <span class="slide-art"><img src="${esc(art(a))}" alt="" loading="lazy" style="object-position:${b.x}% ${b.y}%;transform-origin:${b.x}% ${b.y}%;--z:${b.z}"></span>
+          <span class="slide-glass">
+            <span class="kicker">${esc(kicker)}</span>
+            ${a.logo && a.logo.url
+              ? `<img class="slide-logo" src="${esc(a.logo.url)}" alt="${esc(a.name)}" style="--s:${(a.logo.banner && a.logo.banner.scale ? a.logo.banner.scale : 100) / 100}">`
+              : `<span class="slide-name">${esc(a.name)}</span>`}
+            <span class="slide-blurb">${esc(a.blurb || a.description)}</span>
+          </span>
+        </a>
+      </section>`;
+  }
+  function sectionsHTML() {
+    const list = cat.discover && Array.isArray(cat.discover.sections) && cat.discover.sections.length ? cat.discover.sections : DEFAULT_SECTIONS;
+    return list.map((sec) => {
+      if (sec.type === 'spotlight') {
+        const a = byId(sec.game);
+        return a ? spotlightHTML(a, sec.title || 'Spotlight') : '';
+      }
+      const soon = sec.type === 'soon';
+      const items = soon ? (cat.soon || []) : sec.all ? cat.apps : (sec.games || []).map(byId).filter(Boolean);
+      if (sec.type !== 'games' && !soon) return '';
+      if (!items.length) return '';
+      const title = sec.title ? `<h2>${esc(sec.title)}</h2>` : '';
+      if (sec.layout === 'wide') return `<section class="games">${title}<div class="rowscroll wides">${items.map((a) => wideHTML(a, soon)).join('')}</div></section>`;
+      if (sec.layout === 'grid' && !soon) return `<section class="games">${title}<div class="grid">${items.map((a) => tileHTML(a, false)).join('')}</div></section>`;
+      return `<section class="games">${title}<div class="rowscroll">${items.map((a) => tileHTML(a, soon)).join('')}</div></section>`;
+    }).join('');
+  }
+
   function home() {
     const featured = (cat.featured || []).map(byId).filter(Boolean);
     const slides = featured.length ? featured : cat.apps.filter((a) => art(a)).slice(0, 3);
@@ -44,8 +111,8 @@
       <section class="slider" aria-roledescription="carousel" aria-label="Featured games">
         ${slides.map((a, i) => `
           <a class="slide${i === 0 ? ' on' : ''}" href="#/game/${encodeURIComponent(a.id)}" aria-hidden="${i === 0 ? 'false' : 'true'}" tabindex="${i === 0 ? 0 : -1}" data-slide="${i}">
-            <span class="slide-blur" style="background-image:url('${esc(art(a))}')"></span>
-            <span class="slide-art"><img src="${esc(art(a))}" alt="" style="object-position:${a.banner ? a.banner.x : 50}% ${a.banner ? a.banner.y : 30}%;transform-origin:${a.banner ? a.banner.x : 50}% ${a.banner ? a.banner.y : 30}%;--z:${a.banner ? a.banner.zoom / 100 : 1}"></span>
+            <span class="slide-blur" style="background-image:url('${cssUrl(art(a))}')"></span>
+            <span class="slide-art"><img src="${esc(art(a))}" alt="" style="object-position:${frame(a.banner).x}% ${frame(a.banner).y}%;transform-origin:${frame(a.banner).x}% ${frame(a.banner).y}%;--z:${frame(a.banner).z}"></span>
             <span class="slide-glass">
               <span class="kicker">Featured</span>
               ${a.logo && a.logo.url
@@ -56,17 +123,7 @@
           </a>`).join('')}
         ${slides.length > 1 ? `<div class="dots">${slides.map((a, i) => `<button data-dot="${i}" aria-label="Show ${esc(a.name)}"${i === 0 ? ' aria-current="true"' : ''}></button>`).join('')}</div>` : ''}
       </section>` : ''}
-      <section class="games">
-        <h2>Latest games</h2>
-        <div class="grid">
-          ${cat.apps.map((a) => `
-            <a class="tile" href="#/game/${encodeURIComponent(a.id)}" data-id="${esc(a.id)}">
-              <span class="tile-art">${iconHTML(a, 256)}</span>
-              <span class="tile-name">${esc(a.name)}</span>
-              <span class="tile-sub">${a.kind === 'original' ? 'Recomp Store' : esc(a.author)}${a.version ? ' · ' + esc(a.version) : ''}</span>
-            </a>`).join('')}
-        </div>
-      </section>
+      ${sectionsHTML()}
       <section class="help">
         <a class="glass help-card" href="#/report">
           <span class="kicker">Found a bug?</span>
@@ -93,7 +150,38 @@
     dots.forEach((d) => d.addEventListener('click', () => { show(+d.dataset.dot); restart(); }));
     const restart = () => { clearInterval(slideTimer); if (els.length > 1 && !reduced) slideTimer = setInterval(() => show(cur + 1), 7000); };
     restart();
-    view.querySelectorAll('.tile').forEach((t) => t.addEventListener('pointerenter', () => { const a = byId(t.dataset.id); if (art(a)) setBackdrop(a); }));
+    view.querySelectorAll('.tile, .wide').forEach((t) => t.addEventListener('pointerenter', () => {
+      const a = t.hasAttribute('data-soon') ? soonById(t.dataset.id) : byId(t.dataset.id);
+      if (a && art(a)) setBackdrop(a);
+    }));
+  }
+
+  // ---- A Coming soon game's page ------------------------------------------------------
+  function soonPage(id) {
+    const a = soonById(id);
+    if (!a) { notFound(); return; }
+    const follow = a.source && a.source.type === 'github' && /^[\w.-]+\/[\w.-]+$/.test(a.source.repo || '') ? `https://github.com/${a.source.repo}`
+      : /^https:\/\//.test(a.url || '') ? a.url : '';
+    view.innerHTML = `
+      <article class="game">
+        <a class="back" href="#/">← All games</a>
+        <div class="game-grid">
+          <div class="game-info">
+            <div class="chips"><span class="tag cyan">Coming soon</span>${a.date ? `<span class="tag">${esc(a.date)}</span>` : ''}${a.author ? `<span class="tag">By ${esc(a.author)}</span>` : ''}</div>
+            ${a.logo && a.logo.url
+              ? `<h1 class="logo-h1"><img src="${esc(a.logo.url)}" alt="${esc(a.name)}" style="--s:${(a.logo.page && a.logo.page.scale ? a.logo.page.scale : 100) / 100}"></h1>`
+              : `<h1>${esc(a.name)}</h1>`}
+            <p class="lead">${esc(a.description || a.blurb)}</p>
+          </div>
+          <aside class="glass panel">
+            <div class="panel-head">${iconHTML(a, 112)}<div><strong>${esc(a.name)}</strong><span>${a.author ? 'By ' + esc(a.author) : 'Coming soon'}</span></div></div>
+            <div class="btn soon-btn" aria-disabled="true">${a.date ? 'Coming ' + esc(a.date) : 'Coming soon'}</div>
+            <p class="note">It isn't out yet. When it is, it shows up in Recomp Store on your PS5 and here, ready to install.</p>
+            ${follow ? `<a class="src" href="${esc(follow)}" target="_blank" rel="noopener">Follow it${follow.includes('github.com') ? ' on GitHub' : ''} ↗</a>` : ''}
+          </aside>
+        </div>
+      </article>`;
+    setBackdrop(a);
   }
 
   // ---- Game page ------------------------------------------------------------------
@@ -324,7 +412,9 @@
     if (h === '/get') { if (!dlg.open) dlg.showModal(); if (!view.innerHTML) home(); return; }
     if (dlg.open) dlg.close();
     const m = h.match(/^\/game\/(.+)$/);
+    const ms = h.match(/^\/soon\/(.+)$/);
     if (m) game(decodeURIComponent(m[1]));
+    else if (ms) soonPage(decodeURIComponent(ms[1]));
     else if (h === '/about') about();
     else if (h === '/report') formPage('bug');
     else if (h === '/submit') formPage('submit');
@@ -351,6 +441,7 @@
       // Games that need Recomp Store 1.0.3 or newer are listed apart (older stores don't read them).
       cat.apps = (c.apps || []).concat(c.newerStoreApps || []);
       cat.apps.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9)); // the admin's order, both lists together
+      cat.soon = (c.comingSoon || []).slice().sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9));
       const s = cat.site || {};
       document.getElementById('payload-slot').innerHTML = s.payload
         ? `<a class="btn primary" href="${esc(s.payload)}">Download RecompStore-Installer.elf</a>`

@@ -27,6 +27,7 @@ struct Ctx
     const std::function<void(std::size_t)> &progress;
     const ActAs &act_as;
     const std::function<void(const std::string &)> &log;
+    const std::vector<std::string> *keep;
 };
 
 /* The folder as a folder, only if it really is one and not a link to one. */
@@ -40,8 +41,17 @@ int open_folder(const std::string &path)
 
 /* cur: who this process is acting as here (nullptr: as it started). It is that again
  * whenever this returns. */
-bool remove_at(const std::string &path, int depth, const Who *cur, Ctx &c)
+bool remove_at(const std::string &path, int depth, const Who *cur, Ctx &c, bool &held)
 {
+    /* Kept (a save folder): left as it is, and the folders it's in with it. */
+    if (c.keep)
+        for (const std::string &k : *c.keep)
+            if (path == k)
+            {
+                held = true;
+                if (c.log) c.log("kept " + path);
+                return true;
+            }
     /* A file or a link: unlinked, and that's all (a link's target is never touched). */
     if (unlink(path.c_str()) == 0)
     {
@@ -124,12 +134,13 @@ bool remove_at(const std::string &path, int depth, const Who *cur, Ctx &c)
         auto rank = [](const std::string &n) { return n == "eboot.bin" ? 2 : n == "sce_sys" ? 1 : 0; };
         std::stable_sort(names.begin(), names.end(), [&](const std::string &a, const std::string &b) { return rank(a) < rank(b); });
     }
+    bool inner_held = false;
     for (const std::string &n : names)
     {
-        if (remove_at(path + "/" + n, depth + 1, here, c)) continue;
+        if (remove_at(path + "/" + n, depth + 1, here, c, inner_held)) continue;
         /* A folder this process could read but not change (its owner's alone to change):
          * once more as its owner. */
-        if (c.err == EACCES && become_owner() && remove_at(path + "/" + n, depth + 1, here, c))
+        if (c.err == EACCES && become_owner() && remove_at(path + "/" + n, depth + 1, here, c, inner_held))
         {
             c.bad.clear();
             c.err = 0;
@@ -143,6 +154,11 @@ bool remove_at(const std::string &path, int depth, const Who *cur, Ctx &c)
         c.err = EPERM;
         if (c.log) c.log("couldn't go back from acting as " + path + "'s owner");
         return false;
+    }
+    if (inner_held)
+    {
+        held = true; /* something kept is in it: it stays, emptied of the rest */
+        return true;
     }
     if (rmdir(path.c_str()) != 0 && errno != ENOENT)
     {
@@ -168,15 +184,23 @@ std::vector<std::string> parts(const std::string &path)
 }
 } // namespace
 
+bool holds(const std::string &path, const std::vector<std::string> &keep)
+{
+    for (const std::string &k : keep)
+        if (k == path || k.rfind(path + "/", 0) == 0) return true;
+    return false;
+}
+
 bool remove_tree(const std::string &path, std::size_t &files, std::string &bad, int &err,
                  const std::function<void(std::size_t)> &progress, const ActAs &act_as,
-                 const std::function<void(const std::string &)> &log)
+                 const std::function<void(const std::string &)> &log, const std::vector<std::string> *keep)
 {
     bad.clear();
     err = 0;
     if (path.empty() || path[0] != '/') { bad = path; err = EINVAL; return false; }
-    Ctx c{files, bad, err, progress, act_as, log};
-    const bool ok = remove_at(path, 0, nullptr, c);
+    Ctx c{files, bad, err, progress, act_as, log, keep && !keep->empty() ? keep : nullptr};
+    bool held = false;
+    const bool ok = remove_at(path, 0, nullptr, c, held);
     if (progress) progress(files);
     return ok;
 }

@@ -18,6 +18,14 @@
   setup.addEventListener('change', syncSetup);
   syncSetup();
 
+  // Coming soon: only what's shown of it (the date); Download and Game files wait until it's out.
+  const soon = form.querySelector('[data-soon]');
+  const syncSoon = () => {
+    form.querySelectorAll('[data-soon-fields]').forEach((el) => (el.hidden = !soon.checked));
+    form.querySelectorAll('[data-not-soon]').forEach((el) => (el.hidden = soon.checked));
+  };
+  if (soon) { soon.addEventListener('change', syncSoon); syncSoon(); }
+
   // Name in the banner preview follows the field.
   const nameIn = form.querySelector('input[name="name"]');
   const nameOut = form.querySelector('[data-name]');

@@ -31,8 +31,8 @@ public:
     void preview_picker(const std::string &slot, const std::string &path);
     void preview_focus(int f) { page_focus_ = f; }
     void preview_choose(const std::string &slot, const std::string &image) { chosen_[page_id_ + "/" + slot] = image; }
-    void preview_row(int row, int col) { row_ = row; col_ = col; }
-    void preview_confirm() { confirm_ = true; confirm_t_ = 1; confirm_sel_ = 0; }
+    void preview_row(int row, int col) { row_ = row; col_ = col; page_open_ = false; page_t_ = 0; confirm_ = false; }
+    void preview_confirm(int sel = 0) { confirm_ = true; confirm_t_ = 1; confirm_sel_ = sel; const App *a = find(page_id_); confirm_saves_ = a && !a->saves.empty(); }
     void preview_notes(int mode, int top = 0) { notes_focus_ = mode >= 1; notes_open_ = mode >= 2; notes_t_ = notes_open_ ? 1.f : 0.f; notes_top_ = top; confirm_ = false; }
     void preview_general(int row) { tab_ = 3; section_ = 0; in_section_ = true; gen_row_ = row; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; page_open_ = false; page_t_ = 0; confirm_ = false; }
     void preview_speed(float mbs) { speed_ = mbs; }
@@ -53,12 +53,27 @@ private:
         enum Kind { Primary, Slot, Setup, Delete } kind;
         int slot = -1;
     };
+    /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
+     * banner, then the catalog's sections (a grid is a line per six games). */
+    struct DLine
+    {
+        int kind = 0;        /* 0 the featured banner, 1 a row of tiles, 2 a line of a grid, 3 wide tiles, 4 a spotlight */
+        float y = 0, h = 0;  /* in Discover's own space: 0 is its top */
+        float head = 0;      /* the section's title above it: its height (0 none) */
+        std::string title;   /* the title; a spotlight's names it */
+        std::vector<const App *> items;
+    };
 
     bool pressed(std::uint32_t bits) const { return (held_ & ~prev_ & bits) != 0; }
     bool nav(std::uint32_t bit, float &timer, float dt);
     void sync_catalog();
     Art &art(const App &a);
-    const App *find(const std::string &id) const;
+    const App *find(const std::string &id) const; /* a game, or a Coming soon entry */
+    std::vector<DLine> discover_lines() const;
+    /* Discover: the first item of a line that scrolls sideways that's shown, with col
+     * focused (or last focused) on it; and where item i of it is drawn. */
+    int line_first(const DLine &l, int col) const;
+    float item_x(const DLine &l, int i, int first) const;
     std::string state_of(const App &a, bool *update_ready) const;
     std::string version_of(const App &a) const;
     std::vector<const App *> installed_apps() const;
@@ -87,6 +102,14 @@ private:
     void draw_hints(porpoise::ui::Gfx &gfx);
     void draw_boot(porpoise::ui::Gfx &gfx);
     void draw_tile(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float size, float focus);
+    /* A game's picture, wide (Discover's wide tiles), its name under it. */
+    void draw_wide(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus);
+    /* The featured banner, and a spotlight (the same, standing still). */
+    void draw_banner(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, const std::string &kicker,
+                     float fade, bool drift, float focus);
+    /* "There's more below": an arrow at the bottom of a list that scrolls. */
+    void draw_more(porpoise::ui::Gfx &gfx);
+    void draw_soon_page(porpoise::ui::Gfx &gfx, const App &a, float k);
     void glass(porpoise::ui::Gfx &gfx, float x, float y, float w, float h, float r,
                porpoise::ui::Color fill, bool shadow = true);
     /* glow: the cyan outline with a soft glow (buttons on the game page, which can be white). */
@@ -132,9 +155,13 @@ private:
     int tab_ = Discover;
     int tab_dir_ = 1;
     float tab_t_ = 1; /* 0..1 since the tab changed */
-    int row_ = 1;     /* Discover: 0 the banner, 1 the games */
-    int col_ = 0;
-    float focus_anim_[64] = {};
+    int row_ = 1;     /* Discover: the line focused (0 the banner, when there is one) */
+    int col_ = 0;     /* the item on it; Library and Latest Updates: the item focused */
+    std::vector<int> dcols_;       /* Discover: each line's last focused item */
+    std::map<int, float> dfocus_;  /* Discover: each tile's focus, animated (line * 1000 + item) */
+    /* How far each tab's list is scrolled (design pixels), and where it's going. */
+    float dscroll_ = 0, dscroll_to_ = 0, uscroll_ = 0, uscroll_to_ = 0, lscroll_ = 0, lscroll_to_ = 0;
+    float focus_anim_[512] = {};
     int slide_ = 0;
     float slide_t_ = 0, slide_fade_ = 1;
     int section_ = 0;    /* Settings: 0 General, 1 Adding your game, 2 About */
@@ -164,10 +191,12 @@ private:
     std::vector<FsEntry> entries_;
     bool picker_err_ = false;
     int picker_mode_ = 0; /* 0 a game's disc image, 1 the ShadowMountPlus payload */
+    std::string picker_ext_; /* a "file" slot's extensions, for list_dir */
 
     /* "Delete this game?" */
     bool confirm_ = false;
-    int confirm_sel_ = 0; /* 0 Cancel, 1 Delete */
+    int confirm_sel_ = 0; /* 0 Cancel, 1 Delete; a game with saves: 0 Cancel, 1 Keep my saves, 2 Delete everything */
+    bool confirm_saves_ = false; /* whether it offered Keep my saves when it opened */
     float confirm_t_ = 0;
 
     /* How fast the current job goes: MB/s over the last second or so. */

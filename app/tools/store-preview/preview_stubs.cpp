@@ -36,6 +36,7 @@ void load()
         }
     parse_catalog(text, g_cat);
     for (App &a : g_cat.apps) { a.icon_file = local(a.icon_url); a.hero_file = local(a.hero_url); a.logo_file = local(a.logo_url); }
+    for (App &a : g_cat.soon) { a.icon_file = local(a.icon_url); a.hero_file = local(a.hero_url); a.logo_file = local(a.logo_url); }
 }
 } // namespace
 void Engine::start(const std::string &) { load(); }
@@ -45,7 +46,7 @@ bool Engine::online() const { return true; }
 bool Engine::loading() const { return false; }
 bool Engine::install(const std::string &) { return true; }
 bool Engine::bench() { return true; }
-bool Engine::remove(const std::string &) { return true; }
+bool Engine::remove(const std::string &, bool) { return true; }
 static std::string g_smp;
 std::string smp_path() { if (const char *e = std::getenv("PREVIEW_SMP")) return e; return g_smp; }
 void set_smp_path(const std::string &p) { g_smp = p; }
@@ -154,7 +155,7 @@ void Engine::acknowledge() {}
 std::string Engine::installed(const std::string &id) const
 {
     if (const char *e = std::getenv("PREVIEW_INSTALLED"))
-        if (id == e) return "1.0";
+        if (id == e || (std::string(e) == "all" && id.rfind("soon", 0) != 0)) return "1.0";
     return id == "PPSA92011" ? "v1.0" : id == "PPSA92007" ? "v0.9.0" : "";
 }
 Engine &engine() { static Engine e; return e; }

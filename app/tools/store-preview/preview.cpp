@@ -318,5 +318,20 @@ int main(int argc, char **argv)
     }
     store.preview_open("PPSA99310"); settle(60); if (want("ww")) frame("page-needs-newer");
     store.preview_tab(2); settle(90); if (want("ww")) frame("updates-windwaker");
+    /* 1.0.6: Discover's sections, scrolling; Coming soon; the lists scrolling; Keep my saves. */
+    if (want("v106"))
+    {
+        store.preview_tab(0); settle(30);
+        const int lines[][2] = {{0, 0}, {1, 2}, {2, 3}, {3, 1}, {4, 0}, {5, 2}, {6, 1}};
+        const char *names[] = {"d106-banner", "d106-grid1", "d106-grid2", "d106-soon", "d106-spotlight", "d106-wide", "d106-bottom"};
+        for (int i = 0; i < 7; ++i) { store.preview_row(lines[i][0], lines[i][1]); settle(5); frame(names[i]); }
+        store.preview_open("soon-oot"); settle(60); frame("d106-soon-page");
+        store.preview_tab(2); store.preview_row(0, 0); settle(30); frame("u106-top");
+        store.preview_row(0, 7); settle(5); frame("u106-scrolled");
+        store.preview_tab(1); store.preview_row(0, 0); settle(30); frame("l106-top");
+        store.preview_row(0, 7); settle(5); frame("l106-scrolled");
+        store.preview_open("PPSA92011"); settle(60); store.preview_focus(3); store.preview_confirm(1); frame("c106-keep-saves");
+        store.preview_confirm(2); frame("c106-delete-everything");
+    }
     return 0;
 }

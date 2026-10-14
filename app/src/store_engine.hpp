@@ -20,14 +20,32 @@ constexpr const char *kHomebrew = "/data/homebrew";
 
 struct Slot
 {
-    std::string key, label, kind /* iso, stfs, image */, to /* folder under data_dir; "." = in it */, title_id;
+    std::string key, label, kind /* iso, stfs, image, file */, to /* folder under data_dir; "." = in it */, title_id;
     /* kind "image": a GameCube or Wii disc image copied as it is (.iso, .gcm, .ciso), and the
      * disc's ID it has to be (GZLE01), "" for any. */
     std::string disc_id;
+    /* kind "file" (1.0.6): one of the player's own files copied into the game's folder.
+     *   ext     the extensions it may have, space-separated (".z64 .n64 .v64"); "" any
+     *   pick    the name it must have (a pattern, any case: "pak0.pk3"); "" any
+     *   also    more files from the same folder copied with it ("pak?.pk3", any case)
+     *   name    the name it is given in the game's folder ("DIABDAT.MPQ"); "" its own
+     *   sha1    the SHA-1s it may have, space-separated (after n64); "" any
+     *   n64     a Nintendo 64 ROM: a .n64 or .v64 byte order is turned into .z64's
+     *   need    how many of pick + also must be there to call it set up (default 1)
+     *   made    a file the game makes from it: there, the slot is set up too ("sm64.o2r") */
+    std::string ext, pick, also, name, sha1, made;
+    bool n64 = false;
+    int need = 1;
     bool required = true, multiple = false;
 };
 /* The slot kinds this store can set up. */
 bool slot_kind_known(const std::string &kind);
+/* One plain name, for a file in a game's folder: no "/" or "\\", not "." or "..", not
+ * hidden, no control characters (1.0.6: a slot's name, made and key). */
+bool plain_leaf(const std::string &n);
+/* A path spelled plainly: relative, or absolute under /data/; no empty, "." or ".."
+ * parts, no "\\", no control characters (1.0.6: a game's save folders). */
+bool plain_path(const std::string &p);
 
 /* Where a game's logo sits: nudged x/y (design pixels, from where its name would be)
  * and its size (% of the space the name has). */
@@ -76,13 +94,32 @@ struct App
     bool has_setup = false;
     std::string data_dir;
     std::vector<Slot> slots;
+    /* Where the game keeps saves and settings (1.0.6): folders in its own folder
+     * ("userdata"), or whole paths under /data. Delete can leave them. */
+    std::vector<std::string> saves;
+    /* A Coming soon entry (1.0.6): not installable; date is what it says instead of a
+     * version ("Fall 2026", or empty). */
+    bool soon = false;
+    std::string date;
     /* Filled by the engine: where its art was saved, empty until it is. */
     std::string icon_file, hero_file, logo_file;
+};
+
+/* A part of Discover, under the featured banner (1.0.6), set up in the admin. */
+struct Section
+{
+    std::string type;   /* "games", "spotlight" (one game as a still banner) or "soon" */
+    std::string title;  /* above it; a spotlight's kicker */
+    std::string layout; /* "row" (sideways), "grid" (every game, rows of six) or "wide" */
+    bool all = false;   /* "games": every game in the store, in the admin's order */
+    std::vector<std::string> ids; /* "games": these, in this order; "spotlight": the first */
 };
 
 struct Catalog
 {
     std::vector<App> apps;
+    std::vector<App> soon; /* Coming soon */
+    std::vector<Section> sections; /* empty: the store's own (Latest games, Coming soon) */
     std::vector<std::string> featured;
     std::string tagline, discord, kofi, payload;
     std::string store_version, store_url, store_sha256;
@@ -145,7 +182,8 @@ public:
     /* Delete an installed game's folder and everything in it (the port, game files from
      * the disc, saves, mods), as the player confirmed. Only ever a folder under a
      * homebrew folder, never the store itself. */
-    bool remove(const std::string &app_id);
+    /* keep_saves: the game's save folders stay (App::saves). */
+    bool remove(const std::string &app_id, bool keep_saves = false);
     JobState job() const;
     void acknowledge();
 

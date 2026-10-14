@@ -50,6 +50,7 @@ button:disabled{opacity:.35;cursor:default}
 .row-actions{display:flex;gap:8px;align-items:center}.row-actions form{margin:0}
 .tag{font-size:13px;font-weight:700;border-radius:999px;padding:3px 11px;border:1px solid var(--line)}
 .tag.cyan{background:var(--cyan);color:var(--midnight);border-color:var(--cyan)}
+.tag.soon{background:var(--frost);color:var(--midnight);border-color:var(--frost)}
 .back{display:inline-block;margin-bottom:6px;text-decoration:none;font-weight:600}
 .art{display:flex;gap:28px;flex-wrap:wrap}.art .grow{flex:1;min-width:300px}
 .tile-preview{width:200px;height:200px;border-radius:26px;background:rgba(244,248,252,.06);border:1px solid var(--line);overflow:hidden}
@@ -97,3 +98,61 @@ button:disabled{opacity:.35;cursor:default}
 .logo-file .thumb{width:220px;height:90px;border-radius:14px;border:1px solid var(--line);background:repeating-conic-gradient(#1b2537 0 25%,#141d2c 0 50%) 0 0/18px 18px;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .logo-file .thumb img{max-width:100%;max-height:100%}
 h3.sub{font:700 15px Figtree,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:var(--cyan);margin:18px 0 0}
+/* Discover: the sections beside a preview of the store's screen */
+.disc{display:grid;grid-template-columns:minmax(320px,400px) minmax(0,1fr);gap:24px;align-items:start}
+@media (max-width:980px){.disc{grid-template-columns:minmax(0,1fr)}}
+.disc-edit .sec{padding:18px;margin:0 0 14px}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.sec-title{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sec-tools{display:flex;gap:6px}
+.sec .icon-btn{width:36px;min-height:36px;padding:0;font-size:14px}
+.seg{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.seg label{margin:0;flex-direction:row}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg span{padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-weight:600;font-size:14px;cursor:pointer}
+.seg input:checked+span{background:var(--frost);color:var(--midnight);border-color:var(--frost)}
+.seg input:focus-visible+span{outline:2px solid var(--cyan);outline-offset:2px}
+.picked{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:6px}
+.picked li{display:flex;align-items:center;gap:8px;background:rgba(11,18,32,.5);border:1px solid var(--line);border-radius:12px;padding:6px 8px}
+.picked li>span:not(.blank){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picked img,.picked .blank{width:32px;height:32px;border-radius:9px;object-fit:cover;flex:none}
+.picked .blank{display:flex;align-items:center;justify-content:center;background:rgba(244,248,252,.08);font:700 12px Sora,sans-serif}
+.add-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 12px}
+.small-note{font-size:14px;margin:0 0 10px}
+.warn{color:#ffd98a}
+.disc-preview{position:sticky;top:90px}
+.preview-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.preview-head h2{margin:0}
+.preview-head .muted{font-size:14px}
+.preview-scroll{max-height:calc(100vh - 150px);overflow:auto;border-radius:18px}
+.dstage{background:linear-gradient(180deg,#0B1220 0%,#0d2233 55%,#0f3446 100%);font-family:Figtree,sans-serif}
+.dstage>*{position:absolute}
+.dstage .d-logo{border-radius:16px}
+.dstage .d-brand{font:800 30px Sora,sans-serif;letter-spacing:-.5px}
+.dstage .d-tabs{display:flex;gap:6px;padding:6px;border-radius:30px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16)}
+.dstage .d-tabs span{padding:0 28px;height:48px;display:flex;align-items:center;font:600 20px Figtree,sans-serif;border-radius:24px}
+.dstage .d-tabs span.on{background:#F4F8FC;color:#0B1220;font-weight:700}
+.dstage .d-head{font:800 26px Sora,sans-serif;line-height:36px}
+.dstage .d-tile,.dstage .d-wide{border-radius:28px;overflow:hidden;background:#16233A;border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 40px rgba(0,0,0,.3)}
+.dstage .d-tile img,.dstage .d-wide img{width:100%;height:100%;object-fit:cover;display:block}
+.dstage .d-wide img.mid{position:absolute;left:50%;top:50%;width:168px;height:168px;margin:-84px 0 0 -84px;border-radius:36px}
+.dstage .d-wide img.corner{position:absolute;left:22px;bottom:22px;width:84px;height:84px;border-radius:20px}
+.dstage .mono{position:absolute;left:28px;top:18px;font:800 64px Sora,sans-serif}
+.dstage .d-soon{position:absolute;right:14px;top:14px;background:#F4F8FC;color:#0B1220;font:700 14px Figtree,sans-serif;letter-spacing:1px;padding:5px 12px;border-radius:14px}
+.dstage .d-name{font:600 21px Figtree,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dstage .d-sub{font:400 17px Figtree,sans-serif;color:#AAB6C6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dstage .d-banner{border-radius:36px;overflow:hidden;background:#0B1220;border:1px solid rgba(255,255,255,.16);box-shadow:0 26px 50px rgba(0,0,0,.38)}
+.dstage .d-banner .blur{position:absolute;inset:-40px;width:calc(100% + 80px);height:calc(100% + 80px);object-fit:cover;filter:blur(40px) saturate(1.4) brightness(.55)}
+.dstage .d-pic{position:absolute;left:600px;top:0;right:0;bottom:0;overflow:hidden}
+.dstage .d-pic img{width:100%;height:100%;object-fit:cover}
+.dstage .d-words{position:absolute;left:0;top:0;bottom:0;width:600px;background:rgba(255,255,255,.07);display:flex;flex-direction:column;justify-content:center;gap:14px;padding:0 48px 0 64px}
+.dstage .d-kick{font:700 15px Figtree,sans-serif;letter-spacing:2px;color:#35D6F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dstage .d-words strong{font:800 50px/1.05 Sora,sans-serif;letter-spacing:-1px}
+.dstage .d-blurb{font:400 20px/29px Figtree,sans-serif;color:#E3E9F2;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.dstage .d-dots{position:absolute;right:28px;bottom:22px;display:flex;gap:8px}
+.dstage .d-dots i{width:10px;height:10px;border-radius:5px;background:rgba(244,248,252,.45)}
+.dstage .d-dots i.on{width:34px;background:#35D6F4}
+.dstage .d-arrow{font-size:28px;color:rgba(244,248,252,.6)}
+.dstage .d-empty{border:2px dashed rgba(244,248,252,.25);border-radius:20px;display:flex;align-items:center;padding:0 24px;font:600 20px Figtree,sans-serif;color:#AAB6C6}
+.dstage .d-fold{height:0;border-top:3px dashed rgba(53,214,244,.8)}
+.dstage .d-fold span{position:absolute;right:96px;top:8px;font:700 18px Figtree,sans-serif;color:#35D6F4;background:rgba(11,18,32,.8);padding:4px 12px;border-radius:10px}

@@ -10,6 +10,7 @@
 #include "store_json.hpp"
 #include "store_zip.hpp"
 #include "store_stfs.hpp"
+#include "store_sha1.hpp"
 #include "store_sha256.hpp"
 #include "title_threads.hpp"
 #include "ui_app_common.hpp"
@@ -57,6 +58,20 @@ bool read_file(const std::string &path, std::string &out)
     char buf[16384];
     std::size_t n;
     while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+    std::fclose(f);
+    return true;
+}
+
+bool read_bytes(const std::string &path, std::vector<std::uint8_t> &out)
+{
+    std::FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    out.clear();
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0 && st.st_size > 0) out.reserve(std::size_t(st.st_size)); /* a ROM: one buffer, not twice its size while it grows */
+    std::uint8_t buf[65536];
+    std::size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) out.insert(out.end(), buf, buf + n);
     std::fclose(f);
     return true;
 }
@@ -146,6 +161,7 @@ struct Shared
     std::string pending_setup_app, pending_setup_slot, pending_setup_image;
     bool pending_bench = false;
     std::string pending_delete;
+    bool pending_delete_keep = false; /* the game's saves stay */
     bool started = false;
     /* A newer Recomp Store on GitHub ("" when this is the newest), and its download once
      * the store has fetched and checked it for the installer. */
@@ -252,15 +268,16 @@ void load_cached()
 
 void attach_art(Catalog &c)
 {
-    for (App &a : c.apps)
-    {
-        if (!a.icon_url.empty() && exists(g.data + "/art/" + art_name(a.icon_url)))
-            a.icon_file = g.data + "/art/" + art_name(a.icon_url);
-        if (!a.hero_url.empty() && exists(g.data + "/art/" + art_name(a.hero_url)))
-            a.hero_file = g.data + "/art/" + art_name(a.hero_url);
-        if (!a.logo_url.empty() && exists(g.data + "/art/" + art_name(a.logo_url)))
-            a.logo_file = g.data + "/art/" + art_name(a.logo_url);
-    }
+    for (std::vector<App> *list : {&c.apps, &c.soon})
+        for (App &a : *list)
+        {
+            if (!a.icon_url.empty() && exists(g.data + "/art/" + art_name(a.icon_url)))
+                a.icon_file = g.data + "/art/" + art_name(a.icon_url);
+            if (!a.hero_url.empty() && exists(g.data + "/art/" + art_name(a.hero_url)))
+                a.hero_file = g.data + "/art/" + art_name(a.hero_url);
+            if (!a.logo_url.empty() && exists(g.data + "/art/" + art_name(a.logo_url)))
+                a.logo_file = g.data + "/art/" + art_name(a.logo_url);
+        }
 }
 
 void refresh_catalog(porpoise::http::Session &http)
@@ -290,8 +307,11 @@ void fetch_art(porpoise::http::Session &http)
         c = g.catalog;
     }
     make_dirs(g.data + "/art");
-    for (const App &a : c.apps)
-        for (const std::string *u : {&a.icon_url, &a.hero_url, &a.logo_url})
+    std::vector<const App *> all;
+    for (const App &a : c.apps) all.push_back(&a);
+    for (const App &a : c.soon) all.push_back(&a);
+    for (const App *ap : all)
+        for (const std::string *u : {&ap->icon_url, &ap->hero_url, &ap->logo_url})
         {
             if (u->empty()) continue;
             const std::string path = g.data + "/art/" + art_name(*u);
@@ -765,7 +785,12 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
     /* A copier still working from before (the store was closed during a setup or install). */
     {
         struct stat st;
-        if (exists(jd + "/running") && stat((jd + "/status.txt").c_str(), &st) == 0 && std::time(nullptr) - st.st_mtime < 10)
+        std::string last;
+        /* One that has said it's done or failed is only letting go (a set of files is
+         * copied one after another). */
+        const bool finished = read_file(jd + "/status.txt", last) &&
+                              (last.find("\nphase=done\n") != std::string::npos || last.find("\nphase=failed\n") != std::string::npos);
+        if (!finished && exists(jd + "/running") && stat((jd + "/status.txt").c_str(), &st) == 0 && std::time(nullptr) - st.st_mtime < 10)
         {
             fail_job("A game setup or install is still running from before. Wait for it to finish, then try again.");
             return Copier::Failed;
@@ -1043,6 +1068,349 @@ void run_setup_image(const App &a, const Slot &slot, const std::string &image)
     finish("Your disc image is in place.");
 }
 
+/* ---- Kind "file" (1.0.6): one of the player's own files into the game's folder -------- *
+ * A ROM (Super Mario 64), a game's data file (Diablo's DIABDAT.MPQ), or a set of them from
+ * one folder (Quake III's pak0.pk3 to pak8.pk3). What it must be is the slot's: extensions,
+ * a name, SHA-1s; a Nintendo 64 ROM in another byte order is turned into a .z64. */
+std::string lower_ascii(std::string s)
+{
+    for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+std::vector<std::string> words(const std::string &s)
+{
+    std::vector<std::string> out;
+    std::size_t at = 0;
+    while (at < s.size())
+    {
+        const std::size_t sp = s.find_first_of(" ,", at);
+        const std::size_t end = sp == std::string::npos ? s.size() : sp;
+        if (end > at) out.push_back(s.substr(at, end - at));
+        at = end + 1;
+    }
+    return out;
+}
+
+/* name against a pattern (* and ?), in any case. */
+bool name_like(const std::string &pattern, const std::string &name)
+{
+    return asset_matches(lower_ascii(pattern), lower_ascii(name));
+}
+
+bool file_ext_ok(const Slot &s, const std::string &name)
+{
+    const std::vector<std::string> exts = words(s.ext);
+    if (exts.empty()) return true;
+    const std::string low = lower_ascii(name);
+    for (std::string e : exts)
+    {
+        e = lower_ascii(e);
+        if (!e.empty() && e[0] != '.') e = "." + e;
+        if (low.size() > e.size() && low.compare(low.size() - e.size(), e.size(), e) == 0) return true;
+    }
+    return false;
+}
+
+/* A Nintendo 64 ROM's byte order from its first word: 0 .z64 (as the console reads it),
+ * 1 .v64 (pairs swapped), 2 .n64 (fours reversed); -1 not a ROM. */
+int n64_order(const std::uint8_t *p, std::size_t n)
+{
+    if (n < 4096) return -1;
+    if (p[0] == 0x80 && p[1] == 0x37 && p[2] == 0x12 && p[3] == 0x40) return 0;
+    if (p[0] == 0x37 && p[1] == 0x80 && p[2] == 0x40 && p[3] == 0x12) return 1;
+    if (p[0] == 0x40 && p[1] == 0x12 && p[2] == 0x37 && p[3] == 0x80) return 2;
+    return -1;
+}
+
+void n64_to_z64(std::vector<std::uint8_t> &d, int order)
+{
+    if (order == 1)
+        for (std::size_t i = 0; i + 1 < d.size(); i += 2) std::swap(d[i], d[i + 1]);
+    else if (order == 2)
+        for (std::size_t i = 0; i + 3 < d.size(); i += 4)
+        {
+            std::swap(d[i], d[i + 3]);
+            std::swap(d[i + 1], d[i + 2]);
+        }
+}
+
+/* A name the store won't write into a game's folder (the port's own). */
+bool port_name(const std::string &leaf)
+{
+    const std::string low = lower_ascii(leaf);
+    return low == "eboot.bin" || low == "sce_sys" || low == "sce_module" || low == "recompstore.json";
+}
+
+/* src into the folder target under its own name: by the copier, else here. size is
+ * src's. false: it failed, and fail_job said why. */
+bool copy_file_in(const std::string &src, const std::string &target, std::uint64_t size)
+{
+    const std::string dst = target + "/" + src.substr(src.find_last_of('/') + 1);
+    const Copier c = run_copier("copy", src, target);
+    if (c == Copier::Failed) return false; /* run_copier said why */
+    if (c == Copier::Unavailable)
+    {
+        std::FILE *in = std::fopen(src.c_str(), "rb");
+        const std::string part = dst + ".store-part";
+        std::FILE *out = in ? std::fopen(part.c_str(), "wb") : nullptr;
+        if (!in || !out)
+        {
+            if (in) std::fclose(in);
+            fail_job(in ? "The game's folder can't be written to." : "Your file can't be read.");
+            return false;
+        }
+        std::vector<char> buf(8u << 20);
+        std::uint64_t done = 0;
+        bool ok = true;
+        for (;;)
+        {
+            const std::size_t n = std::fread(buf.data(), 1, buf.size(), in);
+            if (n == 0) break;
+            if (std::fwrite(buf.data(), 1, n, out) != n) { ok = false; break; }
+            done += n;
+            set_job("Copying your files", done, size);
+        }
+        std::fclose(in);
+        ok = std::fclose(out) == 0 && ok && done == size;
+        if (!ok || std::rename(part.c_str(), dst.c_str()) != 0)
+        {
+            std::remove(part.c_str());
+            fail_job("Copying your file failed. Is the storage full?");
+            return false;
+        }
+        chmod(dst.c_str(), 0777);
+    }
+    struct stat st;
+    if (stat(dst.c_str(), &st) != 0 || std::uint64_t(st.st_size) != size)
+    {
+        fail_job("Your file didn't copy whole. Set it up again.");
+        return false;
+    }
+    return true;
+}
+
+/* A file named like a pattern, spelled as the pattern is ("PAK1.PK3" for "pak?.pk3" is
+ * pak1.pk3: a port looks for its files by their exact name). A pattern with * leaves the
+ * name as it is. */
+std::string spelled_like(const std::string &pattern, const std::string &name)
+{
+    if (pattern.find('*') != std::string::npos || pattern.size() != name.size() || !name_like(pattern, name)) return name;
+    std::string out = name;
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (pattern[i] != '?') out[i] = pattern[i];
+    return out;
+}
+
+/* How many of the slot's files are in its folder: the picked one (its name, or any file
+ * with its extensions) and the ones that go with it. A slot that says none of those: the
+ * file it was last set up from. Never the port's own files. */
+int files_in_place(const App &a, const Slot &s)
+{
+    std::vector<FsEntry> here;
+    if (!list_dir(slot_target(a, s), here, "*")) return 0;
+    const std::vector<std::string> also = words(s.also);
+    std::string chosen;
+    if (s.name.empty() && s.pick.empty() && s.ext.empty() && !s.n64)
+    {
+        chosen = slot_source(a, s);
+        chosen = chosen.substr(chosen.find_last_of('/') + 1);
+        if (chosen.empty()) return 0;
+    }
+    int n = 0;
+    for (const FsEntry &e : here)
+    {
+        if (e.is_dir || port_name(e.name)) continue;
+        bool hit = !chosen.empty()   ? e.name == chosen
+                   : !s.name.empty() ? lower_ascii(e.name) == lower_ascii(s.name)
+                                     : (s.pick.empty() || name_like(s.pick, e.name)) && file_ext_ok(s, e.name);
+        if (s.n64 && s.name.empty()) hit = lower_ascii(e.name).size() > 4 && lower_ascii(e.name).rfind(".z64") == e.name.size() - 4;
+        for (const std::string &p : also) hit = hit || name_like(p, e.name);
+        n += hit ? 1 : 0;
+    }
+    return n;
+}
+
+void run_setup_file(const App &a, const Slot &slot, const std::string &file)
+{
+    const std::string id = a.id;
+    if (!exists(app_folder(id) + "/eboot.bin")) return fail_job("Install " + a.name + " first.");
+    if (!slot.name.empty() && !plain_leaf(slot.name))
+        return fail_job("The store's listing for " + a.name + " names this file oddly, so it wasn't set up. The listing needs fixing.");
+    const std::string leaf = file.substr(file.find_last_of('/') + 1);
+    /* What to choose, in words: pak0.pk3; your own Super Mario 64 ROM (.z64, .n64 or .v64);
+     * a .mpq file. */
+    std::string exts;
+    {
+        const std::vector<std::string> e = words(slot.ext);
+        for (std::size_t i = 0; i < e.size(); ++i)
+            exts += (i == 0 ? "" : i + 1 == e.size() ? " or " : ", ") + (e[i][0] == '.' ? e[i] : "." + e[i]);
+    }
+    const std::string what = !slot.pick.empty() ? slot.pick
+                             : slot.n64         ? "your own " + a.name + " ROM (" + (exts.empty() ? std::string(".z64, .n64 or .v64") : exts) + ")"
+                             : !exts.empty()    ? "a " + exts + " file"
+                                                : "your file";
+    struct stat src;
+    if (stat(file.c_str(), &src) != 0 || !S_ISREG(src.st_mode)) return fail_job("Your file can't be read.");
+    if (!file_ext_ok(slot, leaf) || (!slot.pick.empty() && !name_like(slot.pick, leaf)))
+        return fail_job("That isn't the file " + a.name + " needs here. Choose " + what + ".");
+    const std::string target = slot_target(a, slot);
+    make_dirs(target);
+    const std::uint64_t size = std::uint64_t(src.st_size);
+    auto finish = [&](const std::string &step, const std::string &note) {
+        make_dirs(g.data + "/setup");
+        write_file(g.data + "/setup/" + id + "." + slot.key + ".txt", file.data(), file.size());
+        std::lock_guard<std::mutex> l(g.m);
+        g.job.phase = Phase::Done;
+        g.job.step = step;
+        g.job.note = note;
+        g.job.done = g.job.total;
+    };
+    const std::vector<std::string> sums = words(lower_ascii(slot.sha1));
+    auto sum_ok = [&](const std::string &h) {
+        if (sums.empty()) return true;
+        for (const std::string &x : sums)
+            if (x == h) return true;
+        return false;
+    };
+
+    if (slot.n64)
+    {
+        /* A ROM: read whole (a Nintendo 64 cartridge is 64 MB at most), put in .z64's byte
+         * order, checked, and written here as a .z64. */
+        if (size > (128ull << 20)) return fail_job("That's too big to be a Nintendo 64 ROM.");
+        std::vector<std::uint8_t> rom;
+        if (!read_bytes(file, rom) || rom.size() != size) return fail_job("Your ROM can't be read.");
+        const int order = n64_order(rom.data(), rom.size());
+        if (order < 0) return fail_job("That isn't a Nintendo 64 ROM. Choose your own " + a.name + " ROM (.z64, .n64 or .v64).");
+        n64_to_z64(rom, order);
+        set_job("Checking your ROM", 0, 0);
+        Sha1 h;
+        h.update(rom.data(), rom.size());
+        const std::string hex = h.hex();
+        slog("setup %s: %s, a %s ROM, SHA-1 %s", id.c_str(), file.c_str(), order == 0 ? ".z64" : order == 1 ? ".v64" : ".n64", hex.c_str());
+        if (!sum_ok(hex))
+            return fail_job("That ROM isn't one " + a.name + " takes: it has to be the original game, not a hack or another "
+                            "release. (Its SHA-1 is " + hex + ".)");
+        std::string out = slot.name;
+        if (out.empty()) out = leaf.substr(0, leaf.find_last_of('.')) + ".z64";
+        if (port_name(out)) return fail_job("The store won't write " + out + " into the game's folder.");
+        const std::string dst = target + "/" + out;
+        struct stat ds;
+        if (stat(dst.c_str(), &ds) == 0 && std::uint64_t(ds.st_size) == rom.size())
+        {
+            /* The same ROM already there: told by its SHA-1, read through, not a second copy in memory. */
+            Sha1 dh;
+            std::vector<std::uint8_t> buf(4u << 20);
+            bool ok = false;
+            if (std::FILE *f = std::fopen(dst.c_str(), "rb"))
+            {
+                std::size_t n, got = 0;
+                while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0) { dh.update(buf.data(), n); got += n; }
+                std::fclose(f);
+                ok = got == rom.size();
+            }
+            if (ok && dh.hex() == hex)
+                return finish("Your ROM is ready", "Your ROM is already in the game's folder.");
+        }
+        struct statvfs fs;
+        if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (16ull << 20))
+            return fail_job("There isn't room for the ROM.");
+        if (!write_file(dst, rom.data(), rom.size())) /* written beside it, then renamed into place */
+            return fail_job("Writing your ROM into the game's folder failed. Is the storage full?");
+        chmod(dst.c_str(), 0777);
+        slog("setup %s: wrote %s (%s)", id.c_str(), dst.c_str(), fmt_mb(size).c_str());
+        return finish("Your ROM is ready", order == 0 ? "Your ROM is in place." : "Your ROM is in place, turned into a .z64.");
+    }
+
+    /* The file, and the ones from its folder that go with it. */
+    std::vector<std::pair<std::string, std::uint64_t>> files{{file, size}};
+    const std::vector<std::string> also = words(slot.also);
+    if (!also.empty())
+    {
+        const std::string dir = file.substr(0, file.find_last_of('/'));
+        std::vector<FsEntry> there;
+        if (list_dir(dir, there, "*"))
+            for (const FsEntry &e : there)
+            {
+                if (e.is_dir || e.path == file) continue;
+                for (const std::string &p : also)
+                    if (name_like(p, e.name) && !port_name(e.name))
+                    {
+                        files.push_back({e.path, e.size});
+                        break;
+                    }
+            }
+    }
+    if (!sums.empty())
+    {
+        /* Its SHA-1, read through before anything is copied. */
+        const int fd = open(file.c_str(), O_RDONLY);
+        if (fd < 0) return fail_job("Your file can't be read.");
+        Sha1 h;
+        std::vector<std::uint8_t> buf(4u << 20);
+        std::uint64_t done = 0;
+        bool ok = true;
+        while (done < size)
+        {
+            const ssize_t n = pread(fd, buf.data(), std::size_t(std::min<std::uint64_t>(buf.size(), size - done)), off_t(done));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) { ok = false; break; }
+            h.update(buf.data(), std::size_t(n));
+            done += std::uint64_t(n);
+            set_job("Checking your file", done, size);
+        }
+        close(fd);
+        if (!ok) return fail_job("Your file can't be read.");
+        const std::string hex = h.hex();
+        slog("setup %s: %s, SHA-1 %s", id.c_str(), file.c_str(), hex.c_str());
+        if (!sum_ok(hex)) return fail_job("That file isn't one " + a.name + " takes. (Its SHA-1 is " + hex + ".)");
+    }
+    std::uint64_t total = 0;
+    for (const auto &f : files) total += f.second;
+    struct statvfs fs;
+    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < total + (64ull << 20))
+        return fail_job("There isn't room for your files: they need " + fmt_mb(total) + " free.");
+    int copied = 0;
+    for (std::size_t i = 0; i < files.size(); ++i)
+    {
+        const std::string &path = files[i].first;
+        const std::string own = path.substr(path.find_last_of('/') + 1);
+        std::string want = own;
+        if (i == 0 && !slot.name.empty()) want = slot.name;
+        else if (i == 0 && !slot.pick.empty()) want = spelled_like(slot.pick, own);
+        else
+            for (const std::string &p : also)
+                if (name_like(p, own)) { want = spelled_like(p, own); break; }
+        if (port_name(own) || port_name(want)) return fail_job("The store won't write " + want + " into the game's folder.");
+        /* Copied under its own name, then renamed: never over a different file of the game's. */
+        if (lower_ascii(own) != lower_ascii(want) && exists(target + "/" + own))
+            return fail_job("The game's folder already has a file called " + own + ", so yours wasn't copied over it. Rename yours to " + want + " and choose it again.");
+        struct stat st;
+        /* Already there (same size). Not for the one its SHA-1 was checked for: that one is copied, so it's the right one. */
+        if (!(i == 0 && !sums.empty()) && stat((target + "/" + want).c_str(), &st) == 0 && std::uint64_t(st.st_size) == files[i].second)
+        {
+            slog("setup %s: %s is already in the game's folder", id.c_str(), want.c_str());
+            continue;
+        }
+        set_job("Copying your files", 0, files[i].second);
+        if (!copy_file_in(path, target, files[i].second)) return;
+        if (want != own && std::rename((target + "/" + own).c_str(), (target + "/" + want).c_str()) != 0)
+            return fail_job("Your file couldn't be named " + want + " in the game's folder.");
+        slog("setup %s: %s -> %s/%s (%s)", id.c_str(), path.c_str(), target.c_str(), want.c_str(), fmt_mb(files[i].second).c_str());
+        ++copied;
+    }
+    const int have = files_in_place(a, slot);
+    std::string note = copied == 0                        ? "Your files are already in the game's folder."
+                       : copied == 1 && files.size() == 1 ? "Your file is in place."
+                       : copied == 1                      ? "1 file copied into the game's folder; the others were there already."
+                                                          : std::to_string(copied) + " files copied into the game's folder.";
+    if (have < slot.need)
+        note += " " + a.name + " needs " + std::to_string(slot.need) + " of these files and has " + std::to_string(have) +
+                ": put the rest beside the one you chose, then set it up again.";
+    finish(have < slot.need ? "Some files are missing" : "Your files are ready", note);
+}
+
 void run_setup(const std::string &id, const std::string &slot_key, const std::string &image)
 {
     App a;
@@ -1055,12 +1423,13 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
                 for (const Slot &s : x.slots)
                     if (s.key == slot_key) { a = x; slot = s; found = true; }
     }
-    set_job(slot.kind == "stfs" ? "Reading the package" : "Reading the disc image", 0, 0);
+    set_job(slot.kind == "stfs" ? "Reading the package" : slot.kind == "file" ? "Reading your file" : "Reading the disc image", 0, 0);
     if (!found) return fail_job("This game doesn't take that file.");
     if (store_too_old(a))
         return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
     if (slot.kind == "stfs") return run_setup_stfs(a, slot, image);
     if (slot.kind == "image") return run_setup_image(a, slot, image);
+    if (slot.kind == "file") return run_setup_file(a, slot, image);
     if (slot.kind != "iso") return fail_job("Setting up " + slot.label + " isn't something this version of the store can do.");
 
     Disc disc;
@@ -1414,7 +1783,7 @@ std::string smp_file() { return g.data + "/shadowmountplus.txt"; }
  * copier payload, which wrote those files, or here without a loader - never with
  * lstat(), which fails on the PS5 - and checked afterwards: anything still there is a
  * failure that says so, never "Deleted". */
-void run_delete(const std::string &id)
+void run_delete(const std::string &id, bool keep_saves)
 {
     set_job("Deleting", 0, 0);
     const std::string folder = app_folder(id);
@@ -1448,13 +1817,54 @@ void run_delete(const std::string &id)
                 for (const Slot &sl : x.slots) add(slot_target(x, sl));
             }
     }
+    /* Keeping the saves: the game's save folders inside what's being deleted stay; one that
+     * is a whole folder the game set up (its data folder) isn't deleted at all; one outside
+     * stays anyway. Anything the store can't keep as listed: nothing is deleted. */
+    std::vector<std::string> keep, whole;
+    if (keep_saves)
+    {
+        std::vector<std::string> saves;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            for (const App &x : g.catalog.apps)
+                if (x.id == id) saves = x.saves;
+        }
+        int kept = 0;
+        bool bad = false;
+        for (const std::string &s0 : saves)
+        {
+            if (!plain_path(s0)) { bad = true; continue; }
+            const std::string s = s0[0] == '/' ? s0 : folder + "/" + s0;
+            if (s == folder) { bad = true; continue; } /* the whole game: not a save folder */
+            bool inside = false;
+            for (std::size_t i = 0; i < paths.size(); ++i)
+                if (s == paths[i])
+                {
+                    paths.erase(paths.begin() + std::ptrdiff_t(i)); /* kept whole */
+                    whole.push_back(s);
+                    break;
+                }
+                else
+                    inside = inside || s.rfind(paths[i] + "/", 0) == 0;
+            if (inside && keep.size() >= 16) { bad = true; continue; }
+            if (inside) keep.push_back(s);
+            ++kept;
+        }
+        if (bad || kept == 0)
+        {
+            slog("delete %s: keeping saves asked for, but the listing's save folders can't be kept (%zu listed)", id.c_str(), saves.size());
+            return fail_job("The store can't tell where this game keeps its saves, so nothing was deleted. Choose Delete everything to delete it all.");
+        }
+    }
     for (const std::string &p : paths) slog("delete %s: %s", id.c_str(), p.c_str());
+    for (const std::string &k : keep) slog("delete %s: keeping %s", id.c_str(), k.c_str());
     /* ShadowMountPlus lets go of the game first, if it will (it won't while the store is
      * the app on screen; deleting works anyway). */
     unmount_smp(id);
     const double t0 = mono_s();
     std::string extra;
     for (std::size_t i = 0; i < paths.size(); ++i) extra += "path" + std::to_string(i) + "=" + paths[i] + "\n";
+    for (std::size_t i = 0; i < keep.size(); ++i) extra += "keep" + std::to_string(i) + "=" + keep[i] + "\n";
     std::size_t files = 0;
     const Copier c = run_copier("delete", "", folder, nullptr, extra);
     if (c == Copier::Failed)
@@ -1471,7 +1881,9 @@ void run_delete(const std::string &id)
             std::size_t n = 0;
             std::string bad;
             int e = 0;
-            if (!fs::remove_tree(paths[i], n, bad, e, [&](std::size_t so_far) { set_job("Deleting", files + so_far, 0); }))
+            if (!fs::remove_tree(
+                    paths[i], n, bad, e, [&](std::size_t so_far) { set_job("Deleting", files + so_far, 0); }, {},
+                    [&](const std::string &line) { slog("delete %s: %s", id.c_str(), line.c_str()); }, &keep))
             {
                 slog("delete %s: stopped at %s (errno %d) after %zu files", id.c_str(), bad.c_str(), e, files + n);
                 scan_homebrew();
@@ -1485,13 +1897,14 @@ void run_delete(const std::string &id)
             }
             files += n;
             slog("delete %s: %s, %zu files", id.c_str(), paths[i].c_str(), n);
-            if (!fs::gone(paths[i])) break; /* said below, before the game's own folder goes */
-            if (i > 0) fs::remove_empty_parents(paths[i], [&](const std::string &up) { slog("delete %s: removed the empty folder %s", id.c_str(), up.c_str()); });
+            if (!fs::holds(paths[i], keep) && !fs::gone(paths[i])) break; /* said below, before the game's own folder goes */
+            if (i > 0 && !fs::holds(paths[i], keep)) fs::remove_empty_parents(paths[i], [&](const std::string &up) { slog("delete %s: removed the empty folder %s", id.c_str(), up.c_str()); });
         }
     }
     /* Checked here too, whoever deleted: still there is a failure (in the order deleted). */
     for (std::size_t k = 0; k < paths.size(); ++k)
-        if (const std::string &p = paths[(k + 1) % paths.size()]; !fs::gone(p))
+        if (const std::string &p = paths[(k + 1) % paths.size()];
+            fs::holds(p, keep) ? (p == folder && (!fs::gone(p + "/eboot.bin") || !fs::gone(p + "/sce_sys"))) : !fs::gone(p))
         {
             slog("delete %s: %s is still there afterwards", id.c_str(), p.c_str());
             scan_homebrew();
@@ -1520,6 +1933,16 @@ void run_delete(const std::string &id)
     g.job.phase = Phase::Done;
     g.job.home = tile_gone ? 2 : 0;
     g.job.step = "Deleted";
+    if (!keep.empty() || !whole.empty())
+    {
+        std::string where;
+        for (const std::string &k : whole)
+            if (exists(k)) where += (where.empty() ? "" : ", ") + k;
+        for (const std::string &k : keep)
+            if (exists(k)) where += (where.empty() ? "" : ", ") + k;
+        if (!where.empty())
+            g.job.note = "Your saves stayed in " + where + ": install the game again and it picks up where you left off.";
+    }
     if (another)
         g.job.note = "Deleted " + folder + ". Another copy of this game is still at " + other + ": press Delete again to remove it too.";
 }
@@ -1809,9 +2232,10 @@ void *worker(void *)
         std::string id, sapp, sslot, simage;
         bool bench = false;
         std::string del;
-        bool store_dl = false;
+        bool store_dl = false, del_keep = false;
         {
             std::lock_guard<std::mutex> l(g.m);
+            del_keep = g.pending_delete_keep;
             store_dl = g.pending_store_dl;
             g.pending_store_dl = false;
             bench = g.pending_bench;
@@ -1829,7 +2253,7 @@ void *worker(void *)
         else if (bench)
             run_bench();
         else if (!del.empty())
-            run_delete(del);
+            run_delete(del, del_keep);
         else if (store_dl)
             run_store_download();
         else
@@ -2062,13 +2486,14 @@ bool Engine::bench()
     return true;
 }
 
-bool Engine::remove(const std::string &app_id)
+bool Engine::remove(const std::string &app_id, bool keep_saves)
 {
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
         !g.pending_delete.empty())
         return false;
     g.pending_delete = app_id;
+    g.pending_delete_keep = keep_saves;
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "delete";
@@ -2609,9 +3034,27 @@ bool list_dir(const std::string &path, std::vector<FsEntry> &out, const char *ex
                 const std::size_t xl = std::strlen(x);
                 return low.size() > xl && low.compare(low.size() - xl, xl, x) == 0;
             };
+            /* "*": every file. Otherwise one extension or several, space-separated (".z64 .n64"). */
+            auto any_ext = [&]() {
+                std::size_t at = 0;
+                const std::string list = ext;
+                while (at < list.size())
+                {
+                    std::size_t sp = list.find(' ', at);
+                    if (sp == std::string::npos) sp = list.size();
+                    std::string e = list.substr(at, sp - at);
+                    for (char &c : e) c = char(std::tolower(static_cast<unsigned char>(c)));
+                    if (!e.empty() && e[0] != '.') e = "." + e; /* "z64" is ".z64", as file_ext_ok reads it */
+                    if (!e.empty() && ends(e.c_str())) return true;
+                    at = sp + 1;
+                }
+                return false;
+            };
+            (void)el;
             const bool want = std::strcmp(ext, "stfs") == 0    ? stfs::looks_like(f.path)
                               : std::strcmp(ext, "image") == 0 ? ends(".iso") || ends(".gcm") || ends(".ciso")
-                                                               : low.size() > el && low.compare(low.size() - el, el, ext) == 0;
+                              : std::strcmp(ext, "*") == 0     ? true
+                                                               : any_ext();
             if (want)
             {
                 f.size = std::uint64_t(st.st_size);
@@ -2665,6 +3108,21 @@ bool slot_ready(const App &a, const Slot &s)
                     const std::string id = disc_image_id(e.path);
                     if (!id.empty() && (want.empty() || id == want)) { ok = true; break; }
                 }
+        seen[key] = {mono_s(), ok};
+        return ok;
+    }
+    if (s.kind == "file-bad") return false; /* a listing this store won't set up */
+    if (s.kind == "file")
+    {
+        /* The files in place, or what the game made from them ("made"). Looked at every two
+         * seconds, as the image's. */
+        static std::mutex m;
+        static std::map<std::string, std::pair<double, bool>> seen;
+        const std::string key = a.id + "|" + s.key;
+        std::lock_guard<std::mutex> l(m);
+        auto it = seen.find(key);
+        if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
+        const bool ok = (plain_leaf(s.made) && exists(slot_target(a, s) + "/" + s.made)) || files_in_place(a, s) >= s.need;
         seen[key] = {mono_s(), ok};
         return ok;
     }

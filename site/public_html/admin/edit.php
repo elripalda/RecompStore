@@ -21,7 +21,7 @@ $slotTemplate = json_encode([
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store'];
+             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -32,17 +32,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (['logo_by', 'logo_py'] as $k) $g[$k] = max(-600, min(600, (int)($_POST[$k] ?? 0)));
     foreach (['logo_bs', 'logo_ps'] as $k) $g[$k] = max(20, min(300, (int)($_POST[$k] ?? 100)));
     if (!empty($_POST['logo_remove'])) $g['logo'] = '';
-    foreach (['featured', 'hidden', 'setup'] as $k) $g[$k] = !empty($_POST[$k]);
+    foreach (['featured', 'hidden', 'setup', 'soon'] as $k) $g[$k] = !empty($_POST[$k]);
+    $badSave = null;
+    rs_saves_list($g['saves'], $badSave);
 
     if (!preg_match('/^[A-Za-z0-9_-]{3,32}$/', $g['id'])) $error = 'The title ID must be 3 to 32 letters, numbers, - or _ (for example PPSA92011).';
     elseif ($g['name'] === '') $error = 'Give the game a name.';
-    elseif ($g['source'] === 'github' && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
-    elseif ($g['source'] === 'url' && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
+    elseif (mb_strlen($g['date']) > 40) $error = 'Keep the Coming soon date short, like December 2026.';
+    // Coming soon: no download yet, so the repo and link are optional (but well formed when given).
+    elseif ($g['source'] === 'github' && !($g['soon'] && $g['repo'] === '') && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
+    elseif ($g['source'] === 'url' && !($g['soon'] && $g['url'] === '') && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
+    elseif ($badSave !== null) $error = 'Save folders: "' . $badSave . '" isn\'t a folder inside the game\'s (one per line, like userdata, with no .. or \\).';
     elseif ($g['sha256'] !== '' && !preg_match('/^[A-Fa-f0-9]{64}$/', $g['sha256'])) $error = 'The SHA-256 should be 64 letters and numbers (0-9, a-f), or left empty.';
     elseif ($g['min_store'] !== '' && !preg_match('/^\d+(\.\d+){0,3}$/', $g['min_store'])) $error = 'Needs Recomp Store: a version like 1.0.3, or leave it empty.';
     elseif ($g['source'] === 'github' && strpbrk($g['asset'], '*?') !== false && !preg_match('/\.zip$/i', $g['asset'])) $error = 'A zip name with * has to end in .zip, so it can only match the release\'s zip (not a checksum or another file).';
     elseif ($g['inside'] !== '' && (!preg_match('/\.zip$/i', $g['inside']) || strlen($g['inside']) > 300 || $g['inside'][0] === '/' || preg_match('#\\\\|(^|/)\.\.(/|$)|[\x00-\x1f\x7f]#', $g['inside']))) $error = 'The zip inside the download: its whole name in that zip, ending in .zip, with / between folders (for example */prospero/builder/Assets/payload.zip). No .. and no \\.';
     elseif ($g['setup'] && $g['slots'] !== '' && !is_array(json_decode($g['slots'], true))) $error = 'The game files list isn\'t valid. Use the template\'s format.';
+    elseif ($g['setup'] && $g['slots'] !== '' && ($slotErr = rs_slots_error(json_decode($g['slots'], true)))) $error = 'Game files: ' . $slotErr;
     elseif (($isNew || $g['id'] !== $oldId) && rs_game($g['id'])) $error = 'Another game already uses that title ID.';
 
     if ($error === '') {
@@ -97,11 +103,13 @@ $hero = $g['hero_web'] ?: $g['hero'];
     <div class="checks">
       <label class="check"><input type="checkbox" name="featured" <?= $g['featured'] ? 'checked' : '' ?>> Featured on the banner</label>
       <label class="check"><input type="checkbox" name="hidden" <?= $g['hidden'] ? 'checked' : '' ?>> Hidden (kept here, left out when publishing)</label>
+      <label class="check"><input type="checkbox" name="soon" data-soon <?= $g['soon'] ? 'checked' : '' ?>> Coming soon (not out yet)</label>
     </div>
+    <label class="span2" data-soon-fields><span>When it's coming <span class="muted">(optional)</span></span><input name="date" value="<?= h($g['date']) ?>" maxlength="40" placeholder="December 2026"><small>Shown in place of a version, in the store's Coming soon row and on the site. Leave empty for just "Coming soon". A Coming soon game needs only its name, title ID and art; untick it when it's out and fill in Download.</small></label>
   </div>
 </section>
 
-<section class="card">
+<section class="card" data-not-soon>
   <h2>Download</h2>
   <div class="grid2">
     <label>Where the zip comes from
@@ -176,14 +184,17 @@ $hero = $g['hero_web'] ?: $g['hero'];
   <div hidden data-page-text data-blurb="<?= h($g['blurb'] ?: $g['description']) ?>" data-desc="<?= h($g['description']) ?>" data-id="<?= h($g['id']) ?>" data-kind="<?= h($g['kind']) ?>" data-author="<?= h($g['author']) ?>" data-needs="<?= h($g['needs']) ?>"></div>
 </section>
 
-<section class="card">
+<section class="card" data-not-soon>
   <h2>Game files</h2>
-  <label class="check"><input type="checkbox" name="setup" data-setup <?= $g['setup'] ? 'checked' : '' ?>> Recomp Store sets this game up from the player's own files (disc image, Title Update, DLC)</label>
+  <label class="check"><input type="checkbox" name="setup" data-setup <?= $g['setup'] ? 'checked' : '' ?>> Recomp Store sets this game up from the player's own files (disc image, Title Update, DLC, a ROM or data files)</label>
   <div class="grid2" data-setup-fields>
     <label class="span2">Where the port reads its files<input name="data_dir" value="<?= h($g['data_dir']) ?>" placeholder="/data/homebrew/PPSA92011"></label>
     <label class="span2">Files to ask for<textarea name="slots" rows="9" class="mono"><?= h($g['slots'] !== '' ? $g['slots'] : $slotTemplate) ?></textarea>
-      <small>One entry per file: what it's called, its kind, and the folder it goes in, relative to the folder above ("." means right in it). Kinds: iso (an Xbox 360 disc image, unpacked), stfs (a Title Update or DLC package from the console), image (a GameCube or Wii disc image copied as it is, .iso/.gcm/.ciso; needs Recomp Store 1.0.3). titleId (Xbox 360) or discId (GameCube/Wii, like GZLE01) is optional: when set, the store refuses a disc that isn't this game.</small></label>
+      <small>One entry per file: what it's called, its kind, and the folder it goes in, relative to the folder above ("." means right in it). Kinds: iso (an Xbox 360 disc image, unpacked), stfs (a Title Update or DLC package from the console), image (a GameCube or Wii disc image copied as it is, .iso/.gcm/.ciso; needs Recomp Store 1.0.3). titleId (Xbox 360) or discId (GameCube/Wii, like GZLE01) is optional: when set, the store refuses a disc that isn't this game.</small>
+      <small><strong>file</strong> (needs Recomp Store 1.0.6, set for you): the player's own file copied in, such as a ROM or a game's data files. <code>ext</code> the extensions to show (".z64 .n64 .v64"); <code>pick</code> the file to choose ("pak0.pk3"); <code>also</code> the files beside it that go too ("pak?.pk3"); <code>need</code> how many must be there to play (9); <code>name</code> what to call it in the game's folder ("DIABDAT.MPQ"); <code>sha1</code> the SHA-1s it may have, space-separated; <code>n64</code> true for a Nintendo 64 ROM (any byte order, saved as .z64); <code>made</code> a file the game makes from it, which counts as set up ("sm64.o2r").</small></label>
   </div>
+  <label><span>Save folders <span class="muted">(optional)</span></span><textarea name="saves" rows="2" class="mono" placeholder="userdata"><?= h($g['saves']) ?></textarea>
+    <small>Where the game keeps its saves, one per line, inside its folder (like userdata, or baseq3/q3config.cfg). With these, Delete in Recomp Store 1.0.6 offers Keep my saves: everything else goes, and the saves are there when it's installed again.</small></label>
 </section>
 
 <div class="sticky-save"><button class="primary">Save</button><span class="muted">Saving doesn't publish. Press Publish on the Games page when you're done.</span></div>

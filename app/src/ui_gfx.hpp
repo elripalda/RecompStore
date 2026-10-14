@@ -222,6 +222,12 @@ public:
         layer_fade_ = fade;
     }
 
+    /* Everything drawn after this is cut off outside the box (design pixels, moved by the
+     * layer as what's drawn in it is): a list that scrolls under its edges. unclip() ends
+     * it; begin() does too. */
+    void clip(float x, float y, float w, float h);
+    void unclip();
+
     /* The light look (Revolution): colours given to the drawing calls below
      * are turned light for dark and dark for light, keeping their hue, so
      * the screens drawn for the dark look read on white. Pictures are left
@@ -315,6 +321,7 @@ private:
     {
         VkDescriptorSet set;
         std::uint32_t first, count;
+        VkRect2D scissor; /* {0,0,0,0}: the whole target */
     };
     struct GlyphInfo
     {
@@ -441,6 +448,7 @@ private:
     std::vector<Vertex> vertices_;
     std::vector<Batch> batches_;
     bool overflowed_ = false;
+    VkRect2D clip_{}; /* clip(): in framebuffer pixels; {0,0,0,0} none */
 
 #define PORPOISE_UI_VK_FUNCS(X)                                                                  \
     X(vkCreateBuffer) X(vkDestroyBuffer) X(vkGetBufferMemoryRequirements) X(vkAllocateMemory)    \

@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace recomp::fs
 {
@@ -33,7 +34,10 @@ using ActAs = std::function<bool(const Who *who)>;
  * before it returns. log, if set, hears when that happens. */
 bool remove_tree(const std::string &path, std::size_t &files, std::string &bad, int &err,
                  const std::function<void(std::size_t)> &progress = {}, const ActAs &act_as = {},
-                 const std::function<void(const std::string &)> &log = {});
+                 const std::function<void(const std::string &)> &log = {}, const std::vector<std::string> *keep = nullptr);
+/* With keep: those paths stay, and so do the folders they're in (1.0.6, a game's saves on
+ * Delete). True when keep names path itself or anything in it. */
+bool holds(const std::string &path, const std::vector<std::string> &keep);
 
 /* Nothing at path any more (stat says it doesn't exist). */
 bool gone(const std::string &path);
