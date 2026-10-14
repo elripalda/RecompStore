@@ -267,7 +267,114 @@ const App *Store::find(const std::string &id) const
     for (const App &a : catalog_.apps)
         if (a.id == id)
             return &a;
+    for (const App &a : catalog_.soon)
+        if (a.id == id)
+            return &a;
     return nullptr;
+}
+
+/* ---- Discover's lines ---------------------------------------------------------------- */
+namespace
+{
+const float kTile = 256, kTileGap = 36, kTileLine = 336; /* a tile, the room between, a line of them with the words under */
+const int kRowShown = 6, kGridPer = 6, kWideShown = 3;
+const float kWideW = (1728 - kTileGap * 2) / 3, kWideH = 310, kWideLine = 310 + 84;
+const float kHead = 54, kSectionGap = 48, kGridGap = 20, kBannerH = 400;
+const float kDiscTop = 136, kViewTop = 118, kViewBottom = 1000; /* Discover's top on screen; what's shown of the lists */
+} // namespace
+
+std::vector<Store::DLine> Store::discover_lines() const
+{
+    std::vector<DLine> out;
+    float y = 0;
+    const auto feat = featured_apps();
+    if (!feat.empty())
+    {
+        DLine b;
+        b.kind = 0;
+        b.h = kBannerH;
+        b.items = feat;
+        out.push_back(b);
+        y = kBannerH + kSectionGap;
+    }
+    auto section = [&](int kind, const std::string &title, const std::vector<const App *> &items) {
+        if (items.empty()) return;
+        const float head = kind == 4 || title.empty() ? 0.f : kHead;
+        y += head;
+        if (kind == 2)
+        {
+            for (std::size_t i = 0; i < items.size(); i += kGridPer)
+            {
+                DLine l;
+                l.kind = 2;
+                l.y = y;
+                l.h = kTileLine;
+                if (i == 0) { l.head = head; l.title = title; }
+                l.items.assign(items.begin() + std::ptrdiff_t(i), items.begin() + std::ptrdiff_t(std::min(items.size(), i + kGridPer)));
+                out.push_back(l);
+                y += kTileLine + kGridGap;
+            }
+            y += kSectionGap - kGridGap;
+            return;
+        }
+        DLine l;
+        l.kind = kind;
+        l.y = y;
+        l.h = kind == 4 ? kBannerH : kind == 3 ? kWideLine : kTileLine;
+        l.head = head;
+        l.title = title;
+        l.items = items;
+        out.push_back(l);
+        y += l.h + kSectionGap;
+    };
+    std::vector<const App *> all, soon;
+    for (const App &a : catalog_.apps) all.push_back(&a);
+    for (const App &a : catalog_.soon) soon.push_back(&a);
+    if (catalog_.sections.empty())
+    {
+        /* A catalog from before sections: every game, then what's coming. */
+        section(2, "Latest games", all);
+        section(1, "Coming soon", soon);
+    }
+    else
+        for (const Section &sec : catalog_.sections)
+        {
+            if (sec.type == "spotlight")
+            {
+                for (const App &a : catalog_.apps)
+                    if (!sec.ids.empty() && a.id == sec.ids[0]) section(4, sec.title, {&a});
+            }
+            else if (sec.type == "soon")
+                section(sec.layout == "wide" ? 3 : 1, sec.title, soon);
+            else
+            {
+                std::vector<const App *> items;
+                if (sec.all)
+                    items = all;
+                else
+                    for (const std::string &id : sec.ids)
+                        for (const App &a : catalog_.apps)
+                            if (a.id == id) { items.push_back(&a); break; }
+                section(sec.layout == "grid" ? 2 : sec.layout == "wide" ? 3 : 1, sec.title, items);
+            }
+        }
+    return out;
+}
+
+int Store::line_first(const DLine &l, int col) const
+{
+    const int n = int(l.items.size());
+    if (l.kind == 1) return std::clamp(col - kRowShown + 2, 0, std::max(0, n - kRowShown));
+    if (l.kind == 3) return std::clamp(col - 1, 0, std::max(0, n - kWideShown));
+    return 0;
+}
+
+float Store::item_x(const DLine &l, int i, int first) const
+{
+    if (l.kind == 3) return 96 + float(i - first) * (kWideW + kTileGap);
+    if (l.kind == 1) return 96 + float(i - first) * (kTile + kTileGap);
+    if (l.kind == 2) return 96 + float(i) * (kTile + kTileGap);
+    return 96;
 }
 
 /* The version to have: the newest release on GitHub with the game's zip once the store
@@ -363,7 +470,7 @@ void Store::open(const std::string &id)
     notice_.clear();
     reset_notes();
     if (const App *a = find(id))
-        if (a->source == "github" && !a->repo.empty())
+        if (!a->soon && a->source == "github" && !a->repo.empty())
             engine().want_notes(a->repo);
     play(int(Sfx::Open));
 }
@@ -410,6 +517,11 @@ void Store::press_primary()
     const App *a = find(page_id_);
     if (!a)
         return;
+    if (a->soon)
+    {
+        play(int(Sfx::Error)); /* not out yet */
+        return;
+    }
     const JobState job = engine().job();
     if (job.phase == Phase::Working)
     {
@@ -597,9 +709,16 @@ void Store::picker_go(const std::string &path)
     else if (const App *a = find(page_id_))
         if (picker_slot_ >= 0 && picker_slot_ < int(a->slots.size()))
         {
-            const std::string &k = a->slots[std::size_t(picker_slot_)].kind;
-            if (k == "stfs") ext = "stfs";
-            else if (k == "image") ext = "image";
+            const Slot &sl = a->slots[std::size_t(picker_slot_)];
+            if (sl.kind == "stfs") ext = "stfs";
+            else if (sl.kind == "image") ext = "image";
+            else if (sl.kind == "file")
+            {
+                /* The slot's extensions, or every file. */
+                picker_ext_ = sl.ext.empty() ? std::string("*") : sl.ext;
+                for (char &c : picker_ext_) if (c == ',') c = ' ';
+                ext = picker_ext_.c_str();
+            }
         }
     picker_err_ = !list_dir(path, entries_, ext);
 }
@@ -899,8 +1018,20 @@ bool Store::update(const pad::State &p, float dt)
     if (confirm_)
     {
         confirm_t_ = std::min(1.f, confirm_t_ + dt * 5.f);
+        /* Cancel, Delete; or, for a game whose saves the store knows, Cancel, Keep my saves,
+         * Delete everything. */
+        const App *ca = find(page_id_);
+        const bool has_saves = ca && !ca->saves.empty();
+        if (has_saves != confirm_saves_)
+        {
+            /* The catalog changed under it (the choices with it): back to Cancel. */
+            confirm_saves_ = has_saves;
+            confirm_sel_ = 0;
+        }
+        const int last = has_saves ? 2 : 1;
         const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
-        if ((l && confirm_sel_ == 1) || (r && confirm_sel_ == 0)) { confirm_sel_ ^= 1; play(int(Sfx::Move)); }
+        const int sel = std::clamp(confirm_sel_ + (r ? 1 : 0) - (l ? 1 : 0), 0, last);
+        if (sel != confirm_sel_) { confirm_sel_ = sel; play(int(Sfx::Move)); }
         if (pressed(pad::BtnCircle) || (pressed(pad::BtnCross) && confirm_sel_ == 0))
         {
             confirm_ = false;
@@ -909,7 +1040,8 @@ bool Store::update(const pad::State &p, float dt)
         else if (pressed(pad::BtnCross))
         {
             confirm_ = false;
-            if (engine().remove(page_id_))
+            const bool keep_saves = last == 2 && confirm_sel_ == 1;
+            if (engine().remove(page_id_, keep_saves))
             {
                 notice_.clear();
                 page_focus_ = 0;
@@ -927,6 +1059,13 @@ bool Store::update(const pad::State &p, float dt)
         if (!a)
         {
             close();
+            return true;
+        }
+        /* A Coming soon entry's page: nothing to press but Back. */
+        if (a->soon)
+        {
+            if (pressed(pad::BtnCircle))
+                close();
             return true;
         }
         /* The patch notes, open: Up and Down scroll, Circle or Cross close them. */
@@ -986,6 +1125,7 @@ bool Store::update(const pad::State &p, float dt)
                 {
                     confirm_ = true;
                     confirm_sel_ = 0; /* Cancel first: deleting takes a deliberate move */
+                    confirm_saves_ = !a->saves.empty();
                     confirm_t_ = 0;
                     play(int(Sfx::Open));
                 }
@@ -1006,7 +1146,8 @@ bool Store::update(const pad::State &p, float dt)
         tab_ = tab;
         tab_t_ = 0;
         col_ = 0;
-        row_ = tab == Discover ? 1 : 0;
+        row_ = tab == Discover && !featured_apps().empty() ? 1 : 0;
+        dscroll_ = dscroll_to_ = uscroll_ = uscroll_to_ = lscroll_ = lscroll_to_ = 0;
         in_section_ = false;
         play(int(Sfx::Tab));
         return true;
@@ -1019,20 +1160,53 @@ bool Store::update(const pad::State &p, float dt)
     if (tab_ == Discover)
     {
         const auto feat = featured_apps();
-        const int n = int(catalog_.apps.size());
-        if (u && row_ == 1 && !feat.empty()) { row_ = 0; play(int(Sfx::Move)); }
-        if (d && row_ == 0 && n > 0) { row_ = 1; play(int(Sfx::Move)); }
-        if (moves && row_ == 1 && n > 0)
+        const auto lines = discover_lines();
+        const int nl = int(lines.size());
+        dcols_.resize(std::size_t(nl), 0);
+        row_ = std::clamp(row_, 0, std::max(0, nl - 1));
+        if (nl > 0)
         {
-            const int c = std::clamp(col_ + moves, 0, n - 1);
-            if (c != col_) { col_ = c; play(int(Sfx::Move)); }
-        }
-        if (moves && row_ == 0 && feat.size() > 1)
-        {
-            slide_ = (slide_ + moves + int(feat.size())) % int(feat.size());
-            slide_t_ = 0;
-            slide_fade_ = 0;
-            play(int(Sfx::Move));
+            const DLine &L = lines[std::size_t(row_)];
+            const int n = int(L.items.size());
+            col_ = std::clamp(col_, 0, std::max(0, n - 1));
+            if (moves && L.kind == 0 && feat.size() > 1)
+            {
+                slide_ = (slide_ + moves + int(feat.size())) % int(feat.size());
+                slide_t_ = 0;
+                slide_fade_ = 0;
+                play(int(Sfx::Move));
+            }
+            else if (moves && L.kind != 0 && n > 0)
+            {
+                const int c = std::clamp(col_ + moves, 0, n - 1);
+                if (c != col_) { col_ = c; play(int(Sfx::Move)); }
+            }
+            const int to = std::clamp(row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, nl - 1);
+            if (to != row_)
+            {
+                /* Onto the item nearest the one focused, as the lines are drawn. */
+                dcols_[std::size_t(row_)] = col_;
+                const float fw = L.kind == 3 ? kWideW : kTile;
+                const float fx = item_x(L, col_, line_first(L, col_)) + fw / 2;
+                const DLine &T = lines[std::size_t(to)];
+                const int tn = int(T.items.size());
+                const int remembered = std::clamp(dcols_[std::size_t(to)], 0, std::max(0, tn - 1));
+                const int first = line_first(T, remembered);
+                const int shown = T.kind == 1 ? kRowShown : T.kind == 3 ? kWideShown : tn;
+                const float tw = T.kind == 3 ? kWideW : kTile;
+                int best = (T.kind == 1 || T.kind == 2 || T.kind == 3) ? remembered : 0;
+                float best_d = 1e9f;
+                /* From the banner or a spotlight (the whole width): where that line was left. */
+                if (L.kind != 0 && L.kind != 4 && (T.kind == 1 || T.kind == 2 || T.kind == 3))
+                    for (int i = first; i < tn && i < first + shown; ++i)
+                    {
+                        const float dx = std::fabs(item_x(T, i, first) + tw / 2 - fx);
+                        if (dx < best_d) { best_d = dx; best = i; }
+                    }
+                row_ = to;
+                col_ = best;
+                play(int(Sfx::Move));
+            }
         }
         slide_t_ += dt;
         slide_fade_ = std::min(1.f, slide_fade_ + dt * 1.2f);
@@ -1042,11 +1216,15 @@ bool Store::update(const pad::State &p, float dt)
             slide_t_ = 0;
             slide_fade_ = 0;
         }
-        if (row_ == 0 && !feat.empty())
-            focus_id_ = feat[std::min<std::size_t>(std::size_t(slide_), feat.size() - 1)]->id;
-        else if (n > 0)
-            focus_id_ = catalog_.apps[std::size_t(std::min(col_, n - 1))].id;
-        if (pressed(pad::BtnCross) && !focus_id_.empty())
+        if (nl > 0)
+        {
+            const DLine &F = lines[std::size_t(row_)];
+            if (F.kind == 0 && !feat.empty())
+                focus_id_ = feat[std::min<std::size_t>(std::size_t(slide_), feat.size() - 1)]->id;
+            else if (!F.items.empty())
+                focus_id_ = F.items[std::size_t(std::clamp(col_, 0, int(F.items.size()) - 1))]->id;
+        }
+        if (pressed(pad::BtnCross) && !focus_id_.empty() && nl > 0)
             open(focus_id_);
     }
     else if (tab_ == Library || tab_ == Updates)
@@ -1339,7 +1517,13 @@ void Store::draw_tile(Gfx &gfx, const App &a, float x, float y, float size, floa
     }
     ring(gfx, tx, ty, w, w, 28 * s, focus);
     bool up = false;
-    const std::string st = state_of(a, &up);
+    const std::string st = a.soon ? (a.date.empty() ? std::string("Coming soon") : a.date) : state_of(a, &up);
+    if (a.soon)
+    {
+        const float bw = gfx.measure(Font::Bold, 14, "SOON", 1) + 24;
+        gfx.panel(tx + w - 14 - bw, ty + 14, bw, 28, C(kFrost), 1.f, 14);
+        gfx.text_mid(Font::Bold, 14, tx + w - 14 - bw / 2, ty + 28, C(kMidnight), Align::Center, "SOON", 1);
+    }
     if (up)
     {
         const float bw = gfx.measure(Font::Bold, 14, "Update") + 24;
@@ -1350,95 +1534,208 @@ void Store::draw_tile(Gfx &gfx, const App &a, float x, float y, float size, floa
     gfx.text_mid(Font::Regular, 17, x, y + size + 14 + 26 + 4 + 11, C(kMuted), Align::Left, st);
 }
 
+void Store::draw_wide(Gfx &gfx, const App &a, float x, float y, float w, float h, float focus)
+{
+    Art &t = art(a);
+    /* Focused: up 8px and 3% bigger, the ring and a deeper shadow, as a tile. */
+    const float s = 1 + 0.03f * focus;
+    const float ww = w * s, hh = h * s, R = 28 * s;
+    const float tx = x + (w - ww) / 2, ty = y + (h - hh) / 2 - 8 * focus;
+    gfx.panel(tx + 10, ty + 22 + 8 * focus, ww - 20, hh - 20, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.25f + 0.25f * focus}, 0, 24 + 12 * focus);
+    if (t.hero)
+    {
+        float uv[4];
+        cover_uv(t.hero, ww, hh, a.banner_x / 100.f, a.banner_y / 100.f, std::max(1.f, a.banner_zoom / 100.f), uv);
+        gfx.image_part(t.hero, tx, ty, ww, hh, uv, {}, R);
+    }
+    else if (t.blur)
+        gfx.image(t.blur, tx, ty, ww, hh, {0.7f, 0.7f, 0.7f, 1}, R);
+    else
+        gfx.panel(tx, ty, ww, hh, C(0x16233A), 1.f, R, kRim, 1.25f);
+    if (!t.hero)
+    {
+        /* No wide picture: the icon in the middle, or the name's first letters. */
+        if (t.icon)
+            gfx.image(t.icon, tx + ww / 2 - 84, ty + hh / 2 - 84, 168, 168, {}, 36);
+        else
+        {
+            gfx.text(Font::ExtraBold, 64, tx + 32, ty + 22, C(kFrost), Align::Left, a.name.substr(0, 2), -2);
+            gfx.text(Font::SemiBold, 16, tx + 32, ty + hh - 48, C(kSoft), Align::Left, fit(gfx, Font::SemiBold, 16, ww - 64, a.repo));
+        }
+    }
+    /* The logo over the picture when there is one, else the icon in the corner. */
+    else if (draw_logo(gfx, a, LogoPlace{}, tx + 28, ty + hh - 28 - 96, ww * 0.55f, 96, 0) < 0)
+    {
+        if (t.icon)
+            gfx.image(t.icon, tx + 22, ty + hh - 22 - 84, 84, 84, {}, 20);
+    }
+    else
+        draw_logo(gfx, a, LogoPlace{}, tx + 28, ty + hh - 28 - 96, ww * 0.55f, 96, 1.f);
+    gfx.panel(tx, ty, ww, hh, {0, 0, 0, 0}, 1.f, R, kRim, 1.25f);
+    ring(gfx, tx, ty, ww, hh, R, focus);
+    bool up = false;
+    const std::string st = a.soon ? (a.date.empty() ? std::string("Coming soon") : a.date) : state_of(a, &up);
+    const char *badge = a.soon ? "SOON" : up ? "Update" : nullptr;
+    if (badge)
+    {
+        const float bw = gfx.measure(Font::Bold, 14, badge, a.soon ? 1.f : 0.f) + 24;
+        gfx.panel(tx + ww - 16 - bw, ty + 16, bw, 28, a.soon ? C(kFrost) : C(kCyan), 1.f, 14);
+        gfx.text_mid(Font::Bold, 14, tx + ww - 16 - bw / 2, ty + 30, C(kMidnight), Align::Center, badge, a.soon ? 1.f : 0.f);
+    }
+    gfx.text_mid(Font::SemiBold, 21, x, y + h + 14 + 13, C(kFrost), Align::Left, fit(gfx, Font::SemiBold, 21, w, a.name));
+    gfx.text_mid(Font::Regular, 17, x, y + h + 14 + 26 + 4 + 11, C(kMuted), Align::Left, fit(gfx, Font::Regular, 17, w, st));
+}
+
+void Store::draw_banner(Gfx &gfx, const App &a, float x, float y, float w, float h, const std::string &kicker_head, float fade,
+                        bool drift, float focus)
+{
+    /* The banner (1728x400): the art frosted across it, the picture itself on the right
+     * (with its slow drift, on the featured banner), and the words on the left. */
+    const float R = 36;
+    Art &t = art(a);
+    gfx.panel(x + 10, y + 26, w - 20, h - 20, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.38f}, 0, 30);
+    gfx.panel(x, y, w, h, C(kMidnight), 1.f, R);
+    if (t.blur)
+    {
+        const float uv[4] = {0.03f, 0.08f, 0.97f, 0.92f}; /* the blur's soft middle, edges cut off */
+        gfx.image_part(t.blur, x, y, w, h, uv, {0.62f, 0.62f, 0.62f, fade}, R);
+    }
+    /* The words' side: the frosted art with a light wash, meeting the picture in a clean
+     * vertical edge (the picture is drawn over the wash's right end). */
+    const float gx = x, gy = y, gw = 600, gh = h;
+    gfx.panel(x, y, gw + R, h, {1, 1, 1, 0.07f}, 1.f, R);
+    if (t.hero)
+    {
+        float uv[4];
+        const float z = drift ? 1.f + 0.07f * (0.5f - 0.5f * std::cos(time_ * 3.14159f / 16.f)) : 1.f;
+        cover_uv(t.hero, w - gw, h, a.banner_x / 100.f, a.banner_y / 100.f, std::max(1.f, a.banner_zoom / 100.f) * z, uv);
+        gfx.image_part(t.hero, x + gw, y, w - gw, h, uv, {1, 1, 1, fade}, R);
+        const float sw = R + 2, du = (uv[2] - uv[0]) * sw / (w - gw);
+        const float strip[4] = {uv[0], uv[1], uv[0] + du, uv[3]};
+        gfx.image_part(t.hero, x + gw, y, sw, h, strip, {1, 1, 1, fade}, 0);
+        gfx.panel(x + gw, y, 2, h, {1, 1, 1, 0.10f}, 1.f, 0);
+    }
+    gfx.panel(x, y, w, h, {0, 0, 0, 0}, 1.f, R, kRim, 1.25f);
+    bool up = false;
+    const bool inst = !engine().installed(a.id).empty();
+    state_of(a, &up);
+    const std::string kicker = kicker_head + " \xC2\xB7 " + (up ? "UPDATE AVAILABLE" : inst ? "INSTALLED" : "NEW ON RECOMP STORE");
+    const float tx0 = gx + 64, tw0 = gw - 64 - 48;
+    const auto name = wrap(gfx, Font::ExtraBold, 50, tw0, a.name, 2);
+    const auto blurb = wrap(gfx, Font::Regular, 20, tw0, a.blurb.empty() ? a.description : a.blurb, 3);
+    const float k_h = 18, n_lh = 50 * 1.05f, b_lh = 20 * 1.45f;
+    const float total = k_h + 14 + n_lh * float(name.size()) + 14 + b_lh * float(blurb.size());
+    /* A logo, when the game has one, takes the name's place (its height, not the name's). */
+    const float logo_h = draw_logo(gfx, a, a.logo_banner, tx0, 0, tw0, 140, 0); /* alpha 0: measures only */
+    const float name_h = logo_h >= 0 ? logo_h : n_lh * float(name.size());
+    const float total2 = total - n_lh * float(name.size()) + name_h;
+    float ty = gy + (gh - total2) / 2;
+    gfx.text_mid(Font::Bold, 15, tx0, ty + k_h / 2, C(kCyan, fade), Align::Left, fit(gfx, Font::Bold, 15, tw0, kicker), 2);
+    ty += k_h + 14;
+    if (logo_h >= 0)
+        draw_logo(gfx, a, a.logo_banner, tx0, ty, tw0, 140, fade);
+    else
+        for (std::size_t i = 0; i < name.size(); ++i)
+            gfx.text_mid(Font::ExtraBold, 50, tx0, ty + n_lh * (float(i) + 0.5f), C(kFrost, fade), Align::Left, name[i], -1);
+    ty += name_h + 14;
+    draw_lines(gfx, Font::Regular, 20, tx0, ty, b_lh, C(0xE3E9F2, fade), blurb);
+    ring(gfx, x, y, w, h, R, focus);
+}
+
+void Store::draw_more(Gfx &gfx)
+{
+    /* Bottom middle, bobbing gently: a glass dot with an arrow pointing down. */
+    const float bob = 3.f * std::sin(time_ * 3.2f);
+    const float cx = gfx.design_w() / 2, cy = 1034 + bob, r = 22;
+    glass(gfx, cx - r, cy - r, r * 2, r * 2, r, kGlass, false);
+    gfx.glyph(Glyph::Arrow, cx, cy + 1, 15, C(kFrost, 0.9f), 3.14159265f);
+}
+
 void Store::draw_discover(Gfx &gfx)
 {
     const auto feat = featured_apps();
-    if (!feat.empty())
+    const auto lines = discover_lines();
+    const int nl = int(lines.size());
+    if (nl == 0)
     {
-        /* The featured banner (1728x400): the art frosted across it, the picture itself on
-         * the right with its slow drift, and a glass panel on the left with the words. */
-        const float x = 96, y = 136, w = 1728, h = 400, R = 36;
-        const int cur = std::min<int>(slide_, int(feat.size()) - 1);
-        const App &a = *feat[std::size_t(cur)];
-        Art &t = art(a);
-        const float fade = ease_out(slide_fade_);
-        gfx.panel(x + 10, y + 26, w - 20, h - 20, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.38f}, 0, 30);
-        gfx.panel(x, y, w, h, C(kMidnight), 1.f, R);
-        if (t.blur)
-        {
-            const float uv[4] = {0.03f, 0.08f, 0.97f, 0.92f}; /* the blur's soft middle, edges cut off */
-            gfx.image_part(t.blur, x, y, w, h, uv, {0.62f, 0.62f, 0.62f, fade}, R);
-        }
-        /* The words' side: the frosted art with a light wash, meeting the picture in a
-         * clean vertical edge (the picture is drawn over the wash's right end). */
-        const float gx = x, gy = y, gw = 600, gh = h;
-        gfx.panel(x, y, gw + R, h, {1, 1, 1, 0.07f}, 1.f, R);
-        if (t.hero)
-        {
-            float uv[4];
-            const float drift = 1.f + 0.07f * (0.5f - 0.5f * std::cos(time_ * 3.14159f / 16.f));
-            cover_uv(t.hero, w - gw, h, a.banner_x / 100.f, a.banner_y / 100.f, std::max(1.f, a.banner_zoom / 100.f) * drift, uv);
-            gfx.image_part(t.hero, x + gw, y, w - gw, h, uv, {1, 1, 1, fade}, R);
-            const float sw = R + 2, du = (uv[2] - uv[0]) * sw / (w - gw);
-            const float strip[4] = {uv[0], uv[1], uv[0] + du, uv[3]};
-            gfx.image_part(t.hero, x + gw, y, sw, h, strip, {1, 1, 1, fade}, 0);
-            /* A soft shadow where the picture meets the words. */
-            gfx.panel(x + gw, y, 2, h, {1, 1, 1, 0.10f}, 1.f, 0);
-        }
-        gfx.panel(x, y, w, h, {0, 0, 0, 0}, 1.f, R, kRim, 1.25f);
-        bool up = false;
-        const bool inst = !engine().installed(a.id).empty();
-        state_of(a, &up);
-        const std::string kicker = std::string("FEATURED \xC2\xB7 ") + (up ? "UPDATE AVAILABLE" : inst ? "INSTALLED" : "NEW ON RECOMP STORE");
-        const float tx0 = gx + 64, tw0 = gw - 64 - 48;
-        const auto name = wrap(gfx, Font::ExtraBold, 50, tw0, a.name, 2);
-        const auto blurb = wrap(gfx, Font::Regular, 20, tw0, a.blurb.empty() ? a.description : a.blurb, 3);
-        const float k_h = 18, n_lh = 50 * 1.05f, b_lh = 20 * 1.45f;
-        const float total = k_h + 14 + n_lh * float(name.size()) + 14 + b_lh * float(blurb.size());
-        /* A logo, when the game has one, takes the name's place (its height, not the name's). */
-        const float logo_h = draw_logo(gfx, a, a.logo_banner, tx0, 0, tw0, 140, 0); /* alpha 0: measures only */
-        const float name_h = logo_h >= 0 ? logo_h : n_lh * float(name.size());
-        const float total2 = total - n_lh * float(name.size()) + name_h;
-        float ty = gy + (gh - total2) / 2;
-        gfx.text_mid(Font::Bold, 15, tx0, ty + k_h / 2, C(kCyan, fade), Align::Left, kicker, 2);
-        ty += k_h + 14;
-        if (logo_h >= 0)
-            draw_logo(gfx, a, a.logo_banner, tx0, ty, tw0, 140, fade);
-        else
-            for (std::size_t i = 0; i < name.size(); ++i)
-                gfx.text_mid(Font::ExtraBold, 50, tx0, ty + n_lh * (float(i) + 0.5f), C(kFrost, fade), Align::Left, name[i], -1);
-        ty += name_h + 14;
-        draw_lines(gfx, Font::Regular, 20, tx0, ty, b_lh, C(0xE3E9F2, fade), blurb);
-        if (feat.size() > 1)
-        {
-            float dx = x + w - 28;
-            for (int i = int(feat.size()) - 1; i >= 0; --i)
-            {
-                const float dw = i == cur ? 34 : 10;
-                dx -= dw;
-                gfx.panel(dx, y + h - 32, dw, 10, i == cur ? C(kCyan) : C(kFrost, 0.45f), 1.f, 5);
-                dx -= 8;
-            }
-        }
-        ring(gfx, x, y, w, h, R, row_ == 0 ? 1.f : 0.f);
-    }
-
-    /* Latest games: 256px tiles, 36 apart. */
-    const float gy = feat.empty() ? 160.f : 584.f;
-    gfx.text_mid(Font::ExtraBold, 26, 96, gy + 16, C(kFrost), Align::Left, "Latest games");
-    const int n = int(catalog_.apps.size());
-    const float size = 256, gap = 36;
-    const int visible = 6;
-    const int first = std::clamp(col_ - visible + 2, 0, std::max(0, n - visible));
-    for (int i = first; i < n && i < first + visible; ++i)
-    {
-        float &f = focus_anim_[std::min(i, 63)];
-        f = approach(f, row_ == 1 && i == col_ ? 1.f : 0.f, 1.f / 60.f, 14.f);
-        draw_tile(gfx, catalog_.apps[std::size_t(i)], 96 + float(i - first) * (size + gap), gy + 54, size, ease_out(f));
-    }
-    if (n == 0)
-        gfx.text(Font::Regular, 20, 96, gy + 60, C(kMuted), Align::Left,
+        gfx.text(Font::Regular, 20, 96, 160 + 60, C(kMuted), Align::Left,
                  engine().online() ? "No games in the catalog yet." : "Connect your PS5 to the internet to load the catalog.");
+        return;
+    }
+    const int row = std::clamp(row_, 0, nl - 1);
+    /* Scrolled just enough to show the focused line whole, its section's title with it; at
+     * the top for the banner. */
+    const DLine &F = lines[std::size_t(row)];
+    const float bottom = kViewBottom - 8, total = lines.back().y + lines.back().h;
+    float to = dscroll_to_;
+    if (F.kind == 0) to = 0;
+    if (kDiscTop + F.y + F.h - to > bottom) to = kDiscTop + F.y + F.h - bottom;
+    if (F.y - F.head < to) to = F.y - F.head;
+    to = std::clamp(to, 0.f, std::max(0.f, kDiscTop + total - bottom));
+    dscroll_to_ = to;
+    dscroll_ = approach(dscroll_, to, 1.f / 60.f, 12.f);
+    if (std::fabs(dscroll_ - to) < 0.5f) dscroll_ = to;
+
+    gfx.clip(0, kViewTop, gfx.design_w(), kViewBottom - kViewTop);
+    for (int i = 0; i < nl; ++i)
+    {
+        const DLine &L = lines[std::size_t(i)];
+        const float sy = kDiscTop + L.y - dscroll_;
+        if (sy + L.h < kViewTop - 20 || sy - L.head > kViewBottom) continue;
+        if (L.head > 0)
+            gfx.text_mid(Font::ExtraBold, 26, 96, sy - L.head + 16, C(kFrost), Align::Left, L.title);
+        const bool on = i == row;
+        if (L.kind == 0)
+        {
+            const int cur = std::min<int>(slide_, int(L.items.size()) - 1);
+            draw_banner(gfx, *L.items[std::size_t(cur)], 96, sy, 1728, kBannerH, "FEATURED", ease_out(slide_fade_), true, on ? 1.f : 0.f);
+            if (L.items.size() > 1)
+            {
+                float dx = 96 + 1728 - 28;
+                for (int k = int(L.items.size()) - 1; k >= 0; --k)
+                {
+                    const float dw = k == cur ? 34 : 10;
+                    dx -= dw;
+                    gfx.panel(dx, sy + kBannerH - 32, dw, 10, k == cur ? C(kCyan) : C(kFrost, 0.45f), 1.f, 5);
+                    dx -= 8;
+                }
+            }
+            continue;
+        }
+        if (L.kind == 4)
+        {
+            std::string head = L.title.empty() ? std::string("SPOTLIGHT") : L.title;
+            for (char &c : head) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A'); /* (no toupper: only the imports the console is known to have) */
+            draw_banner(gfx, *L.items[0], 96, sy, 1728, kBannerH, head, 1.f, false, on ? 1.f : 0.f);
+            continue;
+        }
+        const int n = int(L.items.size());
+        const int col = on ? std::clamp(col_, 0, n - 1) : (i < int(dcols_.size()) ? std::clamp(dcols_[std::size_t(i)], 0, n - 1) : 0);
+        const int first = line_first(L, col);
+        const int shown = L.kind == 1 ? kRowShown : L.kind == 3 ? kWideShown : n;
+        for (int k = first; k < n && k < first + shown; ++k)
+        {
+            float &f = dfocus_[i * 1000 + k];
+            f = approach(f, on && k == col ? 1.f : 0.f, 1.f / 60.f, 14.f);
+            const float x = item_x(L, k, first);
+            if (L.kind == 3)
+                draw_wide(gfx, *L.items[std::size_t(k)], x, sy, kWideW, kWideH, ease_out(f));
+            else
+                draw_tile(gfx, *L.items[std::size_t(k)], x, sy, kTile, ease_out(f));
+        }
+        /* More of a row off to the side: a faint arrow at that end. */
+        if (L.kind == 1 || L.kind == 3)
+        {
+            const float mid = sy + (L.kind == 3 ? kWideH : kTile) / 2;
+            if (first > 0)
+                gfx.glyph(Glyph::Arrow, 60, mid, 16, C(kFrost, 0.55f), -1.5708f);
+            if (first + shown < n)
+                gfx.glyph(Glyph::Arrow, 1920 - 60, mid, 16, C(kFrost, 0.55f), 1.5708f);
+        }
+    }
+    gfx.unclip();
+    if (kDiscTop + total - dscroll_ > kViewBottom + 4)
+        draw_more(gfx);
 }
 
 void Store::draw_library(Gfx &gfx)
@@ -1447,20 +1744,38 @@ void Store::draw_library(Gfx &gfx)
     gfx.text_mid(Font::ExtraBold, 48, 96, 160 + 30, C(kFrost), Align::Left, "Library", -1);
     const std::string count = list.size() == 1 ? "1 game installed" : std::to_string(list.size()) + " games installed";
     gfx.text_mid(Font::Regular, 21, 96 + gfx.measure(Font::ExtraBold, 48, "Library", -1) + 18, 160 + 36, C(kMuted), Align::Left, count);
-    const float size = 256, gap = 36, top = 160 + 60 + 26 + 10;
+    const float size = 256, gap = 36, top = 160 + 60 + 26 + 10, pitch = size + 120, clip_top = 226;
+    const int rows = int((list.size() + 4) / 5);
+    /* Scrolled a line at a time to keep the focused game whole above the buttons' hints. */
+    const float bottom = kViewBottom - 8;
+    float to = lscroll_to_;
+    const int r = list.empty() ? 0 : std::clamp(col_, 0, int(list.size()) - 1) / 5;
+    if (top + float(r) * pitch + 330 - to > bottom) to = top + float(r) * pitch + 330 - bottom;
+    if (float(r) * pitch < to) to = float(r) * pitch;
+    const float total = float(rows) * pitch + 84;
+    to = std::clamp(to, 0.f, std::max(0.f, top + total - bottom));
+    lscroll_to_ = to;
+    lscroll_ = approach(lscroll_, to, 1.f / 60.f, 12.f);
+    if (std::fabs(lscroll_ - to) < 0.5f) lscroll_ = to;
+    gfx.clip(0, clip_top, gfx.design_w(), kViewBottom - clip_top);
     for (int i = 0; i < int(list.size()); ++i)
     {
-        float &f = focus_anim_[std::min(i, 63)];
+        float &f = focus_anim_[std::min(i, 511)];
         f = approach(f, i == col_ ? 1.f : 0.f, 1.f / 60.f, 14.f);
-        draw_tile(gfx, *list[std::size_t(i)], 96 + float(i % 5) * (size + gap), top + float(i / 5) * (size + 120), size, ease_out(f));
+        const float y = top + float(i / 5) * pitch - lscroll_;
+        if (y > kViewBottom || y + 340 < clip_top) continue;
+        draw_tile(gfx, *list[std::size_t(i)], 96 + float(i % 5) * (size + gap), y, size, ease_out(f));
     }
-    const float by = list.empty() ? top : top + float((list.size() + 4) / 5) * (size + 120);
-    if (by + 80 < 1000)
+    const float by = (list.empty() ? top : top + float(rows) * pitch) - lscroll_;
+    if (by < kViewBottom)
     {
         glass(gfx, 96, by, 900, 84, 24, kGlass, false);
         const auto lines = wrap(gfx, Font::Regular, 19, 900 - 56, "Games you install from the store show up here. Open one to update it, set up its game files, or see where it lives on your console.", 2);
         draw_lines(gfx, Font::Regular, 19, 124, by + 42 - 13.5f * float(lines.size()), 27, C(kSoft), lines);
     }
+    gfx.unclip();
+    if (rows > 0 && top + float(rows - 1) * pitch + 330 - lscroll_ > kViewBottom + 4)
+        draw_more(gfx);
 }
 
 void Store::draw_updates(Gfx &gfx)
@@ -1468,9 +1783,23 @@ void Store::draw_updates(Gfx &gfx)
     gfx.text_mid(Font::ExtraBold, 48, 96, 160 + 30, C(kFrost), Align::Left, "Latest Updates", -1);
     gfx.text_mid(Font::Regular, 21, 96 + gfx.measure(Font::ExtraBold, 48, "Latest Updates", -1) + 18, 160 + 36, C(kMuted),
                  Align::Left, "Newest releases first. Once you've updated, a game drops off your to-do.");
-    float y = 160 + 60 + 22;
+    const float top = 160 + 60 + 22, pitch = 148 + 22, clip_top = 226;
     const std::string store_up = engine().store_update();
     const int first = store_up.empty() ? 0 : 1;
+    const int n = int(catalog_.apps.size()) + first;
+    /* Scrolled a row at a time to keep the focused one whole above the buttons' hints. */
+    const float bottom = kViewBottom - 8;
+    float to = uscroll_to_;
+    const int f0 = std::clamp(col_, 0, std::max(0, n - 1));
+    if (top + float(f0) * pitch + 148 - to > bottom) to = top + float(f0) * pitch + 148 - bottom;
+    if (float(f0) * pitch < to) to = float(f0) * pitch;
+    const float total = float(n) * pitch - 22;
+    to = std::clamp(to, 0.f, std::max(0.f, top + total - bottom));
+    uscroll_to_ = to;
+    uscroll_ = approach(uscroll_, to, 1.f / 60.f, 12.f);
+    if (std::fabs(uscroll_ - to) < 0.5f) uscroll_ = to;
+    gfx.clip(0, clip_top, gfx.design_w(), kViewBottom - clip_top);
+    float y = top - uscroll_;
     if (first)
     {
         float &f = focus_anim_[0];
@@ -1502,13 +1831,14 @@ void Store::draw_updates(Gfx &gfx)
                      std::string("You have ") + kVersion + " \xC2\xB7 from GitHub, elripalda/RecompStore");
         gfx.panel(x + w - 28 - bw, yy + h / 2 - 28, bw, 56, C(kCyan), 1.f, 18);
         gfx.text_mid(Font::Bold, 20, x + w - 28 - bw / 2, yy + h / 2, C(kMidnight), Align::Center, label);
-        y += h0 + 22;
+        y += pitch;
     }
-    for (int i = 0; i < int(catalog_.apps.size()) && y < 960; ++i)
+    for (int i = 0; i < int(catalog_.apps.size()); ++i, y += pitch)
     {
         const App &a = catalog_.apps[std::size_t(i)];
-        float &f = focus_anim_[std::min(i + first, 63)];
+        float &f = focus_anim_[std::min(i + first, 511)];
         f = approach(f, i + first == col_ ? 1.f : 0.f, 1.f / 60.f, 14.f);
+        if (y > kViewBottom || y + 160 < clip_top) continue;
         const float k = ease_out(f);
         const float s = 1 + 0.015f * k;
         const float w0 = 1728, h0 = 148;
@@ -1541,8 +1871,10 @@ void Store::draw_updates(Gfx &gfx)
         const Color fg = up ? C(kMidnight) : inst ? C(0x9FF0C6) : C(kFrost);
         gfx.panel(x + w - 28 - bw, yy + h / 2 - 28, bw, 56, bg, 1.f, 18);
         gfx.text_mid(Font::Bold, 20, x + w - 28 - bw / 2, yy + h / 2, fg, Align::Center, label);
-        y += h0 + 22;
     }
+    gfx.unclip();
+    if (top + total - uscroll_ > kViewBottom + 4)
+        draw_more(gfx);
 }
 
 void Store::draw_settings(Gfx &gfx)
@@ -1909,11 +2241,96 @@ void Store::draw_notes(Gfx &gfx, const App &a, float x, float y, float w, float 
     }
 }
 
+void Store::draw_soon_page(Gfx &gfx, const App &a, float k)
+{
+    /* A game that isn't out yet: its art, its name, when, and what it is. Nothing to press. */
+    Art &t = art(a);
+    const float W = gfx.design_w(), H = gfx.design_h();
+    gfx.set_layer(0, 0, k);
+    gfx.panel(0, 0, W, H, C(kMidnight), 1.f, 0);
+    if (t.hero)
+    {
+        float uv[4];
+        cover_uv(t.hero, W, H, 0.5f, a.banner_y / 100.f, 1.04f - 0.04f * k, uv);
+        gfx.image_part(t.hero, 0, 0, W, H, uv);
+    }
+    else if (t.blur)
+        gfx.image(t.blur, -60, -60, W + 120, H + 120, {0.6f, 0.6f, 0.6f, 1});
+    gfx.panel(0, 0, W, H, C(kMidnight, 0.6f), 1.f, 0);
+    gfx.set_layer(0, (1 - k) * 28, k);
+    {
+        const float bw = 20 + 22 + 10 + gfx.measure(Font::SemiBold, 19, "Store") + 26;
+        glass(gfx, 96, 52, bw, 51, 25.5f, kGlass, false);
+        if (chevron_)
+            gfx.image(chevron_, 96 + 20, 52 + 25.5f - 11, 22, 22);
+        gfx.text_mid(Font::SemiBold, 19, 96 + 20 + 22 + 10, 52 + 25.5f, C(kFrost), Align::Left, "Store");
+    }
+    float x = 96, y = 190;
+    {
+        float chx = x;
+        auto chip = [&](const std::string &s, Font f, Color fill, Color edge, Color fg) {
+            const float w = gfx.measure(f, 16, s) + 32;
+            gfx.panel(chx, y, w, 34, fill, 1.f, 17, edge, 1.25f);
+            gfx.text_mid(f, 16, chx + w / 2, y + 17, fg, Align::Center, s);
+            chx += w + 12;
+        };
+        chip("Coming soon", Font::Bold, C(kCyan), C(kCyan), C(kMidnight));
+        if (!a.date.empty()) chip(a.date, Font::SemiBold, kGlass, kRim, C(kFrost));
+        if (!a.author.empty()) chip("By " + a.author, Font::SemiBold, kGlass, kRim, C(kFrost));
+        y += 34 + 26;
+    }
+    const float logo_h = draw_logo(gfx, a, a.logo_page, x, y, 820, 230, 1.f);
+    if (logo_h >= 0)
+        y += logo_h + 26;
+    else
+    {
+        const auto name = wrap(gfx, Font::ExtraBold, 92, 920, a.name, 2);
+        for (std::size_t i = 0; i < name.size(); ++i)
+            gfx.text_mid(Font::ExtraBold, 92, x, y + 92 * (float(i) + 0.5f), C(kFrost), Align::Left, name[i], -2.5f);
+        y += 92 * float(name.size()) + 26;
+    }
+    const std::string about = a.description.empty() ? a.blurb : a.description;
+    y += draw_lines(gfx, Font::Regular, 25, x, y, 37.5f, C(kBody), wrap(gfx, Font::Regular, 25, 860, about, 8));
+
+    /* Right: the panel, as a game's, with when instead of a button. */
+    const float pw = 640, px = W - 96 - pw, py = 190, ix = px + 40, iw = pw - 80;
+    const auto lines = wrap(gfx, Font::Regular, 20, iw,
+                            "It isn't out yet. When it is, it shows up in Discover and you can install it from here, as any other game.", 4);
+    const std::string where = !a.repo.empty() ? "github.com/" + a.repo : a.url;
+    const float ph = 40 + 112 + 28 + 84 + 28 + 30 * float(lines.size()) + (where.empty() ? 0 : 28 + 56) + 40;
+    glass(gfx, px, py, pw, ph, 34, C(kMidnight, 0.74f), true);
+    float ry = py + 40;
+    if (t.icon)
+        gfx.image(t.icon, ix, ry, 112, 112, {}, 26);
+    else
+    {
+        gfx.panel(ix, ry, 112, 112, C(kFrost, 0.1f), 1.f, 26);
+        gfx.text_mid(Font::ExtraBold, 44, ix + 56, ry + 56, C(kFrost), Align::Center, a.name.substr(0, 2));
+    }
+    gfx.text_mid(Font::ExtraBold, 28, ix + 134, ry + 56 - 16, C(kFrost), Align::Left, fit(gfx, Font::ExtraBold, 28, iw - 134, a.name));
+    gfx.text_mid(Font::Regular, 19, ix + 134, ry + 56 + 20, C(0xB9C4D3), Align::Left, a.author.empty() ? "Coming soon" : "By " + a.author);
+    ry += 112 + 28;
+    gfx.panel(ix, ry, iw, 84, C(kFrost, 0.10f), 1.f, 24, C(kFrost, 0.25f), 1.25f);
+    gfx.text_mid(Font::Bold, 26, ix + iw / 2, ry + 42, C(kFrost), Align::Center, a.date.empty() ? "Coming soon" : "Coming " + a.date);
+    ry += 84 + 28;
+    ry += draw_lines(gfx, Font::Regular, 20, ix, ry, 30, C(kSoft), lines);
+    if (!where.empty())
+    {
+        ry += 28;
+        gfx.panel(ix, ry, iw, 1.25f, kLine, 1.f, 0);
+        gfx.text_mid(Font::Regular, 19, ix, ry + 28, C(kMuted), Align::Left, "Follow it");
+        gfx.text_mid(Font::Regular, 19, ix + iw, ry + 28, C(kFrost), Align::Right, fit(gfx, Font::Regular, 19, iw - 160, where));
+    }
+    gfx.set_layer();
+}
+
 void Store::draw_page(Gfx &gfx)
 {
     const App *ap = find(page_id_);
     if (!ap || page_t_ < 0.01f)
         return;
+    if (ap->soon)
+        return draw_soon_page(gfx, *ap, ease_out(page_t_));
     const App &a = *ap;
     Art &t = art(a);
     const float W = gfx.design_w(), H = gfx.design_h();
@@ -2345,6 +2762,10 @@ void Store::draw_picker(Gfx &gfx)
         else if (slot.kind == "image")
             hint_line = "Your own " + a->name + " disc image" + (slot.disc_id.empty() ? std::string() : ", " + slot.disc_id) +
                         " (.iso, .gcm or .ciso)";
+        else if (slot.kind == "file")
+            hint_line = slot.n64 ? "Your own " + a->name + " ROM (.z64, .n64 or .v64): the store checks it and turns it into a .z64"
+                        : !slot.pick.empty() ? "Your " + slot.pick + (slot.also.empty() ? std::string() : ": the files that go with it, from the same folder, are copied too")
+                        : "Your own " + slot.label + (slot.ext.empty() ? std::string() : " (" + slot.ext + ")");
         else
             hint_line = slot.title_id.empty() ? std::string("Your own Xbox 360 disc image (.iso)") : "Your own " + a->name + " disc image (.iso)";
     }
@@ -2442,12 +2863,22 @@ void Store::draw_confirm(Gfx &gfx)
     gfx.set_layer(0, (1 - k) * 20, k);
     const float bw = 820, bx = (W - bw) / 2, pad = 48, iw = bw - pad * 2;
     const std::string folder = app_folder(a->id);
-    std::string body = "This deletes " + folder + " and everything in it: the game, the files from your disc, your saves and mods.";
+    const bool saves = !a->saves.empty();
+    std::string body = saves ? "This deletes " + folder + ": the game, the files from your disc and your mods."
+                             : "This deletes " + folder + " and everything in it: the game, the files from your disc, your saves and mods.";
     if (a->has_setup && !a->data_dir.empty() && a->data_dir.rfind(folder + "/", 0) != 0 && a->data_dir != folder)
         body += " The game files the store set up in " + a->data_dir + " go too.";
-    body += " It can't be undone.";
+    if (saves)
+    {
+        std::string where;
+        for (std::size_t i = 0; i < a->saves.size() && i < 3; ++i) where += (i ? ", " : "") + a->saves[i];
+        body += " Keep my saves leaves your saves (" + where + ") where they are, so installing it again picks up where you left off.";
+        body += " Delete everything takes them too, and that can't be undone.";
+    }
+    else
+        body += " It can't be undone.";
     const auto title = wrap(gfx, Font::ExtraBold, 32, iw, "Delete " + a->name + "?", 2);
-    const auto lines = wrap(gfx, Font::Regular, 20, iw, body, 5);
+    const auto lines = wrap(gfx, Font::Regular, 20, iw, body, saves ? 8 : 5);
     const float bh = pad + 40 * float(title.size()) + 18 + 30 * float(lines.size()) + 36 + 64 + pad;
     const float by = (H - bh) / 2;
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
@@ -2456,17 +2887,21 @@ void Store::draw_confirm(Gfx &gfx)
         gfx.text_mid(Font::ExtraBold, 32, bx + pad, y + 40 * (float(i) + 0.5f), C(kFrost), Align::Left, title[i]);
     y += 40 * float(title.size()) + 18;
     y += draw_lines(gfx, Font::Regular, 20, bx + pad, y, 30, C(kSoft), lines) + 36;
-    const float gap = 16, w2 = (iw - gap) / 2;
-    const char *labels[2] = {"Cancel", "Delete"};
-    for (int i = 0; i < 2; ++i)
+    const int n = saves ? 3 : 2;
+    const float gap = 16, w2 = (iw - gap * float(n - 1)) / float(n);
+    const char *labels2[2] = {"Cancel", "Delete"};
+    const char *labels3[3] = {"Cancel", "Keep my saves", "Delete everything"};
+    for (int i = 0; i < n; ++i)
     {
         const float x = bx + pad + float(i) * (w2 + gap);
         const bool on = confirm_sel_ == i;
-        const Color bg = i == 1 ? C(0xE5484D, on ? 1.f : 0.25f) : C(kFrost, on ? 1.f : 0.12f);
-        const Color fg = i == 1 ? C(0xFFFFFF) : (on ? C(kMidnight) : C(kFrost));
+        const bool red = i == n - 1;
+        const Color bg = red ? C(0xE5484D, on ? 1.f : 0.25f) : C(kFrost, on ? 1.f : 0.12f);
+        const Color fg = red ? C(0xFFFFFF) : (on ? C(kMidnight) : C(kFrost));
+        const char *label = saves ? labels3[i] : labels2[i];
         gfx.panel(x, y, w2, 64, bg, 1.f, 20);
         ring(gfx, x, y, w2, 64, 20, on ? 1.f : 0.f, true);
-        gfx.text_mid(Font::Bold, 22, x + w2 / 2, y + 32, fg, Align::Center, labels[i]);
+        gfx.text_mid(Font::Bold, 22, x + w2 / 2, y + 32, fg, Align::Center, label);
     }
     gfx.set_layer();
 }
@@ -2496,6 +2931,12 @@ void Store::draw_hints(Gfx &gfx)
         hint(hint_circle_, "Close");
         return;
     }
+    if (page_open_ && !picker_)
+        if (const App *a = find(page_id_); a && a->soon)
+        {
+            hint(hint_circle_, "Back");
+            return;
+        }
     if (page_open_ && !picker_ && notes_focus_)
     {
         hint(hint_circle_, "Back");

@@ -1730,7 +1730,31 @@ void Gfx::begin(unsigned slot, float target_w, float target_h, float time, float
     vertices_.clear();
     batches_.clear();
     overflowed_ = false;
+    clip_ = VkRect2D{};
 }
+
+void Gfx::clip(float x, float y, float w, float h)
+{
+    /* Moved and scaled as push() moves what's drawn: the layer, the intro, the content
+     * scale about the middle; then to framebuffer pixels. */
+    const float dy = layer_dy_ + intro_dy_, scale = look_.content_scale;
+    auto px = [&](float dx, float v, float design, float target) {
+        /* As push(): scaled about the middle, then moved (the move isn't scaled). */
+        return (design / 2 + (v - design / 2) * scale + dx) / design * target;
+    };
+    float x0 = px(layer_dx_, x, kDesignW, target_w_), x1 = px(layer_dx_, x + w, kDesignW, target_w_);
+    float y0 = px(dy, y, kDesignH, target_h_), y1 = px(dy, y + h, kDesignH, target_h_);
+    x0 = std::clamp(x0, 0.f, target_w_);
+    x1 = std::clamp(x1, 0.f, target_w_);
+    y0 = std::clamp(y0, 0.f, target_h_);
+    y1 = std::clamp(y1, 0.f, target_h_);
+    const std::int32_t ix = std::int32_t(std::floor(x0)), iy = std::int32_t(std::floor(y0));
+    const std::int32_t iw = std::max<std::int32_t>(1, std::int32_t(std::ceil(x1)) - ix);
+    const std::int32_t ih = std::max<std::int32_t>(1, std::int32_t(std::ceil(y1)) - iy);
+    clip_ = VkRect2D{{ix, iy}, {std::uint32_t(iw), std::uint32_t(ih)}};
+}
+
+void Gfx::unclip() { clip_ = VkRect2D{}; }
 
 void Gfx::to_clip(const Corner &c, float out[4]) const
 {
@@ -1755,8 +1779,12 @@ void Gfx::push(Texture *t, const Vertex v[4])
         return;
     }
     VkDescriptorSet set = (t ? t : white_)->set;
-    if (batches_.empty() || batches_.back().set != set)
-        batches_.push_back({set, std::uint32_t(vertices_.size()), 0});
+    auto same_clip = [&](const VkRect2D &a) {
+        return a.offset.x == clip_.offset.x && a.offset.y == clip_.offset.y && a.extent.width == clip_.extent.width &&
+               a.extent.height == clip_.extent.height;
+    };
+    if (batches_.empty() || batches_.back().set != set || !same_clip(batches_.back().scissor))
+        batches_.push_back({set, std::uint32_t(vertices_.size()), 0, clip_});
     static const int order[6] = {0, 1, 2, 0, 2, 3};
     const float fade = layer_fade_ * intro_fade_, dy = layer_dy_ + intro_dy_;
     const float scale = look_.content_scale;
@@ -2358,8 +2386,16 @@ void Gfx::record(VkCommandBuffer cmd)
                                  L.light1.b,
                                  L.flat ? 1.0f : 0.0f};
     vkCmdPushConstants_(cmd, layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof push_data, push_data);
+    VkRect2D cur = scissor;
     for (const Batch &b : batches_)
     {
+        const VkRect2D want = b.scissor.extent.width ? b.scissor : scissor;
+        if (want.offset.x != cur.offset.x || want.offset.y != cur.offset.y || want.extent.width != cur.extent.width ||
+            want.extent.height != cur.extent.height)
+        {
+            vkCmdSetScissor_(cmd, 0, 1, &want);
+            cur = want;
+        }
         vkCmdBindDescriptorSets_(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &b.set, 0, nullptr);
         vkCmdDraw_(cmd, b.count, 1, b.first, 0);
     }

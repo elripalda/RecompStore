@@ -37,9 +37,35 @@ bool store_too_old(const App &a)
     return !a.min_store.empty() && version_newer(a.min_store, kVersion);
 }
 
+bool plain_leaf(const std::string &n)
+{
+    if (n.empty() || n.size() > 128 || n[0] == '.') return false;
+    for (const char c : n)
+        if (c == '/' || c == '\\' || c == ':' || static_cast<unsigned char>(c) < 0x20 || c == 0x7F) return false;
+    return true;
+}
+
+bool plain_path(const std::string &p)
+{
+    if (p.empty() || p.size() > 200) return false;
+    if (p[0] == '/' && p.rfind("/data/", 0) != 0) return false;
+    std::size_t at = p[0] == '/' ? 1 : 0;
+    while (at <= p.size())
+    {
+        std::size_t end = p.find('/', at);
+        if (end == std::string::npos) end = p.size();
+        const std::string part = p.substr(at, end - at);
+        if (part.empty() || part == "." || part == "..") return false;
+        at = end + 1;
+    }
+    for (const char c : p)
+        if (c == '\\' || static_cast<unsigned char>(c) < 0x20 || c == 0x7F) return false;
+    return true;
+}
+
 bool slot_kind_known(const std::string &kind)
 {
-    return kind == "iso" || kind == "stfs" || kind == "image";
+    return kind == "iso" || kind == "stfs" || kind == "image" || kind == "file";
 }
 
 bool asset_matches(const std::string &pattern, const std::string &name)
@@ -75,15 +101,25 @@ bool parse_catalog(const std::string &text, Catalog &out)
     out.payload = site["payload"].str();
     for (std::size_t i = 0; i < j["featured"].size(); ++i) out.featured.push_back(j["featured"][i].str());
     /* "apps": every store sees them. "newerStoreApps": games that need Recomp Store 1.0.3 or
-     * newer (each says which in "minStore"), which older stores don't read at all. */
-    auto add = [&](const Json &x) {
+     * newer (each says which in "minStore"), which older stores don't read at all.
+     * "comingSoon" (1.0.6): entries that can't be installed yet, read the same way. */
+    auto add = [&](const Json &x, bool soon) {
         App a;
         a.id = x["id"].str();
         if (a.id.empty() || a.id.find('/') != std::string::npos || a.id.find("..") != std::string::npos) return;
         for (const App &o : out.apps)
             if (o.id == a.id) return; /* listed twice: the first */
+        for (const App &o : out.soon)
+            if (o.id == a.id) return;
+        a.soon = soon;
+        a.date = x["date"].str();
+        for (std::size_t k = 0; k < x["saves"].size(); ++k)
+        {
+            const std::string p = x["saves"][k].str();
+            if (plain_path(p) && a.saves.size() < 16) a.saves.push_back(p);
+        }
         a.min_store = x["minStore"].str();
-        a.order = int(x["order"].integer(int(out.apps.size()) + 1000));
+        a.order = int(x["order"].integer(int(soon ? out.soon.size() : out.apps.size()) + 1000));
         a.name = x["name"].str(a.id);
         a.kind = x["kind"].str("community");
         a.author = x["author"].str();
@@ -135,17 +171,61 @@ bool parse_catalog(const std::string &text, Catalog &out)
                 s.to = slots[k]["to"].str(".");
                 s.title_id = slots[k]["titleId"].str();
                 s.disc_id = slots[k]["discId"].str();
+                s.ext = slots[k]["ext"].str();
+                s.pick = slots[k]["pick"].str();
+                s.also = slots[k]["also"].str();
+                s.name = slots[k]["name"].str();
+                s.sha1 = slots[k]["sha1"].str();
+                s.made = slots[k]["made"].str();
+                s.n64 = slots[k]["n64"].boolean(false);
+                s.need = int(std::clamp<long long>(slots[k]["need"].integer(1), 1, 64));
+                /* A name or a made file that isn't one plain name: a slot this store won't set up. */
+                if (s.kind == "file" && ((!s.name.empty() && !plain_leaf(s.name)) || (!s.made.empty() && !plain_leaf(s.made))))
+                    s.kind = "file-bad";
+                if (!plain_leaf(s.key)) continue; /* its setup record is named after it */
                 s.required = slots[k]["required"].boolean(true);
                 s.multiple = slots[k]["multiple"].boolean(false);
                 a.slots.push_back(s);
             }
         }
-        out.apps.push_back(a);
+        if (soon)
+        {
+            a.kind = "soon";
+            out.soon.push_back(a);
+        }
+        else
+            out.apps.push_back(a);
     };
-    for (std::size_t i = 0; i < j["apps"].size(); ++i) add(j["apps"][i]);
-    for (std::size_t i = 0; i < j["newerStoreApps"].size(); ++i) add(j["newerStoreApps"][i]);
+    for (std::size_t i = 0; i < j["apps"].size(); ++i) add(j["apps"][i], false);
+    for (std::size_t i = 0; i < j["newerStoreApps"].size(); ++i) add(j["newerStoreApps"][i], false);
+    for (std::size_t i = 0; i < j["comingSoon"].size(); ++i) add(j["comingSoon"][i], true);
     /* Both lists back in the admin's order. */
     std::stable_sort(out.apps.begin(), out.apps.end(), [](const App &x, const App &y) { return x.order < y.order; });
+    std::stable_sort(out.soon.begin(), out.soon.end(), [](const App &x, const App &y) { return x.order < y.order; });
+
+    /* Discover's sections (1.0.6). A kind or layout this store doesn't know is left out,
+     * and so is a spotlight on a game that isn't in the catalog. */
+    const Json &secs = j["discover"]["sections"];
+    for (std::size_t i = 0; i < secs.size() && out.sections.size() < 32; ++i)
+    {
+        const Json &x = secs[i];
+        Section s;
+        s.type = x["type"].str("games");
+        s.title = x["title"].str();
+        s.layout = x["layout"].str(s.type == "games" ? "row" : s.type == "soon" ? "row" : "");
+        s.all = x["all"].boolean(false);
+        for (std::size_t k = 0; k < x["games"].size(); ++k) s.ids.push_back(x["games"][k].str());
+        if (s.type == "spotlight" && s.ids.empty()) s.ids.push_back(x["game"].str());
+        const bool known_layout = s.layout == "row" || s.layout == "grid" || s.layout == "wide";
+        if (s.type == "games" && known_layout) out.sections.push_back(s);
+        else if (s.type == "soon" && (s.layout == "row" || s.layout == "wide")) out.sections.push_back(s);
+        else if (s.type == "spotlight" && !s.ids.empty())
+        {
+            bool there = false;
+            for (const App &a : out.apps) there = there || a.id == s.ids[0];
+            if (there) out.sections.push_back(s);
+        }
+    }
     return true;
 }
 

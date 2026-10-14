@@ -343,7 +343,7 @@ int copy_job(const std::string &src, const std::string &target)
     log_line("copy started (pid %d): %s -> %s", int(getpid()), src.c_str(), target.c_str());
     struct stat st;
     if (stat(src.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-        return fail("The disc image can't be read.");
+        return fail("Your file can't be read.");
     const std::string leaf = src.substr(src.find_last_of('/') + 1);
     if (leaf.empty() || leaf[0] == '.' || protected_name(leaf))
         return fail("The copier won't write " + leaf + " into the game's folder.");
@@ -351,7 +351,7 @@ int copy_job(const std::string &src, const std::string &target)
     const unsigned long long total = (unsigned long long)st.st_size;
     const int in = open(src.c_str(), O_RDONLY);
     if (in < 0)
-        return fail("The disc image can't be read.");
+        return fail("Your file can't be read.");
     const int out = open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (out < 0)
     {
@@ -373,11 +373,11 @@ int copy_job(const std::string &src, const std::string &target)
         if (n < 0 && errno == EINTR)
             continue;
         if (n < 0)
-            error = "The disc image couldn't be read at " + std::to_string(done >> 20) + " MB. It may be incomplete.";
+            error = "Your file couldn't be read at " + std::to_string(done >> 20) + " MB. It may be incomplete.";
         if (n <= 0)
             break;
         if (!write_all(out, buf, std::size_t(n)))
-            error = "Writing the disc image failed. Is the storage full?";
+            error = "Writing the file failed. Is the storage full?";
         done += (unsigned long long)n;
         g_status.done = done;
         g_status.seconds = now_s() - t0;
@@ -395,11 +395,11 @@ int copy_job(const std::string &src, const std::string &target)
     std::free(buf);
     close(in);
     if (close(out) != 0 && error.empty())
-        error = "Writing the disc image failed. Is the storage full?";
+        error = "Writing the file failed. Is the storage full?";
     struct stat ds;
     if (error.empty() && (done != total || rename(part.c_str(), dst.c_str()) != 0 || stat(dst.c_str(), &ds) != 0 ||
                           (unsigned long long)ds.st_size != total))
-        error = "The disc image didn't copy whole. Set it up again.";
+        error = "The file didn't copy whole. Set it up again.";
     if (!error.empty())
     {
         unlink(part.c_str());
@@ -491,6 +491,33 @@ int delete_job(const std::string &job)
     }
     if (paths.empty())
         return fail("Nothing to delete.");
+    /* keep0=, keep1=, ...: a game's saves, which stay (1.0.6). Only paths inside one being
+     * deleted mean anything; spelled as plainly as the paths themselves. */
+    std::vector<std::string> keep;
+    for (int i = 0; i < 16; ++i)
+    {
+        const std::string key = "keep" + std::to_string(i);
+        const std::string k = field(job, key.c_str());
+        if (k.empty())
+            break;
+        /* Every part a name: none empty, "." or ".." (so "userdata/." can't stand for the folder). */
+        bool inside = false, plain = k[0] == '/';
+        for (std::size_t at = 1; plain && at <= k.size();)
+        {
+            std::size_t end = k.find('/', at);
+            if (end == std::string::npos) end = k.size();
+            const std::string part = k.substr(at, end - at);
+            plain = !part.empty() && part != "." && part != "..";
+            at = end + 1;
+        }
+        for (const char ch : k)
+            plain = plain && static_cast<unsigned char>(ch) >= 0x20 && ch != 0x7F && ch != '\\';
+        for (const std::string &p : paths)
+            inside = inside || k.rfind(p + "/", 0) == 0;
+        if (!inside || !plain)
+            return fail("The copier can't keep " + k + ".");
+        keep.push_back(k);
+    }
     if (cancelled())
     {
         log_line("the store took this delete over before the copier started; leaving it to the store");
@@ -518,7 +545,7 @@ int delete_job(const std::string &job)
                 g_status.done = files + so_far;
                 write_status();
             },
-            act_as, [](const std::string &line) { log_line("%s", line.c_str()); });
+            act_as, [](const std::string &line) { log_line("%s", line.c_str()); }, &keep);
         files += n;
         if (!ok)
         {
@@ -526,10 +553,15 @@ int delete_job(const std::string &job)
             const char *why = err == EACCES || err == EPERM ? "the console refused" : err == EBUSY ? "it's in use" : "error";
             return fail(bad + " couldn't be deleted (" + why + ", error " + std::to_string(err) + ").");
         }
-        if (!recomp::fs::gone(p))
+        /* A folder holding a kept save is still there, emptied of the rest: the game's own
+         * folder then counts as deleted once what makes it a game has gone. */
+        const bool held = recomp::fs::holds(p, keep);
+        if (!held && !recomp::fs::gone(p))
             return fail(p + " is still there after deleting it.");
+        if (held && i == 0 && (!recomp::fs::gone(p + "/eboot.bin") || !recomp::fs::gone(p + "/sce_sys")))
+            return fail(p + "/eboot.bin is still there after deleting it.");
         log_line("deleted %s: %zu files", p.c_str(), n);
-        if (i > 0) /* the game files' folders: their empty parents too, never the homebrew folder's */
+        if (i > 0 && !held) /* the game files' folders: their empty parents too, never the homebrew folder's */
             recomp::fs::remove_empty_parents(p, [](const std::string &up) { log_line("removed the empty folder %s", up.c_str()); });
     }
     g_status.files = files;
