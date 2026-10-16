@@ -124,7 +124,10 @@ bool Engine::take_auto_update(std::string &) { return false; }
 std::string Engine::newest_version(const App &a) const
 {
     if (const char *e = std::getenv("PREVIEW_NEWEST"))
-        if (a.id == "PPSA99309") return e;
+    {
+        const char *for_id = std::getenv("PREVIEW_NEWEST_ID"); /* the game it's for (default PPSA99309) */
+        if (a.id == (for_id ? for_id : "PPSA99309")) return e;
+    }
     return "";
 }
 void Engine::check_updates_now() {}
@@ -167,7 +170,11 @@ void Engine::acknowledge() {}
 std::string Engine::installed(const std::string &id) const
 {
     if (const char *e = std::getenv("PREVIEW_INSTALLED"))
-        if (id == e || (std::string(e) == "all" && id.rfind("soon", 0) != 0)) return "1.0";
+        if (id == e || (std::string(e) == "all" && id.rfind("soon", 0) != 0))
+        {
+            const char *as = std::getenv("PREVIEW_INSTALLED_AS"); /* the version recorded, as an install writes it */
+            return as ? as : "1.0";
+        }
     return id == "PPSA92011" ? "v1.0" : id == "PPSA92007" ? "v0.9.0" : "";
 }
 Engine &engine() { static Engine e; return e; }

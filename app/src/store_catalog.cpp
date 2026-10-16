@@ -12,11 +12,23 @@ namespace recomp
 {
 /* True when version a is newer than b ("v1.0.10" > "1.0.9"; a pre-release tag's
  * "-beta" part is ignored). */
+/* Where a version's numbers start: after a "v" or "V", and after a "." "-" "_" or space
+ * right behind it when a digit follows ("v1.0", "V.1.1.1", "v-2.0" all start at their 1
+ * or 2). Anything else starts where it starts. */
+std::size_t version_start(const std::string &v)
+{
+    auto digit = [&](std::size_t i) { return i < v.size() && v[i] >= '0' && v[i] <= '9'; };
+    if (v.empty() || (v[0] != 'v' && v[0] != 'V')) return 0;
+    if (digit(1)) return 1;
+    if (v.size() > 2 && (v[1] == '.' || v[1] == '-' || v[1] == '_' || v[1] == ' ') && digit(2)) return 2;
+    return 0;
+}
+
 bool version_newer(const std::string &a, const std::string &b)
 {
     auto parts = [](std::string v) {
         std::vector<long> out;
-        std::size_t at = (!v.empty() && (v[0] == 'v' || v[0] == 'V')) ? 1 : 0;
+        std::size_t at = version_start(v);
         while (at < v.size() && out.size() < 4)
         {
             long n = 0;

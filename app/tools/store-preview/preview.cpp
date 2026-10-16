@@ -275,6 +275,7 @@ int main(int argc, char **argv)
     store.preview_settings(0); settle(90); if (want("settings")) frame("settings-general");
     store.preview_settings(1); settle(90); if (want("settings")) frame("settings-adding");
     store.preview_settings(2); settle(90); if (want("settings")) frame("settings-about");
+    if (const char *id = std::getenv("PREVIEW_PAGE")) { store.preview_open(id); settle(60); if (want("custom")) frame("page-custom"); }
     store.preview_open("PPSA92011"); settle(60); if (want("page")) frame("page-2011");
     store.preview_focus(1); if (want("page")) frame("page-2011-slot");
     if (const char *usb = std::getenv("PREVIEW_USB"))

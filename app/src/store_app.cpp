@@ -48,9 +48,8 @@ float approach(float cur, float target, float dt, float rate) { return cur + (ta
 
 std::string version_key(std::string v)
 {
-    /* "v1.0", "1.0" and "1.0.0" are the same version. */
-    if (!v.empty() && (v[0] == 'v' || v[0] == 'V'))
-        v.erase(0, 1);
+    /* "v1.0", "V.1.0", "1.0" and "1.0.0" are the same version. */
+    v.erase(0, version_start(v));
     while (v.size() > 2 && v.compare(v.size() - 2, 2, ".0") == 0 && std::count(v.begin(), v.end(), '.') > 0)
         v.erase(v.size() - 2);
     return v;
@@ -383,7 +382,7 @@ std::string Store::version_of(const App &a) const
 {
     std::string n = engine().newest_version(a);
     if (n.empty() || (!a.version.empty() && version_newer(a.version, n))) return a.version; /* the catalog may know first */
-    if (n.size() > 1 && (n[0] == 'v' || n[0] == 'V') && std::isdigit(static_cast<unsigned char>(n[1]))) n.erase(0, 1); /* "v1.0.4" reads 1.0.4 */
+    n.erase(0, version_start(n)); /* "v1.0.4" reads 1.0.4, "V.1.1.1" reads 1.1.1 */
     return n;
 }
 
@@ -406,7 +405,7 @@ std::string Store::state_of(const App &a, bool *update_ready) const
             *update_ready = true;
         return "Update " + want + " ready";
     }
-    return "Installed \xC2\xB7 " + v;
+    return "Installed \xC2\xB7 " + v.substr(version_start(v));
 }
 
 std::vector<const App *> Store::installed_apps() const
@@ -2439,7 +2438,7 @@ void Store::draw_page(Gfx &gfx)
     {
         glass(gfx, x, y, 820, nh, 26, kGlass, false);
         gfx.text_mid(Font::Bold, 15, x + 32, y + 28 + 9, C(kCyan), Align::Left,
-                     "WHAT'S NEW" + (a.version.empty() ? std::string() : " \xC2\xB7 " + a.version), 2);
+                     "WHAT'S NEW" + (a.version.empty() ? std::string() : " \xC2\xB7 " + a.version.substr(version_start(a.version))), 2);
         /* Right of the heading: how to open the rest (Left from the panel, then Cross). */
         if (rel_state > 0 || notes_focus_)
         {

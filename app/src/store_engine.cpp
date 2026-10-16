@@ -129,9 +129,8 @@ bool safe_name(const std::string &n)
 
 std::string version_key(std::string v)
 {
-    /* "v1.0", "1.0" and "1.0.0" are the same version. */
-    if (!v.empty() && (v[0] == 'v' || v[0] == 'V'))
-        v.erase(0, 1);
+    /* "v1.0", "V.1.0", "1.0" and "1.0.0" are the same version. */
+    v.erase(0, version_start(v));
     while (v.size() > 2 && v.compare(v.size() - 2, 2, ".0") == 0 && std::count(v.begin(), v.end(), '.') > 0)
         v.erase(v.size() - 2);
     return v;
