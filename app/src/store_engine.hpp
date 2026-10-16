@@ -140,6 +140,8 @@ bool parse_catalog(const std::string &text, Catalog &out);
 bool store_too_old(const App &a);
 /* True when version a is newer than b ("v1.0.10" > "1.0.9"). */
 bool version_newer(const std::string &a, const std::string &b);
+/* Where a version's numbers start: 1 for "v1.0", 2 for "V.1.1.1", 0 for "1.0". */
+std::size_t version_start(const std::string &v);
 
 enum class Phase
 {
