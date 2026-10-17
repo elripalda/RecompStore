@@ -28,7 +28,7 @@ public:
     /* For the desktop preview: jump straight to a screen. */
     void preview_tab(int tab) { tab_ = tab; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
     void preview_open(const std::string &id);
-    void preview_settings(int section) { tab_ = 3; section_ = section; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
+    void preview_settings(int section) { tab_ = 3; section_ = section; in_section_ = false; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
     void preview_boot(float t) { booted_ = false; boot_t_ = t; }
     void preview_picker(const std::string &slot, const std::string &path);
     void preview_focus(int f) { page_focus_ = f; }
@@ -40,6 +40,27 @@ public:
     void preview_speed(float mbs) { speed_ = mbs; }
     void preview_notice(const std::string &t, bool bad) { notice_ = t; notice_bad_ = bad; }
     void preview_settings_note(const std::string &t, bool bad) { settings_note_ = t; settings_note_bad_ = bad; }
+    /* (1.1.0) The Redeem a code keypad: what's typed, the key focused, and view 0 typing
+     * (msg: what went wrong, if bad), 1 checking, 2 unlocked (msg, app). */
+    void preview_keypad(const std::string &digits, int key, int view, const std::string &msg = "", bool bad = false,
+                        const std::string &app = "")
+    {
+        preview_settings(2);
+        keypad_ = true; keypad_t_ = 1; key_digits_ = digits; key_sel_ = key; key_view_ = view; key_msg_ = msg;
+        key_bad_ = bad; key_app_ = app; key_done_sel_ = 0;
+    }
+    void preview_keypad_close() { keypad_ = false; }
+    /* (1.1.0) Send logs on the open game's page: sel 0 the message, 1 Cancel, 2 Send; view 0
+     * ready, 1 sending, 2 sent, 3 didn't go (result); kb: the keyboard open on the message. */
+    void preview_logs(const std::string &msg, int sel, int view = 0, const std::string &result = "", bool kb = false,
+                      int kb_row = 1, int kb_col = 0)
+    {
+        open_logs(page_id_);
+        logs_t_ = 1; logs_msg_ = msg; logs_sel_ = sel; logs_view_ = view; logs_result_ = result;
+        kb_ = kb; kb_t_ = 1; kb_row_ = kb_row; kb_col_ = kb_col;
+    }
+    void preview_logs_close() { logs_ = kb_ = false; }
+    void preview_redeem_note(const std::string &t, bool bad) { redeem_note_ = t; redeem_note_bad_ = bad; }
 
 private:
     enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, TabCount = 4 };
@@ -52,7 +73,7 @@ private:
     /* The game page's controls, top to bottom: what the D-pad moves between. */
     struct Control
     {
-        enum Kind { Primary, Slot, Setup, Delete } kind;
+        enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
@@ -128,6 +149,17 @@ private:
     void layout_notes(porpoise::ui::Gfx &gfx, const std::string &key, const std::vector<Release> &rel, float width);
     bool game_ready(const App &a) const;
     void open_smp_picker();
+    /* (1.1.0) Settings > Redeem a code. */
+    void open_keypad();
+    /* (1.1.0) Send logs, and the keyboard for its message. */
+    void open_logs(const std::string &id);
+    bool update_logs(float dt);
+    void draw_logs(porpoise::ui::Gfx &gfx);
+    bool update_keyboard(float dt);
+    void draw_keyboard(porpoise::ui::Gfx &gfx);
+    bool update_keypad(float dt);
+    void draw_keypad(porpoise::ui::Gfx &gfx);
+    void redeem_typed();
     std::vector<std::string> wrap(porpoise::ui::Gfx &gfx, porpoise::ui::Font f, float size, float width,
                                   const std::string &text, int max_lines) const;
     float draw_lines(porpoise::ui::Gfx &gfx, porpoise::ui::Font f, float size, float x, float y, float line_h,
@@ -166,7 +198,7 @@ private:
     float focus_anim_[512] = {};
     int slide_ = 0;
     float slide_t_ = 0, slide_fade_ = 1;
-    int section_ = 0;    /* Settings: 0 General, 1 Adding your game, 2 About */
+    int section_ = 0;    /* Settings: 0 General, 1 Adding your game, 2 Redeem a code, 3 About */
     bool in_section_ = false;
     bool sounds_on_ = true;
     float nav_left_ = 0, nav_right_ = 0, nav_up_ = 0, nav_down_ = 0;
@@ -234,5 +266,32 @@ private:
     int gen_row_ = 0;          /* Settings > General: 0 sounds, 1 the ShadowMountPlus file, 2 start it */
     std::string settings_note_;
     bool settings_note_bad_ = false;
+
+    /* (1.1.0) Settings > Redeem a code: the keypad over the store. key_sel_ is the key
+     * focused, 1 2 3 / 4 5 6 / 7 8 9 / Delete 0 Redeem (0..11); key_view_ 0 typing, 1 the
+     * site is checking it, 2 unlocked (Open it, Done). redeem_note_: how the last code
+     * went, shown in Settings after the keypad has closed. */
+    bool keypad_ = false;
+    float keypad_t_ = 0;
+    int key_sel_ = 0, key_view_ = 0, key_done_sel_ = 0;
+    std::string key_digits_, key_msg_, key_app_;
+    bool key_bad_ = false;
+    std::string redeem_note_;
+    bool redeem_note_bad_ = false;
+
+    /* (1.1.0) Send logs: the box over a game's page. logs_sel_ 0 the message, 1 Cancel, 2 Send;
+     * logs_view_ 0 ready, 1 sending, 2 sent, 3 didn't go (logs_result_ says why). The files it
+     * takes are found once, when it opens. */
+    bool logs_ = false;
+    float logs_t_ = 0;
+    int logs_sel_ = 0, logs_view_ = 0;
+    std::string logs_app_, logs_msg_, logs_result_;
+    std::vector<LogFile> logs_files_;
+    /* The keyboard for the message: the key focused (rows 0-3 of 11 keys, row 4 Shift, Space,
+     * Delete, Done), and a capital next. */
+    bool kb_ = false;
+    float kb_t_ = 0;
+    int kb_row_ = 1, kb_col_ = 0;
+    bool kb_caps_ = false;
 };
 } // namespace recomp
