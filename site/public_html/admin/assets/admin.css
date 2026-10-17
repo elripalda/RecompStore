@@ -166,3 +166,31 @@ h3.sub{font:700 15px Figtree,sans-serif;letter-spacing:1.5px;text-transform:uppe
 .row.dragging .grip{cursor:grabbing;color:var(--cyan)}
 body.dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .order-bar[hidden]{display:none}
+/* Extra buttons on the game page */
+.links-list{display:flex;flex-direction:column;gap:6px}
+.link-row{display:flex;gap:12px;align-items:flex-end}
+.link-row label{margin:0}
+.link-row .grow{flex:1}
+.link-row input[type=color]{width:64px;height:46px;padding:4px;cursor:pointer}
+.links-foot{margin:12px 0 0}
+.links-preview{display:flex;flex-direction:column;gap:12px;max-width:380px;margin-top:18px;padding:18px;border-radius:18px;background:rgba(11,18,32,.5);border:1px solid var(--line)}
+.site-btn{display:flex;align-items:center;justify-content:center;min-height:56px;border-radius:18px;font:700 18px Figtree,sans-serif;padding:0 18px;text-align:center;border:1px solid rgba(244,248,252,.14)}
+@media (max-width:700px){.link-row{flex-wrap:wrap}.link-row .grow{flex-basis:100%}}
+/* Beta */
+.beta-file{display:flex;flex-direction:column;gap:4px;margin:0 0 14px;font-size:15px}
+.beta-file .lbl{font-weight:600}
+.beta-codes-line{margin:4px 0 0}
+.tag.beta{background:#f5b942;color:#0B1220;border-color:#f5b942}
+.codes-box{font:600 18px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.5px;line-height:1.9;background:rgba(11,18,32,.65);border:1px solid var(--line);border-radius:14px;padding:14px 18px;white-space:pre-wrap;user-select:all}
+table.codes{width:100%;border-collapse:collapse;font-size:15px}
+table.codes th{text-align:left;font-weight:600;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
+table.codes td{padding:10px;border-bottom:1px solid rgba(244,248,252,.07);vertical-align:middle}
+table.codes td.code{font:600 16px ui-monospace,Menlo,Consolas,monospace;white-space:nowrap}
+table.codes td form{margin:0;display:inline}
+.status-pill{display:inline-block;font-size:13px;font-weight:600;border-radius:999px;padding:2px 10px;background:rgba(244,248,252,.1)}
+.status-pill.used{background:rgba(53,214,244,.18);color:#9feaf9}
+.status-pill.off{background:rgba(255,122,122,.18);color:#ffb3b3}
+.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:0 0 14px}
+.filters label{margin:0;min-width:220px}
+.log-files{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:6px;font-size:15px}
+.log-files a{font-family:ui-monospace,Menlo,Consolas,monospace}

@@ -17,6 +17,10 @@ namespace recomp
 {
 constexpr const char *kCatalogUrl = "https://recompstore.com/catalog.json";
 constexpr const char *kHomebrew = "/data/homebrew";
+/* (1.1.0) Beta codes: redeeming one, and the beta games this console has. */
+constexpr const char *kBetaUrl = "https://recompstore.com/api/beta.php";
+/* (1.1.0) Send logs: a game page's logs, to the admin's inbox. */
+constexpr const char *kLogsUrl = "https://recompstore.com/api/logs.php";
 
 struct Slot
 {
@@ -109,6 +113,13 @@ struct App
      * version ("Fall 2026", or empty). */
     bool soon = false;
     std::string date;
+    /* (1.1.0) A game in testing, unlocked on this console with a code (Settings > Redeem a
+     * code). It comes from recompstore.com's beta list, not the catalog, downloads from the
+     * site (source "url"), and shows in the Library, not in Discover. */
+    bool beta = false;
+    /* (1.1.0) The game's log files for Send logs: patterns inside its folder (like crash_*.txt),
+     * set in the admin. Empty: the store looks for them itself (game_log_files). */
+    std::vector<std::string> logs;
     /* Filled by the engine: where its art was saved, empty until it is. */
     std::string icon_file, hero_file, logo_file;
 };
@@ -222,6 +233,23 @@ public:
     void want_notes(const std::string &repo);
     int notes(const std::string &repo, std::vector<Release> &out) const;
 
+    /* (1.1.0) Settings > Redeem a code: an 8-digit code for a beta game, checked with
+     * recompstore.com. redeem_state: 0 nothing asked, 1 checking, 2 unlocked, 3 refused or
+     * it couldn't ask; message says what happened (the site's own words), app_id is the
+     * game it unlocked. redeem_ack: seen, back to 0. The console keeps the ID and token the
+     * site gave it on its first code, so its beta games stay for as long as the store does. */
+    bool redeem(const std::string &code);
+    int redeem_state(std::string &message, std::string &app_id) const;
+    void redeem_ack();
+
+    /* (1.1.0) Send logs, on a game's page: the store's log and the game's own log files
+     * (game_log_files), with the player's message, to recompstore.com, where they land in the
+     * admin's inbox. logs_state: 0 nothing asked, 1 sending, 2 sent, 3 they didn't go;
+     * message: the site's words, or why. */
+    bool send_logs(const std::string &app_id, const std::string &message);
+    int logs_state(std::string &message) const;
+    void logs_ack();
+
     /* The version installed: "" when it isn't installed, "?" when it's on the console but
      * the store didn't install it. */
     std::string installed(const std::string &app_id) const;
@@ -229,6 +257,19 @@ public:
      * recompstore.json, or param.json's contentVersion) and handles its updates from now. */
     bool adopt(const std::string &app_id, std::string &version_out);
 };
+
+/* (1.1.0) A log file Send logs takes: where it is, and its name as sent (store.log, or its
+ * path inside the game's folder). */
+struct LogFile
+{
+    std::string path, name;
+    std::uint64_t size = 0;
+    long long mtime = 0;
+};
+/* The files Send logs takes for a game: the store's log first, then the game's own, newest
+ * first: those its catalog entry names (App::logs), else any .log file and any .txt file with
+ * log, crash or trace in its name, in its folder (4 folders deep at most); 8 of the game's. */
+std::vector<LogFile> game_log_files(const App &a);
 
 /* Where disc images can be: USB drives, extended storage, the console's own storage. */
 struct Place

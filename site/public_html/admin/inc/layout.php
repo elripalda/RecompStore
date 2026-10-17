@@ -23,6 +23,7 @@ function rs_head(string $title, bool $nav = true): void {
   <nav>
     <a href="index.php">Games</a>
     <a href="discover.php">Discover</a>
+    <a href="beta.php">Beta</a>
     <?php $inboxNew = rs_inbox_new_count(); ?>
     <a href="inbox.php">Inbox<?= $inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : '' ?></a>
     <a href="settings.php">Settings</a>

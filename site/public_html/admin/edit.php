@@ -21,7 +21,7 @@ $slotTemplate = json_encode([
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves'];
+             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -35,6 +35,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (['featured', 'hidden', 'setup', 'soon'] as $k) $g[$k] = !empty($_POST[$k]);
     $badSave = null;
     rs_saves_list($g['saves'], $badSave);
+    $badLog = null;
+    rs_logs_list($g['logs'], $badLog);
+    // Extra buttons: rows of text, link and color; an empty row is dropped, a half-filled one is an error.
+    $linkRows = [];
+    $badLink = '';
+    $lt = (array)($_POST['link_label'] ?? []); $lu = (array)($_POST['link_url'] ?? []); $lc = (array)($_POST['link_color'] ?? []);
+    foreach ($lt as $i => $label) {
+        $row = ['label' => trim((string)$label), 'url' => trim((string)($lu[$i] ?? '')), 'color' => trim((string)($lc[$i] ?? ''))];
+        if ($row['label'] === '' && $row['url'] === '') continue;
+        if ($row['label'] === '') $badLink = 'Extra buttons: give the button for ' . $row['url'] . ' some text.';
+        elseif (!preg_match('#^https://\S+$#', $row['url'])) $badLink = 'Extra buttons: "' . $row['label'] . '" needs a link that starts with https://';
+        $linkRows[] = $row;
+    }
+    if (count($linkRows) > 12) $badLink = 'Extra buttons: 12 at most.';
+    $g['links'] = $badLink === '' ? rs_clean_links($linkRows) : $linkRows;
+    // Beta: only testers with a code get it; its zip is kept on this site.
+    $g['beta'] = !empty($_POST['beta']);
+    $g['beta_version'] = trim((string)($_POST['beta_version'] ?? ''));
+    $pickedBeta = basename(trim((string)($_POST['beta_existing'] ?? '')));
+    if ($pickedBeta !== '' && isset(rs_beta_files()[$pickedBeta]) && $pickedBeta !== $g['beta_file']) {
+        $g['beta_file'] = $pickedBeta; $g['beta_sha256'] = ''; $g['beta_size'] = 0;
+    }
 
     if (!preg_match('/^[A-Za-z0-9_-]{3,32}$/', $g['id'])) $error = 'The title ID must be 3 to 32 letters, numbers, - or _ (for example PPSA92011).';
     elseif ($g['name'] === '') $error = 'Give the game a name.';
@@ -42,7 +64,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Coming soon: no download yet, so the repo and link are optional (but well formed when given).
     elseif ($g['source'] === 'github' && !($g['soon'] && $g['repo'] === '') && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
     elseif ($g['source'] === 'url' && !($g['soon'] && $g['url'] === '') && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
+    elseif ($badLink !== '') $error = $badLink;
+    elseif ($g['beta'] && $g['soon']) $error = 'A game can be Beta or Coming soon, not both.';
+    elseif (mb_strlen($g['beta_version']) > 40) $error = 'Keep the beta version short, like 1.2.0-beta1.';
     elseif ($badSave !== null) $error = 'Save folders: "' . $badSave . '" isn\'t a folder inside the game\'s (one per line, like userdata, with no .. or \\).';
+    elseif ($badLog !== null) $error = 'Log files: "' . $badLog . '" isn\'t a path inside the game\'s folder (one per line, like logs/*.log, with no .. or \\).';
     elseif ($g['sha256'] !== '' && !preg_match('/^[A-Fa-f0-9]{64}$/', $g['sha256'])) $error = 'The SHA-256 should be 64 letters and numbers (0-9, a-f), or left empty.';
     elseif ($g['min_store'] !== '' && !preg_match('/^\d+(\.\d+){0,3}$/', $g['min_store'])) $error = 'Needs Recomp Store: a version like 1.0.3, or leave it empty.';
     elseif ($g['source'] === 'github' && strpbrk($g['asset'], '*?') !== false && !preg_match('/\.zip$/i', $g['asset'])) $error = 'A zip name with * has to end in .zip, so it can only match the release\'s zip (not a checksum or another file).';
@@ -55,6 +81,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             foreach (['icon_file' => 'icon', 'hero_file' => 'hero', 'logo_file' => 'logo'] as $field => $kind) {
                 if (!empty($_FILES[$field]['name'])) $g = array_merge($g, rs_save_image($_FILES[$field], $kind, $g['id']));
+            }
+            // A beta zip uploaded here: kept in the beta folder, named after the game.
+            if (!empty($_FILES['beta_upload']['name'])) {
+                $f = $_FILES['beta_upload'];
+                if ($f['error'] === UPLOAD_ERR_INI_SIZE || $f['error'] === UPLOAD_ERR_FORM_SIZE) throw new RuntimeException('That zip is bigger than this server takes in a form. Put it in the beta folder with File Manager instead, then choose it here.');
+                if ($f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('The beta zip didn\'t arrive. Try again.');
+                if (file_get_contents($f['tmp_name'], false, null, 0, 4) !== "PK\x03\x04") throw new RuntimeException('The beta file has to be a .zip.');
+                $name = preg_replace('/[^A-Za-z0-9._-]/', '', $g['id'] . '-' . ($g['beta_version'] !== '' ? $g['beta_version'] : date('Ymd-His'))) . '.zip';
+                if (!move_uploaded_file($f['tmp_name'], rs_beta_dir_ready() . '/' . $name)) throw new RuntimeException('The beta zip couldn\'t be saved in ' . rs_beta_dir() . '.');
+                $g['beta_file'] = $name; $g['beta_sha256'] = ''; $g['beta_size'] = 0;
+            }
+            // Its checksum and size, worked out once (the store checks the download against them).
+            if ($g['beta_file'] !== '' && $g['beta_sha256'] === '') {
+                $p = rs_beta_dir() . '/' . basename($g['beta_file']);
+                if (!is_file($p)) throw new RuntimeException('The beta zip ' . $g['beta_file'] . ' isn\'t in the beta folder anymore.');
+                @set_time_limit(300);
+                $g['beta_sha256'] = hash_file('sha256', $p);
+                $g['beta_size'] = filesize($p);
             }
             rs_save_game($g, $isNew ? null : $oldId);
             rs_flash('Saved ' . $g['name'] . '. Press Publish to send it to the store and the site.');
@@ -131,6 +175,70 @@ $hero = $g['hero_web'] ?: $g['hero'];
   </div>
 </section>
 
+<?php
+$betaFiles = rs_beta_files();
+$betaCounts = ['all' => 0, 'used' => 0];
+if (!$isNew) {
+    try {
+        rs_beta_tables();
+        $st = rs_db()->prepare('SELECT COUNT(*) n, SUM(install_id IS NOT NULL AND revoked = 0) used FROM beta_codes WHERE game_id = ?');
+        $st->execute([$g['id']]);
+        $r = $st->fetch();
+        $betaCounts = ['all' => (int)$r['n'], 'used' => (int)$r['used']];
+    } catch (Throwable $e) {}
+}
+$uploadMax = min(array_map(function ($v) { $v = trim((string)$v); $n = (float)$v; $u = strtolower(substr($v, -1)); return (int)($n * ($u === 'g' ? 1 << 30 : ($u === 'm' ? 1 << 20 : ($u === 'k' ? 1 << 10 : 1)))); }, [ini_get('upload_max_filesize'), ini_get('post_max_size')]));
+?>
+<section class="card beta-card" data-not-soon>
+  <h2>Beta</h2>
+  <label class="check"><input type="checkbox" name="beta" <?= $g['beta'] ? 'checked' : '' ?> data-beta> Beta: only testers with a code get this game. It's left out of the public store and the site.</label>
+  <div class="grid2" data-beta-fields>
+    <label>Beta version<input name="beta_version" value="<?= h($g['beta_version']) ?>" maxlength="40" placeholder="1.0.0-beta1"><small>What testers see. Change it with each new beta zip, so their store offers the update.</small></label>
+    <div class="beta-file">
+      <span class="lbl">Beta zip</span>
+      <?php if ($g['beta_file'] !== ''): ?>
+        <strong><?= h($g['beta_file']) ?></strong>
+        <span class="muted"><?= $g['beta_size'] ? h(rs_human_size((int)$g['beta_size'])) : '' ?><?= $g['beta_sha256'] ? ' · SHA-256 ' . h(substr($g['beta_sha256'], 0, 12)) . '…' : '' ?><?= isset($betaFiles[$g['beta_file']]) ? '' : ' · missing from the beta folder' ?></span>
+      <?php else: ?><span class="muted">None yet.</span><?php endif; ?>
+    </div>
+    <label>Upload a new zip<input type="file" name="beta_upload" accept=".zip,application/zip"><small>Up to <?= h(rs_human_size($uploadMax)) ?> here. For a bigger one, put it in the beta folder with hPanel's File Manager, then pick it below.</small></label>
+    <label>Or pick one from the beta folder
+      <select name="beta_existing">
+        <option value="">Keep the current zip</option>
+        <?php foreach ($betaFiles as $name => $f): ?><option value="<?= h($name) ?>"><?= h($name) ?> (<?= h(rs_human_size((int)$f['size'])) ?>, <?= h(date('M j', $f['time'])) ?>)</option><?php endforeach; ?>
+      </select>
+      <small>The beta folder: <code><?= h(str_replace(dirname(RS_PUBLIC), '', rs_beta_dir())) ?></code> <?= str_starts_with(rs_beta_dir(), RS_PUBLIC) ? '(blocked from the web; only signed-in testers\' stores can download from it)' : '(beside public_html, so it\'s never public)' ?>.</small></label>
+    <?php if (!$isNew): ?>
+    <p class="span2 beta-codes-line"><?= $betaCounts['all'] ? h($betaCounts['used'] . ' of ' . $betaCounts['all'] . ' codes redeemed.') : 'No codes yet.' ?> <a href="beta.php?game=<?= urlencode($g['id']) ?>">Make and manage codes →</a></p>
+    <?php endif; ?>
+  </div>
+</section>
+
+<section class="card" data-links-card>
+  <h2>Extra buttons</h2>
+  <p class="muted">Buttons on the game's page on the website, below Source on GitHub: texture packs, patches, anything with a link. Pick each one's text and color. They open in a new tab.</p>
+  <div class="links-list" data-links>
+    <?php $rows = $g['links'] ?: []; foreach ($rows as $l): ?>
+    <div class="link-row" data-link-row>
+      <label>Text<input name="link_label[]" value="<?= h($l['label'] ?? '') ?>" maxlength="40" placeholder="4K texture pack"></label>
+      <label class="grow">Link<input name="link_url[]" value="<?= h($l['url'] ?? '') ?>" placeholder="https://…"></label>
+      <label>Color<input type="color" name="link_color[]" value="<?= h(preg_match('/^#[0-9a-fA-F]{6}$/', (string)($l['color'] ?? '')) ? $l['color'] : '#2a3446') ?>"></label>
+      <button type="button" class="icon-btn" data-link-remove aria-label="Remove this button" title="Remove">✕</button>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <template data-link-template>
+    <div class="link-row" data-link-row>
+      <label>Text<input name="link_label[]" maxlength="40" placeholder="4K texture pack"></label>
+      <label class="grow">Link<input name="link_url[]" placeholder="https://…"></label>
+      <label>Color<input type="color" name="link_color[]" value="#2a3446"></label>
+      <button type="button" class="icon-btn" data-link-remove aria-label="Remove this button" title="Remove">✕</button>
+    </div>
+  </template>
+  <div class="links-foot"><button type="button" data-link-add>Add a button</button></div>
+  <div class="links-preview" data-links-preview aria-label="How they look on the game page"></div>
+</section>
+
 <section class="card">
   <h2>Art</h2>
   <div class="art">
@@ -196,6 +304,8 @@ $hero = $g['hero_web'] ?: $g['hero'];
   </div>
   <label><span>Save folders <span class="muted">(optional)</span></span><textarea name="saves" rows="2" class="mono" placeholder="userdata"><?= h($g['saves']) ?></textarea>
     <small>Where the game keeps its saves, one per line, inside its folder (like userdata, or baseq3/q3config.cfg). With these, Delete in Recomp Store 1.0.6 offers Keep my saves: everything else goes, and the saves are there when it's installed again.</small></label>
+  <label><span>Log files <span class="muted">(optional)</span></span><textarea name="logs" rows="2" class="mono" placeholder="UserData/crashes/*.txt"><?= h($g['logs']) ?></textarea>
+    <small>What Send logs in Recomp Store 1.1.0 sends from this game, one per line, inside its folder; * and ? match any characters. Leave it empty and the store finds them itself: any .log file, and .txt files with log, crash or trace in the name. The newest 8 go, with the store's own log.</small></label>
 </section>
 
 <div class="sticky-save"><button class="primary">Save</button><span class="muted">Saving doesn't publish. Press Publish on the Games page when you're done.</span></div>

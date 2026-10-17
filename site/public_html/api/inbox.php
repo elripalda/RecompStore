@@ -37,7 +37,7 @@ $str = function (string $k, int $max) use ($in): string {
 if ($str('website', 200) !== '') rs_reply(200, ['ok' => true]);
 
 $kind = $str('kind', 16);
-if (!in_array($kind, ['bug', 'submit'], true)) rs_reply(400, ['ok' => false, 'error' => 'Choose a form.']);
+if (!in_array($kind, ['bug', 'submit', 'message'], true)) rs_reply(400, ['ok' => false, 'error' => 'Choose a form.']);
 
 $row = ['kind' => $kind, 'app_id' => '', 'name' => '', 'contact' => '', 'repo' => '', 'version' => '', 'body' => ''];
 if ($kind === 'bug') {
@@ -47,6 +47,14 @@ if ($kind === 'bug') {
     $row['body'] = $str('body', 5000);
     if ($row['app_id'] === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $row['app_id'])) rs_reply(422, ['ok' => false, 'error' => 'Choose the game the bug is in.']);
     if (mb_strlen($row['body']) < 10) rs_reply(422, ['ok' => false, 'error' => 'Tell us a little more about what happened.']);
+} elseif ($kind === 'message') {
+    // Contact: a question or anything else, answered by email.
+    $row['name'] = $str('name', 120);
+    $row['contact'] = $str('email', 200);
+    $row['body'] = $str('body', 5000);
+    if ($row['name'] === '') rs_reply(422, ['ok' => false, 'error' => 'Add your name or handle.']);
+    if (!filter_var($row['contact'], FILTER_VALIDATE_EMAIL)) rs_reply(422, ['ok' => false, 'error' => 'Add an email address we can reply to.']);
+    if (mb_strlen($row['body']) < 10) rs_reply(422, ['ok' => false, 'error' => 'Write a little more in your message.']);
 } else {
     $row['name'] = $str('name', 120);
     $row['contact'] = $str('email', 200);

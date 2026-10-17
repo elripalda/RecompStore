@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace recomp
 {
@@ -28,7 +29,7 @@ namespace
 {
 Color C(std::uint32_t hex, float a = 1) { return rgba(hex, a); }
 const std::uint32_t kMidnight = 0x0B1220, kFrost = 0xF4F8FC, kCyan = 0x35D6F4, kMuted = 0xAAB6C6, kGreen = 0x5FE3A1,
-                    kSoft = 0xCDD6E2, kDim = 0x95A2B4, kBody = 0xE1E8F1;
+                    kSoft = 0xCDD6E2, kDim = 0x95A2B4, kBody = 0xE1E8F1, kAmber = 0xFFC857 /* (1.1.0) beta */;
 const Color kGlass = {1, 1, 1, 0.08f}, kRim = {1, 1, 1, 0.16f}, kLine = {1, 1, 1, 0.12f};
 
 float clamp01(float t) { return std::clamp(t, 0.f, 1.f); }
@@ -327,7 +328,8 @@ std::vector<Store::DLine> Store::discover_lines() const
         y += l.h + kSectionGap;
     };
     std::vector<const App *> all, soon;
-    for (const App &a : catalog_.apps) all.push_back(&a);
+    for (const App &a : catalog_.apps)
+        if (!a.beta) all.push_back(&a); /* (1.1.0) beta games: the Library only */
     for (const App &a : catalog_.soon) soon.push_back(&a);
     if (catalog_.sections.empty())
     {
@@ -410,9 +412,10 @@ std::string Store::state_of(const App &a, bool *update_ready) const
 
 std::vector<const App *> Store::installed_apps() const
 {
+    /* The games on this console, and (1.1.0) the beta games it has unlocked, installed or not. */
     std::vector<const App *> out;
     for (const App &a : catalog_.apps)
-        if (!engine().installed(a.id).empty())
+        if (a.beta || !engine().installed(a.id).empty())
             out.push_back(&a);
     return out;
 }
@@ -425,7 +428,7 @@ std::vector<const App *> Store::featured_apps() const
             out.push_back(a);
     if (out.empty())
         for (const App &a : catalog_.apps)
-            if (!a.hero_url.empty() && out.size() < 3)
+            if (!a.hero_url.empty() && !a.beta && out.size() < 3)
                 out.push_back(&a);
     return out;
 }
@@ -447,6 +450,7 @@ std::vector<Store::Control> Store::page_controls(const App &a) const
     const std::string inst = engine().installed(a.id);
     if (!inst.empty() && inst != "?")
         c.push_back({Control::Delete, -1});
+    c.push_back({Control::Logs, -1}); /* (1.1.0) beside Delete */
     return c;
 }
 
@@ -1011,8 +1015,62 @@ bool Store::update(const pad::State &p, float dt)
         engine().acknowledge();
     }
 
+    /* (1.1.0) A code's answer from the site: in the keypad, or under Redeem a code when the
+     * keypad was closed while it was checking. */
+    {
+        std::string msg, app;
+        const int st = engine().redeem_state(msg, app);
+        if (st == 2 || st == 3)
+        {
+            engine().redeem_ack();
+            redeem_note_ = msg;
+            redeem_note_bad_ = st == 3;
+            if (keypad_ && key_view_ == 1)
+            {
+                key_msg_ = msg;
+                key_bad_ = st == 3;
+                key_view_ = st == 2 ? 2 : 0;
+                key_app_ = app;
+                key_done_sel_ = st == 2 && find(app) ? 0 : 1;
+                if (st == 2) key_digits_.clear();
+            }
+            play(int(st == 2 ? Sfx::Complete : Sfx::Error));
+        }
+    }
+
+    /* (1.1.0) How sending logs went. */
+    {
+        std::string msg;
+        const int st = engine().logs_state(msg);
+        if (st == 2 || st == 3)
+        {
+            engine().logs_ack();
+            if (logs_ && logs_view_ == 1)
+            {
+                logs_view_ = st;
+                logs_result_ = msg;
+                logs_sel_ = st == 2 ? 1 : 2;
+            }
+            else
+            {
+                notice_ = msg;
+                notice_bad_ = st == 3;
+            }
+            play(int(st == 2 ? Sfx::Complete : Sfx::Error));
+        }
+    }
+
     if (picker_)
         return update_picker(dt);
+
+    if (keypad_)
+        return update_keypad(dt);
+
+    if (kb_)
+        return update_keyboard(dt);
+
+    if (logs_)
+        return update_logs(dt);
 
     if (confirm_)
     {
@@ -1094,6 +1152,24 @@ bool Store::update(const pad::State &p, float dt)
             else if (pressed(pad::BtnCross)) { notes_open_ = true; notes_top_ = 0; play(int(Sfx::Open)); }
             return true;
         }
+        {
+            /* (1.1.0) Delete and Send logs sit side by side: Left and Right go between them. */
+            const auto row = page_controls(*a);
+            const int pf = std::clamp(page_focus_, 0, int(row.size()) - 1);
+            const bool on_logs = row[std::size_t(pf)].kind == Control::Logs, on_del = row[std::size_t(pf)].kind == Control::Delete;
+            if (on_logs && pf > 0 && row[std::size_t(pf - 1)].kind == Control::Delete && nav(pad::BtnLeft, nav_left_, dt))
+            {
+                page_focus_ = pf - 1;
+                play(int(Sfx::Move));
+                return true;
+            }
+            if (on_del && pf + 1 < int(row.size()) && nav(pad::BtnRight, nav_right_, dt))
+            {
+                page_focus_ = pf + 1;
+                play(int(Sfx::Move));
+                return true;
+            }
+        }
         if (has_notes_box(*a) && nav(pad::BtnLeft, nav_left_, dt))
         {
             notes_focus_ = true;
@@ -1128,6 +1204,8 @@ bool Store::update(const pad::State &p, float dt)
                 }
                 else open_picker(*a, c.slot);
             }
+            else if (c.kind == Control::Logs)
+                open_logs(a->id);
             else if (c.kind == Control::Delete)
             {
                 if (engine().job().phase == Phase::Working)
@@ -1277,9 +1355,10 @@ bool Store::update(const pad::State &p, float dt)
     {
         if (!in_section_)
         {
-            const int s = std::clamp(section_ + (u ? -1 : 0) + (d ? 1 : 0), 0, 2);
+            const int s = std::clamp(section_ + (u ? -1 : 0) + (d ? 1 : 0), 0, 3);
             if (s != section_) { section_ = s; play(int(Sfx::Move)); }
             if ((pressed(pad::BtnCross) || r) && section_ == 0) { in_section_ = true; gen_row_ = 0; settings_note_.clear(); play(int(Sfx::Select)); }
+            else if (pressed(pad::BtnCross) && section_ == 2) open_keypad();
         }
         else
         {
@@ -1541,6 +1620,12 @@ void Store::draw_tile(Gfx &gfx, const App &a, float x, float y, float size, floa
         gfx.panel(tx + w - 14 - bw, ty + 14, bw, 28, C(kCyan), 1.f, 14);
         gfx.text_mid(Font::Bold, 14, tx + w - 14 - bw / 2, ty + 28, C(kMidnight), Align::Center, "Update");
     }
+    if (a.beta)
+    {
+        const float bw = gfx.measure(Font::Bold, 14, "BETA", 1) + 24;
+        gfx.panel(tx + 14, ty + 14, bw, 28, C(kAmber), 1.f, 14);
+        gfx.text_mid(Font::Bold, 14, tx + 14 + bw / 2, ty + 28, C(kMidnight), Align::Center, "BETA", 1);
+    }
     gfx.text_mid(Font::SemiBold, 21, x, y + size + 14 + 13, C(kFrost), Align::Left, fit(gfx, Font::SemiBold, 21, size + 20, a.name));
     gfx.text_mid(Font::Regular, 17, x, y + size + 14 + 26 + 4 + 11, C(kMuted), Align::Left, st);
 }
@@ -1753,7 +1838,9 @@ void Store::draw_library(Gfx &gfx)
 {
     const auto list = installed_apps();
     gfx.text_mid(Font::ExtraBold, 48, 96, 160 + 30, C(kFrost), Align::Left, "Library", -1);
-    const std::string count = list.size() == 1 ? "1 game installed" : std::to_string(list.size()) + " games installed";
+    std::size_t on = 0; /* (1.1.0) a beta game is listed before it's installed */
+    for (const App *a : list) on += engine().installed(a->id).empty() ? 0 : 1;
+    const std::string count = on == 1 ? "1 game installed" : std::to_string(on) + " games installed";
     gfx.text_mid(Font::Regular, 21, 96 + gfx.measure(Font::ExtraBold, 48, "Library", -1) + 18, 160 + 36, C(kMuted), Align::Left, count);
     const float size = 256, gap = 36, top = 160 + 60 + 26 + 10, pitch = size + 120, clip_top = 226;
     const int rows = int((list.size() + 4) / 5);
@@ -1876,7 +1963,8 @@ void Store::draw_updates(Gfx &gfx)
         gfx.text_mid(Font::Regular, 19, tx, yy + 76 * s, C(kSoft), Align::Left,
                      fit(gfx, Font::Regular, 19, w - (tx - x) - bw - 80, a.news));
         gfx.text_mid(Font::Regular, 16, tx, yy + 108 * s, C(kDim), Align::Left,
-                     (a.kind == "original" ? std::string("Recomp Store") : "By " + a.author) +
+                     std::string(a.beta ? "Beta \xC2\xB7 " : "") +
+                         (a.kind == "original" ? std::string("Recomp Store") : "By " + a.author) +
                          (a.released.empty() ? "" : " \xC2\xB7 " + a.released));
         const Color bg = up ? C(kCyan) : inst ? C(kGreen, 0.18f) : C(kFrost, 0.14f);
         const Color fg = up ? C(kMidnight) : inst ? C(0x9FF0C6) : C(kFrost);
@@ -1892,9 +1980,10 @@ void Store::draw_settings(Gfx &gfx)
 {
     const float top = 160, bottom = 1080 - 110, h = bottom - top;
     glass(gfx, 96, top, 400, h, 32, kGlass, true);
-    const char *names[3] = {"General", "Adding your game", "About"};
-    const char *hints[3] = {"Sounds and where games go", "How to set a game up", "Legal notice and credits"};
-    for (int i = 0; i < 3; ++i)
+    const char *names[4] = {"General", "Adding your game", "Redeem a code", "About"};
+    const char *hints[4] = {"Sounds and where games go", "How to set a game up", "Unlock a game in testing",
+                            "Legal notice and credits"};
+    for (int i = 0; i < 4; ++i)
     {
         const bool on = i == section_;
         const float y = top + 18 + float(i) * (90 + 6);
@@ -2011,6 +2100,57 @@ void Store::draw_settings(Gfx &gfx)
         }
         gfx.text_mid(Font::Regular, 18, cx, y + 12, C(kDim), Align::Left,
                      "Community games may set up differently; their page in the store says what they need.");
+    }
+    else if (section_ == 2)
+    {
+        /* (1.1.0) Redeem a code: X opens the keypad; under it, the beta games this console has. */
+        float y = top + 48;
+        gfx.text_mid(Font::ExtraBold, 38, cx, y + 24, C(kFrost), Align::Left, "Redeem a code");
+        y += 48 + 22;
+        y += draw_lines(gfx, Font::Regular, 21, cx, y, 31.5f, C(0xD9E1EC),
+                        wrap(gfx, Font::Regular, 21, std::min(cw, 1080.f),
+                             "Got a code to test a game before it's out? Enter it here. The game goes in your Library "
+                             "and stays on this console for as long as Recomp Store is installed.", 3)) + 28;
+        {
+            /* While the site checks a code the keypad was closed on, it says so. */
+            std::string m, app;
+            const bool checking = engine().redeem_state(m, app) == 1;
+            const std::string label = checking ? "Checking your code\xE2\x80\xA6" : "Enter a code";
+            const float bw = gfx.measure(Font::Bold, 22, label) + 64;
+            gfx.panel(cx, y, bw, 64, checking ? C(kFrost, 0.14f) : C(kCyan), 1.f, 20);
+            gfx.text_mid(Font::Bold, 22, cx + bw / 2, y + 32, checking ? C(kFrost) : C(kMidnight), Align::Center, label);
+            y += 64 + 22;
+        }
+        if (!redeem_note_.empty())
+        {
+            gfx.text_mid(Font::SemiBold, 19, cx + 4, y + 13, redeem_note_bad_ ? C(0xFFB4A8) : C(0x9FF0C6), Align::Left,
+                         fit(gfx, Font::SemiBold, 19, cw - 8, redeem_note_));
+            y += 26 + 22;
+        }
+        y += 14;
+        gfx.text_mid(Font::Bold, 16, cx, y + 10, C(kCyan), Align::Left, "BETA GAMES ON THIS CONSOLE", 2);
+        y += 20 + 18;
+        int shown = 0;
+        for (const App &a : catalog_.apps)
+        {
+            if (!a.beta) continue;
+            if (y + 68 > bottom - 28) break;
+            gfx.panel(cx, y, cw, 1.25f, kLine, 1.f, 0);
+            const std::string name = fit(gfx, Font::SemiBold, 21, cw * 0.5f, a.name);
+            gfx.text_mid(Font::SemiBold, 21, cx + 8, y + 34, C(kFrost), Align::Left, name);
+            gfx.text_mid(Font::SemiBold, 18, cx + 8 + gfx.measure(Font::SemiBold, 21, name) + 12, y + 35, C(kCyan), Align::Left,
+                         version_of(a));
+            const bool inst = !engine().installed(a.id).empty();
+            gfx.text_mid(Font::Regular, 19, cx + cw - 8, y + 34, inst ? C(kFrost) : C(kMuted), Align::Right,
+                         inst ? state_of(a, nullptr) : std::string("Not installed"));
+            y += 68;
+            ++shown;
+        }
+        if (!shown)
+        {
+            gfx.panel(cx, y, cw, 1.25f, kLine, 1.f, 0);
+            gfx.text_mid(Font::Regular, 20, cx + 8, y + 34, C(kDim), Align::Left, "None yet.");
+        }
     }
     else
     {
@@ -2383,6 +2523,7 @@ void Store::draw_page(Gfx &gfx)
             gfx.text_mid(f, 16, chx + w / 2, y + 17, fg, Align::Center, s);
             chx += w + 12;
         };
+        if (a.beta) chip("Beta", Font::Bold, C(kAmber), C(kAmber), C(kMidnight));
         chip(kind, Font::Bold, original ? C(kCyan) : kGlass, original ? C(kCyan) : kRim, original ? C(kMidnight) : C(kFrost));
         chip(a.id, Font::SemiBold, kGlass, kRim, C(kFrost));
         chip("Needs your " + (a.needs.empty() ? std::string("own game") : a.needs), Font::SemiBold, kGlass, kRim, C(kFrost));
@@ -2419,9 +2560,10 @@ void Store::draw_page(Gfx &gfx)
     const float nh = notes_box ? 28 + 18 + 10 + 31.5f * float(std::max<std::size_t>(1, news_lines.size())) + 28 : 0;
     const auto credits = wrap(gfx, Font::Regular, 18, 900, a.credits, 2);
     const float ch = a.credits.empty() ? 0 : 27 * float(credits.size());
-    static const char *kDisc =
-        "Recomp Store and this game's GitHub repository don't host any game files. Set it up from your own "
-        "legally obtained copy.";
+    const char *kDisc = a.source == "github"
+                            ? "Recomp Store and this game's GitHub repository don't host any game files. Set it up from your own "
+                              "legally obtained copy."
+                            : "Recomp Store doesn't host any game files. Set it up from your own legally obtained copy.";
     const auto disc = wrap(gfx, Font::Regular, 18, 820 - 64, kDisc, 3);
     const float dh = 22 + 16 + 10 + 27 * float(disc.size()) + 22;
     /* Open, the notes cover everything from the description down (text is drawn over
@@ -2500,7 +2642,7 @@ void Store::draw_page(Gfx &gfx)
     const auto ctl = page_controls(a);
     auto focused = [&](Control::Kind kind, int slot) {
         const Control &c = ctl[std::size_t(std::clamp(page_focus_, 0, int(ctl.size()) - 1))];
-        return !picker_ && !confirm_ && !notes_focus_ && c.kind == kind && (kind != Control::Slot || c.slot == slot);
+        return !picker_ && !confirm_ && !notes_focus_ && !logs_ && c.kind == kind && (kind != Control::Slot || c.slot == slot);
     };
 
     /* Heights first, so the glass fits its contents. */
@@ -2514,7 +2656,7 @@ void Store::draw_page(Gfx &gfx)
         {"Download", a.size},
         {"Installs to", app_folder(a.id)},
         {"You bring", "Your " + (a.needs.empty() ? std::string("own game") : a.needs)},
-        {"Source", a.source == "github" ? "github.com/" + a.repo : a.url},
+        {"Source", a.beta ? std::string("recompstore.com (beta)") : a.source == "github" ? "github.com/" + a.repo : a.url},
     };
     int nrows = 0;
     for (const auto &r : rows)
@@ -2523,7 +2665,7 @@ void Store::draw_page(Gfx &gfx)
     const auto note = wrap(gfx, Font::Regular, 17, iw - 34, "Updates replace only the app. Your game install, saves, DLC and mods stay where they are.", 2);
     const float note_h = 24.6f * float(note.size());
     const bool can_delete = !inst.empty() && inst != "?";
-    const float del_h = can_delete ? 48 : 0;
+    const float del_h = 48; /* Delete game (when installed) and Send logs */
     float ph = 40 + head_h + 28 + btn_h;
     for (float part : {prog_h, notice_h, setup_h, rows_h, del_h, note_h})
         if (part > 0)
@@ -2734,16 +2876,26 @@ void Store::draw_page(Gfx &gfx)
             ry += 56;
         }
     }
-    if (can_delete)
     {
-        /* Delete: quiet until chosen, then a confirmation first. */
+        /* Delete: quiet until chosen, then a confirmation first. (1.1.0) Send logs beside it. */
         ry += 28;
-        const char *label = "Delete game";
+        float bx = ix;
+        if (can_delete)
+        {
+            const char *label = "Delete game";
+            const float bw = gfx.measure(Font::SemiBold, 18, label) + 48;
+            const bool f = focused(Control::Delete, -1);
+            glass(gfx, bx, ry, bw, 48, 16, f ? C(0xE5484D, 0.18f) : Color{1, 1, 1, 0.05f}, false);
+            ring(gfx, bx, ry, bw, 48, 16, f ? 1.f : 0.f, true);
+            gfx.text_mid(Font::SemiBold, 18, bx + bw / 2, ry + 24, C(0xFF8A80), Align::Center, label);
+            bx += bw + 14;
+        }
+        const char *label = "Send logs";
         const float bw = gfx.measure(Font::SemiBold, 18, label) + 48;
-        const bool f = focused(Control::Delete, -1);
-        glass(gfx, ix, ry, bw, 48, 16, f ? C(0xE5484D, 0.18f) : Color{1, 1, 1, 0.05f}, false);
-        ring(gfx, ix, ry, bw, 48, 16, f ? 1.f : 0.f, true);
-        gfx.text_mid(Font::SemiBold, 18, ix + bw / 2, ry + 24, C(0xFF8A80), Align::Center, label);
+        const bool f = focused(Control::Logs, -1);
+        glass(gfx, bx, ry, bw, 48, 16, f ? C(kFrost, 0.14f) : Color{1, 1, 1, 0.05f}, false);
+        ring(gfx, bx, ry, bw, 48, 16, f ? 1.f : 0.f, true);
+        gfx.text_mid(Font::SemiBold, 18, bx + bw / 2, ry + 24, C(kSoft), Align::Center, label);
         ry += 48;
     }
     ry += 28;
@@ -2869,6 +3021,556 @@ void Store::draw_picker(Gfx &gfx)
 }
 
 /* "Delete <game>?": what goes, that it can't be undone, Cancel chosen first. */
+/* ---- Settings > Redeem a code (1.1.0) ------------------------------------------------ */
+namespace
+{
+/* The keypad's keys, left to right and top to bottom. */
+const char *const kKeys[12] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "Delete", "0", "Redeem"};
+const int kKeyDelete = 9, kKeyZero = 10, kKeyRedeem = 11;
+} // namespace
+
+void Store::open_keypad()
+{
+    keypad_ = true;
+    keypad_t_ = 0;
+    key_sel_ = 0;
+    key_digits_.clear();
+    key_msg_.clear();
+    key_bad_ = false;
+    key_app_.clear();
+    key_done_sel_ = 0;
+    std::string m, app;
+    key_view_ = engine().redeem_state(m, app) == 1 ? 1 : 0; /* one still being checked */
+    play(int(Sfx::Open));
+}
+
+void Store::redeem_typed()
+{
+    if (key_digits_.size() != 8)
+    {
+        key_msg_ = "A code is 8 numbers, like 12-345-678.";
+        key_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    if (!engine().redeem(key_digits_))
+    {
+        play(int(Sfx::Error));
+        return;
+    }
+    key_view_ = 1;
+    key_msg_.clear();
+    key_bad_ = false;
+    redeem_note_.clear();
+    play(int(Sfx::Select));
+}
+
+bool Store::update_keypad(float dt)
+{
+    keypad_t_ = std::min(1.f, keypad_t_ + dt * 5.f);
+    const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
+    const bool u = nav(pad::BtnUp, nav_up_, dt), d = nav(pad::BtnDown, nav_down_, dt);
+    if (key_view_ == 1)
+    {
+        /* Checking: Circle closes it; the answer then shows under Redeem a code. */
+        if (pressed(pad::BtnCircle)) { keypad_ = false; play(int(Sfx::Back)); }
+        return true;
+    }
+    if (key_view_ == 2)
+    {
+        /* Unlocked: Open it (the game's page, from the Library) or Done. */
+        const App *a = find(key_app_);
+        const int sel = std::clamp(key_done_sel_ + (r ? 1 : 0) - (l ? 1 : 0), a ? 0 : 1, 1);
+        if (sel != key_done_sel_) { key_done_sel_ = sel; play(int(Sfx::Move)); }
+        if (pressed(pad::BtnCircle) || (pressed(pad::BtnCross) && key_done_sel_ == 1))
+        {
+            keypad_ = false;
+            play(int(Sfx::Back));
+        }
+        else if (pressed(pad::BtnCross) && a)
+        {
+            keypad_ = false;
+            tab_dir_ = tab_ < Library ? 1 : -1;
+            tab_ = Library;
+            tab_t_ = 1;
+            in_section_ = false;
+            row_ = col_ = 0;
+            lscroll_ = lscroll_to_ = 0;
+            const auto lib = installed_apps();
+            for (int i = 0; i < int(lib.size()); ++i)
+                if (lib[std::size_t(i)]->id == a->id) col_ = i;
+            focus_id_ = a->id;
+            open(a->id);
+        }
+        return true;
+    }
+    if (pressed(pad::BtnCircle))
+    {
+        keypad_ = false;
+        play(int(Sfx::Back));
+        return true;
+    }
+    const int row = std::clamp(key_sel_ / 3 + (d ? 1 : 0) - (u ? 1 : 0), 0, 3);
+    const int col = std::clamp(key_sel_ % 3 + (r ? 1 : 0) - (l ? 1 : 0), 0, 2);
+    if (row * 3 + col != key_sel_) { key_sel_ = row * 3 + col; play(int(Sfx::Move)); }
+    auto erase = [&] {
+        if (key_digits_.empty()) { play(int(Sfx::Error)); return; }
+        key_digits_.pop_back();
+        key_msg_.clear();
+        key_bad_ = false;
+        play(int(Sfx::Move));
+    };
+    if (pressed(pad::BtnSquare))
+        erase(); /* a shortcut for Delete */
+    else if (pressed(pad::BtnCross))
+    {
+        if (key_sel_ == kKeyDelete)
+            erase();
+        else if (key_sel_ == kKeyRedeem)
+            redeem_typed();
+        else if (key_digits_.size() >= 8)
+            play(int(Sfx::Error));
+        else
+        {
+            key_digits_ += char('0' + (key_sel_ == kKeyZero ? 0 : key_sel_ + 1));
+            key_msg_.clear();
+            key_bad_ = false;
+            play(int(Sfx::Select));
+            if (key_digits_.size() == 8) key_sel_ = kKeyRedeem; /* all there: onto Redeem */
+        }
+    }
+    return true;
+}
+
+void Store::draw_keypad(Gfx &gfx)
+{
+    if (!keypad_)
+        return;
+    const float k = ease_out(keypad_t_);
+    const float W = gfx.design_w(), H = gfx.design_h();
+    gfx.panel(0, 0, W, H, C(kMidnight, 0.72f * k), 1.f, 0);
+    gfx.set_layer(0, (1 - k) * 20, k);
+    const float bw = 720, bx = (W - bw) / 2, pad = 56, iw = bw - pad * 2;
+    const float key_w = (iw - 2 * 14) / 3, key_h = 76, key_gap = 14;
+    if (key_view_ == 2)
+    {
+        /* Unlocked. */
+        const auto lines = wrap(gfx, Font::Regular, 22, iw, key_msg_, 4);
+        const float bh = pad + 44 + 18 + 33 * float(lines.size()) + 36 + 64 + pad;
+        const float by = (H - bh) / 2;
+        glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
+        float y = by + pad;
+        gfx.text_mid(Font::ExtraBold, 34, bx + pad, y + 22, C(kFrost), Align::Left, "Unlocked");
+        y += 44 + 18;
+        y += draw_lines(gfx, Font::Regular, 22, bx + pad, y, 33, C(kSoft), lines) + 36;
+        const bool can_open = find(key_app_) != nullptr;
+        const float gap = 16, w2 = (iw - gap) / 2;
+        const char *labels[2] = {"Open it", "Done"};
+        for (int i = 0; i < 2; ++i)
+        {
+            const float x = bx + pad + float(i) * (w2 + gap);
+            const bool on = key_done_sel_ == i;
+            const bool dim = i == 0 && !can_open;
+            gfx.panel(x, y, w2, 64, i == 0 ? C(kCyan, dim ? 0.2f : on ? 1.f : 0.3f) : C(kFrost, on ? 1.f : 0.12f), 1.f, 20);
+            ring(gfx, x, y, w2, 64, 20, on ? 1.f : 0.f, true);
+            gfx.text_mid(Font::Bold, 22, x + w2 / 2, y + 32, on ? C(kMidnight) : C(kFrost, dim ? 0.4f : 1.f), Align::Center, labels[i]);
+        }
+        gfx.set_layer();
+        return;
+    }
+    const bool checking = key_view_ == 1;
+    const float bh = pad + 44 + 10 + 30 + 30 + 80 + 20 + 28 + 26 + 4 * key_h + 3 * key_gap + pad;
+    const float by = (H - bh) / 2;
+    glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
+    float y = by + pad;
+    gfx.text_mid(Font::ExtraBold, 34, bx + pad, y + 22, C(kFrost), Align::Left, "Redeem a code");
+    y += 44 + 10;
+    gfx.text_mid(Font::Regular, 20, bx + pad, y + 15, C(kSoft), Align::Left, "Enter the 8 numbers of your code.");
+    y += 30 + 30;
+    {
+        /* The code as it's typed, 12-345-678, the next number's box lit. */
+        const float cw = 60, ch = 80, cgap = 10, dash = 36;
+        const float total = 8 * cw + 5 * cgap + 2 * dash;
+        float x = bx + pad + (iw - total) / 2;
+        const float blink = 0.55f + 0.45f * std::sin(time_ * 5.f);
+        for (int i = 0; i < 8; ++i)
+        {
+            const bool next = !checking && i == int(key_digits_.size());
+            gfx.panel(x, y, cw, ch, C(kFrost, i < int(key_digits_.size()) ? 0.12f : 0.06f), 1.f, 16,
+                      next ? C(kCyan, blink) : kRim, next ? 2.5f : 1.25f);
+            if (i < int(key_digits_.size()))
+                gfx.text_mid(Font::ExtraBold, 40, x + cw / 2, y + ch / 2, C(kFrost, checking ? 0.6f : 1.f), Align::Center,
+                             std::string(1, key_digits_[std::size_t(i)]));
+            x += cw;
+            if (i == 1 || i == 4)
+            {
+                gfx.text_mid(Font::Bold, 34, x + dash / 2, y + ch / 2, C(kDim), Align::Center, "\xE2\x80\x93");
+                x += dash;
+            }
+            else if (i < 7)
+                x += cgap;
+        }
+        y += ch + 20;
+    }
+    {
+        /* What's going on: checking, or why the last try didn't work. */
+        std::string line;
+        Color c = C(kMuted);
+        if (checking)
+            line = engine().job().phase == Phase::Working ? "Checking your code once the download that's running is done\xE2\x80\xA6"
+                                                          : "Checking your code with recompstore.com\xE2\x80\xA6";
+        else if (!key_msg_.empty())
+        {
+            line = key_msg_;
+            c = key_bad_ ? C(0xFFB4A8) : C(0x9FF0C6);
+        }
+        if (!line.empty())
+            gfx.text_mid(Font::SemiBold, 19, bx + bw / 2, y + 14, c, Align::Center, fit(gfx, Font::SemiBold, 19, iw, line));
+        y += 28 + 26;
+    }
+    for (int i = 0; i < 12; ++i)
+    {
+        const float x = bx + pad + float(i % 3) * (key_w + key_gap), ky = y + float(i / 3) * (key_h + key_gap);
+        const bool on = !checking && key_sel_ == i;
+        const bool redeem = i == kKeyRedeem, ready = key_digits_.size() == 8;
+        Color bg = C(kFrost, on ? 1.f : 0.08f), fg = on ? C(kMidnight) : C(kFrost);
+        if (redeem && ready) { bg = C(kCyan, on ? 1.f : 0.85f); fg = C(kMidnight); }
+        else if (redeem) fg = on ? C(kMidnight) : C(kDim);
+        if (checking) { bg.a *= 0.5f; fg.a *= 0.5f; }
+        gfx.panel(x, ky, key_w, key_h, bg, 1.f, 20, on ? Color{0, 0, 0, 0} : kRim, on ? 0.f : 1.25f);
+        ring(gfx, x, ky, key_w, key_h, 20, on ? 1.f : 0.f, true);
+        const bool word = i == kKeyDelete || redeem;
+        gfx.text_mid(word ? Font::Bold : Font::ExtraBold, word ? 22 : 34, x + key_w / 2, ky + key_h / 2, fg, Align::Center, kKeys[i]);
+    }
+    gfx.set_layer();
+}
+
+/* ---- Send logs, and the keyboard for its message (1.1.0) --------------------------- */
+namespace
+{
+const char *const kKbRows[4] = {"1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"};
+struct KbKey
+{
+    int start, len;
+    const char *label;
+};
+const KbKey kKbBottom[4] = {{0, 2, "Shift"}, {2, 5, "Space"}, {7, 2, "Delete"}, {9, 2, "Done"}};
+const std::size_t kMessageMax = 500;
+int kb_key(int col)
+{
+    for (int i = 3; i >= 0; --i)
+        if (col >= kKbBottom[i].start) return i;
+    return 0;
+}
+std::string kb_size(std::uint64_t b)
+{
+    return b >= (1u << 20) ? std::to_string(b >> 20) + " MB" : std::to_string(std::max<std::uint64_t>(1, (b + 512) >> 10)) + " KB";
+}
+} // namespace
+
+void Store::open_logs(const std::string &id)
+{
+    logs_ = true;
+    logs_t_ = 0;
+    logs_app_ = id;
+    logs_msg_.clear();
+    logs_result_.clear();
+    logs_sel_ = 0;
+    std::string m;
+    logs_view_ = engine().logs_state(m) == 1 ? 1 : 0;
+    App a;
+    if (const App *f = find(id)) a = *f;
+    else a.id = id;
+    logs_files_ = game_log_files(a);
+    kb_ = false;
+    play(int(Sfx::Open));
+}
+
+bool Store::update_logs(float dt)
+{
+    logs_t_ = std::min(1.f, logs_t_ + dt * 5.f);
+    const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
+    const bool u = nav(pad::BtnUp, nav_up_, dt), d = nav(pad::BtnDown, nav_down_, dt);
+    if (logs_view_ == 1 || logs_view_ == 2)
+    {
+        /* Sending (closing it leaves them going: how it went shows on the page), or sent. */
+        if (pressed(pad::BtnCircle) || (logs_view_ == 2 && pressed(pad::BtnCross)))
+        {
+            logs_ = false;
+            play(int(Sfx::Back));
+        }
+        return true;
+    }
+    if (pressed(pad::BtnCircle))
+    {
+        logs_ = false;
+        play(int(Sfx::Back));
+        return true;
+    }
+    int sel = logs_sel_;
+    if (u) sel = 0;
+    if (d && sel == 0) sel = 2;
+    if (sel > 0 && l) sel = 1;
+    if (sel > 0 && r) sel = 2;
+    if (sel != logs_sel_) { logs_sel_ = sel; play(int(Sfx::Move)); }
+    if (pressed(pad::BtnCross))
+    {
+        if (logs_sel_ == 0)
+        {
+            kb_ = true;
+            kb_t_ = 0;
+            kb_row_ = 1;
+            kb_col_ = 0;
+            kb_caps_ = logs_msg_.empty();
+            play(int(Sfx::Open));
+        }
+        else if (logs_sel_ == 1)
+        {
+            logs_ = false;
+            play(int(Sfx::Back));
+        }
+        else if (engine().send_logs(logs_app_, logs_msg_))
+        {
+            logs_view_ = 1;
+            logs_result_.clear();
+            play(int(Sfx::Select));
+        }
+        else
+            play(int(Sfx::Error));
+    }
+    return true;
+}
+
+bool Store::update_keyboard(float dt)
+{
+    kb_t_ = std::min(1.f, kb_t_ + dt * 6.f);
+    const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
+    const bool u = nav(pad::BtnUp, nav_up_, dt), d = nav(pad::BtnDown, nav_down_, dt);
+    auto done = [&] {
+        kb_ = false;
+        logs_sel_ = 2; /* on to Send */
+        play(int(Sfx::Back));
+    };
+    if (pressed(pad::BtnCircle) || pressed(pad::BtnOptions) || pressed(pad::BtnR2))
+    {
+        done();
+        return true;
+    }
+    int row = std::clamp(kb_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, 4), col = kb_col_;
+    if (row == 4)
+    {
+        const int k = kb_key(col);
+        if (l && k > 0) col = kKbBottom[k - 1].start;
+        if (r && k < 3) col = kKbBottom[k + 1].start;
+    }
+    else
+        col = std::clamp(col + (r ? 1 : 0) - (l ? 1 : 0), 0, 10);
+    if (row != kb_row_ || col != kb_col_) { kb_row_ = row; kb_col_ = col; play(int(Sfx::Move)); }
+    auto type = [&](char c) {
+        if (logs_msg_.size() >= kMessageMax) { play(int(Sfx::Error)); return; }
+        /* A capital after the end of a sentence. */
+        if (c == ' ' && !logs_msg_.empty() && std::strchr(".?!", logs_msg_.back())) kb_caps_ = true;
+        logs_msg_ += c;
+        play(int(Sfx::Select));
+    };
+    auto erase = [&] {
+        if (logs_msg_.empty()) { play(int(Sfx::Error)); return; }
+        logs_msg_.pop_back();
+        kb_caps_ = logs_msg_.empty();
+        play(int(Sfx::Move));
+    };
+    if (pressed(pad::BtnSquare))
+        erase();
+    else if (pressed(pad::BtnTriangle))
+        type(' ');
+    else if (pressed(pad::BtnL2))
+    {
+        kb_caps_ = !kb_caps_;
+        play(int(Sfx::Select));
+    }
+    else if (pressed(pad::BtnCross))
+    {
+        if (kb_row_ < 4)
+        {
+            char c = kKbRows[kb_row_][kb_col_];
+            if (kb_caps_ && c >= 'a' && c <= 'z')
+            {
+                c = char(c - 'a' + 'A');
+                kb_caps_ = false;
+            }
+            type(c);
+        }
+        else
+            switch (kb_key(kb_col_))
+            {
+            case 0: kb_caps_ = !kb_caps_; play(int(Sfx::Select)); break;
+            case 1: type(' '); break;
+            case 2: erase(); break;
+            default: done(); break;
+            }
+    }
+    return true;
+}
+
+void Store::draw_logs(Gfx &gfx)
+{
+    if (!logs_)
+        return;
+    const App *a = find(logs_app_);
+    const std::string name = a ? a->name : logs_app_;
+    const float k = ease_out(logs_t_);
+    const float W = gfx.design_w(), H = gfx.design_h();
+    gfx.panel(0, 0, W, H, C(kMidnight, 0.72f * k), 1.f, 0);
+    gfx.set_layer(0, (1 - k) * 20, k);
+    const float bw = 860, bx = (W - bw) / 2, pad = 48, iw = bw - pad * 2;
+    const std::size_t game_files = logs_files_.empty() ? 0 : logs_files_.size() - 1;
+    const std::string body = "Sends the store's log" +
+                             (game_files ? " and " + name + "'s log " + (game_files == 1 ? "file" : "files") : std::string()) +
+                             " to Recomp Store, so we can see what went wrong. Your saves and game files aren't sent.";
+    const auto lines = wrap(gfx, Font::Regular, 20, iw, body, 4);
+    std::vector<std::string> files;
+    for (std::size_t i = 0; i < logs_files_.size() && i < 4; ++i)
+        files.push_back(logs_files_[i].name + "  \xC2\xB7  " + kb_size(logs_files_[i].size));
+    if (logs_files_.size() > 4) files.push_back("and " + std::to_string(logs_files_.size() - 4) + " more");
+    const auto msg = logs_msg_.empty() ? std::vector<std::string>{} : wrap(gfx, Font::Regular, 21, iw - 48, logs_msg_, 3);
+    const float msg_h = 28 + 16 + std::max(1.f, float(msg.size())) * 31 + 28;
+    std::string result;
+    Color result_c = C(kMuted);
+    if (logs_view_ == 1 && engine().job().phase == Phase::Working)
+        result = "Sending once the download that's running is done\xE2\x80\xA6";
+    else if (logs_view_ == 2 || logs_view_ == 3)
+    {
+        result = logs_result_;
+        result_c = logs_view_ == 2 ? C(0x9FF0C6) : C(0xFFB4A8);
+    }
+    const float bh = pad + 44 + 14 + 30 * float(lines.size()) + 18 + 27 * float(files.size()) + 26 + 22 + 10 + msg_h +
+                     (result.empty() ? 0.f : 18 + 26) + 30 + 64 + pad;
+    const float by = (H - bh) / 2;
+    glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
+    float y = by + pad;
+    gfx.text_mid(Font::ExtraBold, 32, bx + pad, y + 22, C(kFrost), Align::Left, "Send logs");
+    y += 44 + 14;
+    y += draw_lines(gfx, Font::Regular, 20, bx + pad, y, 30, C(kSoft), lines) + 18;
+    for (const std::string &f : files)
+    {
+        gfx.text_mid(Font::Regular, 17, bx + pad, y + 13, C(kDim), Align::Left, fit(gfx, Font::Regular, 17, iw, f));
+        y += 27;
+    }
+    y += 26;
+    gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, "YOUR MESSAGE \xC2\xB7 OPTIONAL", 2);
+    y += 22 + 10;
+    {
+        const bool on = logs_view_ != 1 && logs_view_ != 2 && logs_sel_ == 0;
+        gfx.panel(bx + pad, y, iw, msg_h, C(kFrost, on ? 0.12f : 0.06f), 1.f, 20, on ? Color{0, 0, 0, 0} : kRim, on ? 0.f : 1.25f);
+        ring(gfx, bx + pad, y, iw, msg_h, 20, on ? 1.f : 0.f, true);
+        if (msg.empty())
+            gfx.text_mid(Font::Regular, 21, bx + pad + 24, y + msg_h / 2, C(kDim), Align::Left,
+                         "What were you doing when it went wrong?");
+        else
+            draw_lines(gfx, Font::Regular, 21, bx + pad + 24, y + 28, 31, C(kFrost), msg);
+        y += msg_h;
+    }
+    if (!result.empty())
+    {
+        y += 18;
+        gfx.text_mid(Font::SemiBold, 19, bx + bw / 2, y + 13, result_c, Align::Center, fit(gfx, Font::SemiBold, 19, iw, result));
+        y += 26;
+    }
+    y += 30;
+    if (logs_view_ == 2)
+    {
+        gfx.panel(bx + pad, y, iw, 64, C(kFrost), 1.f, 20);
+        ring(gfx, bx + pad, y, iw, 64, 20, 1.f, true);
+        gfx.text_mid(Font::Bold, 22, bx + bw / 2, y + 32, C(kMidnight), Align::Center, "Done");
+    }
+    else
+    {
+        const float gap = 16, w2 = (iw - gap) / 2;
+        const bool sending = logs_view_ == 1;
+        const char *labels[2] = {"Cancel", sending ? "Sending\xE2\x80\xA6" : logs_view_ == 3 ? "Try again" : "Send"};
+        for (int i = 0; i < 2; ++i)
+        {
+            const float x = bx + pad + float(i) * (w2 + gap);
+            const bool on = !sending && logs_sel_ == i + 1;
+            Color bg = i == 1 ? C(kCyan, on ? 1.f : 0.3f) : C(kFrost, on ? 1.f : 0.12f);
+            if (sending) bg.a *= 0.5f;
+            gfx.panel(x, y, w2, 64, bg, 1.f, 20);
+            ring(gfx, x, y, w2, 64, 20, on ? 1.f : 0.f, true);
+            gfx.text_mid(Font::Bold, 22, x + w2 / 2, y + 32, on ? C(kMidnight) : C(kFrost, sending ? 0.6f : 1.f), Align::Center, labels[i]);
+        }
+    }
+    gfx.set_layer();
+}
+
+void Store::draw_keyboard(Gfx &gfx)
+{
+    if (!kb_)
+        return;
+    const float k = ease_out(kb_t_);
+    const float W = gfx.design_w(), H = gfx.design_h();
+    gfx.panel(0, 0, W, H, C(kMidnight, 0.6f * k), 1.f, 0);
+    gfx.set_layer(0, (1 - k) * 20, k);
+    const float bw = 1240, bx = (W - bw) / 2, pad = 44, iw = bw - pad * 2;
+    const float gap = 10, kw = (iw - gap * 10) / 11, kh = 72, field_h = 3 * 34 + 40;
+    const float bh = pad + 40 + 18 + field_h + 26 + 5 * kh + 4 * gap + pad;
+    const float by = H - 60 - bh;
+    glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.98f), true);
+    float y = by + pad;
+    gfx.text_mid(Font::ExtraBold, 30, bx + pad, y + 20, C(kFrost), Align::Left, "Your message");
+    gfx.text_mid(Font::Regular, 18, bx + bw - pad, y + 20, logs_msg_.size() >= kMessageMax ? C(0xFFB4A8) : C(kDim), Align::Right,
+                 std::to_string(logs_msg_.size()) + " / " + std::to_string(kMessageMax));
+    y += 40 + 18;
+    {
+        /* The message, its last three lines, and where the next letter goes. */
+        gfx.panel(bx + pad, y, iw, field_h, C(kFrost, 0.06f), 1.f, 20, kRim, 1.25f);
+        auto all = wrap(gfx, Font::Regular, 24, iw - 60, logs_msg_, 100);
+        if (all.size() > 3) all.erase(all.begin(), all.end() - 3);
+        const float tx = bx + pad + 24, ty = y + 20;
+        gfx.clip(bx + pad + 8, y + 4, iw - 16, field_h - 8); /* a word longer than a line runs out of sight */
+        if (logs_msg_.empty())
+            gfx.text_mid(Font::Regular, 24, tx, ty + 17, C(kDim), Align::Left, "What were you doing when it went wrong?");
+        else
+            draw_lines(gfx, Font::Regular, 24, tx, ty, 34, C(kFrost), all);
+        const std::string last = all.empty() ? std::string() : all.back();
+        float cx = tx + gfx.measure(Font::Regular, 24, last) + (!logs_msg_.empty() && logs_msg_.back() == ' ' ? gfx.measure(Font::Regular, 24, " ") : 0);
+        const float cy = ty + 34 * float(std::max<std::size_t>(1, all.size()) - 1);
+        if (logs_msg_.empty()) cx = tx;
+        if (std::fmod(time_, 1.f) < 0.6f)
+            gfx.panel(cx + 1, cy + 3, 2.5f, 28, C(kCyan), 1.f, 1);
+        gfx.unclip();
+        y += field_h + 26;
+    }
+    for (int row = 0; row < 5; ++row)
+    {
+        const float ky = y + float(row) * (kh + gap);
+        if (row < 4)
+            for (int col = 0; col < 11; ++col)
+            {
+                const float kx = bx + pad + float(col) * (kw + gap);
+                const bool on = kb_row_ == row && kb_col_ == col;
+                char c = kKbRows[row][col];
+                if (kb_caps_ && c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+                gfx.panel(kx, ky, kw, kh, C(kFrost, on ? 1.f : 0.08f), 1.f, 16, on ? Color{0, 0, 0, 0} : kRim, on ? 0.f : 1.25f);
+                ring(gfx, kx, ky, kw, kh, 16, on ? 1.f : 0.f, true);
+                gfx.text_mid(Font::Bold, 28, kx + kw / 2, ky + kh / 2, on ? C(kMidnight) : C(kFrost), Align::Center, std::string(1, c));
+            }
+        else
+            for (int i = 0; i < 4; ++i)
+            {
+                const KbKey &key = kKbBottom[i];
+                const float kx = bx + pad + float(key.start) * (kw + gap), w = float(key.len) * kw + float(key.len - 1) * gap;
+                const bool on = kb_row_ == 4 && kb_key(kb_col_) == i;
+                Color bg = C(kFrost, on ? 1.f : 0.08f), fg = on ? C(kMidnight) : C(kFrost);
+                if (i == 0 && kb_caps_ && !on) { bg = C(kFrost, 0.3f); }
+                if (i == 3) { bg = C(kCyan, on ? 1.f : 0.85f); fg = C(kMidnight); }
+                gfx.panel(kx, ky, w, kh, bg, 1.f, 16, on || i == 3 ? Color{0, 0, 0, 0} : kRim, on || i == 3 ? 0.f : 1.25f);
+                ring(gfx, kx, ky, w, kh, 16, on ? 1.f : 0.f, true);
+                gfx.text_mid(Font::Bold, 22, kx + w / 2, ky + kh / 2, fg, Align::Center, key.label);
+            }
+    }
+    gfx.set_layer();
+}
+
 void Store::draw_confirm(Gfx &gfx)
 {
     if (!confirm_)
@@ -2939,6 +3641,24 @@ void Store::draw_hints(Gfx &gfx)
         x -= 34;
     };
     const bool deeper = page_open_ || picker_;
+    if (kb_)
+    {
+        hint(hint_circle_, "Done");
+        hint(hint_cross_, "Type");
+        return;
+    }
+    if (logs_)
+    {
+        hint(hint_circle_, logs_view_ == 2 ? "Close" : "Cancel");
+        if (logs_view_ != 1) hint(hint_cross_, "Choose");
+        return;
+    }
+    if (keypad_)
+    {
+        hint(hint_circle_, key_view_ == 0 ? "Cancel" : "Close");
+        if (key_view_ != 1) hint(hint_cross_, key_view_ == 2 ? "Choose" : "Press");
+        return;
+    }
     if (confirm_)
     {
         hint(hint_circle_, "Cancel");
@@ -3071,6 +3791,9 @@ void Store::draw(Gfx &gfx)
     draw_page(gfx);
     draw_picker(gfx);
     draw_confirm(gfx);
+    draw_keypad(gfx);
+    draw_logs(gfx);
+    draw_keyboard(gfx);
     draw_hints(gfx);
 }
 } // namespace recomp

@@ -31,6 +31,8 @@ To install by hand instead, unzip `PPSA92000.zip` into `/data/homebrew/` over FT
 - **Sets games up from your own files.** Pick your disc image, your Xbox Live Arcade game's file, a Title Update or DLC, or a ROM on the game's page, and the store puts what the port needs where it expects it, at the drive's full speed.
 - **Opens games**, refreshes ShadowMountPlus so new games appear on the home screen, and deletes a game (after asking) when you're done with it.
 - **Shows every release's patch notes** from each game's GitHub repository.
+- **Beta games.** A code from Settings > Redeem a code unlocks a game in testing on that console; it shows up in the Library.
+- **Send logs** from a game's page: the store's log and the game's own, with a message, go to the admin's Inbox.
 
 ## Repository layout
 
@@ -61,7 +63,7 @@ Every copy of the store checks this repository's releases when it starts, and ev
 
 ## The website
 
-`site/public_html` runs on any host with PHP 8 and MySQL. Upload it, open `/admin/setup.php` once to connect the database and make your admin login, then add games and press **Publish** to write the `catalog.json` that the store and the site read. Bug reports and recomp submissions land in the admin's **Inbox**.
+`site/public_html` runs on any host with PHP 8 and MySQL. Upload it, open `/admin/setup.php` once to connect the database and make your admin login, then add games and press **Publish** to write the `catalog.json` that the store and the site read. Bug reports, recomp submissions, messages from the Contact page and logs sent from the store land in the admin's **Inbox**. Under **Beta**, make codes for a game marked Beta; its zip stays on the site, outside `public_html`, and only consoles that redeemed a code can download it.
 
 ## License and credits
 

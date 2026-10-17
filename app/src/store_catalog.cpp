@@ -126,12 +126,19 @@ bool parse_catalog(const std::string &text, Catalog &out)
             if (o.id == a.id) return;
         a.soon = soon;
         a.date = x["date"].str();
+        a.beta = !soon && x["beta"].boolean(false);
         for (std::size_t k = 0; k < x["saves"].size(); ++k)
         {
             const std::string p = x["saves"][k].str();
             if (plain_path(p) && a.saves.size() < 16) a.saves.push_back(p);
         }
         a.min_store = x["minStore"].str();
+        for (std::size_t k = 0; k < x["logs"].size() && a.logs.size() < 12; ++k)
+        {
+            /* (1.1.0) inside the game's folder only */
+            const std::string p = x["logs"][k].str();
+            if (plain_path(p) && p[0] != '/') a.logs.push_back(p);
+        }
         a.order = int(x["order"].integer(int(soon ? out.soon.size() : out.apps.size()) + 1000));
         a.name = x["name"].str(a.id);
         a.kind = x["kind"].str("community");

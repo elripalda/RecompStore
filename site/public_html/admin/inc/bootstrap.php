@@ -2,7 +2,7 @@
 // Recomp Store admin: shared setup for every admin page.
 declare(strict_types=1);
 
-const RS_VERSION = '1.4.0';
+const RS_VERSION = '1.5.0';
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -107,7 +107,30 @@ function rs_game_defaults(): array {
         'soon' => false, 'date' => '',
         // Where the game keeps its saves, one per line, inside its folder (store 1.0.6: Delete can keep them).
         'saves' => '',
+        // The game's own log files, one pattern per line inside its folder (store 1.1.0: Send logs).
+        // Empty: the store looks for *.log and files like log.txt or crash_*.txt itself.
+        'logs' => '',
+        // Extra buttons on the game's page on the website (texture packs, patches...): [{label, url, color}].
+        'links' => [],
+        // Beta: left out of the public catalog; only consoles that redeemed one of its codes see it,
+        // and they download beta_file (a zip in RS_BETA_DIR) from this site, not from GitHub.
+        'beta' => false, 'beta_file' => '', 'beta_sha256' => '', 'beta_size' => 0, 'beta_version' => '',
     ];
+}
+
+// A game's extra buttons, cleaned: a label, an https link and a #rrggbb color each, at most 12.
+function rs_clean_links($in): array {
+    $out = [];
+    foreach (is_array($in) ? $in : [] as $l) {
+        if (!is_array($l) || count($out) >= 12) continue;
+        $label = mb_substr(trim((string)($l['label'] ?? '')), 0, 40);
+        $url = trim((string)($l['url'] ?? ''));
+        $color = strtolower(trim((string)($l['color'] ?? '')));
+        if ($label === '' || !preg_match('#^https://[^\s<>"]{1,500}$#', $url)) continue;
+        if (!preg_match('/^#[0-9a-f]{6}$/', $color)) $color = '#2a3446';
+        $out[] = ['label' => $label, 'url' => $url, 'color' => $color];
+    }
+    return $out;
 }
 
 // The oldest Recomp Store a game needs: what the admin set, and at least 1.0.3 when it
@@ -150,6 +173,19 @@ function rs_saves_list(string $text, ?string &$bad = null): array {
         if (strlen($p) > 200 || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $p) || ($p[0] === '/' && !str_starts_with($p, '/data/'))) { $bad = $p; return []; }
         $out[] = rtrim($p, '/');
         if (count($out) >= 16) break;
+    }
+    return $out;
+}
+
+// The patterns for a game's log files (store 1.1.0's Send logs): inside its folder, * and ? allowed.
+function rs_logs_list(string $text, ?string &$bad = null): array {
+    $out = [];
+    foreach (preg_split('/[\r\n,]+/', $text) as $p) {
+        $p = trim($p);
+        if ($p === '') continue;
+        if (strlen($p) > 160 || $p[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $p)) { $bad = $p; return []; }
+        $out[] = $p;
+        if (count($out) >= 12) break;
     }
     return $out;
 }
@@ -340,16 +376,60 @@ function rs_save_image(array $file, string $kind, string $id): array {
 
 // ---- Publish ------------------------------------------------------------------
 
+// A path on this site as a full https:// address.
+function rs_abs(string $p): string {
+    $base = rs_setting('site_url', 'https://recompstore.com');
+    return $p === '' ? '' : (preg_match('#^https?://#', $p) ? $p : rtrim($base, '/') . $p);
+}
+
+// One game as the store reads it (an entry of catalog.json's apps or newerStoreApps).
+function rs_app_entry(array $g, int $order): array {
+    $abs = 'rs_abs';
+    $app = [
+        'id' => $g['id'], 'name' => $g['name'], 'order' => $order,
+        'kind' => $g['kind'], 'author' => $g['author'],
+        'blurb' => $g['blurb'], 'description' => $g['description'], 'news' => $g['news'], 'credits' => $g['credits'],
+        'version' => $g['version'], 'build' => (int)$g['build'], 'released' => $g['released'],
+        'size' => $g['size'], 'needs' => $g['needs'],
+        'source' => $g['source'] === 'github'
+            ? ['type' => 'github', 'repo' => $g['repo'], 'asset' => $g['asset']]
+            : ['type' => 'url'],
+        'url' => $g['url'], 'sha256' => strtolower(trim($g['sha256'])),
+        'icon' => $abs($g['icon']), 'hero' => $abs($g['hero']), 'heroWeb' => $abs($g['hero_web']),
+        'banner' => ['x' => (int)$g['focus_x'], 'y' => (int)$g['focus_y'], 'zoom' => (int)$g['zoom']],
+        'logo' => $g['logo'] === '' ? null : [
+            'url' => $abs($g['logo']),
+            'banner' => ['x' => (int)$g['logo_bx'], 'y' => (int)$g['logo_by'], 'scale' => (int)$g['logo_bs']],
+            'page' => ['x' => (int)$g['logo_px'], 'y' => (int)$g['logo_py'], 'scale' => (int)$g['logo_ps']],
+        ],
+        'setup' => null,
+    ];
+    if ($g['setup']) {
+        $slots = json_decode((string)$g['slots'], true);
+        $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
+    }
+    if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
+    $links = rs_clean_links($g['links']);
+    if ($links) $app['links'] = $links;
+    $saves = rs_saves_list((string)$g['saves']);
+    if ($saves) $app['saves'] = $saves;
+    $logs = rs_logs_list((string)($g['logs'] ?? ''));
+    if ($logs) $app['logs'] = $logs;
+    $min = rs_min_store($g);
+    if ($min !== '') $app['minStore'] = $min;
+    return $app;
+}
+
 // Builds catalog.json from the database. Written to a temporary file first and then
 // renamed over the old one, so the PS5 store never reads a half-written catalog.
+// Beta games are left out: only consoles that redeemed one of their codes get them (api/beta.php).
 function rs_build_catalog(): array {
-    $base = rs_setting('site_url', 'https://recompstore.com');
-    $abs = fn(string $p) => $p === '' ? '' : (preg_match('#^https?://#', $p) ? $p : rtrim($base, '/') . $p);
+    $abs = 'rs_abs';
     $apps = [];
     $newer = [];
     $featured = [];
     $soon = [];
-    foreach (rs_games(false) as $i => $g) {
+    foreach (array_values(array_filter(rs_games(false), fn($g) => !$g['beta'])) as $i => $g) {
         if ($g['soon']) {
             // Not out yet: what the store and the site show of it, nothing to install.
             $entry = [
@@ -368,34 +448,8 @@ function rs_build_catalog(): array {
             $soon[] = $entry;
             continue;
         }
-        $app = [
-            'id' => $g['id'], 'name' => $g['name'], 'order' => $i,
-            'kind' => $g['kind'], 'author' => $g['author'],
-            'blurb' => $g['blurb'], 'description' => $g['description'], 'news' => $g['news'], 'credits' => $g['credits'],
-            'version' => $g['version'], 'build' => (int)$g['build'], 'released' => $g['released'],
-            'size' => $g['size'], 'needs' => $g['needs'],
-            'source' => $g['source'] === 'github'
-                ? ['type' => 'github', 'repo' => $g['repo'], 'asset' => $g['asset']]
-                : ['type' => 'url'],
-            'url' => $g['url'], 'sha256' => strtolower(trim($g['sha256'])),
-            'icon' => $abs($g['icon']), 'hero' => $abs($g['hero']), 'heroWeb' => $abs($g['hero_web']),
-            'banner' => ['x' => (int)$g['focus_x'], 'y' => (int)$g['focus_y'], 'zoom' => (int)$g['zoom']],
-            'logo' => $g['logo'] === '' ? null : [
-                'url' => $abs($g['logo']),
-                'banner' => ['x' => (int)$g['logo_bx'], 'y' => (int)$g['logo_by'], 'scale' => (int)$g['logo_bs']],
-                'page' => ['x' => (int)$g['logo_px'], 'y' => (int)$g['logo_py'], 'scale' => (int)$g['logo_ps']],
-            ],
-            'setup' => null,
-        ];
-        if ($g['setup']) {
-            $slots = json_decode((string)$g['slots'], true);
-            $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
-        }
-        if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
-        $saves = rs_saves_list((string)$g['saves']);
-        if ($saves) $app['saves'] = $saves;
-        $min = rs_min_store($g);
-        if ($min !== '') $app['minStore'] = $min;
+        $app = rs_app_entry($g, $i);
+        $min = $app['minStore'] ?? '';
         if ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;
         else $apps[] = $app;
         if ($g['featured']) $featured[] = $g['id'];
@@ -468,6 +522,15 @@ function rs_inbox_table(): void {
         created DATETIME NOT NULL,
         INDEX (kind, created), INDEX (ip_hash, created)
     ) CHARACTER SET utf8mb4');
+    // Log files a player sent from the store (kind 'logs'), kept with their message.
+    rs_db()->exec('CREATE TABLE IF NOT EXISTS inbox_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        inbox_id INT NOT NULL,
+        name VARCHAR(160) NOT NULL,
+        size INT NOT NULL DEFAULT 0,
+        body MEDIUMTEXT NOT NULL,
+        INDEX (inbox_id)
+    ) CHARACTER SET utf8mb4');
     $done = true;
 }
 
@@ -489,4 +552,116 @@ function rs_ip_hash(): string {
     $bin = @inet_pton($ip);
     if ($bin !== false && strlen($bin) === 16) $ip = bin2hex(substr($bin, 0, 8)) . '::/64';
     return hash('sha256', $salt . '|' . $ip);
+}
+
+// ---- Beta: games only testers with a code get ---------------------------------------------
+// A beta game is left out of the public catalog. You make codes for it (8 digits, shown as
+// 12-345-678); a console that redeems one in Recomp Store 1.1.0 gets the game in its library,
+// and downloads its zip from this site (RS_BETA_DIR), never from a public link. One console
+// per code: the store install that redeems it keeps it, until you cancel the code.
+
+const RS_BETA_FROM = '1.1.0';
+
+// Where beta zips are kept: beside public_html when the host allows it (never served directly),
+// otherwise public_html/beta-files, which its own .htaccess blocks.
+function rs_beta_dir(): string {
+    $outside = dirname(RS_PUBLIC) . '/recompstore-beta';
+    if (is_dir($outside)) return $outside;
+    $inside = RS_PUBLIC . '/beta-files';
+    if (is_dir($inside)) return $inside;
+    return is_writable(dirname(RS_PUBLIC)) ? $outside : $inside;
+}
+
+function rs_beta_dir_ready(): string {
+    $dir = rs_beta_dir();
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) throw new RuntimeException('Could not make the beta folder ' . $dir . '.');
+    if (str_starts_with($dir, RS_PUBLIC) && !is_file($dir . '/.htaccess')) @file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
+    return $dir;
+}
+
+// The zips in the beta folder (uploaded here or with hPanel's File Manager), newest first.
+function rs_beta_files(): array {
+    $dir = rs_beta_dir();
+    $out = [];
+    foreach (is_dir($dir) ? (glob($dir . '/*.zip') ?: []) : [] as $p) $out[basename($p)] = ['size' => filesize($p), 'time' => filemtime($p)];
+    uasort($out, fn($a, $b) => $b['time'] <=> $a['time']);
+    return $out;
+}
+
+function rs_beta_tables(): void {
+    static $done = false;
+    if ($done) return;
+    $db = rs_db();
+    $db->exec('CREATE TABLE IF NOT EXISTS beta_codes (
+        code CHAR(8) PRIMARY KEY,
+        game_id VARCHAR(32) NOT NULL,
+        note VARCHAR(120) NOT NULL DEFAULT \'\',
+        created DATETIME NOT NULL,
+        install_id CHAR(16) NULL,
+        redeemed DATETIME NULL,
+        revoked TINYINT NOT NULL DEFAULT 0,
+        INDEX (game_id), INDEX (install_id)
+    ) CHARACTER SET utf8mb4');
+    $db->exec('CREATE TABLE IF NOT EXISTS beta_installs (
+        install_id CHAR(16) PRIMARY KEY,
+        token_hash CHAR(64) NOT NULL,
+        created DATETIME NOT NULL,
+        last_seen DATETIME NOT NULL,
+        store_version VARCHAR(32) NOT NULL DEFAULT \'\'
+    ) CHARACTER SET utf8mb4');
+    $db->exec('CREATE TABLE IF NOT EXISTS beta_tries (
+        ip_hash CHAR(64) NOT NULL,
+        at DATETIME NOT NULL,
+        INDEX (ip_hash, at)
+    ) CHARACTER SET utf8mb4');
+    $done = true;
+}
+
+function rs_beta_format(string $code): string {
+    return substr($code, 0, 2) . '-' . substr($code, 2, 3) . '-' . substr($code, 5, 3);
+}
+
+// $n new codes for a game, each unused and unique.
+function rs_beta_make_codes(string $gameId, int $n, string $note): array {
+    rs_beta_tables();
+    $db = rs_db();
+    $ins = $db->prepare('INSERT IGNORE INTO beta_codes (code, game_id, note, created) VALUES (?, ?, ?, NOW())');
+    $made = [];
+    for ($tries = 0; count($made) < $n && $tries < $n * 20; ++$tries) {
+        $code = str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+        $ins->execute([$code, $gameId, $note]);
+        if ($ins->rowCount() === 1) $made[] = $code;
+    }
+    return $made;
+}
+
+// The secret the beta download links are signed with (made once, kept in settings).
+function rs_beta_secret(): string {
+    $s = rs_setting('beta_secret');
+    if (!$s) { $s = bin2hex(random_bytes(32)); rs_set_setting('beta_secret', $s); }
+    return $s;
+}
+
+function rs_beta_sig(string $install, string $gameId): string {
+    return substr(hash_hmac('sha256', $install . '|' . $gameId, rs_beta_secret()), 0, 32);
+}
+
+// A beta game as the store reads it, for one install: downloads come from this site, signed for it.
+function rs_beta_entry(array $g, string $install, int $order): array {
+    $app = rs_app_entry($g, $order);
+    $app['source'] = ['type' => 'url'];
+    $app['url'] = rs_abs('/api/beta.php') . '?a=file&id=' . rawurlencode($g['id']) . '&install=' . $install . '&sig=' . rs_beta_sig($install, $g['id']);
+    $app['sha256'] = strtolower((string)$g['beta_sha256']);
+    if (trim((string)$g['beta_version']) !== '') $app['version'] = trim((string)$g['beta_version']);
+    if ((int)$g['beta_size'] > 0) $app['size'] = rs_human_size((int)$g['beta_size']);
+    $app['beta'] = true;
+    $min = $app['minStore'] ?? '';
+    if ($min === '' || version_compare($min, RS_BETA_FROM, '<')) $app['minStore'] = RS_BETA_FROM;
+    return $app;
+}
+
+function rs_human_size(int $b): string {
+    if ($b >= 1024 ** 3) return round($b / 1024 ** 3, 1) . ' GB';
+    if ($b >= 1024 ** 2) return round($b / 1024 ** 2) . ' MB';
+    return max(1, (int)round($b / 1024)) . ' KB';
 }

@@ -274,7 +274,7 @@ int main(int argc, char **argv)
     store.preview_tab(2); settle(90); if (want("updates")) frame("updates");
     store.preview_settings(0); settle(90); if (want("settings")) frame("settings-general");
     store.preview_settings(1); settle(90); if (want("settings")) frame("settings-adding");
-    store.preview_settings(2); settle(90); if (want("settings")) frame("settings-about");
+    store.preview_settings(3); settle(90); if (want("settings")) frame("settings-about");
     if (const char *id = std::getenv("PREVIEW_PAGE")) { store.preview_open(id); settle(60); if (want("custom")) frame("page-custom"); }
     store.preview_open("PPSA92011"); settle(60); if (want("page")) frame("page-2011");
     store.preview_focus(1); if (want("page")) frame("page-2011-slot");
@@ -341,7 +341,64 @@ int main(int argc, char **argv)
         store.preview_choose("update", recomp::kDownloadChoice); store.preview_focus(3); frame("p108-chosen");
         recomp::preview_job("fetch", "PPSA99300"); frame("p108-downloading");
         recomp::preview_job("", "");
-        store.preview_row(0, 0); store.preview_settings(2); settle(90); frame("p108-about");
+        store.preview_row(0, 0); store.preview_settings(3); settle(90); frame("p108-about");
+    }
+    /* 1.1.0: Settings > Redeem a code, its keypad, and a beta game in the Library. */
+    if (want("v110"))
+    {
+        store.preview_row(0, 0); store.preview_settings(2); settle(90); frame("r110-section");
+        store.preview_redeem_note("Beta Test Game is unlocked. It's in your Library.", false); frame("r110-section-note");
+        store.preview_redeem_note("", false);
+        store.preview_keypad("", 0, 0); settle(10); frame("r110-keypad");
+        store.preview_keypad("12345", 4, 0); frame("r110-typing");
+        store.preview_keypad("12345678", 11, 0); frame("r110-full");
+        store.preview_keypad("12345678", 11, 0, "That code isn't right. Check the numbers and try again.", true); frame("r110-wrong");
+        store.preview_keypad("12345678", 11, 1); frame("r110-checking");
+        store.preview_keypad("", 0, 2, "Beta Test Game is unlocked. It's in your Library.", false, "PPSA99777"); frame("r110-unlocked");
+        store.preview_keypad_close();
+        store.preview_tab(1); store.preview_row(0, 0); settle(60); frame("r110-library");
+        store.preview_open("PPSA99777"); settle(60); frame("r110-page");
+        store.preview_tab(2); store.preview_row(0, 0); settle(60); frame("r110-updates");
+        store.preview_tab(0); store.preview_row(1, 0); settle(60); frame("r110-discover");
+    }
+    /* 1.1.0: Send logs on a game's page, and the keyboard for its message. */
+    if (want("logs"))
+    {
+        store.preview_open("PPSA92011"); settle(60); store.preview_focus(4); frame("l110-page-focus");
+        store.preview_logs("", 0); frame("l110-dialog");
+        store.preview_logs("The game freezes when I", 0, 0, "", true, 2, 3); frame("l110-keyboard");
+        store.preview_logs("The game freezes when I open Create a Superstar and pick a face paint. Happens every time.", 2); frame("l110-typed");
+        store.preview_logs("The game freezes when I open Create a Superstar and pick a face paint. Happens every time.", 2, 1); frame("l110-sending");
+        store.preview_logs("The game freezes when I open Create a Superstar and pick a face paint. Happens every time.", 1, 2, "Sent. Thanks for helping."); frame("l110-sent");
+        store.preview_logs("", 2, 3, "That's a lot of logs at once. Try again in an hour."); frame("l110-failed");
+        store.preview_logs_close();
+        store.preview_open("PPSA92007"); settle(60); store.preview_focus(1); frame("l110-page-not-installed");
+        /* With the controller: X on Send logs, X on the message, type H i (caps first), Done. */
+        using namespace porpoise::pad;
+        store.preview_open("PPSA92011"); settle(30); store.preview_focus(4);
+        press(BtnCross); settle(10); press(BtnCross); settle(10);
+        press(BtnDown); press(BtnRight); press(BtnRight); press(BtnRight); press(BtnRight); press(BtnRight); press(BtnCross); /* h */
+        press(BtnUp); press(BtnRight); press(BtnRight); press(BtnCross); /* i */
+        press(BtnTriangle); press(BtnUp); press(BtnCross); press(BtnSquare); press(BtnCross); settle(10);
+        frame("l110-input-kb");
+        press(BtnCircle); settle(20); frame("l110-input-dialog");
+        store.preview_logs_close();
+    }
+    /* 1.1.0, with the controller: X on Redeem a code, type 1 2 (Right, X), Square deletes
+     * the 2, Down Down Down onto 0... then Open it from the unlocked box. */
+    if (want("v110in"))
+    {
+        using namespace porpoise::pad;
+        store.preview_row(0, 0); store.preview_settings(2); settle(30);
+        press(BtnCross); settle(20);
+        press(BtnCross); press(BtnRight); press(BtnCross); press(BtnSquare);
+        press(BtnDown); press(BtnDown); press(BtnDown); press(BtnCross); press(BtnCross); settle(10);
+        frame("r110-input");
+        store.preview_keypad("", 0, 2, "Beta Test Game is unlocked. It's in your Library.", false, "PPSA99777");
+        press(BtnCross); settle(60);
+        frame("r110-open-it");
+        press(BtnCircle); settle(60);
+        frame("r110-open-it-back");
     }
     return 0;
 }

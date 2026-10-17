@@ -225,6 +225,21 @@
   }
 
   // ---- Game page ------------------------------------------------------------------
+  // The admin's extra buttons (texture packs, patches...): its text and color, dark text on a light color.
+  function linksHTML(a) {
+    const ok = (Array.isArray(a.links) ? a.links : []).filter((l) => l && /^https:\/\//.test(l.url || '') && l.label);
+    if (!ok.length) return '';
+    const ink = (hex) => {
+      const n = parseInt(String(hex).slice(1), 16) || 0;
+      const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+      return 0.2126 * lin(n >> 16 & 255) + 0.7152 * lin(n >> 8 & 255) + 0.0722 * lin(n & 255) > 0.4 ? '#0B1220' : '#F4F8FC';
+    };
+    return `<div class="extra-links">${ok.map((l) => {
+      const c = /^#[0-9a-f]{6}$/i.test(l.color || '') ? l.color : '#2a3446';
+      return `<a class="btn extra" href="${esc(l.url)}" target="_blank" rel="noopener" style="--b:${c};--t:${ink(c)}">${esc(l.label)}</a>`;
+    }).join('')}</div>`;
+  }
+
   function game(id) {
     const a = byId(id);
     if (!a) { notFound(); return; }
@@ -260,6 +275,7 @@
             <dl>${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd${r[0] === 'Version' ? ' data-version' : ''}>${esc(r[1])}</dd></div>`).join('')}</dl>
             ${repoUrl ? `<a class="src" href="${esc(repoUrl)}" target="_blank" rel="noopener">Source on GitHub ↗</a>` : ''}
             <p class="note">Updates through Recomp Store replace only the app. Your game install, saves, DLC and mods stay where they are.</p>
+            ${linksHTML(a)}
           </aside>
         </div>
       </article>`;
@@ -395,7 +411,7 @@
     const games = cat.apps.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
     view.innerHTML = `
       <article class="form-page">
-        <a class="back" href="#/">← All games</a>
+        <a class="back" href="#/contact">← Contact</a>
         <h1>${bug ? 'Report a bug' : 'Submit your recomp'}</h1>
         <p class="lead">${bug
           ? 'Tell us what went wrong and which game it was in. The more you can say about what you did right before, the faster it gets fixed.'
@@ -417,14 +433,19 @@
         </form>
       </article>`;
     setBackdrop(null);
-    const form = view.querySelector('form');
+    wireForm(view.querySelector('form'), kind,
+      bug ? [['app', 'Choose the game the bug is in.'], ['body', 'Tell us what happened.']]
+          : [['name', 'Add your name or handle.'], ['email', 'Add your email.'], ['repo', 'Add the GitHub repository link.'], ['body', 'Tell us about the port.']],
+      bug ? ['Thanks, the report is in.', 'It went straight to the developer.'] : ['Thanks, it\'s on its way.', 'We\'ll be in touch at the email you gave.']);
+  }
+
+  // Sends a form to the Inbox: the fields in need must be filled; sent is the thank-you.
+  function wireForm(form, kind, need, sent) {
     const status = form.querySelector('.status');
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
       data.kind = kind;
-      const need = bug ? [['app', 'Choose the game the bug is in.'], ['body', 'Tell us what happened.']]
-                       : [['name', 'Add your name or handle.'], ['email', 'Add your email.'], ['repo', 'Add the GitHub repository link.'], ['body', 'Tell us about the port.']];
       for (const [k, msg] of need) if (!String(data[k] || '').trim()) { status.textContent = msg; status.className = 'status bad'; form.querySelector(`[name="${k}"]`).focus(); return; }
       const btn = form.querySelector('button');
       btn.disabled = true;
@@ -433,13 +454,54 @@
         .then((r) => r.json().catch(() => ({ ok: false })))
         .then((res) => {
           if (res.ok) {
-            form.innerHTML = `<div class="sent"><strong>${bug ? 'Thanks, the report is in.' : 'Thanks, it\'s on its way.'}</strong><p>${bug ? 'It went straight to the developer.' : 'We\'ll be in touch at the email you gave.'}</p><a class="btn" href="#/">Back to all games</a></div>`;
+            form.innerHTML = `<div class="sent"><strong>${sent[0]}</strong><p>${sent[1]}</p><a class="btn" href="#/">Back to all games</a></div>`;
           } else {
             status.textContent = res.error || 'That didn\'t send. Try again in a moment.'; status.className = 'status bad'; btn.disabled = false;
           }
         })
         .catch(() => { status.textContent = 'That didn\'t send. Check your connection and try again.'; status.className = 'status bad'; btn.disabled = false; });
     });
+  }
+
+  // ---- Contact: the two forms, a message, and the email address ---------------------------
+  const CONTACT_EMAIL = 'info@recompstore.com';
+  function contactPage() {
+    view.innerHTML = `
+      <article class="form-page contact">
+        <a class="back" href="#/">← All games</a>
+        <h1>Contact</h1>
+        <p class="lead">Found a bug, made a recomp, or have a question? Here's how to reach us.</p>
+        <section class="help contact-cards">
+          <a class="glass help-card" href="#/report">
+            <span class="kicker">Found a bug?</span>
+            <strong>Report it</strong>
+            <span>Pick the game and tell us what happened. It goes straight to the developer.</span>
+          </a>
+          <a class="glass help-card" href="#/submit">
+            <span class="kicker">Made a recomp?</span>
+            <strong>Submit your port</strong>
+            <span>Send us your PS5 port and we'll get in touch about listing it.</span>
+          </a>
+          <a class="glass help-card" href="mailto:${CONTACT_EMAIL}">
+            <span class="kicker">Email us</span>
+            <strong class="mail">${CONTACT_EMAIL}</strong>
+            <span>For questions and anything else.</span>
+          </a>
+        </section>
+        <h2 class="contact-h2">Send a message</h2>
+        <form class="glass form" novalidate>
+          <label>Your name or handle<input name="name" maxlength="120" required autocomplete="nickname"></label>
+          <label>Email<input name="email" type="email" maxlength="200" required autocomplete="email" placeholder="So we can reply"></label>
+          <label>Message<textarea name="body" rows="6" maxlength="5000" required></textarea></label>
+          <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
+          <p class="form-note">Only the Recomp Store developer sees this. Your email is used just to reply.</p>
+          <div class="form-row"><button class="btn primary" type="submit">Send the message</button><span class="status" role="status"></span></div>
+        </form>
+      </article>`;
+    setBackdrop(null);
+    wireForm(view.querySelector('form'), 'message',
+      [['name', 'Add your name or handle.'], ['email', 'Add your email.'], ['body', 'Write your message.']],
+      ['Thanks, your message is in.', 'We\'ll reply to the email you gave.']);
   }
 
   function notFound() {
@@ -460,8 +522,9 @@
     else if (h === '/about') about();
     else if (h === '/report') formPage('bug');
     else if (h === '/submit') formPage('submit');
+    else if (h === '/contact') contactPage();
     else home();
-    const here = h === '/about' ? 'about' : h === '/report' ? 'report' : h === '/submit' ? 'submit' : 'home';
+    const here = h === '/about' ? 'about' : ['/contact', '/report', '/submit'].includes(h) ? 'contact' : 'home';
     document.querySelectorAll('[data-nav]').forEach((n) => n.toggleAttribute('aria-current', n.dataset.nav === here));
     window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
     view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
@@ -494,6 +557,7 @@
         '<a href="https://github.com/elripalda/RecompStore" target="_blank" rel="noopener">GitHub</a>',
         '<a href="#/report">Report a bug</a>',
         '<a href="#/submit">Submit your recomp</a>',
+        '<a href="#/contact">Contact</a>',
         '<a href="#/about">About</a>',
       ].filter(Boolean).join('');
       window.addEventListener('hashchange', route);

@@ -74,6 +74,7 @@ rs_head('Games');
         <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'Recomp Store' : 'By ' . h($g['author']) ?></span>
         <?php if ($g['featured']): ?><span class="tag">Featured</span><?php endif; ?>
         <?php if ($g['hidden']): ?><span class="tag">Hidden</span><?php endif; ?>
+        <?php if ($g['beta']): ?><span class="tag beta">Beta</span><?php endif; ?>
         <?php if ($g['soon']): ?><span class="tag soon">Coming soon<?= $g['date'] !== '' ? ' · ' . h($g['date']) : '' ?></span><?php endif; ?>
         <?php if ($g['setup'] && !$g['soon']): ?><span class="tag">Store sets up files</span><?php endif; ?>
         <span class="muted"><?= h($g['id']) ?><?= $g['soon'] ? '' : ' · ' . h($g['version'] ?: 'no version') ?></span>

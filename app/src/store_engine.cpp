@@ -179,6 +179,20 @@ struct Shared
     std::map<std::string, std::vector<Release>> notes;
     std::map<std::string, double> notes_at;
     std::set<std::string> notes_failed, notes_wanted;
+    /* (1.1.0) Beta codes: this console's ID and token on recompstore.com (beta.json), the
+     * beta games it has (beta-apps.json, the site's last list), and a code being redeemed
+     * (redeem: 0 none, 1 checking, 2 unlocked, 3 refused). */
+    std::string beta_install, beta_token;
+    std::vector<App> beta_apps;
+    std::string pending_redeem;
+    int redeem = 0;
+    std::string redeem_msg, redeem_app;
+    /* (1.1.0) Send logs: the game and message waiting to go, and how it went (logs: 0 none,
+     * 1 sending, 2 sent, 3 didn't go). */
+    bool pending_logs = false;
+    std::string pending_logs_app, pending_logs_msg;
+    int logs = 0;
+    std::string logs_msg;
 };
 Shared g;
 
@@ -254,14 +268,19 @@ void fail_job(const std::string &why)
 }
 
 /* ---- The catalog ------------------------------------------------------------------ */
+void load_beta();
+void merge_beta(Catalog &c);
+
 void load_cached()
 {
+    load_beta();
     std::string text;
     Catalog c;
     if (read_file(g.data + "/catalog.json", text) && parse_catalog(text, c))
     {
         std::lock_guard<std::mutex> l(g.m);
         g.catalog = c;
+        merge_beta(g.catalog);
         g.have_catalog = true;
         ++g.revision;
     }
@@ -290,14 +309,238 @@ void refresh_catalog(porpoise::http::Session &http)
     if (status == 200 && parse_catalog(text, c))
     {
         write_file(g.data + "/catalog.json", text.data(), text.size());
-        attach_art(c);
         std::lock_guard<std::mutex> l(g.m);
         g.catalog = c;
+        merge_beta(g.catalog);
+        attach_art(g.catalog);
         g.have_catalog = true;
         g.online = true;
         ++g.revision;
     }
     slog("catalog: HTTP %d, %zu bytes, %zu games\n", status, body.size(), c.apps.size());
+}
+
+/* ---- Beta games (1.1.0) ------------------------------------------------------------- */
+bool lower_hex(const std::string &s, std::size_t n)
+{
+    if (s.size() != n) return false;
+    for (const char c : s)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    return true;
+}
+
+/* The catalog with this console's beta games in it, after its own games. A beta the
+ * catalog has itself (it's out for everyone now) is the catalog's. g.m held. */
+void merge_beta(Catalog &c)
+{
+    c.apps.erase(std::remove_if(c.apps.begin(), c.apps.end(), [](const App &a) { return a.beta; }), c.apps.end());
+    for (const App &b : g.beta_apps)
+    {
+        bool there = false;
+        for (const App &a : c.apps) there = there || a.id == b.id;
+        for (const App &a : c.soon) there = there || a.id == b.id;
+        if (!there) c.apps.push_back(b);
+    }
+}
+
+/* What the store kept: its ID and token on the site, and the beta games it had. */
+void load_beta()
+{
+    std::string text;
+    Json j;
+    if (read_file(g.data + "/beta.json", text) && Json::parse(text, j))
+    {
+        const std::string install = j["install"].str(), token = j["token"].str();
+        if (lower_hex(install, 16) && lower_hex(token, 32))
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.beta_install = install;
+            g.beta_token = token;
+        }
+    }
+    Catalog c;
+    if (read_file(g.data + "/beta-apps.json", text) && parse_catalog(text, c))
+    {
+        for (App &a : c.apps) a.beta = true;
+        std::lock_guard<std::mutex> l(g.m);
+        g.beta_apps = c.apps;
+    }
+}
+
+void set_beta(std::vector<App> apps)
+{
+    for (App &a : apps) a.beta = true;
+    std::lock_guard<std::mutex> l(g.m);
+    g.beta_apps = std::move(apps);
+    merge_beta(g.catalog);
+    attach_art(g.catalog);
+    ++g.revision;
+}
+
+/* A value in a form: letters, digits and -._ as they are, the rest %XX. */
+std::string form_value(const std::string &v)
+{
+    static const char *hex = "0123456789ABCDEF";
+    std::string out;
+    for (const unsigned char c : v)
+        if (std::isalnum(c) || c == '-' || c == '.' || c == '_') out += char(c);
+        else { out += '%'; out += hex[c >> 4]; out += hex[c & 15]; }
+    return out;
+}
+
+/* A request to the site's beta API: what to do, plus this console's ID and token (none
+ * before its first code) and the store's version (the admin sees which testers updated). */
+std::string beta_form(const char *action, const std::string &more)
+{
+    std::string install, token;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        install = g.beta_install;
+        token = g.beta_token;
+    }
+    return std::string("a=") + action + more + "&install=" + form_value(install) + "&token=" + form_value(token) +
+           "&store=" + form_value(kVersion);
+}
+
+/* The beta games this console has: at start, with each catalog refresh, and after a code.
+ * Kept for when the console is offline. A console the site doesn't know has none; a code
+ * that was cancelled takes its game off the list. */
+void refresh_beta(porpoise::http::Session &http)
+{
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        if (g.beta_install.empty()) return;
+    }
+    const std::string form = beta_form("list", "");
+    std::vector<std::uint8_t> body;
+    const int status = http.request(kBetaUrl, &form, body, 4u << 20);
+    const std::string text(body.begin(), body.end());
+    Json j;
+    Catalog c;
+    if (status == 200 && Json::parse(text, j) && j["ok"].boolean(false) && parse_catalog(text, c))
+    {
+        write_file(g.data + "/beta-apps.json", text.data(), text.size());
+        set_beta(c.apps);
+    }
+    else if (status == 403)
+    {
+        std::remove((g.data + "/beta-apps.json").c_str());
+        set_beta({});
+    }
+    slog("beta: list HTTP %d, %zu games\n", status, c.apps.size());
+}
+
+void redeem_done(int state, const std::string &message, const std::string &app)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.redeem = state;
+    g.redeem_msg = message;
+    g.redeem_app = app;
+    ++g.revision;
+}
+
+/* Settings > Redeem a code: the site checks it, ties it to this console (making the
+ * console an ID and token on its first code), and its game joins the beta list. */
+void run_redeem(const std::string &code)
+{
+    porpoise::http::Session http("beta", "RecompStore/1.1");
+    if (!http.init()) return redeem_done(3, "Your PS5 isn't online. Connect it and try again.", "");
+    const std::string form = beta_form("redeem", "&code=" + form_value(code));
+    std::vector<std::uint8_t> body;
+    const int status = http.request(kBetaUrl, &form, body, 64u << 10);
+    Json j;
+    const bool answered = Json::parse(std::string(body.begin(), body.end()), j) && j.is_object();
+    const bool ok = answered && j["ok"].boolean(false);
+    const std::string id = ok ? j["game"]["id"].str() : std::string();
+    slog("beta: redeem HTTP %d, %s%s\n", status, !answered ? "no answer" : ok ? "unlocked " : "refused", id.c_str());
+    if (!answered)
+        return redeem_done(3, status < 0 ? "recompstore.com didn't answer. Check your connection and try again."
+                                         : "recompstore.com can't check codes right now. Try again in a moment.", "");
+    if (!ok) return redeem_done(3, j["error"].str("That code didn't work."), "");
+    const std::string install = j["install"].str(), token = j["token"].str();
+    if (lower_hex(install, 16) && lower_hex(token, 32))
+    {
+        const std::string text = "{\"install\":\"" + install + "\",\"token\":\"" + token + "\"}\n";
+        if (!write_file(g.data + "/beta.json", text.data(), text.size()))
+            slog("beta: couldn't save this console's ID in %s/beta.json\n", g.data.c_str());
+        std::lock_guard<std::mutex> l(g.m);
+        g.beta_install = install;
+        g.beta_token = token;
+    }
+    refresh_beta(http);
+    std::string message = j["message"].str();
+    if (message.empty()) message = j["game"]["name"].str("The game") + " is unlocked. It's in your Library.";
+    redeem_done(2, message, id);
+}
+
+/* ---- Send logs (1.1.0) ------------------------------------------------------------- */
+/* A file's end, as text: at most max bytes, from the start of a line. */
+std::string file_tail(const std::string &path, std::uint64_t size, std::uint64_t max)
+{
+    std::FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f) return std::string();
+    const bool cut = size > max;
+    if (cut) std::fseek(f, long(size - max), SEEK_SET);
+    std::string out;
+    out.resize(std::size_t(std::min(size, max)));
+    out.resize(std::fread(out.data(), 1, out.size(), f));
+    std::fclose(f);
+    if (cut)
+    {
+        const std::size_t nl = out.find('\n');
+        if (nl != std::string::npos && nl < 4096) out.erase(0, nl + 1);
+        out = "[the first " + std::to_string((size - out.size()) / 1024) + " KB are left out]\n" + out;
+    }
+    return out;
+}
+
+void logs_done(int state, const std::string &message)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.logs = state;
+    g.logs_msg = message;
+    ++g.revision;
+}
+
+/* The store's log and the game's own log files, with the player's message and what's
+ * installed, to recompstore.com/api/logs.php: the admin's inbox, under Logs. */
+void run_send_logs(const std::string &id, const std::string &message)
+{
+    App a;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const App &x : g.catalog.apps)
+            if (x.id == id) a = x;
+    }
+    if (a.id.empty()) a.id = id;
+    std::string form = beta_form("send", "&app=" + form_value(id) + "&version=" + form_value(engine().installed(id)) +
+                                             "&message=" + form_value(message));
+    std::uint64_t total = 0;
+    std::size_t n = 0;
+    for (const LogFile &f : game_log_files(a))
+    {
+        /* The store's log: its last 200 KB; each of the game's: its last 128 KB; 640 KB in all. */
+        const std::uint64_t room = (n == 0 ? 200u : 128u) << 10;
+        if (total + std::min(f.size, room) > (640u << 10)) break;
+        const std::string text = file_tail(f.path, f.size, room);
+        total += text.size();
+        ++n;
+        form += "&name%5B%5D=" + form_value(f.name) + "&text%5B%5D=" + form_value(text);
+    }
+    porpoise::http::Session http("logs", "RecompStore/1.1");
+    if (!http.init()) return logs_done(3, "Your PS5 isn't online. Connect it and try again.");
+    std::vector<std::uint8_t> body;
+    const int status = http.request(kLogsUrl, &form, body, 64u << 10);
+    Json j;
+    const bool answered = Json::parse(std::string(body.begin(), body.end()), j) && j.is_object();
+    const bool ok = answered && j["ok"].boolean(false);
+    slog("logs: sent %zu files (%llu KB) for %s: HTTP %d, %s\n", n, (unsigned long long)(total >> 10), id.c_str(), status,
+         ok ? "ok" : answered ? "refused" : "no answer");
+    if (!answered)
+        return logs_done(3, status < 0 ? "recompstore.com didn't answer. Check your connection and try again."
+                                       : "recompstore.com couldn't take them right now. Try again in a moment.");
+    if (!ok) return logs_done(3, j["error"].str("They didn't go. Try again in a moment."));
+    logs_done(2, j["message"].str("Sent. Thanks for helping."));
 }
 
 void fetch_art(porpoise::http::Session &http)
@@ -2400,6 +2643,7 @@ void *worker(void *)
                 if (http.init())
                 {
                     refresh_catalog(http);
+                    refresh_beta(http);
                     fetch_art(http);
                     if (now >= next_store_check)
                     {
@@ -2433,6 +2677,34 @@ void *worker(void *)
             next_refresh = now + (ok ? 600 : 60);
             if (next_store_check > now && next_store_check < next_refresh)
                 next_refresh = next_store_check; /* the store's own check, retried sooner */
+        }
+        {
+            /* (1.1.0) A code to redeem: before any job waiting, as it takes a moment. */
+            std::string code;
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                code.swap(g.pending_redeem);
+            }
+            if (!code.empty())
+            {
+                run_redeem(code);
+                continue;
+            }
+            /* (1.1.0) Logs to send, the same way. */
+            std::string lapp, lmsg;
+            bool lsend = false;
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                lsend = g.pending_logs;
+                g.pending_logs = false;
+                lapp.swap(g.pending_logs_app);
+                lmsg.swap(g.pending_logs_msg);
+            }
+            if (lsend)
+            {
+                run_send_logs(lapp, lmsg);
+                continue;
+            }
         }
         std::string id, sapp, sslot, simage;
         bool bench = false, sfetch = false;
@@ -2560,6 +2832,83 @@ std::string app_folder(const std::string &app_id)
     return it != g_folders.end() ? it->second : std::string(kHomebrew) + "/" + app_id;
 }
 
+std::vector<LogFile> game_log_files(const App &a)
+{
+    std::vector<LogFile> out;
+    auto add = [&](const std::string &path, const std::string &name) {
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) return;
+        LogFile f;
+        f.path = path;
+        f.name = name;
+        f.size = std::uint64_t(st.st_size);
+        f.mtime = (long long)st.st_mtime;
+        out.push_back(f);
+    };
+    add(log_path(), "store.log");
+    /* The game's folder, a folder at a time (the shallow ones first), never through a link. */
+    auto lower = [](std::string v) {
+        for (char &c : v) c = char(std::tolower(static_cast<unsigned char>(c)));
+        return v;
+    };
+    std::vector<std::string> pats;
+    for (const std::string &p : a.logs) pats.push_back(lower(p));
+    std::vector<LogFile> found;
+    struct Dir
+    {
+        std::string rel;
+        int depth;
+    };
+    const std::string root = app_folder(a.id);
+    std::vector<Dir> todo{{"", 0}};
+    std::size_t seen = 0;
+    for (std::size_t i = 0; i < todo.size() && seen < 6000; ++i)
+    {
+        const Dir d = todo[i];
+        DIR *dir = opendir((d.rel.empty() ? root : root + "/" + d.rel).c_str());
+        if (!dir) continue;
+        while (dirent *e = readdir(dir))
+        {
+            if (++seen > 6000) break;
+            const std::string leaf = e->d_name;
+            if (leaf == "." || leaf == ".." || e->d_type == DT_LNK) continue;
+            const std::string rel = d.rel.empty() ? leaf : d.rel + "/" + leaf;
+            const std::string path = root + "/" + rel;
+            bool is_dir = e->d_type == DT_DIR;
+            if (e->d_type == DT_UNKNOWN)
+            {
+                struct stat st;
+                is_dir = stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+            }
+            if (is_dir)
+            {
+                if (d.depth < 4 && leaf != "sce_sys" && leaf != "sce_module") todo.push_back({rel, d.depth + 1});
+                continue;
+            }
+            const std::string lr = lower(rel), ll = lower(leaf);
+            bool want = false;
+            if (!pats.empty())
+                for (const std::string &p : pats) want = want || asset_matches(p, lr);
+            else
+            {
+                const bool txt = ll.size() > 4 && ll.compare(ll.size() - 4, 4, ".txt") == 0;
+                const bool log = ll.size() > 4 && ll.compare(ll.size() - 4, 4, ".log") == 0;
+                want = log || (txt && (ll.find("log") != std::string::npos || ll.find("crash") != std::string::npos ||
+                                       ll.find("trace") != std::string::npos));
+            }
+            if (!want) continue;
+            const std::size_t before = out.size();
+            add(path, rel);
+            if (out.size() > before) { found.push_back(out.back()); out.pop_back(); }
+        }
+        closedir(dir);
+    }
+    std::sort(found.begin(), found.end(), [](const LogFile &x, const LogFile &y) { return x.mtime > y.mtime; });
+    if (found.size() > 8) found.resize(8);
+    out.insert(out.end(), found.begin(), found.end());
+    return out;
+}
+
 std::vector<std::string> log_tail(std::size_t n)
 {
     LogState &L = logs();
@@ -2679,6 +3028,64 @@ bool Engine::install(const std::string &app_id)
     g.job.app_id = app_id;
     g.job.step = "Starting";
     return true;
+}
+
+bool Engine::redeem(const std::string &code)
+{
+    std::string digits;
+    for (const char c : code)
+        if (c >= '0' && c <= '9') digits += c;
+    std::lock_guard<std::mutex> l(g.m);
+    if (digits.size() != 8 || g.redeem == 1) return false;
+    g.pending_redeem = digits;
+    g.redeem = 1;
+    g.redeem_msg.clear();
+    g.redeem_app.clear();
+    return true;
+}
+
+int Engine::redeem_state(std::string &message, std::string &app_id) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    message = g.redeem_msg;
+    app_id = g.redeem_app;
+    return g.redeem;
+}
+
+void Engine::redeem_ack()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.redeem == 1) return;
+    g.redeem = 0;
+    g.redeem_msg.clear();
+    g.redeem_app.clear();
+}
+
+bool Engine::send_logs(const std::string &app_id, const std::string &message)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.logs == 1) return false;
+    g.pending_logs = true;
+    g.pending_logs_app = app_id;
+    g.pending_logs_msg = message.substr(0, 2000);
+    g.logs = 1;
+    g.logs_msg.clear();
+    return true;
+}
+
+int Engine::logs_state(std::string &message) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    message = g.logs_msg;
+    return g.logs;
+}
+
+void Engine::logs_ack()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.logs == 1) return;
+    g.logs = 0;
+    g.logs_msg.clear();
 }
 
 bool Engine::bench()

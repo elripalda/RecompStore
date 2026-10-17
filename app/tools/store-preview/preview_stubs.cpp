@@ -167,6 +167,24 @@ std::string slot_source(const App &a, const Slot &s)
     return s.kind == "stfs" ? "/data/recompstore/updates/415608B2/d8b9fb4dc4bb36e0b07c4842bde4cb5612e9b5e7" : "/mnt/usb0/Games/SmackDown vs Raw 2011.iso";
 }
 void Engine::acknowledge() {}
+/* (1.1.0) PREVIEW_REDEEM: the state a code is in (1 checking). */
+bool Engine::redeem(const std::string &) { return true; }
+int Engine::redeem_state(std::string &m, std::string &a) const { m.clear(); a.clear(); const char *e = std::getenv("PREVIEW_REDEEM"); return e ? std::atoi(e) : 0; }
+void Engine::redeem_ack() {}
+/* (1.1.0) Send logs: PREVIEW_LOGS the state (1 sending). */
+bool Engine::send_logs(const std::string &, const std::string &) { return true; }
+int Engine::logs_state(std::string &m) const { m.clear(); const char *e = std::getenv("PREVIEW_LOGS"); return e ? std::atoi(e) : 0; }
+void Engine::logs_ack() {}
+std::vector<LogFile> game_log_files(const App &a)
+{
+    std::vector<LogFile> out{{"/data/recompstore/logs/store.log", "store.log", 212000, 0}};
+    if (a.id == "PPSA92011")
+    {
+        out.push_back({"", "UserData/crashes/crash_2026-10-17_141502.txt", 3400, 0});
+        out.push_back({"", "UserData/rexglue.log", 88000, 0});
+    }
+    return out;
+}
 std::string Engine::installed(const std::string &id) const
 {
     if (const char *e = std::getenv("PREVIEW_INSTALLED"))

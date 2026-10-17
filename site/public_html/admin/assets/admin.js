@@ -227,3 +227,55 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
   layout();
 })();
+
+// Extra buttons: add and remove rows, and a preview the size of the site's buttons.
+(function () {
+  const card = document.querySelector('[data-links-card]');
+  if (!card) return;
+  const list = card.querySelector('[data-links]');
+  const tpl = card.querySelector('[data-link-template]');
+  const preview = card.querySelector('[data-links-preview]');
+  // Dark text on a light color, white on a dark one (the site decides the same way).
+  const ink = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const L = 0.2126 * lin(n >> 16 & 255) + 0.7152 * lin(n >> 8 & 255) + 0.0722 * lin(n & 255);
+    return L > 0.4 ? '#0B1220' : '#F4F8FC';
+  };
+  const draw = () => {
+    preview.innerHTML = '';
+    list.querySelectorAll('[data-link-row]').forEach((row) => {
+      const text = row.querySelector('[name="link_label[]"]').value.trim();
+      if (!text) return;
+      const color = row.querySelector('[name="link_color[]"]').value || '#2a3446';
+      const b = document.createElement('span');
+      b.className = 'site-btn';
+      b.textContent = text;
+      b.style.background = color;
+      b.style.color = ink(color);
+      preview.appendChild(b);
+    });
+    preview.hidden = !preview.children.length;
+  };
+  card.querySelector('[data-link-add]').addEventListener('click', () => {
+    list.appendChild(tpl.content.cloneNode(true));
+    list.lastElementChild.querySelector('input').focus();
+    draw();
+  });
+  list.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-link-remove]');
+    if (b) { b.closest('[data-link-row]').remove(); draw(); }
+  });
+  list.addEventListener('input', draw);
+  draw();
+})();
+
+// Beta: its fields only when the game is a beta.
+(function () {
+  const box = document.querySelector('[data-beta]');
+  const fields = document.querySelector('[data-beta-fields]');
+  if (!box || !fields) return;
+  const sync = () => (fields.hidden = !box.checked);
+  box.addEventListener('change', sync);
+  sync();
+})();
