@@ -1883,8 +1883,10 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     Disc disc;
     std::string err;
     if (!disc.open(image, err)) return fail_job(err);
-    if (!disc.find("default.xex"))
-        return fail_job("This disc image has no default.xex: it isn't a game disc, or it's the wrong one.");
+    /* (1.1.1) A game disc: an Xbox 360 one has default.xex, an original Xbox one default.xbe
+     * (Def Jam: Fight for NY). The copier payload checks the same. */
+    if (!disc.find("default.xex") && !disc.find("default.xbe"))
+        return fail_job("This disc image has no default.xex or default.xbe: it isn't a game disc, or it's the wrong one.");
     if (!slot.title_id.empty())
     {
         const std::uint32_t want = std::uint32_t(std::strtoul(slot.title_id.c_str(), nullptr, 16));

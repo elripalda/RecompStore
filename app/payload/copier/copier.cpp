@@ -643,8 +643,10 @@ int main()
     write_status(true);
     if (!disc.open(image, err))
         return fail(err);
-    if (!disc.find("default.xex"))
-        return fail("This disc image has no default.xex: it isn't a game disc, or it's the wrong one.");
+    /* An Xbox 360 game disc has default.xex, an original Xbox one default.xbe (1.1.1). The
+     * store has checked the disc against its slot already. */
+    if (!disc.find("default.xex") && !disc.find("default.xbe"))
+        return fail("This disc image has no default.xex or default.xbe: it isn't a game disc, or it's the wrong one.");
 
     std::vector<const recomp::DiscFile *> order, todo;
     unsigned long long total = 0, done = 0;
