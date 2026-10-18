@@ -579,6 +579,19 @@ function rs_beta_dir_ready(): string {
     return $dir;
 }
 
+// A beta zip's SHA-256, kept beside it (<zip>.sha256) once worked out: a big zip takes a while.
+function rs_beta_remember_hash(string $zip, string $sha): void {
+    @file_put_contents($zip . '.sha256', $sha . ' ' . filesize($zip) . ' ' . filemtime($zip) . "\n");
+}
+function rs_beta_hash(string $zip): string {
+    $kept = explode(' ', trim((string)@file_get_contents($zip . '.sha256')));
+    if (count($kept) === 3 && preg_match('/^[0-9a-f]{64}$/', $kept[0]) && (int)$kept[1] === filesize($zip) && (int)$kept[2] === filemtime($zip)) return $kept[0];
+    @set_time_limit(600);
+    $sha = hash_file('sha256', $zip);
+    rs_beta_remember_hash($zip, $sha);
+    return $sha;
+}
+
 // The zips in the beta folder (uploaded here or with hPanel's File Manager), newest first.
 function rs_beta_files(): array {
     $dir = rs_beta_dir();

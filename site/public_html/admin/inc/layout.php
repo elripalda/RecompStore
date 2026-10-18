@@ -14,7 +14,7 @@ function rs_head(string $title, bool $nav = true): void {
 <link rel="icon" href="/assets/logo-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/admin.css?v=<?= RS_VERSION ?>">
+<link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(RS_ADMIN . '/assets/admin.css') ?>">
 </head>
 <body>
 <header class="bar">
@@ -38,6 +38,7 @@ function rs_head(string $title, bool $nav = true): void {
 }
 
 function rs_foot(array $scripts = []): void {
-    foreach ($scripts as $s) echo '<script src="' . h($s) . '?v=' . RS_VERSION . '"></script>' . "\n";
+    // Each file's own date: a browser never keeps an old copy after an update.
+    foreach ($scripts as $s) echo '<script src="' . h($s) . '?v=' . (int)@filemtime(RS_ADMIN . '/' . $s) . '"></script>' . "\n";
     echo "</main>\n</body>\n</html>\n";
 }

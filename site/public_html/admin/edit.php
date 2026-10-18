@@ -96,8 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($g['beta_file'] !== '' && $g['beta_sha256'] === '') {
                 $p = rs_beta_dir() . '/' . basename($g['beta_file']);
                 if (!is_file($p)) throw new RuntimeException('The beta zip ' . $g['beta_file'] . ' isn\'t in the beta folder anymore.');
-                @set_time_limit(300);
-                $g['beta_sha256'] = hash_file('sha256', $p);
+                $g['beta_sha256'] = rs_beta_hash($p);
                 $g['beta_size'] = filesize($p);
             }
             rs_save_game($g, $isNew ? null : $oldId);
@@ -187,7 +186,6 @@ if (!$isNew) {
         $betaCounts = ['all' => (int)$r['n'], 'used' => (int)$r['used']];
     } catch (Throwable $e) {}
 }
-$uploadMax = min(array_map(function ($v) { $v = trim((string)$v); $n = (float)$v; $u = strtolower(substr($v, -1)); return (int)($n * ($u === 'g' ? 1 << 30 : ($u === 'm' ? 1 << 20 : ($u === 'k' ? 1 << 10 : 1)))); }, [ini_get('upload_max_filesize'), ini_get('post_max_size')]));
 ?>
 <section class="card beta-card" data-not-soon>
   <h2>Beta</h2>
@@ -201,8 +199,14 @@ $uploadMax = min(array_map(function ($v) { $v = trim((string)$v); $n = (float)$v
         <span class="muted"><?= $g['beta_size'] ? h(rs_human_size((int)$g['beta_size'])) : '' ?><?= $g['beta_sha256'] ? ' · SHA-256 ' . h(substr($g['beta_sha256'], 0, 12)) . '…' : '' ?><?= isset($betaFiles[$g['beta_file']]) ? '' : ' · missing from the beta folder' ?></span>
       <?php else: ?><span class="muted">None yet.</span><?php endif; ?>
     </div>
-    <label>Upload a new zip<input type="file" name="beta_upload" accept=".zip,application/zip"><small>Up to <?= h(rs_human_size($uploadMax)) ?> here. For a bigger one, put it in the beta folder with hPanel's File Manager, then pick it below.</small></label>
-    <label>Or pick one from the beta folder
+    <div class="drop-zone span2" data-beta-drop data-game="<?= h($isNew ? '' : $g['id']) ?>" data-csrf="<?= h(rs_csrf()) ?>">
+      <input type="file" accept=".zip,application/zip" hidden data-beta-pick>
+      <strong>Drop the beta zip here</strong>
+      <span class="muted">or <button type="button" class="link" data-beta-choose>choose it</button>. Any size; it goes up in pieces.</span>
+      <div class="drop-progress" hidden><div class="drop-bar"></div></div>
+      <p class="drop-status" data-beta-status></p>
+    </div>
+    <label class="span2">Or pick one already in the beta folder
       <select name="beta_existing">
         <option value="">Keep the current zip</option>
         <?php foreach ($betaFiles as $name => $f): ?><option value="<?= h($name) ?>"><?= h($name) ?> (<?= h(rs_human_size((int)$f['size'])) ?>, <?= h(date('M j', $f['time'])) ?>)</option><?php endforeach; ?>

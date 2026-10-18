@@ -279,3 +279,94 @@
   box.addEventListener('change', sync);
   sync();
 })();
+
+// Beta: a zip dropped on the Beta card goes up in pieces (any size gets through the server's
+// per-request limit), then is picked as the game's beta zip; Save makes it the beta.
+(function () {
+  const zone = document.querySelector('[data-beta-drop]');
+  if (!zone) return;
+  const pick = zone.querySelector('[data-beta-pick]');
+  const status = zone.querySelector('[data-beta-status]');
+  const bar = zone.querySelector('.drop-bar');
+  const progress = zone.querySelector('.drop-progress');
+  const select = document.querySelector('select[name="beta_existing"]');
+  const version = document.querySelector('input[name="beta_version"]');
+  let busy = false;
+  const say = (text, bad) => { status.textContent = text; status.classList.toggle('bad', !!bad); };
+  const mb = (b) => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : (b / (1 << 20)).toFixed(b < 10 << 20 ? 1 : 0) + ' MB';
+  async function call(action, body, query) {
+    const r = await fetch('beta-upload.php?a=' + action + (query || ''), {
+      method: 'POST', credentials: 'same-origin', body,
+      headers: { 'X-CSRF': zone.dataset.csrf, 'Content-Type': action === 'chunk' ? 'application/octet-stream' : 'application/json' },
+    });
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = { ok: false, error: 'The server answered ' + r.status + '.' }; }
+    if (!r.ok || !j.ok) { const err = new Error(j.error || 'The upload stopped.'); err.received = j.received; throw err; }
+    return j;
+  }
+  async function upload(file) {
+    if (busy) return;
+    if (!zone.dataset.game) { say('Save the game once first, then drop its beta zip.', true); return; }
+    if (!/\.zip$/i.test(file.name)) { say('The beta has to be a .zip.', true); return; }
+    busy = true;
+    zone.classList.add('busy');
+    progress.hidden = false;
+    bar.style.width = '0%';
+    let token = '';
+    const t0 = performance.now();
+    try {
+      const s = await call('start', JSON.stringify({ game: zone.dataset.game, name: file.name, size: file.size }));
+      token = s.token;
+      let at = 0;
+      while (at < file.size) {
+        const piece = file.slice(at, Math.min(file.size, at + s.chunk));
+        let tries = 0;
+        for (;;) {
+          try {
+            const r = await call('chunk', piece, '&token=' + token + '&offset=' + at);
+            at = r.received;
+            break;
+          } catch (e) {
+            if (typeof e.received === 'number') { at = e.received; break; } // back in step with the server
+            if (++tries >= 4) throw e;
+            await new Promise((ok) => setTimeout(ok, 1500 * tries));
+          }
+        }
+        const secs = (performance.now() - t0) / 1000;
+        bar.style.width = (100 * at / file.size).toFixed(1) + '%';
+        say('Uploading ' + file.name + ': ' + mb(at) + ' of ' + mb(file.size) + (secs > 1 ? ' · ' + mb(at / secs) + '/s' : ''));
+      }
+      say('Checking ' + file.name + '…');
+      const f = await call('finish', JSON.stringify({ token, version: version ? version.value : '' }));
+      token = '';
+      bar.style.width = '100%';
+      if (select) {
+        let o = [...select.options].find((x) => x.value === f.name);
+        if (!o) { o = new Option(f.label, f.name); select.add(o, 1); }
+        select.value = f.name;
+      }
+      say('Uploaded as ' + f.name + ' (' + mb(f.size) + '). Press Save to make it the beta.');
+      zone.classList.add('done');
+    } catch (e) {
+      say(e.message, true);
+      if (token) call('cancel', JSON.stringify({ token })).catch(() => {});
+    } finally {
+      busy = false;
+      zone.classList.remove('busy', 'over');
+    }
+  }
+  zone.querySelector('[data-beta-choose]').addEventListener('click', () => pick.click());
+  pick.addEventListener('change', () => { if (pick.files[0]) upload(pick.files[0]); pick.value = ''; });
+  ['dragenter', 'dragover'].forEach((t) => zone.addEventListener(t, (e) => { e.preventDefault(); zone.classList.add('over'); }));
+  ['dragleave', 'dragend'].forEach((t) => zone.addEventListener(t, () => zone.classList.remove('over')));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('over');
+    const file = e.dataTransfer && e.dataTransfer.files[0];
+    if (file) upload(file);
+  });
+  // A zip dropped next to the box shouldn't open in the tab and lose the page.
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { if (!zone.contains(e.target)) e.preventDefault(); });
+  window.addEventListener('beforeunload', (e) => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
+})();
