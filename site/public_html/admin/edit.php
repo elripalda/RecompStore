@@ -21,7 +21,7 @@ $slotTemplate = json_encode([
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs'];
+             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs', 'keep'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -37,6 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_saves_list($g['saves'], $badSave);
     $badLog = null;
     rs_logs_list($g['logs'], $badLog);
+    $badKeep = null;
+    rs_keep_list($g['keep'], $badKeep);
     // Extra buttons: rows of text, link and color; an empty row is dropped, a half-filled one is an error.
     $linkRows = [];
     $badLink = '';
@@ -69,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($g['beta'] && $g['soon']) $error = 'A game can be Beta or Coming soon, not both.';
     elseif (mb_strlen($g['beta_version']) > 40) $error = 'Keep the beta version short, like 1.2.0-beta1.';
     elseif ($badSave !== null) $error = 'Save folders: "' . $badSave . '" isn\'t a folder inside the game\'s (one per line, like userdata, with no .. or \\).';
+    elseif ($badKeep !== null) $error = 'Keep when updating: "' . $badKeep . '" isn\'t a file or folder inside the game\'s (one per line, like user_data or dbz3.toml, with no .., * or \\).';
     elseif ($badLog !== null) $error = 'Log files: "' . $badLog . '" isn\'t a path inside the game\'s folder (one per line, like logs/*.log, with no .. or \\).';
     elseif ($g['sha256'] !== '' && !preg_match('/^[A-Fa-f0-9]{64}$/', $g['sha256'])) $error = 'The SHA-256 should be 64 letters and numbers (0-9, a-f), or left empty.';
     elseif ($g['min_store'] !== '' && !preg_match('/^\d+(\.\d+){0,3}$/', $g['min_store'])) $error = 'Needs Recomp Store: a version like 1.0.3, or leave it empty.';
@@ -306,10 +309,13 @@ if (!$isNew) {
     <label class="span2">Files to ask for<textarea name="slots" rows="9" class="mono"><?= h($g['slots'] !== '' ? $g['slots'] : $slotTemplate) ?></textarea>
       <small>One entry per file: what it's called, its kind, and the folder it goes in, relative to the folder above ("." means right in it). Kinds: iso (an Xbox 360 disc image, unpacked), stfs (a Title Update or DLC package from the console), image (a GameCube or Wii disc image copied as it is, .iso/.gcm/.ciso; needs Recomp Store 1.0.3), arcade (an Xbox Live Arcade game's own package, the long-named file from the console's 000D0000 folder, unpacked; needs Recomp Store 1.0.7, set for you). titleId (Xbox 360, like 584111EC) or discId (GameCube/Wii, like GZLE01) is optional: when set, the store refuses a disc or package that isn't this game.</small>
       <small><strong>ready</strong> (needs Recomp Store 1.0.8, set for you): the file whose being in the slot's folder means it's set up, in any case (<code>Default.xexp</code> for a Title Update that shares the game's folder). <strong>updateId</strong> and <strong>updateSha1</strong> (1.0.8): a Title Update the store can download for the player, shown as a Download button. updateId is the update's content ID (XboxUnity lists it as its hash); updateSha1 is the whole file's SHA-1, which the store checks before using it. Both need the slot's titleId.</small>
+      <small><strong>only</strong>, <strong>files</strong> and <strong>wrong</strong> (needs Recomp Store 1.1.2, set for you), for a disc: <code>only</code> the disc's folders to copy, each with its path (<code>["DBZ3"]</code> copies DBZ3 and what's in it, nothing else); <code>files</code> the files the disc must have, <code>[{"path": "DBZ3/yae3_xenon.xex", "size": 4890624, "crc32": "F67F6C97"}, ...]</code> (crc32 optional): a disc without them, or with another size or CRC, is refused before anything is copied, and the slot counts as set up once they're all there at their sizes; <code>wrong</code> what to tell a player whose disc that is ("This app needs the USA Budokai HD Collection.").</small>
       <small><strong>file</strong> (needs Recomp Store 1.0.6, set for you): the player's own file copied in, such as a ROM or a game's data files. <code>ext</code> the extensions to show (".z64 .n64 .v64"); <code>pick</code> the file to choose ("pak0.pk3"); <code>also</code> the files beside it that go too ("pak?.pk3"); <code>need</code> how many must be there to play (9); <code>name</code> what to call it in the game's folder ("DIABDAT.MPQ"); <code>sha1</code> the SHA-1s it may have, space-separated; <code>n64</code> true for a Nintendo 64 ROM (any byte order, saved as .z64); <code>made</code> a file the game makes from it, which counts as set up ("sm64.o2r").</small></label>
   </div>
   <label><span>Save folders <span class="muted">(optional)</span></span><textarea name="saves" rows="2" class="mono" placeholder="userdata"><?= h($g['saves']) ?></textarea>
     <small>Where the game keeps its saves, one per line, inside its folder (like userdata, or baseq3/q3config.cfg). With these, Delete in Recomp Store 1.0.6 offers Keep my saves: everything else goes, and the saves are there when it's installed again.</small></label>
+  <label><span>Keep when updating <span class="muted">(optional)</span></span><textarea name="keep" rows="3" class="mono" placeholder="user_data"><?= h($g['keep']) ?></textarea>
+    <small>The player's own files and folders inside the game's folder, one per line (like Assets, user_data or dbz3.toml). Recomp Store 1.1.2 never writes over them when it installs an update; the release's copy goes in only when the player has none yet.</small></label>
   <label><span>Log files <span class="muted">(optional)</span></span><textarea name="logs" rows="2" class="mono" placeholder="UserData/crashes/*.txt"><?= h($g['logs']) ?></textarea>
     <small>What Send logs in Recomp Store 1.1.0 sends from this game, one per line, inside its folder; * and ? match any characters. Leave it empty and the store finds them itself: any .log file, and .txt files with log, crash or trace in the name. The newest 8 go, with the store's own log.</small></label>
 </section>

@@ -110,6 +110,9 @@ function rs_game_defaults(): array {
         // The game's own log files, one pattern per line inside its folder (store 1.1.0: Send logs).
         // Empty: the store looks for *.log and files like log.txt or crash_*.txt itself.
         'logs' => '',
+        // The player's own files and folders in the game's folder, one per line (store 1.1.2): an
+        // update never writes over them (settings, saves, the game files set up from a disc).
+        'keep' => '',
         // Extra buttons on the game's page on the website (texture packs, patches...): [{label, url, color}].
         'links' => [],
         // Beta: left out of the public catalog; only consoles that redeemed one of its codes see it,
@@ -143,6 +146,7 @@ const RS_INSIDE_FROM = '1.0.4';
 const RS_FILE_FROM = '1.0.6';
 const RS_ARCADE_FROM = '1.0.7';
 const RS_READY_FROM = '1.0.8';
+const RS_PART_FROM = '1.1.2';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
@@ -158,8 +162,11 @@ function rs_min_store(array $g): string {
             elseif (!in_array($kind, ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
             // A set-up file, or a Title Update the store downloads itself (store 1.0.8).
             if (($sl['ready'] ?? '') !== '' || ($sl['updateSha1'] ?? '') !== '' || ($sl['updateId'] ?? '') !== '') $needs(RS_READY_FROM);
+            // Part of a disc, the files it must have (store 1.1.2): an older store would copy all of it.
+            if (!empty($sl['only']) || !empty($sl['files']) || ($sl['wrong'] ?? '') !== '') $needs(RS_PART_FROM);
         }
     }
+    if (rs_keep_list((string)($g['keep'] ?? ''))) $needs(RS_PART_FROM);
     return $min;
 }
 
@@ -190,6 +197,25 @@ function rs_logs_list(string $text, ?string &$bad = null): array {
     return $out;
 }
 
+// What an update leaves alone (store 1.1.2): files and folders inside the game's folder, one
+// per line, spelled plainly (no * or ?). '' when one isn't, with $bad set to it.
+function rs_keep_list(string $text, ?string &$bad = null): array {
+    $out = [];
+    foreach (preg_split('/[\r\n,]+/', $text) as $p) {
+        $p = rtrim(trim($p), '/');
+        if ($p === '') continue;
+        if (strlen($p) > 160 || $p[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[*?:\x00-\x1f\x7f]#', $p)) { $bad = $p; return []; }
+        $out[] = $p;
+        if (count($out) >= 32) break;
+    }
+    return $out;
+}
+
+// A path inside a disc or a game's folder, spelled plainly: relative, no "..", no backslash.
+function rs_plain_rel($p): bool {
+    return is_string($p) && $p !== '' && strlen($p) <= 200 && $p[0] !== '/' && !preg_match('#(^|/)\.\.?(/|$)|//|\\\\|:|[\x00-\x1f\x7f]#', $p);
+}
+
 // What's wrong with a game's file list, or null. The store checks these too and won't set
 // up a slot that breaks them; here they're caught before they're published.
 function rs_slots_error(array $slots): ?string {
@@ -213,6 +239,28 @@ function rs_slots_error(array $slots): ?string {
             return "$n: a Title Update the store downloads needs both updateId and updateSha1.";
         if (($sl['updateId'] ?? '') !== '' && ($kind !== 'stfs' || !empty($sl['multiple']) || !preg_match('/^[0-9A-Fa-f]{8}\z/', (string)($sl['titleId'] ?? ''))))
             return "$n: only a Title Update (kind stfs, with its titleId) can be downloaded by the store.";
+        // Part of a disc and the files it must have (store 1.1.2), for an Xbox 360 disc.
+        $only = $sl['only'] ?? [];
+        if (is_string($only)) $only = preg_split('/[\s,]+/', trim($only), -1, PREG_SPLIT_NO_EMPTY);
+        if (!is_array($only) || count($only) > 16) return "$n: only is the disc's folders to copy, like [\"DBZ3\"].";
+        $only = array_map(fn($o) => is_string($o) ? rtrim($o, '/') : $o, $only);
+        foreach ($only as $o) if (!rs_plain_rel($o)) return "$n: only is the disc's folders to copy, like [\"DBZ3\"] (no leading /, no ..).";
+        if (isset($sl['files']) && !is_array($sl['files'])) return "$n: files is a list like [{\"path\": \"DBZ3/yae3_xenon.xex\", \"size\": 4890624, \"crc32\": \"F67F6C97\"}].";
+        $wantFiles = $sl['files'] ?? [];
+        if (count($wantFiles) > 512) return "$n: files lists 512 files at most.";
+        foreach ($wantFiles as $k => $w) {
+            $wn = "$n, files entry " . ((int)$k + 1);
+            if (!is_array($w) || !rs_plain_rel($w['path'] ?? null)) return "$wn: path is the file's path on the disc, like DBZ3/us/adx_usa.afs.";
+            if (!is_int($w['size'] ?? null) || $w['size'] < 1 || $w['size'] > 4294967295) return "$wn: size is the file's size in bytes, a whole number.";
+            if (isset($w['crc32']) && $w['crc32'] !== '' && (!is_string($w['crc32']) || !preg_match('/^[0-9A-Fa-f]{8}\z/', $w['crc32']))) return "$wn: crc32 is 8 letters and numbers, like F67F6C97.";
+            if ($only) {
+                $inside = false;
+                foreach ($only as $o) $inside = $inside || strcasecmp($w['path'], $o) === 0 || stripos($w['path'], $o . '/') === 0;
+                if (!$inside) return "$wn: {$w['path']} isn't in the folders only copies, so it would never be there.";
+            }
+        }
+        if (isset($sl['wrong']) && (!is_string($sl['wrong']) || mb_strlen($sl['wrong']) > 300)) return "$n: wrong is what to tell a player whose disc isn't the right one (300 characters at most).";
+        if (($only || $wantFiles || ($sl['wrong'] ?? '') !== '') && $kind !== 'iso') return "$n: only, files and wrong are for a disc (kind iso).";
         $to = (string)($sl['to'] ?? '.');
         if ($to !== '.' && ($to === '' || $to[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $to))) return "$n: to is a folder inside the game's, like game or baseq3 (or . for right in it).";
         if ($kind !== 'file') continue;
@@ -415,6 +463,8 @@ function rs_app_entry(array $g, int $order): array {
     if ($saves) $app['saves'] = $saves;
     $logs = rs_logs_list((string)($g['logs'] ?? ''));
     if ($logs) $app['logs'] = $logs;
+    $keep = rs_keep_list((string)($g['keep'] ?? ''));
+    if ($keep) $app['keep'] = $keep;
     $min = rs_min_store($g);
     if ($min !== '') $app['minStore'] = $min;
     return $app;
@@ -666,7 +716,10 @@ function rs_beta_entry(array $g, string $install, int $order): array {
     $app['url'] = rs_abs('/api/beta.php') . '?a=file&id=' . rawurlencode($g['id']) . '&install=' . $install . '&sig=' . rs_beta_sig($install, $g['id']);
     $app['sha256'] = strtolower((string)$g['beta_sha256']);
     if (trim((string)$g['beta_version']) !== '') $app['version'] = trim((string)$g['beta_version']);
-    if ((int)$g['beta_size'] > 0) $app['size'] = rs_human_size((int)$g['beta_size']);
+    if ((int)$g['beta_size'] > 0) {
+        $app['size'] = rs_human_size((int)$g['beta_size']);
+        $app['bytes'] = (int)$g['beta_size']; // store 1.1.2: progress, and the download in pieces
+    }
     $app['beta'] = true;
     $min = $app['minStore'] ?? '';
     if ($min === '' || version_compare($min, RS_BETA_FROM, '<')) $app['minStore'] = RS_BETA_FROM;
