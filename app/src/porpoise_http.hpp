@@ -32,6 +32,12 @@ public:
     /* Like get(), but each piece goes to sink as it arrives instead of into memory
      * (big downloads straight to a file). sink may return false to stop. */
     int get_stream(const std::string &url, const std::function<bool(const std::uint8_t *, std::size_t)> &sink);
+    /* (Recomp Store 1.1.2) Bytes from..to of url (a Range request), each read handed to
+     * sink as it comes, the whole request given timeout_s seconds. The answer is read only
+     * when it's the part (206), or the whole file from its start (200, from == 0); its
+     * status either way. */
+    int get_part(const std::string &url, std::uint64_t from, std::uint64_t to,
+                 const std::function<bool(const std::uint8_t *, std::size_t)> &sink, unsigned timeout_s);
     /* A form POST (form set) or a GET, keeping the answer whatever its status
      * (RetroAchievements explains a refusal in the body). The HTTP status, or
      * -1 when there was no answer. */

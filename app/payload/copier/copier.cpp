@@ -264,8 +264,20 @@ bool protected_name(const std::string &p)
 
 /* ---- An install: the store's verified download unpacked into the game's folder,
  * by the same code the store uses (store_zip.cpp). -------------------------------- */
-int unzip_job(const std::string &zip_path, const std::string &root)
+int unzip_job(const std::string &zip_path, const std::string &root, const std::string &job)
 {
+    /* keep0=, keep1=, ... (1.1.2): the player's own files in the game's folder, which an
+     * update leaves alone. Names inside the folder, spelled plainly. */
+    std::vector<std::string> keep;
+    for (int i = 0; i < 32; ++i)
+    {
+        const std::string k = field(job, ("keep" + std::to_string(i)).c_str());
+        if (k.empty())
+            break;
+        if (k[0] == '/' || !recomp::zip::safe_name(k))
+            return fail("The copier can't keep " + k + ".");
+        keep.push_back(k);
+    }
     /* Only the store's own downloads, into a game's folder. */
     const std::string downloads = kDir + "/downloads/";
     if (zip_path.rfind(downloads, 0) != 0 || zip_path.find("/../") != std::string::npos)
@@ -293,7 +305,7 @@ int unzip_job(const std::string &zip_path, const std::string &root)
             write_status();
         },
         [](const std::string &line) { log_line("%s", line.c_str()); }, [] { return cancelled(); }, error, changed,
-        files);
+        files, &keep);
     g_status.changed = changed ? 1 : 0;
     g_status.seconds = now_s() - t0;
     if (!ok)
@@ -626,7 +638,7 @@ int main()
         target.find("/../") != std::string::npos || target.find("/./") != std::string::npos)
         return fail("The game's folder isn't somewhere the store sets games up.");
     if (kind == "unzip")
-        return unzip_job(image, target);
+        return unzip_job(image, target, job);
     if (kind == "stfs")
         return stfs_job(image, target);
     if (kind == "delete")
@@ -648,10 +660,22 @@ int main()
     if (!disc.find("default.xex") && !disc.find("default.xbe"))
         return fail("This disc image has no default.xex or default.xbe: it isn't a game disc, or it's the wrong one.");
 
+    /* only0=, only1=, ... (1.1.2): the part of the disc the game needs ("DBZ3"), each copied
+     * with its path on the disc. None: the whole disc. */
+    std::vector<std::string> only;
+    for (int i = 0; i < 16; ++i)
+    {
+        const std::string o = field(job, ("only" + std::to_string(i)).c_str());
+        if (o.empty())
+            break;
+        if (o[0] == '/' || !recomp::zip::safe_name(o))
+            return fail("The copier can't take " + o + " from the disc.");
+        only.push_back(o);
+    }
     std::vector<const recomp::DiscFile *> order, todo;
     unsigned long long total = 0, done = 0;
     for (const recomp::DiscFile &f : disc.files())
-        if (!f.is_dir && !protected_name(f.path))
+        if (!f.is_dir && !protected_name(f.path) && (only.empty() || recomp::zip::kept(f.path, only)))
         {
             order.push_back(&f);
             total += f.size;

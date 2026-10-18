@@ -248,6 +248,9 @@ void set_stat(const std::string &key, const std::string &value)
     L.stats[key] = value;
 }
 
+std::string any_case_path(const std::string &dir, const std::string &rel);
+bool at_size_any_case(const std::string &dir, const std::string &rel, std::uint64_t size);
+
 namespace
 {
 
@@ -590,6 +593,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
         t.url = a.url;
         t.sha256 = a.sha256;
         t.version = a.version;
+        t.size = a.bytes; /* (1.1.2) a beta's, from the site; 0 when it isn't said */
         if (t.url.empty()) { err = "This game has no download link yet."; return false; }
         return true;
     }
@@ -633,6 +637,48 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
     t.version = rel["tag_name"].str();
     if (t.url.empty()) { err = "The newest release on GitHub has no " + a.asset + "."; return false; }
     return true;
+}
+
+/* (1.1.2) A download from the site whose size the site says (a beta game's): in 4 MB
+ * pieces, each asked for with a Range header and given two minutes. In 1.1.1 a beta
+ * download from recompstore.com, asked for in one request, sat at Downloading on a PS5 with
+ * no error and nothing arriving. A piece that comes back short or not at all is asked for
+ * again from where it stopped, on a fresh connection; five tries in a row that bring nothing
+ * new give up. 200 once all of it is here. */
+double mono_s();
+int download_in_parts(porpoise::http::Session &http, const std::string &url, std::uint64_t size,
+                      const std::function<bool(const std::uint8_t *, std::size_t)> &take, std::uint64_t &got,
+                      const bool &write_ok)
+{
+    constexpr std::uint64_t kPart = 4ull << 20;
+    int idle = 0;
+    while (got < size)
+    {
+        const std::uint64_t from = got, to = std::min(size, from + kPart) - 1;
+        const double t0 = mono_s();
+        const int st = http.get_part(
+            url, from, to,
+            [&](const std::uint8_t *p, std::size_t n) {
+                if (got + n > size) n = std::size_t(size - got); /* never past the end the site said */
+                return n > 0 && take(p, n) && got < size;
+            },
+            120);
+        if (!write_ok) return -1;
+        if (got == size || (st == 206 && got > to)) continue; /* the piece, whole */
+        const bool moved = got > from;
+        slog("download: bytes %llu-%llu: HTTP %d (error %#x) after %.0f s, %llu bytes came; %s", (unsigned long long)from,
+             (unsigned long long)to, st, unsigned(http.last_error()), mono_s() - t0, (unsigned long long)(got - from),
+             moved ? "asking for the rest" : idle + 1 >= 5 ? "giving up" : "asking again");
+        if (moved)
+            idle = 0;
+        else if (++idle >= 5)
+            return st == 200 || st == 206 ? -1 : st;
+        /* A fresh connection for the next try, after a moment. */
+        http.term();
+        usleep(useconds_t(400000) * useconds_t(idle + 1));
+        if (!http.init()) return -1;
+    }
+    return 200;
 }
 
 enum class Copier : int { Done, Failed, Unavailable };
@@ -680,19 +726,23 @@ void run_install(const std::string &id)
     set_job("Downloading", 0, t.size);
     timespec dl0;
     clock_gettime(CLOCK_MONOTONIC, &dl0);
-    const int status = http.get_stream(t.url, [&](const std::uint8_t *p, std::size_t n) {
+    auto take = [&](const std::uint8_t *p, std::size_t n) {
         if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
         sha.update(p, n);
         got += n;
         set_job("Downloading", got, t.size);
         return true;
-    });
+    };
+    const bool in_parts = a.source != "github" && t.size > 0;
+    slog("download %s: started%s", a.id.c_str(), in_parts ? " (in parts)" : "");
+    const int status = in_parts ? download_in_parts(http, t.url, t.size, take, got, write_ok)
+                                : http.get_stream(t.url, take);
     std::fclose(out);
     {
         timespec dl1;
         clock_gettime(CLOCK_MONOTONIC, &dl1);
         const double secs = double(dl1.tv_sec - dl0.tv_sec) + double(dl1.tv_nsec - dl0.tv_nsec) / 1e9;
-        slog("download %s: HTTP %d, %llu bytes (GitHub says %llu) in %.0f s, %.1f MB/s", t.url.c_str(), status,
+        slog("download %s: HTTP %d, %llu bytes (expected %llu) in %.0f s, %.1f MB/s", t.url.c_str(), status,
              (unsigned long long)got, (unsigned long long)t.size, secs, secs > 0 ? double(got) / 1048576.0 / secs : 0.0);
         char st[128];
         std::snprintf(st, sizeof st, "%.0f MB in %.0f s \xC2\xB7 %.1f MB/s", double(got) / 1048576.0, secs,
@@ -754,7 +804,10 @@ void run_install(const std::string &id)
     std::size_t nfiles = 0;
     {
         bool changed = false;
-        const Copier c = run_copier("unzip", install_zip, root, &changed);
+        /* (1.1.2) The player's own files an update leaves alone. */
+        std::string keep_job;
+        for (std::size_t k = 0; k < a.keep.size(); ++k) keep_job += "keep" + std::to_string(k) + "=" + a.keep[k] + "\n";
+        const Copier c = run_copier("unzip", install_zip, root, &changed, keep_job);
         if (c == Copier::Failed)
         {
             if (changed) std::remove(record.c_str()); /* half updated: offer the install again */
@@ -765,7 +818,7 @@ void run_install(const std::string &id)
             std::string error;
             if (!zip::unpack(
                     install_zip, root, [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); },
-                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles))
+                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles, &a.keep))
             {
                 if (changed) std::remove(record.c_str());
                 return fail_job(error);
@@ -790,6 +843,7 @@ void run_install(const std::string &id)
                 set_job("Checking the installed files", ++i, entries.size());
                 const std::string name = e.name.substr(strip.size());
                 if (name.empty() || name.back() == '/') continue;
+                if (zip::kept(name, a.keep)) continue; /* the player's own, as the copier left it */
                 std::string why;
                 if (!zip::safe_name(name) || !zip::file_matches(root + "/" + name, e.usize, e.crc, &why))
                 {
@@ -1901,6 +1955,46 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
         }
     }
 
+    /* (1.1.2) The files the disc must have, at their sizes and CRC-32s; without them it's
+     * another disc (another region's, or another game's), refused before anything is copied. */
+    if (!slot.files.empty())
+    {
+        const std::string wrong = slot.wrong.empty() ? "This isn't the disc " + a.name + " needs." : slot.wrong;
+        for (const DiscWant &w : slot.files)
+        {
+            const DiscFile *f = disc.find(w.path);
+            if (!f || f->size != w.size)
+            {
+                slog("setup %s: %s on the disc: %s, want %llu bytes", id.c_str(), w.path.c_str(),
+                     f ? (std::to_string(f->size) + " bytes").c_str() : "not there", (unsigned long long)w.size);
+                return fail_job(wrong);
+            }
+        }
+        std::vector<std::uint8_t> buf(1u << 20);
+        for (const DiscWant &w : slot.files)
+        {
+            if (!w.has_crc) continue;
+            const DiscFile *f = disc.find(w.path);
+            set_job("Checking the disc", 0, f->size);
+            std::uint32_t crc = 0;
+            for (std::uint64_t at = 0; at < f->size;)
+            {
+                const std::size_t n = std::size_t(std::min<std::uint64_t>(buf.size(), f->size - at));
+                if (!disc.read(std::uint64_t(f->sector) * 2048 + at, buf.data(), n))
+                    return fail_job("The disc image couldn't be read at " + f->path + ". It may be incomplete.");
+                crc = zip::crc32(buf.data(), n, crc);
+                at += n;
+                set_job("Checking the disc", at, f->size);
+            }
+            if (crc != w.crc)
+            {
+                slog("setup %s: %s's CRC-32 is %08X, want %08X", id.c_str(), w.path.c_str(), crc, w.crc);
+                return fail_job(wrong);
+            }
+        }
+        slog("setup %s: the disc has all %zu files it should", id.c_str(), slot.files.size());
+    }
+
     const std::string target = slot_target(a, slot);
     make_dirs(target);
     /* The port's own files live beside the game's in some folders: never written over. */
@@ -1915,6 +2009,7 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     for (const DiscFile &f : disc.files())
     {
         if (f.is_dir) continue;
+        if (!slot.only.empty() && !zip::kept(f.path, slot.only)) continue; /* (1.1.2) not this part of the disc */
         if (protected_name(f.path))
         {
             slog("setup: skipped %s (the port's own name)\n", f.path.c_str());
@@ -1928,6 +2023,7 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     /* In the order they lie on the disc: one pass along the image. */
     std::sort(order.begin(), order.end(), [](const DiscFile *x, const DiscFile *y) { return x->sector < y->sector; });
 
+    if (order.empty()) return fail_job("This disc image doesn't have the files " + a.name + " needs.");
     struct statvfs fs;
     if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < needed + (256ull << 20))
         return fail_job("There isn't enough free space: the game's files need " + fmt_mb(needed) + ".");
@@ -1943,6 +2039,9 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
             if (stat((target + "/" + f->path).c_str(), &st) != 0 || std::uint64_t(st.st_size) != f->size)
                 return fail_job(f->path + " didn't copy whole. Set up again to finish it.");
         }
+        for (const DiscWant &w : slot.files) /* (1.1.2) and every file it must have */
+            if (!at_size_any_case(target, w.path, w.size))
+                return fail_job(w.path + " didn't copy whole. Set up again to finish it.");
         make_dirs(g.data + "/setup");
         write_file(g.data + "/setup/" + id + "." + slot_key + ".txt", image.data(), image.size());
         slog("setup %s: done", id.c_str());
@@ -1957,7 +2056,9 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     };
     if (needed > 0)
     {
-        const Copier c = run_copier("setup", image, target);
+        std::string only_job; /* (1.1.2) the part of the disc to copy */
+        for (std::size_t k = 0; k < slot.only.size(); ++k) only_job += "only" + std::to_string(k) + "=" + slot.only[k] + "\n";
+        const Copier c = run_copier("setup", image, target, nullptr, only_job);
         if (c == Copier::Done) return finish();
         if (c == Copier::Failed) return;
     }
@@ -3738,6 +3839,20 @@ bool store_downloaded(const std::string &path)
  * cases apart. */
 bool exists_any_case(const std::string &dir, const std::string &rel)
 {
+    return !any_case_path(dir, rel).empty();
+}
+
+/* (1.1.2) rel under dir, found as exists_any_case finds it, at exactly size bytes. */
+bool at_size_any_case(const std::string &dir, const std::string &rel, std::uint64_t size)
+{
+    const std::string p = any_case_path(dir, rel);
+    struct stat st;
+    return !p.empty() && stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode) && std::uint64_t(st.st_size) == size;
+}
+
+/* Where rel is under dir, each part in any case; "" when it isn't there. */
+std::string any_case_path(const std::string &dir, const std::string &rel)
+{
     std::string at = dir;
     std::size_t from = 0;
     while (from <= rel.size())
@@ -3756,10 +3871,10 @@ bool exists_any_case(const std::string &dir, const std::string &rel)
                 if (lower_ascii(e->d_name) == want) { found = e->d_name; break; }
             closedir(d);
         }
-        if (found.empty()) return false;
+        if (found.empty()) return "";
         at += "/" + found;
     }
-    return true;
+    return at;
 }
 
 /* Raised whenever a job ends (Engine::acknowledge): slot_ready's two-second answers from
@@ -3768,6 +3883,23 @@ std::atomic<unsigned> g_slot_epoch{0};
 
 bool slot_ready(const App &a, const Slot &s)
 {
+    if (!s.files.empty())
+    {
+        /* (1.1.2) Every file the slot must have, at its size. Asked every frame, so looked
+         * at every two seconds. */
+        static std::mutex m;
+        static std::map<std::string, std::pair<double, bool>> seen;
+        const std::string dir = slot_target(a, s), key = dir + "|" + s.key + "|" + std::to_string(g_slot_epoch.load());
+        std::lock_guard<std::mutex> l(m);
+        if (seen.size() > 256) seen.clear();
+        auto it = seen.find(key);
+        if (it != seen.end() && mono_s() - it->second.first < 2.0) return it->second.second;
+        bool ok = true;
+        for (const DiscWant &w : s.files)
+            if (!(ok = at_size_any_case(dir, w.path, w.size))) break;
+        seen[key] = {mono_s(), ok};
+        return ok;
+    }
     if (!s.ready.empty() || s.kind == "iso" || s.kind == "arcade")
     {
         /* The slot's own set-up file, or a disc's or Arcade game's default.xex, in any case.
