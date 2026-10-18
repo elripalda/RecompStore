@@ -18,6 +18,9 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
 .kicker{display:block;font:700 13px Figtree,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);margin-bottom:8px}
 .tag{display:inline-block;font:700 13px Figtree,sans-serif;border-radius:999px;padding:5px 13px;border:1px solid var(--line);background:var(--glass)}
 .tag.cyan{background:var(--cyan);color:var(--midnight);border-color:var(--cyan)}
+.tag.share{color:inherit;cursor:pointer}
+.tag.share::before{content:"\2197";margin-right:6px}
+.tag.share:hover,.tag.share:focus-visible{border-color:var(--cyan);color:var(--cyan)}
 
 /* Header */
 .top{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px clamp(16px,5vw,64px);background:rgba(11,18,32,.6);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid rgba(244,248,252,.08)}

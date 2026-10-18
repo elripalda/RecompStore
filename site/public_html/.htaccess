@@ -6,6 +6,11 @@ RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
+# A game's own link, /game/<ID> (Coming soon: /soon/<ID>), and its preview picture, /og/<ID>.jpg:
+# shared anywhere, the link shows a card with the game's name and art.
+RewriteRule ^(game|soon)/([A-Za-z0-9_-]{1,64})/?$ share.php?kind=$1&id=$2 [L,QSA]
+RewriteRule ^og/([A-Za-z0-9_-]{1,64})\.jpg$ og.php?id=$1 [L,QSA]
+
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"

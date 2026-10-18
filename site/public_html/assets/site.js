@@ -207,7 +207,7 @@
         <a class="back" href="#/">← All games</a>
         <div class="game-grid">
           <div class="game-info">
-            <div class="chips"><span class="tag cyan">Coming soon</span>${a.date ? `<span class="tag">${esc(a.date)}</span>` : ''}${a.author ? `<span class="tag">By ${esc(a.author)}</span>` : ''}</div>
+            <div class="chips"><span class="tag cyan">Coming soon</span>${a.date ? `<span class="tag">${esc(a.date)}</span>` : ''}${a.author ? `<span class="tag">By ${esc(a.author)}</span>` : ''}${shareHTML(a, 'soon')}</div>
             ${a.logo && a.logo.url
               ? `<h1 class="logo-h1"><img src="${esc(a.logo.url)}" alt="${esc(a.name)}" style="--s:${(a.logo.page && a.logo.page.scale ? a.logo.page.scale : 100) / 100}"></h1>`
               : `<h1>${esc(a.name)}</h1>`}
@@ -223,6 +223,28 @@
       </article>`;
     setBackdrop(a);
   }
+
+  // ---- A game's own link -------------------------------------------------------------
+  // recompstore.com/game/<ID> (Coming soon: /soon/<ID>) shows the game's card when it's shared
+  // in Discord, X, Messages and the like; the server puts the game's name and picture in it.
+  const ownLink = (a, kind) => `${location.origin}/${kind}/${encodeURIComponent(a.id)}`;
+  function shareHTML(a, kind) {
+    return `<button type="button" class="tag share" data-share="${esc(ownLink(a, kind))}" data-title="${esc(a.name)}">Share</button>`;
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-share]');
+    if (!b) return;
+    const url = b.dataset.share;
+    const done = (t) => { b.textContent = t; setTimeout(() => (b.textContent = 'Share'), 1600); };
+    // Phones: the share sheet. Elsewhere: the link, copied.
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      navigator.share({ title: b.dataset.title, url }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => done('Link copied'), () => window.prompt('Copy this link', url));
+    } else {
+      window.prompt('Copy this link', url);
+    }
+  });
 
   // ---- Game page ------------------------------------------------------------------
   // The admin's extra buttons (texture packs, patches...): its text and color, dark text on a light color.
@@ -253,7 +275,7 @@
         <a class="back" href="#/">← All games</a>
         <div class="game-grid">
           <div class="game-info">
-            <div class="chips">${tagFor(a)}<span class="tag">${esc(a.id)}</span></div>
+            <div class="chips">${tagFor(a)}<span class="tag">${esc(a.id)}</span>${shareHTML(a, 'game')}</div>
             ${a.logo && a.logo.url
               ? `<h1 class="logo-h1"><img src="${esc(a.logo.url)}" alt="${esc(a.name)}" style="--s:${(a.logo.page && a.logo.page.scale ? a.logo.page.scale : 100) / 100}"></h1>`
               : `<h1>${esc(a.name)}</h1>`}
@@ -510,13 +532,25 @@
   }
 
   // ---- Router ---------------------------------------------------------------------
+  // The site's pages are #/about, #/contact...; a game's page is its own link, /game/<ID>, so the
+  // address bar always has the link that shows the game's card when it's shared.
+  function current() {
+    if (location.hash.length > 1) return location.hash.slice(1);
+    const p = location.pathname.match(/^\/(game|soon)\/([A-Za-z0-9_-]+)\/?$/);
+    return p ? `/${p[1]}/${p[2]}` : '/';
+  }
+  let routed = '';
   function route() {
     clearInterval(slideTimer);
-    const h = location.hash.replace(/^#/, '') || '/';
-    if (h === '/get') { if (!dlg.open) dlg.showModal(); if (!view.innerHTML) home(); return; }
+    const h = current();
+    if (h === '/get') { if (!dlg.open) dlg.showModal(); if (!view.innerHTML) home(); routed = location.href; return; }
     if (dlg.open) dlg.close();
     const m = h.match(/^\/game\/(.+)$/);
     const ms = h.match(/^\/soon\/(.+)$/);
+    const own = m ? byId(decodeURIComponent(m[1])) && `/game/${m[1]}` : ms ? soonById(decodeURIComponent(ms[1])) && `/soon/${ms[1]}` : '';
+    if (own && location.pathname + location.hash !== own) history.replaceState(history.state, '', own);
+    else if (!own && location.pathname !== '/') history.replaceState(history.state, '', '/' + location.hash);
+    routed = location.href;
     if (m) game(decodeURIComponent(m[1]));
     else if (ms) soonPage(decodeURIComponent(ms[1]));
     else if (h === '/about') about();
@@ -560,7 +594,10 @@
         '<a href="#/contact">Contact</a>',
         '<a href="#/about">About</a>',
       ].filter(Boolean).join('');
-      window.addEventListener('hashchange', route);
+      // A link or Back can bring both events for one move: the page is drawn once.
+      const moved = () => { if (location.href !== routed) route(); };
+      window.addEventListener('hashchange', moved);
+      window.addEventListener('popstate', moved);
       route();
     })
     .catch(() => { view.innerHTML = '<section class="intro"><h1>The catalog didn\'t load.</h1><p>Refresh the page in a moment.</p></section>'; });
