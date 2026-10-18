@@ -4,6 +4,7 @@
 #include "store_zip.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -310,8 +311,23 @@ void make_dirs(const std::string &path)
         }
 }
 
+bool kept(const std::string &name, const std::vector<std::string> &keep)
+{
+    auto low = [](std::string s) {
+        for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    const std::string n = low(name);
+    for (const std::string &k : keep)
+    {
+        const std::string l = low(k);
+        if (!l.empty() && (n == l || n.rfind(l + "/", 0) == 0)) return true;
+    }
+    return false;
+}
+
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
-            const Stop &stop, std::string &error, bool &changed, std::size_t &files)
+            const Stop &stop, std::string &error, bool &changed, std::size_t &files, const std::vector<std::string> *keep)
 {
     changed = false;
     files = 0;
@@ -368,6 +384,19 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
             continue;
         }
         make_dirs(path.substr(0, path.find_last_of('/')));
+        if (keep && kept(name, *keep))
+        {
+            struct stat st;
+            if (stat(path.c_str(), &st) == 0)
+            {
+                /* The player's own (settings, saves, game files): the release's copy waits
+                 * for a player who has none. */
+                if (log)
+                    log("kept " + name + " (the player's own)");
+                done += e.usize;
+                continue;
+            }
+        }
         if (progress)
             progress("Installing", done, total);
         if (stop && stop())

@@ -22,9 +22,28 @@ constexpr const char *kBetaUrl = "https://recompstore.com/api/beta.php";
 /* (1.1.0) Send logs: a game page's logs, to the admin's inbox. */
 constexpr const char *kLogsUrl = "https://recompstore.com/api/logs.php";
 
+/* (1.1.2) A file a disc must have: its path on the disc, its exact size and, when has_crc,
+ * its CRC-32. */
+struct DiscWant
+{
+    std::string path;
+    std::uint64_t size = 0;
+    std::uint32_t crc = 0;
+    bool has_crc = false;
+};
+
 struct Slot
 {
     std::string key, label, kind /* iso, stfs, image, file, arcade */, to /* folder under data_dir; "." = in it */, title_id;
+    /* (1.1.2) kind "iso": only these folders or files of the disc are copied, each with its
+     * path on the disc ("DBZ3": Budokai 3 from the Budokai HD Collection, without Budokai 1 and
+     * the collection's menu). Empty: the whole disc. */
+    std::vector<std::string> only;
+    /* (1.1.2) kind "iso": files the disc must have, at these sizes and CRC-32s. A disc
+     * without them is refused before anything is copied, with wrong (the admin's words) as
+     * the reason; once they're all in the slot's folder at their sizes, it's set up. */
+    std::vector<DiscWant> files;
+    std::string wrong;
     /* kind "image": a GameCube or Wii disc image copied as it is (.iso, .gcm, .ciso), and the
      * disc's ID it has to be (GZLE01), "" for any. */
     std::string disc_id;
@@ -120,6 +139,13 @@ struct App
     /* (1.1.0) The game's log files for Send logs: patterns inside its folder (like crash_*.txt),
      * set in the admin. Empty: the store looks for them itself (game_log_files). */
     std::vector<std::string> logs;
+    /* (1.1.2) The player's own files and folders in the game's folder ("Assets",
+     * "user_data", "dbz3.toml"): an update never writes over them. A release's copy of one
+     * is written only when the player has none yet. */
+    std::vector<std::string> keep;
+    /* (1.1.2) A download from a fixed link (a beta game's, from the site): its exact size,
+     * so its progress shows and a cut-off download is caught. 0: not known. */
+    std::uint64_t bytes = 0;
     /* Filled by the engine: where its art was saved, empty until it is. */
     std::string icon_file, hero_file, logo_file;
 };

@@ -139,6 +139,17 @@ bool parse_catalog(const std::string &text, Catalog &out)
             const std::string p = x["logs"][k].str();
             if (plain_path(p) && p[0] != '/') a.logs.push_back(p);
         }
+        for (std::size_t k = 0; k < x["keep"].size() && a.keep.size() < 32; ++k)
+        {
+            /* (1.1.2) inside the game's folder only */
+            std::string p = x["keep"][k].str();
+            while (p.size() > 1 && p.back() == '/') p.pop_back();
+            if (plain_path(p) && p[0] != '/') a.keep.push_back(p);
+        }
+        {
+            const long long b = x["bytes"].integer(0); /* (1.1.2) */
+            a.bytes = b > 0 ? std::uint64_t(b) : 0;
+        }
         a.order = int(x["order"].integer(int(soon ? out.soon.size() : out.apps.size()) + 1000));
         a.name = x["name"].str(a.id);
         a.kind = x["kind"].str("community");
@@ -211,6 +222,61 @@ bool parse_catalog(const std::string &text, Catalog &out)
                     };
                     s.update_id = hex40(slots[k]["updateId"].str());
                     s.update_sha1 = hex40(slots[k]["updateSha1"].str());
+                }
+                if (s.kind == "iso")
+                {
+                    /* (1.1.2) Part of the disc, and the files it must have. One that can't be
+                     * read as meant: a slot this store won't set up (the whole disc would be
+                     * the wrong thing to copy). */
+                    bool bad = false;
+                    auto add_only = [&](std::string p) {
+                        while (p.size() > 1 && p.back() == '/') p.pop_back();
+                        if (p.empty()) return;
+                        if (!plain_path(p) || p[0] == '/' || s.only.size() >= 16) bad = true;
+                        else s.only.push_back(p);
+                    };
+                    const Json &only = slots[k]["only"];
+                    if (only.is_array())
+                        for (std::size_t i = 0; i < only.size(); ++i) add_only(only[i].str());
+                    else
+                    {
+                        std::string list = only.str(), part;
+                        for (char &c : list) if (c == ',') c = ' ';
+                        for (std::size_t i = 0; i <= list.size(); ++i)
+                            if (i == list.size() || list[i] == ' ') { add_only(part); part.clear(); }
+                            else part += list[i];
+                    }
+                    const Json &files = slots[k]["files"];
+                    for (std::size_t i = 0; i < files.size() && !bad; ++i)
+                    {
+                        DiscWant w;
+                        w.path = files[i]["path"].str();
+                        const double size = files[i]["size"].num(-1);
+                        const std::string crc = files[i]["crc32"].str();
+                        if (!plain_path(w.path) || w.path[0] == '/' || size <= 0 || size > 4294967295.0 || size != double((long long)size) ||
+                            s.files.size() >= 512)
+                        {
+                            bad = true;
+                            break;
+                        }
+                        w.size = std::uint64_t(size);
+                        if (!crc.empty())
+                        {
+                            char *end = nullptr;
+                            const unsigned long v = std::strtoul(crc.c_str(), &end, 16);
+                            if (crc.size() != 8 || !end || *end != '\0' || crc.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+                            {
+                                bad = true;
+                                break;
+                            }
+                            w.crc = std::uint32_t(v);
+                            w.has_crc = true;
+                        }
+                        s.files.push_back(w);
+                    }
+                    if (files.size() > 0 && !files.is_array()) bad = true;
+                    s.wrong = slots[k]["wrong"].str().substr(0, 300);
+                    if (bad) s.kind = "iso-bad";
                 }
                 s.need = int(std::clamp<long long>(slots[k]["need"].integer(1), 1, 64));
                 /* A name or a made file that isn't one plain name: a slot this store won't set up. */

@@ -2756,6 +2756,8 @@ void Store::draw_page(Gfx &gfx)
             right = amount(job.done, job.total);
         else if (job.total)
             right = std::to_string(int(frac * 100 + 0.5f)) + "%";
+        else if (job.done && job.step.rfind("Download", 0) == 0)
+            right = size_text(job.done); /* (1.1.2) a download whose size isn't known: what's here so far */
         gfx.text_mid(Font::Regular, 18, ix, ry + 12 + 12 + 11, C(kSoft), Align::Left, job.step);
         gfx.text_mid(Font::Regular, 18, ix + iw, ry + 12 + 12 + 11, C(kSoft), Align::Right, right);
         ry += prog_h;

@@ -40,9 +40,14 @@ using Progress = std::function<void(const char *step, std::uint64_t done, std::u
 using Log = std::function<void(const std::string &line)>;
 using Stop = std::function<bool()>;
 /* Unpacks zip_path into root as above. On failure error says why (for the player) and
- * changed says whether any old file had already been replaced. */
+ * changed says whether any old file had already been replaced. keep (1.1.2): the player's
+ * own files and folders in root ("Assets", "dbz3.toml"); the zip's copy of one is written
+ * only when there's none there yet. */
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
-            const Stop &stop, std::string &error, bool &changed, std::size_t &files);
+            const Stop &stop, std::string &error, bool &changed, std::size_t &files,
+            const std::vector<std::string> *keep = nullptr);
+/* (1.1.2) A name in the game's folder that's one of keep's, or inside one, in any case. */
+bool kept(const std::string &name, const std::vector<std::string> &keep);
 
 /* A game whose PS5 files come as a zip inside its release's bigger zip (a source
  * archive): the one file in zip_path whose name wanted() accepts, written to out as it is
