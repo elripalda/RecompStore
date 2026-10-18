@@ -61,9 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!preg_match('/^[A-Za-z0-9_-]{3,32}$/', $g['id'])) $error = 'The title ID must be 3 to 32 letters, numbers, - or _ (for example PPSA92011).';
     elseif ($g['name'] === '') $error = 'Give the game a name.';
     elseif (mb_strlen($g['date']) > 40) $error = 'Keep the Coming soon date short, like December 2026.';
-    // Coming soon: no download yet, so the repo and link are optional (but well formed when given).
-    elseif ($g['source'] === 'github' && !($g['soon'] && $g['repo'] === '') && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
-    elseif ($g['source'] === 'url' && !($g['soon'] && $g['url'] === '') && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
+    // Coming soon: no download yet. Beta: testers download the beta zip from this site. Either
+    // way the repo and link are optional until it's out (but well formed when given).
+    elseif ($g['source'] === 'github' && !(($g['soon'] || $g['beta']) && $g['repo'] === '') && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
+    elseif ($g['source'] === 'url' && !(($g['soon'] || $g['beta']) && $g['url'] === '') && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
     elseif ($badLink !== '') $error = $badLink;
     elseif ($g['beta'] && $g['soon']) $error = 'A game can be Beta or Coming soon, not both.';
     elseif (mb_strlen($g['beta_version']) > 40) $error = 'Keep the beta version short, like 1.2.0-beta1.';
@@ -152,8 +153,9 @@ $hero = $g['hero_web'] ?: $g['hero'];
   </div>
 </section>
 
-<section class="card" data-not-soon>
+<section class="card" data-not-soon data-download-card>
   <h2>Download</h2>
+  <p class="beta-note" data-beta-note hidden>This game is a beta: testers get the beta zip from the Beta card below, so you can leave the repo and link empty for now. Fill them in when it's out for everyone, then untick Beta.</p>
   <div class="grid2">
     <label>Where the zip comes from
       <select name="source" data-source>

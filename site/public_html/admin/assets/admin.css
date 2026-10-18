@@ -204,3 +204,5 @@ table.codes td form{margin:0;display:inline}
 .drop-bar{height:100%;width:0;background:var(--cyan);transition:width .2s}
 .drop-status{margin:4px 0 0;font-size:14px;min-height:1.2em}
 .drop-status.bad{color:#ff8a80}
+.beta-note{margin:0 0 14px;padding:10px 14px;border-radius:12px;background:rgba(245,185,66,.12);border:1px solid rgba(245,185,66,.45);font-size:15px}
+[data-download-card].waiting .grid2{opacity:.55}

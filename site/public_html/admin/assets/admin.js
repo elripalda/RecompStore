@@ -275,7 +275,14 @@
   const box = document.querySelector('[data-beta]');
   const fields = document.querySelector('[data-beta-fields]');
   if (!box || !fields) return;
-  const sync = () => (fields.hidden = !box.checked);
+  const note = document.querySelector('[data-beta-note]');
+  const card = document.querySelector('[data-download-card]');
+  const sync = () => {
+    fields.hidden = !box.checked;
+    // A beta's download is its beta zip: the release fields wait until it's out.
+    if (note) note.hidden = !box.checked;
+    if (card) card.classList.toggle('waiting', box.checked);
+  };
   box.addEventListener('change', sync);
   sync();
 })();
