@@ -95,6 +95,10 @@ struct Slot
      * Title Update (kind "stfs") the store can download itself: the package's content ID
      * (its header's, as XboxUnity lists it) and the whole file's SHA-1, both lowercase. */
     std::string ready, update_id, update_sha1;
+    /* (2.0.1) kind "stfs": the package copied in as it is, named name ("" its own), not
+     * unpacked: for a port whose own installer reads the Title Update file (GTA IV). Set up
+     * once that file is there (ready defaults to name). */
+    bool raw = false;
     bool n64 = false;
     int need = 1;
     bool required = true, multiple = false;

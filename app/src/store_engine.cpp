@@ -2348,6 +2348,55 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
  * the port reads them: an update's or an Arcade game's files into the slot's folder, each
  * piece of DLC into a folder of its own named after it. By the copier payload at the drive's
  * full speed, or here when there's no loader. */
+bool copy_file_in(const std::string &src, const std::string &target, std::uint64_t size);
+bool port_name(const std::string &leaf);
+std::string lower_ascii(std::string s);
+
+/* (2.0.1) A Title Update copied into the game's folder as it is, under the name its port looks
+ * for (slot.raw): GTA IV's own installer reads TU_1A581VI_000000K000000.0000000000205 from its
+ * install folder. Already checked by run_setup_stfs: the game's, and a Title Update. */
+void run_setup_stfs_raw(const App &a, const Slot &slot, const std::string &image)
+{
+    const std::string id = a.id;
+    const std::string own = image.substr(image.find_last_of('/') + 1);
+    const std::string want = slot.name.empty() ? own : slot.name;
+    if (!plain_leaf(want) || port_name(want))
+        return fail_job("The store's listing for " + a.name + " names this file oddly, so it wasn't set up. The listing needs fixing.");
+    if (!exists(app_folder(id) + "/eboot.bin")) return fail_job("Install " + a.name + " first.");
+    struct stat src;
+    if (stat(image.c_str(), &src) != 0 || !S_ISREG(src.st_mode)) return fail_job("The Title Update can't be read.");
+    const std::uint64_t size = std::uint64_t(src.st_size);
+    const std::string target = slot_target(a, slot), dst = target + "/" + want;
+    make_dirs(target);
+    auto done = [&](const std::string &note) {
+        make_dirs(g.data + "/setup");
+        write_file(g.data + "/setup/" + id + "." + slot.key + ".txt", image.data(), image.size());
+        std::lock_guard<std::mutex> l(g.m);
+        g.job.phase = Phase::Done;
+        g.job.step = "The Title Update is ready";
+        g.job.note = note;
+        g.job.done = g.job.total;
+    };
+    struct stat ds;
+    if (stat(dst.c_str(), &ds) == 0 && ds.st_dev == src.st_dev && ds.st_ino == src.st_ino)
+        return done("The Title Update is already in place."); /* chosen from where it goes */
+    struct statvfs fs;
+    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (16ull << 20))
+        return fail_job("There isn't room for the Title Update.");
+    /* Copied under its own name, then renamed: never over a different file of the game's. */
+    if (own != want && exists(target + "/" + own))
+        return fail_job("The game's folder already has a file called " + own + ", so the Title Update wasn't copied over it.");
+    set_job("Copying the Title Update", 0, size);
+    if (!copy_file_in(image, target, size)) return;
+    if (own != want && std::rename((target + "/" + own).c_str(), dst.c_str()) != 0)
+    {
+        std::remove((target + "/" + own).c_str());
+        return fail_job("The Title Update couldn't be named " + want + " in the game's folder.");
+    }
+    slog("setup %s: %s -> %s (%s, as it is)", id.c_str(), image.c_str(), dst.c_str(), fmt_mb(size).c_str());
+    done(std::string("The Title Update is in place") + (slot.to.empty() || slot.to == "." ? "." : ", in the game's " + slot.to + " folder."));
+}
+
 void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
 {
     const std::string id = a.id;
@@ -2370,6 +2419,12 @@ void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
                         " Choose " + a.name + "'s own file, from its 000D0000 folder on the console.");
     if (!arcade && !several && first.content_type() != stfs::kTitleUpdate)
         return fail_job("That isn't a Title Update. It's the file whose name starts with TU_.");
+    if (slot.raw && !arcade && !several)
+    {
+        first.close();
+        run_setup_stfs_raw(a, slot, image);
+        return;
+    }
     if (several && first.content_type() != stfs::kMarketplace)
         return fail_job("That isn't DLC. Choose one of the game's downloadable content files.");
     std::size_t arcade_files = 0;
