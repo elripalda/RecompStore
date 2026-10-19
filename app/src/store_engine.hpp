@@ -512,6 +512,11 @@ void set_smp_path(const std::string &path);
 /* 2: it was running (its API on 127.0.0.1:10101 answered) and is looking for new games
  * now; 1: it wasn't, so the player's copy was sent to the loader; 0: neither (why). */
 int refresh_smp(std::string &why);
+/* (2.0) ShadowMountPlus passes over a folder changed in the last 10 seconds (a copy may still
+ * be going on), and a folder just installed always has been: it's asked again 12 and 30
+ * seconds from now, by the store's worker. */
+void smp_scan_later();
+void smp_scan_again();
 /* After a delete: a running ShadowMountPlus takes the game's tile off the home screen. */
 bool forget_smp(const std::string &title_id);
 /* Before a delete: a running ShadowMountPlus lets go of the game's folder. */

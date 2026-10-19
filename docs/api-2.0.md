@@ -251,3 +251,12 @@ here (icon 512, banner 3840/1920), others linked as given. Not published: tester
   later gives the app by its title ID).
 - Advanced mode: new apps can install to a drive's homebrew folder (/mnt/ext1, /mnt/ext0, /mnt/usbN, as
   ShadowMountPlus scans them). The store finds apps in all of them; updates go where an app is.
+- Pictures: `POST /api/art.php` with `paths=` (newline-separated `/media/...` paths, up to 24) answers, for each
+  path in order, a line `<path> <size>` and then that many bytes (0: not on the site; -1: past the answer's 12 MB
+  cap, ask on its own). The store asks for icons first, then logos, then banners, 24 to a request, and falls back
+  to one request each when the site has no art.php. A job the player starts (an install) goes before the rest.
+- After an install or a game setup the store asks ShadowMountPlus to rescan at once and again 12 and 30 seconds
+  later: ShadowMountPlus passes over a folder changed in the last 10 seconds (its `stability_wait_seconds`).
+  An app that won't open has it asked again from its page.
+- The Prospero import leaves games out (`--with-games` keeps them): a game goes in by hand once it's tested with
+  the store's ISO/ROM setup.

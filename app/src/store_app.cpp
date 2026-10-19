@@ -886,11 +886,22 @@ bool Store::update(const pad::State &p, float dt)
         if (open_game_failure(id, result) && find(id))
         {
             open(id);
-            char t[260];
-            std::snprintf(t, sizeof t,
-                          "%s didn't open (0x%08X). If it isn't on your home screen yet, start ShadowMountPlus "
-                          "(Settings > General), give it a few seconds, then try again.",
-                          find(id)->name.c_str(), result);
+            /* (2.0) Most often it isn't on the home screen yet: ShadowMountPlus is asked to add it
+             * now (and again in a moment), rather than the player going to Settings for it. */
+            std::string why;
+            const int home = refresh_smp(why);
+            if (home > 0) smp_scan_later();
+            char t[300];
+            if (home > 0)
+                std::snprintf(t, sizeof t,
+                              "%s didn't open (0x%08X). If it isn't on your home screen yet, ShadowMountPlus is %s now: "
+                              "give it about 15 seconds, then press Open again.",
+                              find(id)->name.c_str(), result, home == 2 ? "adding it" : "starting to add it");
+            else
+                std::snprintf(t, sizeof t,
+                              "%s didn't open (0x%08X). If it isn't on your home screen yet, start ShadowMountPlus "
+                              "(Settings > General), give it a few seconds, then try again.",
+                              find(id)->name.c_str(), result);
             notice_ = t;
             notice_bad_ = true;
         }
@@ -2953,7 +2964,7 @@ void Store::draw_page(Gfx &gfx)
         float bx = ix;
         if (can_delete)
         {
-            const char *label = "Delete game";
+            const char *label = a.category.empty() || a.category == "games" ? "Delete game" : "Delete app";
             const float bw = gfx.measure(Font::SemiBold, 18, label) + 48;
             const bool f = focused(Control::Delete, -1);
             glass(gfx, bx, ry, bw, 48, 16, f ? C(0xE5484D, 0.18f) : Color{1, 1, 1, 0.05f}, false);
