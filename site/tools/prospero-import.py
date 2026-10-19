@@ -9,10 +9,11 @@ app's name, the developer, the repo, the release file's name and the icon in the
 Descriptions are left empty on purpose: tick "Look things up on GitHub" in the Import page and each
 one is filled from the developer's own GitHub page (Prospero's wording and art aren't copied).
 
-  prospero-import.py <catalog checkout> <out.json>
+  prospero-import.py <catalog checkout> <out.json> [--with-games]
 
 Left out: records with no release yet (reserved IDs), releases that aren't a .zip or .7z
-(Recomp Store installs those two), and ProsperoStore itself."""
+(Recomp Store installs those two), ProsperoStore itself, and games. A game goes into the store by
+hand, once it's been tested and installs with the store's ISO/ROM setup; --with-games keeps them."""
 import json, glob, os, re, sys
 
 CATEGORY = {"emulators": "emulators", "console-ports": "games", "pc-ports": "games", "homebrew-games": "games",
@@ -36,7 +37,7 @@ def pattern(file, version):
     return name[:m.start()] + "v*" + name[m.end():] if m else name
 
 
-def main(src, out):
+def main(src, out, with_games=False):
     apps, left = [], []
     for f in sorted(glob.glob(os.path.join(src, "apps", "*.json"))):
         r = json.load(open(f, encoding="utf-8"))
@@ -49,7 +50,10 @@ def main(src, out):
             left.append({"id": tid, "name": r.get("name", ""), "why": why})
             continue
         cat = r.get("category", "")
-        tags = [LABEL[cat]] if cat in LABEL and LABEL[cat] != "Emulator" else []
+        if CATEGORY.get(cat, "apps") == "games" and not with_games:
+            left.append({"id": tid, "name": r.get("name", ""), "why": "a game: added by hand once it's tested"})
+            continue
+        tags =[LABEL[cat]] if cat in LABEL and LABEL[cat] != "Emulator" else []
         apps.append({
             "id": tid, "name": r.get("name", ""), "author": r.get("author", ""),
             "category": CATEGORY.get(cat, "apps"), "tags": tags[:6],
@@ -66,4 +70,4 @@ def main(src, out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], "--with-games" in sys.argv[3:])

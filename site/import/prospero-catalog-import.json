@@ -45,36 +45,6 @@
    "from": "PS5 Homebrew Catalog (PPSA17641.json)"
   },
   {
-   "id": "PPSA19111",
-   "name": "XashPS5",
-   "author": "GordonProsperoMan",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/GordonProsperoMan/xash3d-ps5",
-   "asset": "PPSA19111.zip",
-   "icon": "https://raw.githubusercontent.com/GordonProsperoMan/xash3d-ps5/v1.3/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA19111.json)"
-  },
-  {
-   "id": "PPSA28319",
-   "name": "Middle Ages Ping Pong",
-   "author": "STL1te",
-   "category": "games",
-   "tags": [
-    "Homebrew"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/STL1te/MedievalTennis",
-   "asset": "PPSA28319.zip",
-   "icon": "https://raw.githubusercontent.com/STL1te/MedievalTennis/01.000.000/Assets/Art/Icons/Art/game_icon_en.png",
-   "from": "PS5 Homebrew Catalog (PPSA28319.json)"
-  },
-  {
    "id": "PPSA39410",
    "name": "VITA5",
    "author": "StonedModder",
@@ -90,21 +60,6 @@
    "from": "PS5 Homebrew Catalog (PPSA39410.json)"
   },
   {
-   "id": "PPSA47402",
-   "name": "Syobon Action",
-   "author": "Andrei Kvapil",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/kvaps/syobon-action-ps5",
-   "asset": "PPSA47402.zip",
-   "icon": "https://raw.githubusercontent.com/kvaps/syobon-action-ps5/01.001.000/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA47402.json)"
-  },
-  {
    "id": "PPSA47770",
    "name": "Afterglow",
    "author": "DevvNirvana",
@@ -118,21 +73,6 @@
    "asset": "PPSA47770.zip",
    "icon": "https://raw.githubusercontent.com/DevvNirvana/afterglow/01.000.006/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA47770.json)"
-  },
-  {
-   "id": "PPSA59322",
-   "name": "ccleste",
-   "author": "AngelXex",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/darkxex/PS5_Celeste",
-   "asset": "PPSA59322.zip",
-   "icon": "https://raw.githubusercontent.com/darkxex/PS5_Celeste/master/dist/PPSA59322/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA59322.json)"
   },
   {
    "id": "PPSA67670",
@@ -178,51 +118,6 @@
    "from": "PS5 Homebrew Catalog (PPSA69420.json)"
   },
   {
-   "id": "PPSA69421",
-   "name": "SuperTuxKart",
-   "author": "Marice",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/Marice/stk-ps5",
-   "asset": "PPSA69421.zip",
-   "icon": "https://raw.githubusercontent.com/Marice/stk-ps5/00.001.000/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA69421.json)"
-  },
-  {
-   "id": "PPSA69423",
-   "name": "Rush 2 Recompiled",
-   "author": "Marice",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/Marice/rush2-ps5",
-   "asset": "Rush2Recompiled-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/Marice/rush2-ps5/952b3728f4a7285ee3d6a971e652545918a5b20f/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA69423.json)"
-  },
-  {
-   "id": "PPSA69424",
-   "name": "Wave Race 64 Recompiled",
-   "author": "Marice",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/Marice/wave-race-64-ps5",
-   "asset": "WaveRace64Recompiled-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/Marice/wave-race-64-ps5/b8125c47fd01edbe6f4b49fe04d74d6f849d8ece/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA69424.json)"
-  },
-  {
    "id": "PPSA69426",
    "name": "Signal Companion",
    "author": "Marice",
@@ -251,21 +146,6 @@
    "asset": "PPSA74126.zip",
    "icon": "https://raw.githubusercontent.com/LoZazaMastro/Stremio-Plus/0.5.11/app/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA74126.json)"
-  },
-  {
-   "id": "PPSA74207",
-   "name": "The Simpsons Game",
-   "author": "ZazaMastro",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/LoZazaMastro/TheSimpsonsGame-PS5-Builder",
-   "asset": "TheSimpsonsGame-PS5-Builder-*-Source.zip",
-   "icon": "https://raw.githubusercontent.com/LoZazaMastro/TheSimpsonsGame-PS5-Builder/v3.10.6/prospero/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA74207.json)"
   },
   {
    "id": "PPSA75837",
@@ -356,21 +236,6 @@
    "from": "PS5 Homebrew Catalog (PPSA92878.json)"
   },
   {
-   "id": "PPSA94002",
-   "name": "Raptor: Call of the Shadows (PS5)",
-   "author": "ChaDea1",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/ChaDea1/RaptorPS5",
-   "asset": "raptor-ps5-*.zip",
-   "icon": "https://raw.githubusercontent.com/ChaDea1/RaptorPS5/v1.0.0-rc.2/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA94002.json)"
-  },
-  {
    "id": "PPSA97358",
    "name": "XPSemu",
    "author": "AZiZ",
@@ -395,21 +260,6 @@
    "asset": "PSXS5-*.zip",
    "icon": "https://raw.githubusercontent.com/SynoPiia/PSXS5/v2.2.0/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA97510.json)"
-  },
-  {
-   "id": "PPSA98001",
-   "name": "PokeMMO Prospero",
-   "author": "Shabbypenguin",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/Shabbypenguin/PokeMMO-Prospero",
-   "asset": "PPSA98001.zip",
-   "icon": "https://raw.githubusercontent.com/Shabbypenguin/PokeMMO-Prospero/v1.0.2/assets/branding/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA98001.json)"
   },
   {
    "id": "PPSA98427",
@@ -438,36 +288,6 @@
    "asset": "PPSA98510.zip",
    "icon": "https://raw.githubusercontent.com/darkxex/SwanStationPS5/master/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA98510.json)"
-  },
-  {
-   "id": "PPSA98511",
-   "name": "ReKHCoM",
-   "author": "AngelXex",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/darkxex/ReKHCom-PS5",
-   "asset": "PPSA98511.zip",
-   "icon": "https://raw.githubusercontent.com/darkxex/ReKHCom-PS5/master/port/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA98511.json)"
-  },
-  {
-   "id": "PPSA98512",
-   "name": "FFTARecomp",
-   "author": "AngelXex",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/darkxex/FFTARecomp-PS5",
-   "asset": "PPSA98512.zip",
-   "icon": "https://raw.githubusercontent.com/darkxex/FFTARecomp-PS5/main/PS5Port/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA98512.json)"
   },
   {
    "id": "PPSA98766",
@@ -541,21 +361,6 @@
    "asset": "ProsperoEden-*.zip",
    "icon": "https://raw.githubusercontent.com/blackbearreloaded/ProsperoEden/v1.005.000/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA99008.json)"
-  },
-  {
-   "id": "PPSA99010",
-   "name": "vkQuake",
-   "author": "Mihawk",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mihawk-99/PS5_vkQuake",
-   "asset": "PPSA99010.zip",
-   "icon": "https://raw.githubusercontent.com/mihawk-99/PS5_vkQuake/1.0/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99010.json)"
   },
   {
    "id": "PPSA99015",
@@ -788,141 +593,6 @@
    "from": "PS5 Homebrew Catalog (PPSA99288.json)"
   },
   {
-   "id": "PPSA99300",
-   "name": "Spider-Man: Edge of Time",
-   "author": "KongaTime",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/KongaTime/PS5_EdgeOfTimeTitle",
-   "asset": "Spider.Man.Edge.Of.Time.*.zip",
-   "icon": "https://raw.githubusercontent.com/KongaTime/PS5_EdgeOfTimeTitle/d42a03ad351fb8c0e69f7c9685535ac0595703fb/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99300.json)"
-  },
-  {
-   "id": "PPSA99303",
-   "name": "Quake3e",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_Quake3e",
-   "asset": "Quake3-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_Quake3e/v1.2.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99303.json)"
-  },
-  {
-   "id": "PPSA99305",
-   "name": "Dusklight",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_Dusklight",
-   "asset": "Dusklight-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_Dusklight/v1.0.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99305.json)"
-  },
-  {
-   "id": "PPSA99309",
-   "name": "Wind Waker",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_SwitchWaker",
-   "asset": "WindWaker-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_SwitchWaker/v1.0.3/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99309.json)"
-  },
-  {
-   "id": "PPSA99310",
-   "name": "Mario 64",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_Ghostship",
-   "asset": "Mario64-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_Ghostship/v1.0.1/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99310.json)"
-  },
-  {
-   "id": "PPSA99312",
-   "name": "Super Mario Sunshine",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_Sunshine",
-   "asset": "Sunshine-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_Sunshine/v0.10.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99312.json)"
-  },
-  {
-   "id": "PPSA99313",
-   "name": "Doom 3 BFG",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_Doom3",
-   "asset": "Doom3BFG-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_Doom3/v1.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99313.json)"
-  },
-  {
-   "id": "PPSA99314",
-   "name": "Eternal Darkness",
-   "author": "Gary Riches",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/griches/PS5_EternalDarkness",
-   "asset": "EternalDarkness-PS5-*.zip",
-   "icon": "https://raw.githubusercontent.com/griches/PS5_EternalDarkness/v0.9.3/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99314.json)"
-  },
-  {
-   "id": "PPSA99320",
-   "name": "Ship of Harkinian (Vulkan)",
-   "author": "damiantw",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/damiantw/PS5_Shipwright",
-   "asset": "PPSA99320.zip",
-   "icon": "https://raw.githubusercontent.com/damiantw/PS5_Shipwright/01.000.000/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99320.json)"
-  },
-  {
    "id": "PPSA99350",
    "name": "Steam Remote Play",
    "author": "jmelovich",
@@ -949,21 +619,6 @@
    "asset": "PS5CEMU-HAR-*.zip",
    "icon": "https://raw.githubusercontent.com/premohq/PS5CEMU-HAR/v4.0.1/sce_sys/icon0.png",
    "from": "PS5 Homebrew Catalog (PPSA99360.json)"
-  },
-  {
-   "id": "PPSA99403",
-   "name": "NFS Black Box",
-   "author": "lavavex",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/lavavex/nfs-blackbox-ps5",
-   "asset": "PPSA99403.zip",
-   "icon": "https://raw.githubusercontent.com/lavavex/nfs-blackbox-ps5/01.000.000/art/nfs-most-wanted-2005.png",
-   "from": "PS5 Homebrew Catalog (PPSA99403.json)"
   },
   {
    "id": "PPSA99420",
@@ -1101,141 +756,6 @@
    "from": "PS5 Homebrew Catalog (PPSA99600.json)"
   },
   {
-   "id": "PPSA99620",
-   "name": "Ship of Harkinian (Ocarina of Time)",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/oot64-ps5",
-   "asset": "PPSA99620.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/oot64-ps5/v1.2.0/ps5/art/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99620.json)"
-  },
-  {
-   "id": "PPSA99621",
-   "name": "2 Ship 2 Harkinian (Majora's Mask)",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/tmm64-ps5",
-   "asset": "PPSA99621.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/tmm64-ps5/v1.1.0/ps5/art/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99621.json)"
-  },
-  {
-   "id": "PPSA99630",
-   "name": "Morrowind (OpenMW)",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/morrowind-ps5",
-   "asset": "PPSA99630.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/morrowind-ps5/v1.0.1/art/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99630.json)"
-  },
-  {
-   "id": "PPSA99640",
-   "name": "Twilight Princess (Dusklight)",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/dusklight-ps5",
-   "asset": "PPSA99640.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/dusklight-ps5/ps5-v0.1.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99640.json)"
-  },
-  {
-   "id": "PPSA99641",
-   "name": "Wind Waker HD",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/ww-ps5",
-   "asset": "PPSA99641.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/ww-ps5/ps5-v0.1.2/ps5/art/catalog-icon.png",
-   "from": "PS5 Homebrew Catalog (PPSA99641.json)"
-  },
-  {
-   "id": "PPSA99660",
-   "name": "Animal Crossing for PS5",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/ac-ps5",
-   "asset": "PPSA99660.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/ac-ps5/v1.0.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99660.json)"
-  },
-  {
-   "id": "PPSA99666",
-   "name": "DOOM Native Port",
-   "author": "lowbit",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/lowbit/ps5-doom",
-   "asset": "PPSA99666.zip",
-   "icon": "https://raw.githubusercontent.com/lowbit/ps5-doom/v1.1.1/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99666.json)"
-  },
-  {
-   "id": "PPSA99670",
-   "name": "Link’s Awakening for PS5",
-   "author": "mshivam019",
-   "category": "games",
-   "tags": [
-    "Port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/mshivam019/la-ps5",
-   "asset": "PPSA99670.zip",
-   "icon": "https://raw.githubusercontent.com/mshivam019/la-ps5/v0.1.0/ps5/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99670.json)"
-  },
-  {
-   "id": "PPSA99728",
-   "name": "OpenRCT2 Native Port",
-   "author": "lowbit",
-   "category": "games",
-   "tags": [
-    "PC port"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/lowbit/ps5-openrct2",
-   "asset": "PPSA99728.zip",
-   "icon": "https://raw.githubusercontent.com/lowbit/ps5-openrct2/v1.0.0/sce_sys/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99728.json)"
-  },
-  {
    "id": "PPSA99764",
    "name": "Porpoise",
    "author": "Ruben Ripalda",
@@ -1337,21 +857,6 @@
    "from": "PS5 Homebrew Catalog (PPSA99991.json)"
   },
   {
-   "id": "PPSA99993",
-   "name": "Pulse",
-   "author": "shwan-ps5",
-   "category": "games",
-   "tags": [
-    "Homebrew"
-   ],
-   "blurb": "",
-   "description": "",
-   "repo": "https://github.com/shwan-ps5/pulse",
-   "asset": "Pulse-*.zip",
-   "icon": "https://raw.githubusercontent.com/shwan-ps5/pulse/01.000.000/ps5/art/icon0.png",
-   "from": "PS5 Homebrew Catalog (PPSA99993.json)"
-  },
-  {
    "id": "PPSA99995",
    "name": "Prospero Win",
    "author": "mpereiraesaa",
@@ -1447,6 +952,171 @@
    "id": "PPSA99925",
    "name": "Beetle PCE PS5",
    "why": "no release yet"
+  },
+  {
+   "id": "PPSA19111",
+   "name": "XashPS5",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA28319",
+   "name": "Middle Ages Ping Pong",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA47402",
+   "name": "Syobon Action",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA59322",
+   "name": "ccleste",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA69421",
+   "name": "SuperTuxKart",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA69423",
+   "name": "Rush 2 Recompiled",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA69424",
+   "name": "Wave Race 64 Recompiled",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA74207",
+   "name": "The Simpsons Game",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA94002",
+   "name": "Raptor: Call of the Shadows (PS5)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA98001",
+   "name": "PokeMMO Prospero",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA98511",
+   "name": "ReKHCoM",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA98512",
+   "name": "FFTARecomp",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99010",
+   "name": "vkQuake",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99300",
+   "name": "Spider-Man: Edge of Time",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99303",
+   "name": "Quake3e",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99305",
+   "name": "Dusklight",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99309",
+   "name": "Wind Waker",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99310",
+   "name": "Mario 64",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99312",
+   "name": "Super Mario Sunshine",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99313",
+   "name": "Doom 3 BFG",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99314",
+   "name": "Eternal Darkness",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99320",
+   "name": "Ship of Harkinian (Vulkan)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99403",
+   "name": "NFS Black Box",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99620",
+   "name": "Ship of Harkinian (Ocarina of Time)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99621",
+   "name": "2 Ship 2 Harkinian (Majora's Mask)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99630",
+   "name": "Morrowind (OpenMW)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99640",
+   "name": "Twilight Princess (Dusklight)",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99641",
+   "name": "Wind Waker HD",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99660",
+   "name": "Animal Crossing for PS5",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99666",
+   "name": "DOOM Native Port",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99670",
+   "name": "Link’s Awakening for PS5",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99728",
+   "name": "OpenRCT2 Native Port",
+   "why": "a game: added by hand once it's tested"
+  },
+  {
+   "id": "PPSA99993",
+   "name": "Pulse",
+   "why": "a game: added by hand once it's tested"
   }
  ]
 }
