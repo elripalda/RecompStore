@@ -267,7 +267,8 @@ bool protected_name(const std::string &p)
 int unzip_job(const std::string &zip_path, const std::string &root, const std::string &job)
 {
     /* keep0=, keep1=, ... (1.1.2): the player's own files in the game's folder, which an
-     * update leaves alone. Names inside the folder, spelled plainly. */
+     * update leaves alone. Names inside the folder, spelled plainly. app= (1.1.3): the game's
+     * title ID; its folder in the zip is the one installed (zip::app_prefix). */
     std::vector<std::string> keep;
     for (int i = 0; i < 32; ++i)
     {
@@ -305,7 +306,7 @@ int unzip_job(const std::string &zip_path, const std::string &root, const std::s
             write_status();
         },
         [](const std::string &line) { log_line("%s", line.c_str()); }, [] { return cancelled(); }, error, changed,
-        files, &keep);
+        files, &keep, field(job, "app"));
     g_status.changed = changed ? 1 : 0;
     g_status.seconds = now_s() - t0;
     if (!ok)

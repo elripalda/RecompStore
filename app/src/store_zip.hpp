@@ -32,6 +32,12 @@ bool extract(int fd, const Entry &en, std::vector<std::uint8_t> &out);
 bool safe_name(const std::string &n);
 /* The single top folder every name starts with ("PPSA92011/"), or "". */
 std::string top_folder(const std::vector<Entry> &entries);
+/* (1.1.3) Where the game's own folder is in the zip: the folder named after its title ID
+ * that holds eboot.bin, as deep as it is ("PPSA64007/" beside "PPSA64008/" in a zip with two
+ * games, "ninjas-dawn-ps5-v0.1.4-alpha/PPSA94202/" under a folder of notes), the shallowest
+ * if there are several; else top_folder's answer, as before. Names outside it aren't
+ * installed. */
+std::string app_prefix(const std::vector<Entry> &entries, const std::string &title_id);
 /* The file on disk, read back: its size and CRC-32. why says what differed. */
 bool file_matches(const std::string &path, std::uint64_t size, std::uint32_t crc, std::string *why = nullptr);
 void make_dirs(const std::string &path);
@@ -45,7 +51,7 @@ using Stop = std::function<bool()>;
  * only when there's none there yet. */
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
             const Stop &stop, std::string &error, bool &changed, std::size_t &files,
-            const std::vector<std::string> *keep = nullptr);
+            const std::vector<std::string> *keep = nullptr, const std::string &title_id = std::string());
 /* (1.1.2) A name in the game's folder that's one of keep's, or inside one, in any case. */
 bool kept(const std::string &name, const std::vector<std::string> &keep);
 

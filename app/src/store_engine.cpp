@@ -807,6 +807,7 @@ void run_install(const std::string &id)
         /* (1.1.2) The player's own files an update leaves alone. */
         std::string keep_job;
         for (std::size_t k = 0; k < a.keep.size(); ++k) keep_job += "keep" + std::to_string(k) + "=" + a.keep[k] + "\n";
+        keep_job += "app=" + a.id + "\n"; /* (1.1.3) the folder of the zip that's this game's */
         const Copier c = run_copier("unzip", install_zip, root, &changed, keep_job);
         if (c == Copier::Failed)
         {
@@ -818,7 +819,7 @@ void run_install(const std::string &id)
             std::string error;
             if (!zip::unpack(
                     install_zip, root, [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); },
-                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles, &a.keep))
+                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles, &a.keep, a.id))
             {
                 if (changed) std::remove(record.c_str());
                 return fail_job(error);
@@ -836,11 +837,12 @@ void run_install(const std::string &id)
                 std::remove(record.c_str());
                 return fail_job("The store couldn't read the download back to check the install. Install it again.");
             }
-            const std::string strip = zip::top_folder(entries);
+            const std::string strip = zip::app_prefix(entries, a.id);
             std::uint64_t i = 0;
             for (const zip::Entry &e : entries)
             {
                 set_job("Checking the installed files", ++i, entries.size());
+                if (e.name.compare(0, strip.size(), strip) != 0) continue; /* (1.1.3) not the game's folder */
                 const std::string name = e.name.substr(strip.size());
                 if (name.empty() || name.back() == '/') continue;
                 if (zip::kept(name, a.keep)) continue; /* the player's own, as the copier left it */

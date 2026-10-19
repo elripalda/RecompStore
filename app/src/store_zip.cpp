@@ -250,6 +250,34 @@ std::string top_folder(const std::vector<Entry> &entries)
     return top;
 }
 
+std::string app_prefix(const std::vector<Entry> &entries, const std::string &title_id)
+{
+    if (!title_id.empty() && title_id.find('/') == std::string::npos)
+    {
+        const std::string tail = title_id + "/eboot.bin";
+        std::string best;
+        bool found = false;
+        for (const Entry &e : entries)
+        {
+            if (e.name.size() < tail.size() || e.name.compare(e.name.size() - tail.size(), tail.size(), tail) != 0)
+                continue;
+            const std::string prefix = e.name.substr(0, e.name.size() - std::string("eboot.bin").size());
+            /* the folder is named exactly that: at the top, or right after a '/' */
+            if (prefix.size() != title_id.size() + 1 && prefix[prefix.size() - title_id.size() - 2] != '/')
+                continue;
+            const auto depth = std::count(prefix.begin(), prefix.end(), '/');
+            if (!found || depth < std::count(best.begin(), best.end(), '/'))
+            {
+                best = prefix;
+                found = true;
+            }
+        }
+        if (found)
+            return best;
+    }
+    return top_folder(entries);
+}
+
 bool file_matches(const std::string &path, std::uint64_t size, std::uint32_t crc, std::string *why)
 {
     struct stat st;
@@ -327,7 +355,8 @@ bool kept(const std::string &name, const std::vector<std::string> &keep)
 }
 
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
-            const Stop &stop, std::string &error, bool &changed, std::size_t &files, const std::vector<std::string> *keep)
+            const Stop &stop, std::string &error, bool &changed, std::size_t &files, const std::vector<std::string> *keep,
+            const std::string &title_id)
 {
     changed = false;
     files = 0;
@@ -348,8 +377,10 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
         error = "The download isn't a zip the store can read.";
         return false;
     }
-    /* A single top folder in the zip (PPSA92011/...) is the game's own folder. */
-    const std::string strip = top_folder(entries);
+    /* A single top folder in the zip (PPSA92011/...) is the game's own folder; (1.1.3) or the
+     * folder named after the title ID, wherever it is, and nothing outside it. */
+    const std::string strip = app_prefix(entries, title_id);
+    auto inside = [&](const Entry &e) { return e.name.compare(0, strip.size(), strip) == 0; };
     make_dirs(root);
 
     struct Written
@@ -365,9 +396,12 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
     };
     std::uint64_t done = 0, total = 0;
     for (const Entry &e : entries)
-        total += e.usize;
+        if (inside(e))
+            total += e.usize;
     for (const Entry &e : entries)
     {
+        if (!inside(e))
+            continue; /* (1.1.3) beside the game's folder: notes, a PC script, another game */
         const std::string name = e.name.substr(strip.size());
         if (name.empty())
             continue;
