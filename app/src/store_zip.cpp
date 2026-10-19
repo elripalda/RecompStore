@@ -354,12 +354,156 @@ bool kept(const std::string &name, const std::vector<std::string> &keep)
     return false;
 }
 
+bool is_7z(const std::string &path)
+{
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0)
+        return false;
+    std::uint8_t sig[6] = {};
+    const bool ok = read_at(fd, 0, sig, sizeof sig);
+    ::close(fd);
+    static const std::uint8_t k7z[6] = {'7', 'z', 0xBC, 0xAF, 0x27, 0x1C};
+    return ok && std::memcmp(sig, k7z, sizeof sig) == 0;
+}
+
+bool matches(const std::string &path, std::uint64_t size, bool has_crc, std::uint32_t crc, std::string *why)
+{
+    if (has_crc)
+        return file_matches(path, size, crc, why);
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0)
+    {
+        if (why)
+            *why = "missing";
+        return false;
+    }
+    if (std::uint64_t(st.st_size) != size)
+    {
+        if (why)
+            *why = "size " + std::to_string((long long)st.st_size) + ", want " + std::to_string((unsigned long long)size);
+        return false;
+    }
+    return true;
+}
+
+bool entry_matches(const std::string &path, const Entry &e, std::string *why)
+{
+    return matches(path, e.usize, e.has_crc, e.crc, why);
+}
+
+bool list_any(const std::string &path, std::vector<Entry> &out)
+{
+    out.clear();
+    if (is_7z(path))
+        return list_7z(path, out);
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0)
+        return false;
+    const bool ok = list(fd, out);
+    ::close(fd);
+    return ok;
+}
+
+bool read_one(const std::string &archive_path, const std::string &title_id, const std::string &rel, std::string &out,
+              std::uint64_t max)
+{
+    out.clear();
+    if (is_7z(archive_path))
+        return read_one_7z(archive_path, title_id, rel, out, max);
+    const int fd = ::open(archive_path.c_str(), O_RDONLY);
+    if (fd < 0)
+        return false;
+    struct Closer
+    {
+        int fd;
+        ~Closer() { ::close(fd); }
+    } closer{fd};
+    std::vector<Entry> entries;
+    if (!list(fd, entries))
+        return false;
+    const std::string want = app_prefix(entries, title_id) + rel;
+    auto same = [](const std::string &a, const std::string &b) {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    };
+    for (const Entry &e : entries)
+    {
+        if (!same(e.name, want))
+            continue;
+        if (e.usize > max)
+            return false;
+        std::vector<std::uint8_t> data;
+        if (!extract(fd, e, data))
+            return false;
+        out.assign(reinterpret_cast<const char *>(data.data()), data.size());
+        return true;
+    }
+    return false;
+}
+
+bool commit(const std::string &root, const std::vector<Written> &written, const Progress &progress, const Log &log,
+            std::string &error, bool &changed, std::size_t &files)
+{
+    changed = false;
+    files = 0;
+    auto drop_new = [&] {
+        for (const Written &w : written)
+            std::remove((w.path + ".new").c_str());
+    };
+    /* The swap: eboot.bin last, so a half-finished swap never leaves a new program with
+     * old files. Then every file is read back and checked against the archive. */
+    if (progress)
+        progress("Checking the installed files", 0, written.size());
+    std::vector<const Written *> order;
+    const Written *eboot = nullptr;
+    for (const Written &w : written)
+        if (w.path == root + "/eboot.bin")
+            eboot = &w;
+        else
+            order.push_back(&w);
+    if (eboot)
+        order.push_back(eboot);
+    for (const Written *w : order)
+    {
+        if (!replace(w->path + ".new", w->path, log))
+        {
+            drop_new();
+            error = "Couldn't replace " + w->path.substr(root.size() + 1) + ". The game may be half updated: install it again.";
+            return false;
+        }
+        changed = true;
+    }
+    std::size_t checked = 0;
+    for (const Written *w : order)
+    {
+        std::string why;
+        if (!matches(w->path, w->size, w->has_crc, w->crc, &why))
+        {
+            if (log)
+                log("check " + w->path + ": " + why);
+            error = w->path.substr(root.size() + 1) + " doesn't match the download after installing. Install it again.";
+            return false;
+        }
+        if (progress)
+            progress("Checking the installed files", ++checked, written.size());
+    }
+    files = written.size();
+    return true;
+}
+
 bool unpack(const std::string &zip_path, const std::string &root, const Progress &progress, const Log &log,
             const Stop &stop, std::string &error, bool &changed, std::size_t &files, const std::vector<std::string> *keep,
             const std::string &title_id)
 {
     changed = false;
     files = 0;
+    /* (2.0) A .7z: the same steps, by store_7z.cpp. */
+    if (is_7z(zip_path))
+        return unpack_7z(zip_path, root, progress, log, stop, error, changed, files, keep, title_id);
     const int fd = ::open(zip_path.c_str(), O_RDONLY);
     if (fd < 0)
     {
@@ -374,7 +518,7 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
     std::vector<Entry> entries;
     if (!list(fd, entries) || entries.empty())
     {
-        error = "The download isn't a zip the store can read.";
+        error = "The download isn't a zip or .7z the store can read.";
         return false;
     }
     /* A single top folder in the zip (PPSA92011/...) is the game's own folder; (1.1.3) or the
@@ -383,12 +527,6 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
     auto inside = [&](const Entry &e) { return e.name.compare(0, strip.size(), strip) == 0; };
     make_dirs(root);
 
-    struct Written
-    {
-        std::string path;
-        std::uint64_t size;
-        std::uint32_t crc;
-    };
     std::vector<Written> written;
     auto drop_new = [&] {
         for (const Written &w : written)
@@ -458,49 +596,10 @@ bool unpack(const std::string &zip_path, const std::string &root, const Progress
             error = "Writing " + name + " failed. Nothing was changed.";
             return false;
         }
-        written.push_back({path, e.usize, e.crc});
+        written.push_back({path, e.usize, e.crc, true});
         done += e.usize;
     }
-
-    /* The swap: eboot.bin last, so a half-finished swap never leaves a new program with
-     * old files. Then every file is read back and checked against the zip. */
-    if (progress)
-        progress("Checking the installed files", 0, written.size());
-    std::vector<const Written *> order;
-    const Written *eboot = nullptr;
-    for (const Written &w : written)
-        if (w.path == root + "/eboot.bin")
-            eboot = &w;
-        else
-            order.push_back(&w);
-    if (eboot)
-        order.push_back(eboot);
-    for (const Written *w : order)
-    {
-        if (!replace(w->path + ".new", w->path, log))
-        {
-            drop_new();
-            error = "Couldn't replace " + w->path.substr(root.size() + 1) + ". The game may be half updated: install it again.";
-            return false;
-        }
-        changed = true;
-    }
-    std::size_t checked = 0;
-    for (const Written *w : order)
-    {
-        std::string why;
-        if (!file_matches(w->path, w->size, w->crc, &why))
-        {
-            if (log)
-                log("check " + w->path + ": " + why);
-            error = w->path.substr(root.size() + 1) + " doesn't match the download after installing. Install it again.";
-            return false;
-        }
-        if (progress)
-            progress("Checking the installed files", ++checked, written.size());
-    }
-    files = written.size();
-    return true;
+    return commit(root, written, progress, log, error, changed, files);
 }
 
 bool take_inner(const std::string &zip_path, const std::function<bool(const std::string &)> &wanted,

@@ -35,6 +35,26 @@ void load()
             std::fclose(f);
         }
     parse_catalog(text, g_cat);
+    /* (2.0) PREVIEW_CUSTOM: a source.php answer whose apps join as a custom source's. */
+    if (const char *p = std::getenv("PREVIEW_CUSTOM"))
+        if (std::FILE *f = std::fopen(p, "rb"))
+        {
+            std::string t;
+            char b[8192]; std::size_t n;
+            while ((n = std::fread(b, 1, sizeof b, f)) > 0) t.append(b, n);
+            std::fclose(f);
+            Catalog c;
+            Json j;
+            if (parse_catalog(t, c) && Json::parse(t, j))
+                for (App a : c.apps)
+                {
+                    a.custom = true;
+                    a.source_value = j["source"]["value"].str();
+                    if (a.source_name.empty()) a.source_name = j["source"]["name"].str();
+                    a.order = 100000 + int(g_cat.apps.size());
+                    g_cat.apps.push_back(a);
+                }
+        }
     for (App &a : g_cat.apps) { a.icon_file = local(a.icon_url); a.hero_file = local(a.hero_url); a.logo_file = local(a.logo_url); }
     for (App &a : g_cat.soon) { a.icon_file = local(a.icon_url); a.hero_file = local(a.hero_url); a.logo_file = local(a.logo_url); }
 }
@@ -169,6 +189,12 @@ std::string slot_source(const App &a, const Slot &s)
 void Engine::acknowledge() {}
 /* (1.1.0) PREVIEW_REDEEM: the state a code is in (1 checking). */
 bool Engine::redeem(const std::string &) { return true; }
+/* (2.0) The title ID guard and Refresh. PREVIEW_MOVED: the ID SvR 2011 shows as moved to. */
+bool Engine::resolve_clash(const std::string &, int) { return true; }
+void Engine::refresh() {}
+std::string moved_id(const std::string &id) { const char *m = std::getenv("PREVIEW_MOVED"); return m && id == "PPSA92011" ? m : ""; }
+std::string installed_id(const std::string &id) { const std::string m = moved_id(id); return m.empty() ? id : m; }
+long long installed_time(const std::string &id) { long long h = 0; for (char c : id) h = h * 31 + c; return 1700000000 + (h & 0xFFFF); }
 int Engine::redeem_state(std::string &m, std::string &a) const { m.clear(); a.clear(); const char *e = std::getenv("PREVIEW_REDEEM"); return e ? std::atoi(e) : 0; }
 void Engine::redeem_ack() {}
 /* (1.1.0) Send logs: PREVIEW_LOGS the state (1 sending). */
@@ -188,6 +214,17 @@ std::vector<LogFile> game_log_files(const App &a)
 std::string Engine::installed(const std::string &id) const
 {
     if (const char *e = std::getenv("PREVIEW_INSTALLED"))
+    {
+        /* (2.0) A list: "PPSA92011=1.0,PPSA69421=0.9" (each one's recorded version). */
+        const std::string list = std::string(",") + e + ",";
+        const std::size_t at = list.find("," + id + "=");
+        if (at != std::string::npos)
+        {
+            const std::size_t v = at + id.size() + 2;
+            return list.substr(v, list.find(',', v) - v);
+        }
+    }
+    if (const char *e = std::getenv("PREVIEW_INSTALLED"))
         if (id == e || (std::string(e) == "all" && id.rfind("soon", 0) != 0))
         {
             const char *as = std::getenv("PREVIEW_INSTALLED_AS"); /* the version recorded, as an install writes it */
@@ -195,6 +232,98 @@ std::string Engine::installed(const std::string &id) const
         }
     return id == "PPSA92011" ? "v1.0" : id == "PPSA92007" ? "v0.9.0" : "";
 }
+/* (2.0) Link a phone. PREVIEW_LINK: the code's state (0 none, 1 asking, 2 here, 3 refused);
+ * PREVIEW_DEVICES: how many phones are linked. */
+void Engine::link_screen(bool) {}
+void Engine::link_new_code() {}
+LinkInfo Engine::link_info() const
+{
+    LinkInfo i;
+    const char *st = std::getenv("PREVIEW_LINK");
+    i.code_state = st ? std::atoi(st) : 2;
+    if (i.code_state == 2) { i.code = "K7Q4X2"; i.url = "https://recompstore.com/l/K7Q4X2"; i.expires_in = 541; }
+    if (i.code_state == 3) i.error = "recompstore.com didn't answer. Check your connection and try again.";
+    const char *nd = std::getenv("PREVIEW_DEVICES");
+    const int n = nd ? std::atoi(nd) : 0;
+    const char *labels[] = {"iPhone \xC2\xB7 Safari", "Windows PC \xC2\xB7 Chrome", "Android \xC2\xB7 Chrome", "iPad \xC2\xB7 Safari", "Mac \xC2\xB7 Firefox"};
+    const char *seen[] = {"2026-10-19T19:01:00Z", "2026-10-19T12:30:00Z", "2026-10-16T09:00:00Z", "2026-10-19T19:03:00Z", "2026-10-02T09:00:00Z"};
+    for (int k = 0; k < n && k < 5; ++k) i.devices.push_back({"d" + std::to_string(k), labels[k], "2026-10-1" + std::to_string(k + 2), seen[k]});
+    i.known = true;
+    return i;
+}
+void Engine::link_unlink(const std::string &) {}
+bool Engine::take_link_action(LinkAction &) { return false; }
+std::string Engine::install_id() const { return "3fa9c1d2e8b04a17"; }
+std::string Engine::logs_report(std::string &url) const
+{
+    const char *r = std::getenv("PREVIEW_REPORT");
+    if (!r) { url.clear(); return ""; }
+    url = std::string("https://recompstore.com/r/") + r;
+    return r;
+}
+/* (2.0) Sources: PREVIEW_SOURCES, a JSON list of {kind, value, name, state, apps, error, problems}. */
+std::vector<Source> Engine::sources() const
+{
+    std::vector<Source> out;
+    const char *p = std::getenv("PREVIEW_SOURCES");
+    if (!p) return out;
+    std::string text;
+    if (std::FILE *f = std::fopen(p, "rb"))
+    {
+        char b[8192]; std::size_t n;
+        while ((n = std::fread(b, 1, sizeof b, f)) > 0) text.append(b, n);
+        std::fclose(f);
+    }
+    Json j;
+    if (!Json::parse(text, j)) return out;
+    for (std::size_t i = 0; i < j.size(); ++i)
+    {
+        Source s;
+        s.kind = j[i]["kind"].str("repo"); s.value = j[i]["value"].str(); s.name = j[i]["name"].str();
+        s.state = int(j[i]["state"].integer(2)); s.apps = std::size_t(j[i]["apps"].integer(0)); s.error = j[i]["error"].str();
+        for (std::size_t k = 0; k < j[i]["problems"].size(); ++k) s.problems.push_back(j[i]["problems"][k].str());
+        out.push_back(s);
+    }
+    return out;
+}
+bool Engine::add_source(const std::string &, std::string &) { return true; }
+void Engine::remove_source(const std::string &) {}
+bool Engine::report_source(const std::string &, const std::string &) { return true; }
+int Engine::source_report_state(std::string &m) const { m.clear(); return 0; }
+void Engine::source_report_ack() {}
+/* (2.0) Charts: PREVIEW_CHARTS, a charts.php answer. */
+Charts Engine::charts() const
+{
+    Charts c;
+    const char *p = std::getenv("PREVIEW_CHARTS");
+    if (!p) return c;
+    std::string text;
+    if (std::FILE *f = std::fopen(p, "rb"))
+    {
+        char b[8192]; std::size_t n;
+        while ((n = std::fread(b, 1, sizeof b, f)) > 0) text.append(b, n);
+        std::fclose(f);
+    }
+    Json j;
+    if (!Json::parse(text, j)) return c;
+    auto ids = [&](const Json &a, std::vector<std::string> &v) {
+        for (std::size_t i = 0; i < a.size(); ++i) v.push_back(a[i].is_object() ? a[i]["id"].str() : a[i].str());
+    };
+    ids(j["top"], c.top); ids(j["trending"], c.trending); ids(j["new"], c.fresh); ids(j["updated"], c.updated);
+    c.have = true;
+    return c;
+}
+bool Engine::tester() const { return std::getenv("PREVIEW_TESTER") != nullptr; }
+bool Engine::test_view() const { return true; }
+void Engine::set_test_view(bool) {}
+std::string own_id(const std::string &id) { return id; }
+static std::string g_root = "/data/homebrew";
+std::vector<Place> Engine::install_places() const
+{
+    return {{"Console storage", "/data/homebrew"}, {"M.2 SSD", "/mnt/ext1/homebrew"}, {"USB drive 1", "/mnt/usb0/homebrew"}};
+}
+std::string Engine::install_root() const { if (const char *r = std::getenv("PREVIEW_ROOT")) return r; return g_root; }
+void Engine::set_install_root(const std::string &r) { g_root = r; }
 Engine &engine() { static Engine e; return e; }
 } // namespace recomp
 

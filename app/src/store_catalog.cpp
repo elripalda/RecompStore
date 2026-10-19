@@ -112,7 +112,9 @@ bool parse_catalog(const std::string &text, Catalog &out)
     out.discord = site["discord"].str();
     out.kofi = site["kofi"].str();
     out.payload = site["payload"].str();
-    for (std::size_t i = 0; i < j["featured"].size(); ++i) out.featured.push_back(j["featured"][i].str());
+    /* (2.0) featuredV2: the admin's whole list, with apps 1.x stores don't get (v2Apps). */
+    const Json &feat = j["featuredV2"].is_array() ? j["featuredV2"] : j["featured"];
+    for (std::size_t i = 0; i < feat.size(); ++i) out.featured.push_back(feat[i].str());
     /* "apps": every store sees them. "newerStoreApps": games that need Recomp Store 1.0.3 or
      * newer (each says which in "minStore"), which older stores don't read at all.
      * "comingSoon" (1.0.6): entries that can't be installed yet, read the same way. */
@@ -149,6 +151,25 @@ bool parse_catalog(const std::string &text, Catalog &out)
         {
             const long long b = x["bytes"].integer(0); /* (1.1.2) */
             a.bytes = b > 0 ? std::uint64_t(b) : 0;
+        }
+        {
+            /* (2.0) Its part of the store; anything else is a game, as every entry was before. */
+            const std::string c = x["category"].str("games");
+            a.category = c == "emulators" || c == "apps" || c == "tools" ? c : "games";
+            for (std::size_t k = 0; k < x["tags"].size() && a.tags.size() < 6; ++k)
+            {
+                const std::string t = x["tags"][k].str();
+                if (!t.empty() && t.size() <= 24) a.tags.push_back(t);
+            }
+            a.can_move = x["canMove"].boolean(true);
+            /* A custom source's app (source.php): its title ID when the site could read it,
+             * and its repo's GitHub numbers. Whether it's custom is the engine's to say. */
+            a.title_id = x["titleId"].str();
+            if (a.title_id.size() > 16) a.title_id.clear();
+            a.source_name = x["sourceName"].str().substr(0, 80);
+            a.stars = x["stars"].integer(-1);
+            a.downloads = x["downloads"].integer(-1);
+            a.testing = x["testing"].boolean(false);
         }
         a.order = int(x["order"].integer(int(soon ? out.soon.size() : out.apps.size()) + 1000));
         a.name = x["name"].str(a.id);
@@ -298,7 +319,11 @@ bool parse_catalog(const std::string &text, Catalog &out)
     };
     for (std::size_t i = 0; i < j["apps"].size(); ++i) add(j["apps"][i], false);
     for (std::size_t i = 0; i < j["newerStoreApps"].size(); ++i) add(j["newerStoreApps"][i], false);
+    /* (2.0) Entries only 2.0 stores read at all: emulators, apps, tools and anything else that
+     * needs 1.9.1 or newer (1.x stores never see them, not even as "update the store"). */
+    for (std::size_t i = 0; i < j["v2Apps"].size(); ++i) add(j["v2Apps"][i], false);
     for (std::size_t i = 0; i < j["comingSoon"].size(); ++i) add(j["comingSoon"][i], true);
+    for (std::size_t i = 0; i < j["comingSoonV2"].size(); ++i) add(j["comingSoonV2"][i], true); /* (2.0) not games */
     /* Both lists back in the admin's order. */
     std::stable_sort(out.apps.begin(), out.apps.end(), [](const App &x, const App &y) { return x.order < y.order; });
     std::stable_sort(out.soon.begin(), out.soon.end(), [](const App &x, const App &y) { return x.order < y.order; });
@@ -317,7 +342,15 @@ bool parse_catalog(const std::string &text, Catalog &out)
         for (std::size_t k = 0; k < x["games"].size(); ++k) s.ids.push_back(x["games"][k].str());
         if (s.type == "spotlight" && s.ids.empty()) s.ids.push_back(x["game"].str());
         const bool known_layout = s.layout == "row" || s.layout == "grid" || s.layout == "wide";
-        if (s.type == "games" && known_layout) out.sections.push_back(s);
+        if (s.type == "category")
+        {
+            s.category = x["category"].str();
+            if (known_layout && (s.category == "games" || s.category == "emulators" || s.category == "apps" || s.category == "tools"))
+                out.sections.push_back(s);
+        }
+        else if (s.type == "games" && known_layout) out.sections.push_back(s);
+        else if ((s.type == "top" || s.type == "trending" || s.type == "new" || s.type == "updated") && known_layout)
+            out.sections.push_back(s); /* (2.0) filled from the charts */
         else if (s.type == "soon" && (s.layout == "row" || s.layout == "wide")) out.sections.push_back(s);
         else if (s.type == "spotlight" && !s.ids.empty())
         {

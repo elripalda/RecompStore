@@ -400,5 +400,77 @@ int main(int argc, char **argv)
         press(BtnCircle); settle(60);
         frame("r110-open-it-back");
     }
+    /* 2.0: categories, the Library, Customize, the title ID guard, Refresh, pins. Tab kinds:
+     * Discover 0, Library 1, Settings 3, Games 4, Emulators 5, Apps 6. */
+    if (want("v2"))
+    {
+        store.preview_tab(0); store.preview_row(0, 0); settle(90); frame("v2-discover");
+        store.preview_row(1, 1); settle(30); frame("v2-discover-cats");
+        store.preview_pin("PPSA94202"); store.preview_pin("PPSA64007"); store.preview_pin("PPSA99764");
+        store.preview_row(2, 0); settle(30); frame("v2-discover-pinned");
+        store.preview_row(4, 2); settle(40); frame("v2-discover-emulators-row");
+        store.preview_category(4, 0, 0); settle(60); frame("v2-games");
+        store.preview_category(4, 2, 0, true); settle(30); frame("v2-games-chip");
+        store.preview_category(5, 0, 0); settle(60); frame("v2-emulators");
+        store.preview_category(6, 0, 1); settle(60); frame("v2-apps");
+        store.preview_category(7, 0, 0); settle(60); frame("v2-tools");
+        store.preview_library(0, 2); settle(60); frame("v2-library");
+        store.preview_prefs(1, false); store.preview_library(0, 1); settle(60); frame("v2-library-list");
+        store.preview_prefs(1, true); settle(5); frame("v2-library-list-advanced");
+        store.preview_prefs(0, false);
+        store.preview_library(1, 0); settle(60); frame("v2-library-updates");
+        store.preview_queue({"PPSA64008", "PPSA94202"}, 1); recomp::preview_job("install", "PPSA64007"); settle(10); frame("v2-library-updating");
+        recomp::preview_job("", ""); store.preview_queue({}, 0);
+        store.preview_library(2, 0); settle(60); frame("v2-library-betas");
+        store.preview_customize(0); settle(60); frame("v2-customize");
+        store.preview_customize(6); settle(10); frame("v2-customize-advanced");
+        store.preview_open("PPSA94202"); settle(60); store.preview_clash("RPCS3", "PPSA97001", false); settle(10); frame("v2-clash");
+        store.preview_clash("RPCS3", "PPSA97001", false, 1); frame("v2-clash-over");
+        store.preview_clash("RPCS3", "PPSA97001", true); frame("v2-clash-pkg");
+        store.preview_clash("Old Port", "", false); frame("v2-clash-cantmove");
+        store.preview_clash_close(); store.preview_open("PPSA92011"); settle(60); frame("v2-page-moved");
+        store.preview_tab(0); store.preview_row(0, 0); store.preview_refresh(1); settle(30); frame("v2-refreshing");
+        store.preview_refresh(2); frame("v2-refreshed");
+    }
+    /* 2.0, stage 3 and 4: Link a phone, Sources, the sheet, the keyboard for an address, a
+     * custom source's app, the charts and the sources' row on Discover, the report QR. */
+    if (want("v2b"))
+    {
+        store.preview_tab(0); store.preview_row(2, 0); settle(90); frame("v2b-discover-top");
+        store.preview_row(5, 0); settle(60); frame("v2b-discover-sources");
+        store.preview_link(-1); settle(60); frame("v2b-link");
+        store.preview_link(0); settle(10); frame("v2b-link-focus");
+        setenv("PREVIEW_DEVICES", "2", 1); store.preview_link(1); settle(10); frame("v2b-link-devices");
+        setenv("PREVIEW_LINK", "1", 1); store.preview_link(-1); settle(10); frame("v2b-link-waiting");
+        setenv("PREVIEW_LINK", "3", 1); frame("v2b-link-error");
+        setenv("PREVIEW_LINK", "2", 1); unsetenv("PREVIEW_DEVICES");
+        store.preview_sources(-1); settle(60); frame("v2b-sources");
+        store.preview_sources(0); store.preview_src_note("Added. Reading it now\xE2\x80\xA6", false); settle(10); frame("v2b-sources-add");
+        store.preview_src_note("", false);
+        store.preview_sources(1); settle(10); frame("v2b-sources-row");
+        store.preview_sheet(2, "https://raw.githubusercontent.com/someone/ps5-lists/main/emulators.json", 2); settle(10); frame("v2b-sheet-source");
+        store.preview_sheet(1, "drkn/ps5-ftp", 0); frame("v2b-sheet-phone");
+        store.preview_sheet_close();
+        store.preview_kb(1, "github.com/someone/mgba-p", 2, 9); settle(5); frame("v2b-kb-source");
+        store.preview_kb(2, "It installs but crashes on start", 3, 2); frame("v2b-kb-report");
+        store.preview_logs_close();
+        store.preview_open("PPSA77001"); settle(60); frame("v2b-page-custom");
+        store.preview_open("gh-1a2b3c4d5e"); settle(60); store.preview_focus(1); frame("v2b-page-custom-gh");
+        store.preview_open("PPSA97771"); settle(60); frame("v2b-page-testing");
+        store.preview_category(5, 0, 0); settle(60); frame("v2b-emulators");
+        store.preview_open("PPSA92011"); settle(30);
+        setenv("PREVIEW_REPORT", "R7K2QX", 1);
+        store.preview_logs("The game freezes when I open Create a Superstar.", 1, 2, "Sent. Thanks for helping."); settle(10); frame("v2b-logs-report");
+        store.preview_logs_close(); unsetenv("PREVIEW_REPORT");
+        setenv("PREVIEW_TESTER", "1", 1);
+        store.preview_general(4); settle(30); frame("v2b-general-tester");
+        store.preview_settings(3); settle(30); frame("v2b-about");
+        setenv("PREVIEW_ROOT", "/mnt/ext1/homebrew", 1);
+        store.preview_prefs(0, true); store.preview_customize(7); settle(30); frame("v2b-customize-root");
+        store.preview_open("PPSA92011"); settle(30); frame("v2b-page-root");
+        unsetenv("PREVIEW_ROOT"); store.preview_prefs(0, false);
+        store.preview_open("PPSA99764"); store.preview_focus(0); settle(60); frame("v2b-page-emulator");
+        store.preview_open("PPSA97772"); store.preview_focus(0); settle(60); frame("v2b-page-app");
+    }
     return 0;
 }
