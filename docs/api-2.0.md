@@ -260,3 +260,7 @@ here (icon 512, banner 3840/1920), others linked as given. Not published: tester
   An app that won't open has it asked again from its page.
 - The Prospero import leaves games out (`--with-games` keeps them): a game goes in by hand once it's tested with
   the store's ISO/ROM setup.
+- (2.0.1) A Title Update slot can be `"raw": true` (kind stfs, not multiple): the package is copied into the slot's
+  folder as it is, named `name` (its own name when empty), instead of unpacked, and the slot is set up once that file
+  is there. For a port whose own installer reads the update file (GTA IV reads TU_1A581VI_000000K000000.0000000000205
+  from its install folder). The admin makes such a game need Recomp Store 2.0.1.

@@ -303,6 +303,14 @@ bool parse_catalog(const std::string &text, Catalog &out)
                 /* A name or a made file that isn't one plain name: a slot this store won't set up. */
                 if (s.kind == "file" && ((!s.name.empty() && !plain_leaf(s.name)) || (!s.made.empty() && !plain_leaf(s.made))))
                     s.kind = "file-bad";
+                /* (2.0.1) A Title Update copied in as it is: set up once it's there, by the name
+                 * it's given. A name that isn't one plain name: a slot this store won't set up. */
+                if (s.kind == "stfs" && slots[k]["raw"].boolean(false) && !slots[k]["multiple"].boolean(false))
+                {
+                    s.raw = true;
+                    if (!s.name.empty() && !plain_leaf(s.name)) s.kind = "file-bad";
+                    else if (s.ready.empty() && !s.name.empty()) s.ready = s.name;
+                }
                 if (!plain_leaf(s.key)) continue; /* its setup record is named after it */
                 s.required = slots[k]["required"].boolean(true);
                 s.multiple = slots[k]["multiple"].boolean(false);

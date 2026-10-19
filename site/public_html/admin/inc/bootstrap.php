@@ -156,6 +156,8 @@ const RS_READY_FROM = '1.0.8';
 const RS_PART_FROM = '1.1.2';
 // (2.0) A .7z download: the 2.0 previews (1.9.x) and 2.0 unpack them; older stores only read zips.
 const RS_7Z_FROM = '1.9.1';
+// (2.0.1) A Title Update copied in as it is (raw), for a port whose own installer reads it (GTA IV).
+const RS_RAW_FROM = '2.0.1';
 // (2.0) What only the 2.0 store reads: an app that isn't a game (Emulators, Apps, Tools) needs it,
 // and anything that needs it is published apart, in v2Apps, which 1.x stores never read.
 const RS_V2_FROM = '1.9.1';
@@ -179,6 +181,7 @@ function rs_min_store(array $g): string {
             if (($sl['ready'] ?? '') !== '' || ($sl['updateSha1'] ?? '') !== '' || ($sl['updateId'] ?? '') !== '') $needs(RS_READY_FROM);
             // Part of a disc, the files it must have (store 1.1.2): an older store would copy all of it.
             if (!empty($sl['only']) || !empty($sl['files']) || ($sl['wrong'] ?? '') !== '') $needs(RS_PART_FROM);
+            if ($kind === 'stfs' && !empty($sl['raw'])) $needs(RS_RAW_FROM);
         }
     }
     if (rs_keep_list((string)($g['keep'] ?? ''))) $needs(RS_PART_FROM);
@@ -317,6 +320,9 @@ function rs_slots_error(array $slots): ?string {
         if (($only || $wantFiles || ($sl['wrong'] ?? '') !== '') && $kind !== 'iso') return "$n: only, files and wrong are for a disc (kind iso).";
         $to = (string)($sl['to'] ?? '.');
         if ($to !== '.' && ($to === '' || $to[0] === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $to))) return "$n: to is a folder inside the game's, like game or baseq3 (or . for right in it).";
+        if (isset($sl['raw']) && !is_bool($sl['raw'])) return "$n: raw is true or false.";
+        if (!empty($sl['raw']) && ($kind !== 'stfs' || !empty($sl['multiple']))) return "$n: raw is for one Title Update (kind stfs): the file is put in as it is, not unpacked.";
+        if (!empty($sl['raw']) && isset($sl['name']) && $sl['name'] !== '' && !$leaf($sl['name'])) return "$n: name has to be one file name, with no / or \\ (like TU_1A581VI_000000K000000.0000000000205).";
         if ($kind !== 'file') continue;
         foreach (['name', 'made'] as $f) if (isset($sl[$f]) && $sl[$f] !== '' && !$leaf($sl[$f])) return "$n: $f has to be one file name, with no / or \\ (like DIABDAT.MPQ).";
         foreach (['ext', 'pick', 'also'] as $f) if (isset($sl[$f]) && (!is_string($sl[$f]) || preg_match('#[/\\\\\x00-\x1f\x7f]#', $sl[$f]))) return "$n: $f is names or patterns only, with no / or \\.";
