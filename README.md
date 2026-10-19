@@ -1,6 +1,6 @@
 # Recomp Store
 
-A homebrew app store for jailbroken PS5 that installs and updates native PS5 ports of recompiled games, and sets each game up from your own disc image.
+A homebrew app store for jailbroken PS5. It installs and updates native PS5 ports of recompiled games, emulators, apps and tools, and sets each game up from your own disc image.
 
 **No game files are hosted here or in any repository the store links to.** Every game needs your own legally obtained copy, which the store sets up for you from your disc image.
 
@@ -21,13 +21,17 @@ Website: [recompstore.com](https://recompstore.com) · Report a bug: [recompstor
    ```
 3. A notification tells you when it's done. If ShadowMountPlus is running, Recomp Store shows up on your home screen a few seconds later. If it isn't running, start it.
 
-The installer downloads the newest release's `PPSA92000.zip` from this repository and checks it against GitHub's SHA-256. It unpacks it into `/data/homebrew/PPSA92000`, or into the folder where the store already is, and checks every file as it is written. You only do this once: after that the store updates itself from **Latest Updates**.
+The installer downloads the newest release's `PPSA92000.zip` from this repository and checks it against GitHub's SHA-256 (offline, it uses the copy built into it). It unpacks it into `/data/homebrew/PPSA92000`, or into the folder where the store already is, and checks every file as it is written. You only do this once: after that the store updates itself from **Latest Updates**.
 
 To install by hand instead, unzip `PPSA92000.zip` into `/data/homebrew/` over FTP and let ShadowMountPlus pick it up.
 
 ## What it does
 
-- **Installs and updates games** from their GitHub releases, keeping your game files, saves, DLC and mods when a port updates.
+- **Games, Emulators, Apps and Tools**, each with its own tab. Your Library has everything installed, waiting updates and betas.
+- **Installs and updates** from GitHub releases (.zip or .7z), keeping your game files, saves, DLC and mods when a port updates. In Advanced mode, new apps can go to the M.2 SSD, extended storage or a USB drive.
+- **Never writes over another app.** If something else already uses an app's title ID, the store asks first, and can install it under a new ID so both work.
+- **Sources you add.** A GitHub repo or a list of them, from Settings > Sources. Their apps are marked as not checked by the store.
+- **Link a phone.** Scan the QR code in Settings to send installs and sources to your PS5 from recompstore.com, and see what's on it.
 - **Sets games up from your own files.** Pick your disc image, your Xbox Live Arcade game's file, a Title Update or DLC, or a ROM on the game's page, and the store puts what the port needs where it expects it, at the drive's full speed.
 - **Opens games**, refreshes ShadowMountPlus so new games appear on the home screen, and deletes a game (after asking) when you're done with it.
 - **Shows every release's patch notes** from each game's GitHub repository.
