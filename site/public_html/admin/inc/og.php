@@ -25,9 +25,12 @@ function rs_og_find(string $id): ?array {
         $cat = json_decode((string)@file_get_contents(rs_og_public() . '/catalog.json'), true);
         if (!is_array($cat)) $cat = [];
     }
-    foreach (['apps', 'newerStoreApps', 'comingSoon'] as $list) {
+    // (2.0) What only the 2.0 store lists gets a card once the website's 2.0 side is on for everyone.
+    $lists = ['apps', 'newerStoreApps', 'comingSoon'];
+    if (!empty($cat['site']['v2'])) array_push($lists, 'v2Apps', 'comingSoonV2');
+    foreach ($lists as $list) {
         foreach ((array)($cat[$list] ?? []) as $a) {
-            if (is_array($a) && ($a['id'] ?? '') === $id) return [$a, $list === 'comingSoon'];
+            if (is_array($a) && ($a['id'] ?? '') === $id) return [$a, $list === 'comingSoon' || $list === 'comingSoonV2'];
         }
     }
     return null;

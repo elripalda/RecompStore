@@ -1,13 +1,15 @@
 <?php
 // Recomp Store admin: bug reports, recomp submissions and messages sent from the website, and
-// logs players send from the store (1.1.0: a game's page, Send logs).
+// logs players send from the store (1.1.0: a game's page, Send logs). (2.0) A logs report a
+// player finished on their phone shows its words and pictures; custom sources people reported.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 rs_require_login();
 rs_inbox_table();
+rs_report_tables();
 
-$show = in_array($_GET['show'] ?? '', ['bug', 'submit', 'message', 'logs', 'done'], true) ? $_GET['show'] : 'all';
+$show = in_array($_GET['show'] ?? '', ['bug', 'submit', 'message', 'logs', 'source', 'done'], true) ? $_GET['show'] : 'all';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
@@ -18,6 +20,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'new') $db->prepare("UPDATE inbox SET status = 'new' WHERE id = ?")->execute([$id]);
     elseif ($action === 'delete') {
         $db->prepare('DELETE FROM inbox_files WHERE inbox_id = ?')->execute([$id]);
+        // (2.0) Its phone report and pictures go too.
+        $pics = $db->prepare('SELECT file FROM inbox_pictures WHERE inbox_id = ?');
+        $pics->execute([$id]);
+        foreach ($pics->fetchAll(PDO::FETCH_COLUMN) as $file) @unlink(rs_report_dir() . '/' . basename((string)$file));
+        $db->prepare('DELETE FROM inbox_pictures WHERE inbox_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM inbox_reports WHERE inbox_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM report_codes WHERE inbox_id = ?')->execute([$id]);
         $db->prepare('DELETE FROM inbox WHERE id = ?')->execute([$id]);
         rs_flash('Deleted.');
     }
@@ -30,6 +39,7 @@ $where = match ($show) {
     'submit' => "WHERE kind = 'submit' AND status <> 'done'",
     'message' => "WHERE kind = 'message' AND status <> 'done'",
     'logs' => "WHERE kind = 'logs' AND status <> 'done'",
+    'source' => "WHERE kind = 'source' AND status <> 'done'",
     'done' => "WHERE status = 'done'",
     default => "WHERE status <> 'done'",
 };
@@ -45,6 +55,12 @@ if ($logIds) {
     foreach (rs_db()->query('SELECT id, inbox_id, name, size FROM inbox_files WHERE inbox_id IN (' . implode(',', $logIds) . ') ORDER BY id') as $f) {
         $files[(int)$f['inbox_id']][] = $f;
     }
+}
+// (2.0) Reports finished on a phone, and their pictures.
+$reports = $pictures = [];
+if ($logIds) {
+    foreach (rs_db()->query('SELECT * FROM inbox_reports WHERE inbox_id IN (' . implode(',', $logIds) . ')') as $r) $reports[(int)$r['inbox_id']] = $r;
+    foreach (rs_db()->query('SELECT id, inbox_id, w, h, size FROM inbox_pictures WHERE inbox_id IN (' . implode(',', $logIds) . ') ORDER BY id') as $p) $pictures[(int)$p['inbox_id']][] = $p;
 }
 $kb = fn(int $b) => $b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, (int)round($b / 1024)) . ' KB';
 
@@ -62,11 +78,12 @@ rs_head('Inbox');
   <a href="inbox.php?show=submit" <?= $show === 'submit' ? 'aria-current="page"' : '' ?>>Submissions<?= !empty($counts['submit']) ? ' <span class="count">' . (int)$counts['submit'] . '</span>' : '' ?></a>
   <a href="inbox.php?show=message" <?= $show === 'message' ? 'aria-current="page"' : '' ?>>Messages<?= !empty($counts['message']) ? ' <span class="count">' . (int)$counts['message'] . '</span>' : '' ?></a>
   <a href="inbox.php?show=logs" <?= $show === 'logs' ? 'aria-current="page"' : '' ?>>Logs<?= !empty($counts['logs']) ? ' <span class="count">' . (int)$counts['logs'] . '</span>' : '' ?></a>
+  <a href="inbox.php?show=source" <?= $show === 'source' ? 'aria-current="page"' : '' ?>>Sources<?= !empty($counts['source']) ? ' <span class="count">' . (int)$counts['source'] . '</span>' : '' ?></a>
   <a href="inbox.php?show=done" <?= $show === 'done' ? 'aria-current="page"' : '' ?>>Done</a>
 </nav>
 
 <section class="list">
-<?php foreach ($rows as $r): $bug = $r['kind'] === 'bug'; $label = ['bug' => 'Bug', 'submit' => 'Submission', 'message' => 'Message', 'logs' => 'Logs'][$r['kind']] ?? $r['kind']; ?>
+<?php foreach ($rows as $r): $bug = $r['kind'] === 'bug'; $label = ['bug' => 'Bug', 'submit' => 'Submission', 'message' => 'Message', 'logs' => 'Logs', 'source' => 'Source reported'][$r['kind']] ?? $r['kind']; ?>
   <article class="msg<?= $r['status'] === 'new' ? ' unread' : '' ?>">
     <?php if ($r['kind'] === 'logs'): $fs = $files[(int)$r['id']] ?? []; ?>
     <header>
@@ -76,7 +93,17 @@ rs_head('Inbox');
       <?php if ($r['contact'] !== ''): ?><span class="tag beta" title="Console <?= h($r['contact']) ?>">Beta tester · <?= h(substr($r['contact'], 0, 6)) ?></span><?php endif; ?>
       <span class="muted when"><?= h(date('M j, Y g:i a', strtotime($r['created']))) ?></span>
     </header>
-    <?php if (trim($r['body']) !== ''): ?><p class="body"><?= nl2br(h($r['body'])) ?></p><?php else: ?><p class="body muted">No message, just the logs.</p><?php endif; ?>
+    <?php $rep = $reports[(int)$r['id']] ?? null; $pics = $pictures[(int)$r['id']] ?? []; ?>
+    <?php if (trim($r['body']) !== ''): ?><p class="body"><?= nl2br(h($r['body'])) ?></p><?php elseif (!$rep): ?><p class="body muted">No message, just the logs.</p><?php endif; ?>
+    <?php if ($rep): ?>
+    <div class="phone-report">
+      <span class="kicker">Finished on their phone · <?= h(date('M j, g:i a', strtotime($rep['finished']))) ?></span>
+      <p class="body"><strong>What happened:</strong> <?= nl2br(h($rep['what'])) ?></p>
+      <?php if (trim($rep['before_text']) !== ''): ?><p class="body"><strong>Right before:</strong> <?= nl2br(h($rep['before_text'])) ?></p><?php endif; ?>
+      <?php if ($rep['contact'] !== ''): ?><p class="meta"><?= filter_var($rep['contact'], FILTER_VALIDATE_EMAIL) ? '<a href="mailto:' . h($rep['contact']) . '">' . h($rep['contact']) . '</a>' : h($rep['contact']) ?></p><?php endif; ?>
+      <?php if ($pics): ?><div class="pics"><?php foreach ($pics as $p): ?><a href="picture.php?id=<?= (int)$p['id'] ?>" target="_blank" rel="noopener"><img src="picture.php?id=<?= (int)$p['id'] ?>" alt="Picture <?= (int)$p['w'] ?>×<?= (int)$p['h'] ?>" loading="lazy"></a><?php endforeach; ?></div><?php endif; ?>
+    </div>
+    <?php endif; ?>
     <ul class="log-files">
       <?php foreach ($fs as $f): ?>
         <li><a href="log-file.php?id=<?= (int)$f['id'] ?>" target="_blank" rel="noopener"><?= h($f['name']) ?></a> <span class="muted"><?= h($kb((int)$f['size'])) ?></span> · <a href="log-file.php?id=<?= (int)$f['id'] ?>&amp;dl=1">Download</a></li>
@@ -86,7 +113,10 @@ rs_head('Inbox');
     <?php else: ?>
     <header>
       <span class="tag<?= $bug ? '' : ' cyan' ?>"><?= h($label) ?></span>
-      <?php if ($bug): ?>
+      <?php if ($r['kind'] === 'source'): ?>
+        <strong><?= h($r['repo']) ?></strong>
+        <span class="muted">Add it to Blocked sources in Settings to take it down.</span>
+      <?php elseif ($bug): ?>
         <strong><?= h($names[$r['app_id']] ?? $r['app_id']) ?></strong>
         <?php if ($r['version'] !== ''): ?><span class="muted">version <?= h($r['version']) ?></span><?php endif; ?>
       <?php else: ?>

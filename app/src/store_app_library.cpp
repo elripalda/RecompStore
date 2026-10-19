@@ -1,0 +1,1047 @@
+/* Recomp Store 2.0 - the tab bar's order, the Library (My Apps, Updates, Betas), the
+ * category tabs (Games, Emulators, Apps & Tools), pins, Update All, and Settings >
+ * Customize with what it keeps (prefs.json).
+ * SPDX-License-Identifier: GPL-3.0-or-later */
+
+#include "store_app.hpp"
+#include "store_json.hpp"
+#include "store_ui.hpp"
+#include "porpoise_pad.hpp"
+#include "porpoise_sound.hpp"
+#include "ui_app_common.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <map>
+
+namespace recomp
+{
+using namespace porpoise::ui;
+using namespace sui;
+namespace pad = porpoise::pad;
+using Sfx = porpoise::sound::Effect;
+
+namespace
+{
+const float kTop = 236;          /* the Library's and a category's bar of views or labels */
+const float kContent = 316;      /* where their lists start */
+const float kBottom = 1000;      /* what's shown of them ends here (the hints are below) */
+const float kTileS = 216, kTileGap = 32, kTilePitch = 216 + 100;
+const int kPerRow = 7;
+const float kRowH = 120, kRowPitch = 136;
+
+std::string json_text(const std::string &s)
+{
+    std::string out = "\"";
+    for (const unsigned char c : s)
+    {
+        if (c == '"' || c == '\\') { out += '\\'; out += char(c); }
+        else if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); out += b; }
+        else out += char(c);
+    }
+    return out + "\"";
+}
+
+std::string lower(std::string s)
+{
+    for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/* Scrolled just enough to keep [y0, y1) (in the list's own space) inside the view. */
+void keep_in_view(float &scroll, float &to, float y0, float y1, float view_h, float total)
+{
+    if (y1 - to > view_h) to = y1 - view_h;
+    if (y0 < to) to = y0;
+    to = std::clamp(to, 0.f, std::max(0.f, total - view_h));
+    scroll = approach(scroll, to, 1.f / 60.f, 12.f);
+    if (std::fabs(scroll - to) < 0.5f) scroll = to;
+}
+} // namespace
+
+/* ---- Tabs ------------------------------------------------------------------------- */
+
+const char *Store::tab_name(int kind)
+{
+    switch (kind)
+    {
+    case Discover: return "Discover";
+    case Games: return "Games";
+    case Emulators: return "Emulators";
+    case Apps: return "Apps";
+    case Tools: return "Tools";
+    case Library: return "Library";
+    default: return "Settings";
+    }
+}
+
+const char *Store::category_of(int kind)
+{
+    return kind == Games ? "games" : kind == Emulators ? "emulators" : kind == Apps ? "apps" : kind == Tools ? "tools" : "";
+}
+
+std::vector<int> Store::tab_order() const
+{
+    /* A category gets its own tab once the store has something in it; Games only when
+     * there's more than games (else it would be Discover again). */
+    bool games = false, emus = false, apps = false, tools = false;
+    for (const App &a : catalog_.apps)
+    {
+        if (a.beta) continue;
+        games = games || a.category == "games";
+        emus = emus || a.category == "emulators";
+        apps = apps || a.category == "apps";
+        tools = tools || a.category == "tools";
+    }
+    std::vector<int> out{Discover};
+    if (games && (emus || apps || tools)) out.push_back(Games);
+    if (emus) out.push_back(Emulators);
+    if (apps) out.push_back(Apps);
+    if (tools) out.push_back(Tools);
+    out.push_back(Library);
+    out.push_back(Settings);
+    return out;
+}
+
+std::vector<int> Store::settings_order() const
+{
+    return {SecGeneral, SecCustomize, SecSources, SecLink, SecRedeem, SecAdding, SecAbout};
+}
+
+void Store::go_tab(int kind, int dir)
+{
+    tab_dir_ = dir;
+    tab_ = kind;
+    tab_t_ = 0;
+    col_ = 0;
+    row_ = kind == Discover && !featured_apps().empty() ? 1 : 0;
+    dscroll_ = dscroll_to_ = uscroll_ = uscroll_to_ = lscroll_ = lscroll_to_ = cscroll_ = cscroll_to_ = 0;
+    in_section_ = false;
+    lib_bar_ = false;
+    cat_chip_ = 0;
+    cat_on_chips_ = false;
+    play(int(Sfx::Tab));
+}
+
+/* ---- What the player keeps -------------------------------------------------------- */
+
+void Store::load_prefs()
+{
+    prefs_loaded_ = true;
+    std::string text;
+    if (std::FILE *f = std::fopen((data_ + "/prefs.json").c_str(), "rb"))
+    {
+        char b[4096];
+        std::size_t n;
+        while ((n = std::fread(b, 1, sizeof b, f)) > 0 && text.size() < (256u << 10)) text.append(b, n);
+        std::fclose(f);
+    }
+    Json j;
+    if (!Json::parse(text, j) || !j.is_object())
+        return;
+    Prefs p;
+    const int st = int(j["startTab"].integer(Discover));
+    p.start_tab = st == Library || st == Games || st == Emulators || st == Apps || st == Tools ? st : Discover;
+    p.lib_view = std::clamp(int(j["libraryView"].integer(0)), 0, 1);
+    p.lib_order = std::clamp(int(j["libraryOrder"].integer(0)), 0, 2);
+    p.pins_on_discover = j["pinsOnDiscover"].boolean(true);
+    p.backdrop = std::clamp(int(j["backdrop"].integer(0)), 0, 1);
+    p.reduced_motion = j["reducedMotion"].boolean(false);
+    p.advanced = j["advanced"].boolean(false);
+    p.sounds = j["sounds"].boolean(true);
+    for (std::size_t i = 0; i < j["pins"].size() && p.pins.size() < 64; ++i)
+    {
+        const std::string id = j["pins"][i].str();
+        if (!id.empty() && id.size() <= 64 && std::find(p.pins.begin(), p.pins.end(), id) == p.pins.end()) p.pins.push_back(id);
+    }
+    prefs_ = p;
+    sounds_on_ = p.sounds;
+}
+
+void Store::save_prefs()
+{
+    prefs_.sounds = sounds_on_;
+    std::string pins;
+    for (const std::string &id : prefs_.pins) pins += (pins.empty() ? "" : ",") + json_text(id);
+    char head[320];
+    std::snprintf(head, sizeof head,
+                  "{\"startTab\":%d,\"libraryView\":%d,\"libraryOrder\":%d,\"pinsOnDiscover\":%s,\"backdrop\":%d,"
+                  "\"reducedMotion\":%s,\"advanced\":%s,\"sounds\":%s,",
+                  prefs_.start_tab, prefs_.lib_view, prefs_.lib_order, prefs_.pins_on_discover ? "true" : "false",
+                  prefs_.backdrop, prefs_.reduced_motion ? "true" : "false", prefs_.advanced ? "true" : "false",
+                  prefs_.sounds ? "true" : "false");
+    const std::string text = std::string(head) + "\"pins\":[" + pins + "]}\n";
+    const std::string path = data_ + "/prefs.json", tmp = path + ".new";
+    if (std::FILE *f = std::fopen(tmp.c_str(), "wb"))
+    {
+        const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+        if (std::fclose(f) == 0 && ok) std::rename(tmp.c_str(), path.c_str());
+        else std::remove(tmp.c_str());
+    }
+}
+
+bool Store::pinned(const std::string &id) const
+{
+    return std::find(prefs_.pins.begin(), prefs_.pins.end(), id) != prefs_.pins.end();
+}
+
+void Store::toggle_pin(const std::string &id)
+{
+    const App *a = find(id);
+    if (!a) return;
+    auto it = std::find(prefs_.pins.begin(), prefs_.pins.end(), id);
+    if (it != prefs_.pins.end())
+    {
+        prefs_.pins.erase(it);
+        toast("Unpinned " + a->name);
+    }
+    else
+    {
+        prefs_.pins.insert(prefs_.pins.begin(), id);
+        if (prefs_.pins.size() > 64) prefs_.pins.pop_back();
+        toast("Pinned " + a->name);
+    }
+    save_prefs();
+    play(int(Sfx::Select));
+}
+
+/* ---- The Library's lists ------------------------------------------------------------ */
+
+std::vector<const App *> Store::library_apps() const
+{
+    std::vector<const App *> pins, rest;
+    for (const App &a : catalog_.apps)
+    {
+        const std::string v = engine().installed(a.id);
+        if (v.empty()) continue;
+        (pinned(a.id) ? pins : rest).push_back(&a);
+    }
+    std::sort(pins.begin(), pins.end(), [&](const App *x, const App *y) {
+        return std::find(prefs_.pins.begin(), prefs_.pins.end(), x->id) < std::find(prefs_.pins.begin(), prefs_.pins.end(), y->id);
+    });
+    auto by_name = [](const App *x, const App *y) { return lower(x->name) < lower(y->name); };
+    if (prefs_.lib_order == 1)
+    {
+        /* Each app's time once, not once per comparison (a file's date each). */
+        std::map<const App *, long long> when;
+        for (const App *x : rest) when[x] = installed_time(x->id);
+        std::stable_sort(rest.begin(), rest.end(), [&](const App *x, const App *y) {
+            const long long tx = when[x], ty = when[y];
+            return tx != ty ? tx > ty : by_name(x, y);
+        });
+    }
+    else if (prefs_.lib_order == 2)
+    {
+        std::stable_sort(rest.begin(), rest.end(), by_name);
+        std::stable_partition(rest.begin(), rest.end(), [&](const App *x) {
+            bool up = false;
+            state_of(*x, &up);
+            return up;
+        });
+    }
+    else
+        std::stable_sort(rest.begin(), rest.end(), by_name);
+    pins.insert(pins.end(), rest.begin(), rest.end());
+    return pins;
+}
+
+std::vector<const App *> Store::update_apps() const
+{
+    std::vector<const App *> out;
+    for (const App &a : catalog_.apps)
+    {
+        bool up = false;
+        state_of(a, &up);
+        if (up) out.push_back(&a);
+    }
+    return out;
+}
+
+std::vector<const App *> Store::beta_apps() const
+{
+    std::vector<const App *> out;
+    for (const App &a : catalog_.apps)
+        if (a.beta) out.push_back(&a);
+    return out;
+}
+
+std::vector<int> Store::library_views() const
+{
+    std::vector<int> v{0, 1};
+    if (!beta_apps().empty()) v.push_back(2);
+    return v;
+}
+
+std::vector<std::string> Store::category_chips(int kind) const
+{
+    std::vector<std::string> out{"All"};
+    const std::string cat = category_of(kind);
+    for (const std::vector<App> *list : {&catalog_.apps, &catalog_.soon})
+        for (const App &a : *list)
+        {
+            if (a.beta || a.category != cat) continue;
+            for (const std::string &t : a.tags)
+                if (out.size() < 10 && std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
+        }
+    return out;
+}
+
+std::vector<const App *> Store::category_apps(int kind) const
+{
+    const std::string cat = category_of(kind);
+    const auto chips = category_chips(kind);
+    const std::string tag = cat_chip_ > 0 && cat_chip_ < int(chips.size()) ? chips[std::size_t(cat_chip_)] : "";
+    std::vector<const App *> out;
+    for (const std::vector<App> *list : {&catalog_.apps, &catalog_.soon})
+        for (const App &a : *list)
+            if (!a.beta && a.category == cat && (tag.empty() || std::find(a.tags.begin(), a.tags.end(), tag) != a.tags.end()))
+                out.push_back(&a);
+    return out;
+}
+
+/* ---- Update All --------------------------------------------------------------------- */
+
+void Store::start_update_all()
+{
+    if (!queue_.empty() || !queue_now_.empty())
+    {
+        /* Pressed again while it runs: stop after the one that's going. */
+        queue_.clear();
+        lib_note_ = "Stopping after this one.";
+        lib_note_bad_ = false;
+        play(int(Sfx::Back));
+        return;
+    }
+    if (!freed_)
+    {
+        lib_note_ = "Recomp Store can't write to /data. Start etaHEN, then open the store again.";
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    queue_.clear();
+    queue_failed_.clear();
+    for (const App *a : update_apps()) queue_.push_back(a->id);
+    queue_total_ = int(queue_.size());
+    queue_done_ = 0;
+    lib_note_.clear();
+    play(int(Sfx::Install));
+    tick_queue();
+}
+
+void Store::tick_queue()
+{
+    if (queue_.empty() && queue_now_.empty() && queue_total_ == 0)
+        return;
+    const JobState j = engine().job();
+    if (!queue_now_.empty())
+    {
+        /* The one going: its result was taken by the screens (Done or Failed, acknowledged). */
+        if (j.phase != Phase::Idle) return;
+        ++queue_done_;
+        queue_now_.clear();
+    }
+    if (clash_ || confirm_ || picker_ || keypad_ || logs_ || sheet_)
+        return; /* a question on screen: the rest waits for it */
+    if (queue_.empty())
+    {
+        if (queue_total_ > 0)
+        {
+            const int ok = queue_done_ - int(queue_failed_.size());
+            const std::string verb = queue_fresh_ ? "Installed or updated " : "Updated ";
+            if (queue_failed_.empty())
+                lib_note_ = verb + (ok == 1 ? "1 app." : std::to_string(ok) + " apps.");
+            else
+            {
+                std::string names;
+                for (std::size_t i = 0; i < queue_failed_.size() && i < 3; ++i)
+                {
+                    const App *a = find(queue_failed_[i]);
+                    names += (i ? ", " : "") + (a ? a->name : queue_failed_[i]);
+                }
+                lib_note_ = verb + std::to_string(ok) + " of " + std::to_string(queue_done_) + ". Didn't finish: " + names +
+                            ". Open it to see why.";
+            }
+            lib_note_bad_ = !queue_failed_.empty();
+            play(int(queue_failed_.empty() ? Sfx::Complete : Sfx::Error));
+        }
+        queue_total_ = queue_done_ = 0;
+        queue_fresh_ = false;
+        return;
+    }
+    if (j.phase != Phase::Idle) return;
+    const std::string id = queue_.front();
+    queue_.erase(queue_.begin());
+    if (engine().install(id))
+        queue_now_ = id;
+    else
+    {
+        queue_failed_.push_back(id);
+        ++queue_done_;
+    }
+}
+
+/* ---- Drawing pieces ----------------------------------------------------------------- */
+
+void Store::draw_tab_header(Gfx &gfx, const std::string &title, const std::string &count)
+{
+    gfx.text_mid(Font::ExtraBold, 48, 96, 160 + 30, C(kFrost), Align::Left, title, -1);
+    if (!count.empty())
+        gfx.text_mid(Font::Regular, 21, 96 + gfx.measure(Font::ExtraBold, 48, title, -1) + 18, 160 + 36, C(kMuted), Align::Left, count);
+}
+
+void Store::draw_pin(Gfx &gfx, float x, float y)
+{
+    /* A small glass dot with a star: pinned (first in the Library, and on Discover). */
+    const float r = 17;
+    gfx.panel(x - r, y - r, r * 2, r * 2, C(kMidnight, 0.72f), 1.f, r, C(kCyan, 0.85f), 1.5f, 6);
+    gfx.glyph(Glyph::Star, x, y + 0.5f, 17, C(kCyan));
+}
+
+void Store::draw_app_row(Gfx &gfx, const App &a, float x0, float y0, float w0, float focus, const std::string &line,
+                         const std::string &button, int style)
+{
+    const float k = ease_out(focus);
+    const float s = 1 + 0.012f * k;
+    const float w = w0 * s, h = kRowH * s, x = x0 + (w0 - w) / 2, y = y0 + (kRowH - h) / 2;
+    glass(gfx, x, y, w, h, 26, {1, 1, 1, 0.07f + 0.05f * k}, true);
+    ring(gfx, x, y, w, h, 26, k);
+    Art &t = art(a);
+    const float is = 84 * s, ix = x + 20, iy = y + (h - is) / 2;
+    if (t.icon)
+        gfx.image(t.icon, ix, iy, is, is, {}, 20);
+    else
+        draw_no_icon(gfx, a, ix, iy, is, 20);
+    if (pinned(a.id)) draw_pin(gfx, ix + is - 10, iy + is - 10);
+    const float tx = ix + is + 24;
+    const float bw = button.empty() ? 0 : gfx.measure(Font::Bold, 19, button) + 52;
+    const float room = w - (tx - x) - bw - 56;
+    const std::string name = fit(gfx, Font::ExtraBold, 24, room * 0.7f, a.name);
+    gfx.text_mid(Font::ExtraBold, 24, tx, y + h / 2 - 16, C(kFrost), Align::Left, name);
+    const std::string ver = version_of(a);
+    float cx = tx + gfx.measure(Font::ExtraBold, 24, name) + 12;
+    if (!ver.empty())
+        gfx.text_mid(Font::SemiBold, 18, cx, y + h / 2 - 15, C(kCyan), Align::Left, ver);
+    if (a.beta)
+    {
+        cx += (ver.empty() ? 0 : gfx.measure(Font::SemiBold, 18, ver) + 12);
+        const float bwid = gfx.measure(Font::Bold, 13, "BETA", 1) + 20;
+        gfx.panel(cx, y + h / 2 - 28, bwid, 24, C(kAmber), 1.f, 12);
+        gfx.text_mid(Font::Bold, 13, cx + bwid / 2, y + h / 2 - 16, C(kMidnight), Align::Center, "BETA", 1);
+    }
+    gfx.text_mid(Font::Regular, 18, tx, y + h / 2 + 18, C(kSoft), Align::Left, fit(gfx, Font::Regular, 18, room, line));
+    if (bw > 0)
+    {
+        /* 0 an update (cyan), 1 done (green), 2 plain, 3 working (dim) */
+        const Color bg = style == 0 ? C(kCyan) : style == 1 ? C(kGreen, 0.18f) : style == 3 ? C(kFrost, 0.08f) : C(kFrost, 0.14f);
+        const Color fg = style == 0 ? C(kMidnight) : style == 1 ? C(0x9FF0C6) : style == 3 ? C(kMuted) : C(kFrost);
+        gfx.panel(x + w - 28 - bw, y + h / 2 - 26, bw, 52, bg, 1.f, 17);
+        gfx.text_mid(Font::Bold, 19, x + w - 28 - bw / 2, y + h / 2, fg, Align::Center, button);
+    }
+}
+
+/* ---- The Library ---------------------------------------------------------------------- */
+
+namespace
+{
+/* The rows of Updates: Update all (when there are two or more), the store itself, the games. */
+struct UpdateRow
+{
+    int kind; /* 0 Update all, 1 the store, 2 a game */
+    const App *app;
+};
+} // namespace
+
+bool Store::update_library(float dt, int moves, bool u, bool d)
+{
+    (void)dt;
+    const auto views = library_views();
+    if (std::find(views.begin(), views.end(), lib_view_) == views.end()) lib_view_ = 0;
+    const int vi = int(std::find(views.begin(), views.end(), lib_view_) - views.begin());
+    auto switch_view = [&](int step) {
+        const int n = int(views.size());
+        const int to = views[std::size_t((vi + step + n) % n)];
+        if (to == lib_view_) return;
+        lib_view_ = to;
+        col_ = 0;
+        lscroll_ = lscroll_to_ = 0;
+        lib_view_t_ = 0;
+        play(int(Sfx::Tab));
+    };
+    if (pressed(pad::BtnL2)) { switch_view(-1); return true; }
+    if (pressed(pad::BtnR2)) { switch_view(1); return true; }
+    if (lib_bar_)
+    {
+        if (moves) switch_view(moves);
+        if (d || pressed(pad::BtnCross)) { lib_bar_ = false; play(int(Sfx::Move)); }
+        return true;
+    }
+    if (lib_view_ == 0)
+    {
+        const auto list = library_apps();
+        const int n = int(list.size());
+        const bool grid = prefs_.lib_view == 0;
+        const int per = grid ? kPerRow : 1;
+        if (n == 0)
+        {
+            if (u) { lib_bar_ = true; play(int(Sfx::Move)); }
+            return true;
+        }
+        col_ = std::clamp(col_, 0, n - 1);
+        int to = col_;
+        if (grid && moves) to = std::clamp(col_ + moves, 0, n - 1);
+        if (d) to = std::min(n - 1, col_ + per);
+        if (u)
+        {
+            if (col_ < per) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
+            to = col_ - per;
+        }
+        if (to != col_) { col_ = to; play(int(Sfx::Move)); }
+        focus_id_ = list[std::size_t(col_)]->id;
+        if (pressed(pad::BtnCross)) open(focus_id_);
+        else if (pressed(pad::BtnSquare)) toggle_pin(focus_id_);
+        return true;
+    }
+    if (lib_view_ == 1)
+    {
+        std::vector<UpdateRow> rows;
+        const auto ups = update_apps();
+        if (ups.size() >= 2 || !queue_.empty() || !queue_now_.empty()) rows.push_back({0, nullptr});
+        if (!engine().store_update().empty()) rows.push_back({1, nullptr});
+        for (const App *a : ups) rows.push_back({2, a});
+        const int n = int(rows.size());
+        if (n == 0)
+        {
+            if (u) { lib_bar_ = true; play(int(Sfx::Move)); }
+            return true;
+        }
+        col_ = std::clamp(col_, 0, n - 1);
+        if (u && col_ == 0) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
+        const int to = std::clamp(col_ + (d ? 1 : 0) - (u ? 1 : 0), 0, n - 1);
+        if (to != col_) { col_ = to; play(int(Sfx::Move)); }
+        const UpdateRow &r = rows[std::size_t(col_)];
+        if (r.app) focus_id_ = r.app->id;
+        if (pressed(pad::BtnCross))
+        {
+            if (r.kind == 0) start_update_all();
+            else if (r.kind == 1) start_store_update();
+            else if (engine().job().phase == Phase::Working || !queue_.empty()) play(int(Sfx::Error));
+            else if (!freed_) { lib_note_ = "Recomp Store can't write to /data. Start etaHEN, then open the store again."; lib_note_bad_ = true; play(int(Sfx::Error)); }
+            else if (engine().install(r.app->id)) { lib_note_.clear(); play(int(Sfx::Install)); }
+        }
+        else if (pressed(pad::BtnSquare) && r.app)
+            open(r.app->id); /* What's new and the rest, on its page */
+        return true;
+    }
+    /* Betas: each beta game, then Enter a code. */
+    const auto list = beta_apps();
+    const int n = int(list.size()) + 1;
+    col_ = std::clamp(col_, 0, n - 1);
+    if (u && col_ == 0) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
+    const int to = std::clamp(col_ + (d ? 1 : 0) - (u ? 1 : 0), 0, n - 1);
+    if (to != col_) { col_ = to; play(int(Sfx::Move)); }
+    if (col_ < int(list.size())) focus_id_ = list[std::size_t(col_)]->id;
+    if (pressed(pad::BtnCross))
+    {
+        if (col_ < int(list.size())) open(list[std::size_t(col_)]->id);
+        else open_keypad();
+    }
+    return true;
+}
+
+void Store::draw_library2(Gfx &gfx)
+{
+    const auto views = library_views();
+    const auto mine = library_apps();
+    const auto ups = update_apps();
+    const int store_up = engine().store_update().empty() ? 0 : 1;
+    lib_view_t_ = std::min(1.f, lib_view_t_ + 1.f / 60.f * 4.f);
+    draw_tab_header(gfx, "Library", mine.size() == 1 ? "1 app installed" : std::to_string(mine.size()) + " apps installed");
+
+    /* The views, as a glass bar: My Apps, Updates (with its count), Betas. */
+    {
+        const char *names[3] = {"My Apps", "Updates", "Betas"};
+        float widths[3] = {0, 0, 0}, total = 12;
+        const int badge = int(ups.size()) + store_up;
+        for (int v : views)
+        {
+            widths[v] = gfx.measure(Font::SemiBold, 19, names[v]) + 48;
+            if (v == 1 && badge > 0) widths[v] += 10 + gfx.measure(Font::Bold, 14, std::to_string(badge)) + 16;
+            total += widths[v] + 4;
+        }
+        const float bx = 96, by = kTop, bh = 52;
+        glass(gfx, bx, by, total, bh, bh / 2, kGlass, true);
+        float x = bx + 6;
+        for (int v : views)
+        {
+            const bool on = v == lib_view_;
+            if (on)
+            {
+                gfx.panel(x, by + 5, widths[v], bh - 10, C(kFrost), 0.92f, (bh - 10) / 2);
+                if (lib_bar_) ring(gfx, x, by + 5, widths[v], bh - 10, (bh - 10) / 2, 1.f, true);
+            }
+            const Color fg = on ? C(kMidnight) : C(kFrost);
+            float lx = x + 24;
+            gfx.text_mid(on ? Font::Bold : Font::SemiBold, 19, lx, by + bh / 2, fg, Align::Left, names[v]);
+            if (v == 1 && badge > 0)
+            {
+                lx += gfx.measure(on ? Font::Bold : Font::SemiBold, 19, names[v]) + 10;
+                const std::string b = std::to_string(badge);
+                const float bw = gfx.measure(Font::Bold, 14, b) + 16;
+                gfx.panel(lx, by + bh / 2 - 11, bw, 22, C(kCyan), 1.f, 11);
+                gfx.text_mid(Font::Bold, 14, lx + bw / 2, by + bh / 2, C(kMidnight), Align::Center, b);
+            }
+            x += widths[v] + 4;
+        }
+        /* L2 and R2 change the view: their keycaps beside the bar. */
+        float kx = bx + total + 18;
+        for (const char *cap : {"L2", "R2"})
+        {
+            const float cw = gfx.measure(Font::Bold, 15, cap) + 22;
+            glass(gfx, kx, by + bh / 2 - 17, cw, 34, 11, kGlass, false);
+            gfx.text_mid(Font::Bold, 15, kx + cw / 2, by + bh / 2, C(0xE8EEF6), Align::Center, cap);
+            kx += cw + 8;
+        }
+        if (!lib_note_.empty())
+            gfx.text_mid(Font::SemiBold, 18, kx + 18, by + bh / 2, lib_note_bad_ ? C(0xFFB4A8) : C(0x9FF0C6), Align::Left,
+                         fit(gfx, Font::SemiBold, 18, 1824 - kx - 18, lib_note_));
+    }
+
+    const float fade = ease_out(lib_view_t_), slide = (1 - fade) * 24;
+    const float view_h = kBottom - kContent;
+    gfx.clip(0, kContent - 12, gfx.design_w(), kBottom - kContent + 12);
+    if (lib_view_ == 0)
+    {
+        const int n = int(mine.size());
+        if (n == 0)
+        {
+            glass(gfx, 96, kContent + slide, 900, 96, 26, kGlass, false);
+            const auto lines = wrap(gfx, Font::Regular, 20, 900 - 60,
+                                    "Nothing installed yet. Find something in Discover, and it shows up here with its updates.", 2);
+            draw_lines(gfx, Font::Regular, 20, 126, kContent + slide + 48 - 14.5f * float(lines.size()), 29, C(kSoft), lines);
+        }
+        else if (prefs_.lib_view == 0)
+        {
+            const int rows = (n + kPerRow - 1) / kPerRow, r = std::clamp(col_, 0, n - 1) / kPerRow;
+            keep_in_view(lscroll_, lscroll_to_, float(r) * kTilePitch, float(r) * kTilePitch + kTilePitch - 30, view_h,
+                         float(rows) * kTilePitch);
+            for (int i = 0; i < n; ++i)
+            {
+                float &f = focus_anim_[std::min(i, 511)];
+                f = approach(f, i == col_ && !lib_bar_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+                const float y = kContent + 14 + float(i / kPerRow) * kTilePitch - lscroll_ + slide;
+                if (y > kBottom || y + kTilePitch < kContent - 20) continue;
+                const float x = 96 + float(i % kPerRow) * (kTileS + kTileGap);
+                draw_tile(gfx, *mine[std::size_t(i)], x, y, kTileS, ease_out(f));
+            }
+        }
+        else
+        {
+            keep_in_view(lscroll_, lscroll_to_, float(col_) * kRowPitch, float(col_) * kRowPitch + kRowH + 8, view_h,
+                         float(n) * kRowPitch);
+            for (int i = 0; i < n; ++i)
+            {
+                float &f = focus_anim_[std::min(i, 511)];
+                f = approach(f, i == col_ && !lib_bar_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+                const float y = kContent + 8 + float(i) * kRowPitch - lscroll_ + slide;
+                if (y > kBottom || y + kRowH < kContent - 20) continue;
+                const App &a = *mine[std::size_t(i)];
+                bool up = false;
+                const std::string st = state_of(a, &up);
+                std::string line = st;
+                if (prefs_.advanced) line += "  \xC2\xB7  " + app_folder(a.id);
+                else if (!a.tags.empty()) line += "  \xC2\xB7  " + a.tags[0];
+                draw_app_row(gfx, a, 96, y, 1728, f, line, up ? "Update" : "Open", up ? 0 : 2);
+            }
+        }
+    }
+    else if (lib_view_ == 1)
+    {
+        std::vector<UpdateRow> rows;
+        if (ups.size() >= 2 || !queue_.empty() || !queue_now_.empty()) rows.push_back({0, nullptr});
+        if (store_up) rows.push_back({1, nullptr});
+        for (const App *a : ups) rows.push_back({2, a});
+        const int n = int(rows.size());
+        if (n == 0)
+        {
+            glass(gfx, 96, kContent + slide, 900, 96, 26, kGlass, false);
+            gfx.panel(96 + 30, kContent + slide + 48 - 16, 32, 32, C(kGreen, 0.2f), 1.f, 16);
+            gfx.text_mid(Font::Bold, 20, 96 + 46, kContent + slide + 48, C(0x9FF0C6), Align::Center, "\xE2\x9C\x93");
+            gfx.text_mid(Font::SemiBold, 21, 96 + 80, kContent + slide + 48, C(kFrost), Align::Left,
+                         "Everything is up to date. Triangle looks again.");
+        }
+        keep_in_view(lscroll_, lscroll_to_, float(col_) * kRowPitch, float(col_) * kRowPitch + kRowH + 8, view_h, float(n) * kRowPitch);
+        const JobState job = engine().job();
+        for (int i = 0; i < n; ++i)
+        {
+            float &f = focus_anim_[std::min(i, 511)];
+            f = approach(f, i == col_ && !lib_bar_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+            const float y = kContent + 8 + float(i) * kRowPitch - lscroll_ + slide;
+            if (y > kBottom || y + kRowH < kContent - 20) continue;
+            const UpdateRow &r = rows[std::size_t(i)];
+            if (r.kind == 2)
+            {
+                const App &a = *r.app;
+                const std::string inst = engine().installed(a.id);
+                const bool going = job.phase == Phase::Working && job.app_id == a.id;
+                const bool waiting = std::find(queue_.begin(), queue_.end(), a.id) != queue_.end();
+                std::string line = going ? (job.total ? job.step + "  " + std::to_string(int(100.0 * double(job.done) / double(job.total))) + "%"
+                                                      : job.step + "\xE2\x80\xA6")
+                                         : ("You have " + inst.substr(version_start(inst)) +
+                                            (a.news.empty() ? std::string() : "  \xC2\xB7  " + md_inline(a.news)));
+                draw_app_row(gfx, a, 96, y, 1728, f, line, going ? "Updating\xE2\x80\xA6" : waiting ? "Waiting" : "Update",
+                             going || waiting ? 3 : 0);
+                continue;
+            }
+            /* Update all, and the store's own update: glass rows of their own. */
+            const float k = ease_out(f), s = 1 + 0.012f * k;
+            const float w = 1728 * s, h = kRowH * s, x = 96 + (1728 - w) / 2, yy = y + (kRowH - h) / 2;
+            glass(gfx, x, yy, w, h, 26, r.kind == 0 ? Color{0.21f, 0.84f, 0.96f, 0.10f + 0.05f * k} : Color{1, 1, 1, 0.07f + 0.05f * k}, true);
+            ring(gfx, x, yy, w, h, 26, k);
+            std::string title, line, button;
+            int style = 0;
+            if (r.kind == 0)
+            {
+                const bool running = !queue_.empty() || !queue_now_.empty();
+                title = running ? "Updating " + std::to_string(std::min(queue_done_ + 1, queue_total_)) + " of " + std::to_string(queue_total_)
+                                : "Update all";
+                if (running)
+                {
+                    const App *a = find(queue_now_);
+                    line = a ? a->name + (job.total ? "  \xC2\xB7  " + job.step + " " + std::to_string(int(100.0 * double(job.done) / double(std::max<std::uint64_t>(1, job.total)))) + "%" : "") : "Starting\xE2\x80\xA6";
+                }
+                else
+                    line = std::to_string(ups.size()) + " updates, one after another. Your saves and game files stay as they are.";
+                button = running ? "Stop after this" : "Update all";
+                style = running ? 2 : 0;
+                /* the stack of icons it covers */
+                float ix = x + 20;
+                for (std::size_t q = 0; q < ups.size() && q < 3; ++q)
+                {
+                    Art &t = art(*ups[q]);
+                    const float is = 70 * s;
+                    const float qx = ix + float(q) * 24, qy = yy + (h - is) / 2;
+                    gfx.panel(qx - 3, qy - 3, is + 6, is + 6, C(0x0E1729), 1.f, 21);
+                    if (t.icon) gfx.image(t.icon, qx, qy, is, is, {}, 18);
+                    else draw_no_icon(gfx, *ups[q], qx, qy, is, 18);
+                }
+                if (running && queue_total_ > 0)
+                {
+                    const float pw = w - 300 - 360, px = x + 150 + 24, py = yy + h - 22;
+                    gfx.panel(px, py, pw, 6, C(kFrost, 0.12f), 1.f, 3);
+                    const float part = (float(queue_done_) + (job.total ? float(double(job.done) / double(job.total)) : 0.f)) / float(queue_total_);
+                    gfx.panel(px, py, std::max(6.f, pw * clamp01(part)), 6, C(kCyan), 1.f, 3);
+                }
+            }
+            else
+            {
+                std::string v = engine().store_update();
+                if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
+                title = "Recomp Store " + v;
+                const bool fetching = job.phase == Phase::Working && job.kind == "storeupdate";
+                line = !store_note_.empty() ? store_note_ : fetching ? (job.total ? "Downloading " + size_text(job.done) + " of " + size_text(job.total) : job.step + "\xE2\x80\xA6")
+                                                                     : "A new version of the store. It downloads, closes, updates itself and opens again.";
+                button = store_updating_ ? "Starting\xE2\x80\xA6" : fetching ? "Downloading\xE2\x80\xA6" : "Update";
+                style = store_updating_ || fetching ? 3 : 0;
+                if (logo_) gfx.image(logo_, x + 20, yy + (h - 84 * s) / 2, 84 * s, 84 * s, {}, 20);
+            }
+            const float tx = x + (r.kind == 0 ? 150.f : 128.f);
+            const float bw = gfx.measure(Font::Bold, 19, button) + 52;
+            gfx.text_mid(Font::ExtraBold, 24, tx, yy + h / 2 - 16, C(kFrost), Align::Left, title);
+            gfx.text_mid(Font::Regular, 18, tx, yy + h / 2 + 18, r.kind == 1 && store_note_bad_ ? C(0xFFB4A8) : C(kSoft), Align::Left,
+                         fit(gfx, Font::Regular, 18, w - (tx - x) - bw - 70, line));
+            const Color bg = style == 0 ? C(kCyan) : style == 3 ? C(kFrost, 0.08f) : C(kFrost, 0.14f);
+            const Color fg = style == 0 ? C(kMidnight) : style == 3 ? C(kMuted) : C(kFrost);
+            gfx.panel(x + w - 28 - bw, yy + h / 2 - 26, bw, 52, bg, 1.f, 17);
+            gfx.text_mid(Font::Bold, 19, x + w - 28 - bw / 2, yy + h / 2, fg, Align::Center, button);
+        }
+    }
+    else
+    {
+        const auto list = beta_apps();
+        const int n = int(list.size()) + 1;
+        keep_in_view(lscroll_, lscroll_to_, float(col_) * kRowPitch, float(col_) * kRowPitch + kRowH + 8, view_h, float(n) * kRowPitch);
+        for (int i = 0; i < n; ++i)
+        {
+            float &f = focus_anim_[std::min(i, 511)];
+            f = approach(f, i == col_ && !lib_bar_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+            const float y = kContent + 8 + float(i) * kRowPitch - lscroll_ + slide;
+            if (y > kBottom || y + kRowH < kContent - 20) continue;
+            if (i < int(list.size()))
+            {
+                const App &a = *list[std::size_t(i)];
+                bool up = false;
+                const std::string st = state_of(a, &up);
+                const bool inst = !engine().installed(a.id).empty();
+                draw_app_row(gfx, a, 96, y, 1728, f, inst ? st : std::string("Unlocked on this PS5 \xC2\xB7 not installed yet"),
+                             up ? "Update" : inst ? "Open" : "Install", up || !inst ? 0 : 2);
+                continue;
+            }
+            const float k = ease_out(f), s = 1 + 0.012f * k;
+            const float w = 1728 * s, h = kRowH * s, x = 96 + (1728 - w) / 2, yy = y + (kRowH - h) / 2;
+            glass(gfx, x, yy, w, h, 26, {1, 1, 1, 0.05f + 0.05f * k}, true);
+            ring(gfx, x, yy, w, h, 26, k);
+            gfx.panel(x + 20, yy + (h - 84 * s) / 2, 84 * s, 84 * s, C(kAmber, 0.16f), 1.f, 20, C(kAmber, 0.5f), 1.25f);
+            gfx.text_mid(Font::ExtraBold, 30, x + 20 + 42 * s, yy + h / 2, C(kAmber), Align::Center, "#");
+            gfx.text_mid(Font::ExtraBold, 24, x + 128, yy + h / 2 - 16, C(kFrost), Align::Left, "Enter a code");
+            gfx.text_mid(Font::Regular, 18, x + 128, yy + h / 2 + 18, C(kSoft), Align::Left,
+                         "Got a code for a game in testing? It unlocks here.");
+        }
+    }
+    gfx.unclip();
+}
+
+/* ---- A category tab ------------------------------------------------------------------ */
+
+bool Store::update_category(float dt, int moves, bool u, bool d)
+{
+    (void)dt;
+    const auto chips = category_chips(tab_);
+    const auto list = category_apps(tab_);
+    const int n = int(list.size());
+    const bool has_chips = chips.size() > 1;
+    if (cat_on_chips_)
+    {
+        if (!has_chips) cat_on_chips_ = false;
+        const int c = std::clamp(cat_chip_ + moves, 0, int(chips.size()) - 1);
+        if (c != cat_chip_)
+        {
+            cat_chip_ = c;
+            col_ = 0;
+            cscroll_ = cscroll_to_ = 0;
+            play(int(Sfx::Move));
+        }
+        if ((d || pressed(pad::BtnCross)) && n > 0) { cat_on_chips_ = false; play(int(Sfx::Move)); }
+        return true;
+    }
+    if (n == 0)
+    {
+        if (u && has_chips) { cat_on_chips_ = true; play(int(Sfx::Move)); }
+        return true;
+    }
+    col_ = std::clamp(col_, 0, n - 1);
+    int to = col_;
+    if (moves) to = std::clamp(col_ + moves, 0, n - 1);
+    if (d) to = std::min(n - 1, col_ + kPerRow);
+    if (u)
+    {
+        if (col_ < kPerRow)
+        {
+            if (has_chips) { cat_on_chips_ = true; play(int(Sfx::Move)); }
+            return true;
+        }
+        to = col_ - kPerRow;
+    }
+    if (to != col_) { col_ = to; play(int(Sfx::Move)); }
+    focus_id_ = list[std::size_t(col_)]->id;
+    if (pressed(pad::BtnCross)) open(focus_id_);
+    else if (pressed(pad::BtnSquare) && !list[std::size_t(col_)]->soon) toggle_pin(focus_id_);
+    return true;
+}
+
+void Store::draw_category(Gfx &gfx)
+{
+    const auto chips = category_chips(tab_);
+    const auto list = category_apps(tab_);
+    const int n = int(list.size());
+    std::size_t total = 0;
+    for (const App &a : catalog_.apps) total += !a.beta && a.category == category_of(tab_) ? 1 : 0;
+    const char *noun = tab_ == Games ? "game" : tab_ == Emulators ? "emulator" : tab_ == Tools ? "tool" : "app";
+    draw_tab_header(gfx, tab_name(tab_),
+                    std::to_string(total) + " " + noun + (total == 1 ? "" : "s"));
+    float list_top = kContent;
+    if (chips.size() > 1)
+    {
+        /* The labels in this part of the store: one picked filters the grid. */
+        float x = 96;
+        for (int i = 0; i < int(chips.size()); ++i)
+        {
+            const bool picked = i == cat_chip_, on = cat_on_chips_ && picked;
+            const float w = gfx.measure(Font::SemiBold, 18, chips[std::size_t(i)]) + 40;
+            if (x + w > 1824) break;
+            if (picked) gfx.panel(x, kTop, w, 46, C(kFrost), 0.92f, 23);
+            else glass(gfx, x, kTop, w, 46, 23, kGlass, false);
+            if (on) ring(gfx, x, kTop, w, 46, 23, 1.f, true);
+            gfx.text_mid(picked ? Font::Bold : Font::SemiBold, 18, x + w / 2, kTop + 23, picked ? C(kMidnight) : C(kFrost),
+                         Align::Center, chips[std::size_t(i)]);
+            x += w + 10;
+        }
+    }
+    else
+        list_top = kTop + 10;
+    if (n == 0)
+    {
+        gfx.text_mid(Font::Regular, 20, 96, list_top + 30, C(kMuted), Align::Left, "Nothing here yet.");
+        return;
+    }
+    const float view_h = kBottom - list_top;
+    const int rows = (n + kPerRow - 1) / kPerRow, r = std::clamp(col_, 0, n - 1) / kPerRow;
+    keep_in_view(cscroll_, cscroll_to_, float(r) * kTilePitch, float(r) * kTilePitch + kTilePitch - 30, view_h,
+                 float(rows) * kTilePitch);
+    gfx.clip(0, list_top - 12, gfx.design_w(), kBottom - list_top + 12);
+    for (int i = 0; i < n; ++i)
+    {
+        float &f = focus_anim_[std::min(i, 511)];
+        f = approach(f, i == col_ && !cat_on_chips_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+        const float y = list_top + 14 + float(i / kPerRow) * kTilePitch - cscroll_;
+        if (y > kBottom || y + kTilePitch < list_top - 20) continue;
+        draw_tile(gfx, *list[std::size_t(i)], 96 + float(i % kPerRow) * (kTileS + kTileGap), y, kTileS, ease_out(f));
+    }
+    gfx.unclip();
+    if (float(rows) * kTilePitch - cscroll_ > view_h + 8)
+        draw_more(gfx);
+}
+
+/* ---- Settings > Customize ------------------------------------------------------------ */
+
+namespace
+{
+const int kCustomRows = 8; /* the last, Install new apps to, only in Advanced mode */
+}
+
+bool Store::update_customize(float dt, bool l, bool r, bool u, bool d)
+{
+    (void)dt;
+    const int rows = prefs_.advanced ? kCustomRows : kCustomRows - 1;
+    const int to = std::clamp(cus_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, rows - 1);
+    if (to != cus_row_) { cus_row_ = to; play(int(Sfx::Move)); }
+    const int step = r || pressed(pad::BtnCross) ? 1 : l ? -1 : 0;
+    if (!step) return false;
+    switch (cus_row_)
+    {
+    case 0:
+    {
+        const int kinds[6] = {Discover, Games, Emulators, Apps, Tools, Library};
+        int at = 0;
+        for (int i = 0; i < 6; ++i) if (kinds[i] == prefs_.start_tab) at = i;
+        prefs_.start_tab = kinds[(at + step + 6) % 6];
+        break;
+    }
+    case 1: prefs_.lib_view = 1 - prefs_.lib_view; break;
+    case 2: prefs_.lib_order = (prefs_.lib_order + step + 3) % 3; break;
+    case 3: prefs_.pins_on_discover = !prefs_.pins_on_discover; break;
+    case 4: prefs_.backdrop = 1 - prefs_.backdrop; break;
+    case 5: prefs_.reduced_motion = !prefs_.reduced_motion; break;
+    case 6: prefs_.advanced = !prefs_.advanced; break;
+    default:
+    {
+        /* (2.0) Where new apps install: the console, or a connected drive. */
+        places_t_ = -1; /* looked for again now */
+        const auto places = install_places_now();
+        const std::string now = engine().install_root();
+        int at = 0;
+        for (int i = 0; i < int(places.size()); ++i) if (places[std::size_t(i)].path == now) at = i;
+        if (places.size() < 2) { play(int(Sfx::Error)); return true; }
+        engine().set_install_root(places[std::size_t((at + step + int(places.size())) % int(places.size()))].path);
+        play(int(Sfx::Select));
+        return true;
+    }
+    }
+    save_prefs();
+    play(int(Sfx::Select));
+    return true;
+}
+
+void Store::draw_customize(Gfx &gfx, float cx, float top, float cw)
+{
+    gfx.text_mid(Font::ExtraBold, 38, cx, top + 48 + 24, C(kFrost), Align::Left, "Customize");
+    float ry = top + 48 + 48 + 18;
+    const char *start_names[8] = {"Discover", "Library", "", "", "Games", "Emulators", "Apps", "Tools"};
+    const char *orders[3] = {"Name", "Recently installed", "Updates first"};
+    struct Row
+    {
+        const char *title, *help;
+        std::string value;
+    };
+    const Row rows[kCustomRows] = {
+        {"Start on", "The tab the store opens on.", start_names[std::clamp(prefs_.start_tab, 0, 7)]},
+        {"Library view", "Tiles, or a list with more about each app.", prefs_.lib_view == 0 ? "Tiles" : "List"},
+        {"Library order", "Pinned apps always come first.", orders[prefs_.lib_order]},
+        {"Pinned on Discover", "A row of your pinned apps at the top of Discover. Square pins an app.", prefs_.pins_on_discover ? "On" : "Off"},
+        {"Background", "The focused app's art behind everything, or a calm gradient.", prefs_.backdrop == 0 ? "App art" : "Calm"},
+        {"Motion", "Reduced keeps movement to a minimum.", prefs_.reduced_motion ? "Reduced" : "Full"},
+        {"Advanced mode", "Shows title IDs and folders, and where new apps install.", prefs_.advanced ? "On" : "Off"},
+        {"Install new apps to", "Updates go where each app already is. ShadowMountPlus finds apps in all of these.", install_label()},
+    };
+    const int nrows = prefs_.advanced ? kCustomRows : kCustomRows - 1;
+    const float pitch = nrows > 7 ? 84.f : 92.f;
+    for (int i = 0; i < nrows; ++i)
+    {
+        const bool on = in_section_ && cus_row_ == i;
+        gfx.panel(cx, ry, cw, 1.25f, kLine, 1.f, 0);
+        if (on) ring(gfx, cx - 12, ry + 6, cw + 24, pitch - 10, 18, 1.f, true);
+        gfx.text_mid(Font::SemiBold, 22, cx + 8, ry + 18 + 13, C(kFrost), Align::Left, rows[i].title);
+        gfx.text_mid(Font::Regular, 17, cx + 8, ry + 18 + 26 + 6 + 10, C(kMuted), Align::Left, fit(gfx, Font::Regular, 17, cw - 420, rows[i].help));
+        /* The value, between its arrows when focused. */
+        const float vw = gfx.measure(Font::SemiBold, 19, rows[i].value);
+        const float vx = cx + cw - 8 - (on ? 34 : 0);
+        gfx.text_mid(Font::SemiBold, 19, vx, ry + 47, i == 6 && prefs_.advanced ? C(kCyan) : C(kFrost), Align::Right, rows[i].value);
+        if (on)
+        {
+            gfx.glyph(Glyph::Arrow, vx - vw - 18, ry + 47, 12, C(kFrost, 0.7f), 3.14159265f * 1.5f);
+            gfx.glyph(Glyph::Arrow, cx + cw - 14, ry + 47, 12, C(kFrost, 0.7f), 3.14159265f * 0.5f);
+        }
+        ry += pitch;
+    }
+}
+
+const std::vector<Place> &Store::install_places_now() const
+{
+    /* The drives, looked for at most every two seconds (not every frame). */
+    if (places_t_ < 0 || time_ - places_t_ > 2.f)
+    {
+        places_now_ = engine().install_places();
+        places_t_ = time_;
+    }
+    return places_now_;
+}
+
+std::string Store::install_label() const
+{
+    const std::string now = engine().install_root();
+    for (const Place &p : install_places_now())
+        if (p.path == now) return p.label;
+    /* Chosen before, on a drive that isn't connected now. */
+    return now.rfind("/mnt/", 0) == 0 ? now.substr(5, now.find('/', 5) - 5) + " (not connected)" : "Console storage";
+}
+} // namespace recomp
+
+namespace recomp
+{
+/* ---- What the buttons do, for the hints ------------------------------------------- */
+
+std::string Store::square_hint() const
+{
+    std::string id;
+    if (tab_ == Discover)
+    {
+        const auto lines = discover_lines();
+        if (lines.empty()) return "";
+        const int k = lines[std::size_t(std::clamp(row_, 0, int(lines.size()) - 1))].kind;
+        if (k == 0 || k == 5) return ""; /* the banner, the category buttons */
+        id = focus_id_;
+    }
+    else if (is_category(tab_))
+    {
+        if (cat_on_chips_) return "";
+        id = focus_id_;
+    }
+    else if (tab_ == Library && !lib_bar_ && lib_view_ == 0 && !library_apps().empty())
+        id = focus_id_;
+    else if (tab_ == Library && !lib_bar_ && lib_view_ == 1 && !update_apps().empty())
+        return "What's new";
+    const App *a = id.empty() ? nullptr : find(id);
+    if (!a || a->soon) return "";
+    return pinned(id) ? "Unpin" : "Pin";
+}
+
+std::string Store::cross_hint() const
+{
+    if (tab_ == Library && lib_bar_) return "";
+    if (tab_ == Library && lib_view_ == 1) return update_apps().empty() && engine().store_update().empty() ? "" : "Update";
+    if (tab_ == Library && lib_view_ == 0 && library_apps().empty()) return "";
+    if (is_category(tab_) && cat_on_chips_) return "";
+    return tab_ == Settings ? "Select" : "Open";
+}
+} // namespace recomp

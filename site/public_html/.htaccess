@@ -11,6 +11,10 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 RewriteRule ^(game|soon)/([A-Za-z0-9_-]{1,64})/?$ share.php?kind=$1&id=$2 [L,QSA]
 RewriteRule ^og/([A-Za-z0-9_-]{1,64})\.jpg$ og.php?id=$1 [L,QSA]
 
+# (2.0) A code a PS5 shows: /l/<code> links this phone to it; /r/<code> finishes a bug report the
+# store sent. The site's own page, which reads the code from the address.
+RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ index.html [L]
+
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"

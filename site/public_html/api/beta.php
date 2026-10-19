@@ -60,7 +60,30 @@ if ($a === 'redeem' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $st = $db->prepare('SELECT * FROM beta_codes WHERE code = ?');
     $st->execute([$code]);
     $row = $st->fetch();
-    if (!$row) $wrong('That code isn\'t right. Check the numbers and try again.');
+    if (!$row) {
+        // (2.0) A code the website made to link a phone or computer: that browser is linked to
+        // this console (made now if it has no ID yet).
+        $web = rs_live_web_code($db, $code);
+        if ($web && $web['device_id'] !== null) {
+            $install = rs_install($db, $s('install'), $s('token'));
+            $newToken = '';
+            if ($install === null) [$install, $newToken] = rs_console_new($db);
+            $up = $db->prepare('UPDATE link_codes SET used = NOW(), install_id = ? WHERE code = ? AND used IS NULL');
+            $up->execute([$install, $code]);
+            if ($up->rowCount() === 1) {
+                $db->prepare('UPDATE link_devices SET install_id = ?, linked = NOW() WHERE device_id = ?')->execute([$install, $web['device_id']]);
+                $st = $db->prepare('SELECT label FROM link_devices WHERE device_id = ?');
+                $st->execute([$web['device_id']]);
+                $label = (string)$st->fetchColumn();
+                rs_seen($db, $install, $s('store', 32));
+                $out = ['ok' => true, 'linked' => true, 'install' => $install,
+                        'message' => 'Your ' . ($label !== '' && $label !== 'Phone or computer' ? $label : 'phone') . ' is linked. You can send things to this PS5 from recompstore.com now.'];
+                if ($newToken !== '') $out['token'] = $newToken;
+                rs_out(200, $out);
+            }
+        }
+        $wrong('That code isn\'t right. Check the numbers and try again.');
+    }
     if ((int)$row['revoked']) rs_out(200, ['ok' => false, 'error' => 'That code has been cancelled.']);
     $g = rs_game((string)$row['game_id']);
     if (!$g) rs_out(200, ['ok' => false, 'error' => 'That code\'s game isn\'t in Recomp Store anymore.']);

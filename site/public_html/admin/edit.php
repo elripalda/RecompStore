@@ -33,6 +33,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (['logo_bs', 'logo_ps'] as $k) $g[$k] = max(20, min(300, (int)($_POST[$k] ?? 100)));
     if (!empty($_POST['logo_remove'])) $g['logo'] = '';
     foreach (['featured', 'hidden', 'setup', 'soon'] as $k) $g[$k] = !empty($_POST[$k]);
+    // (2.0) Its part of the store, its labels, and whether the store may move it to a new title ID.
+    $g['category'] = rs_category((string)($_POST['category'] ?? 'games'));
+    $g['tags'] = trim((string)($_POST['tags'] ?? ''));
+    $g['can_move'] = !empty($_POST['can_move']);
+    // (2.0) Who gets it: everyone (once published), or only consoles marked as testers.
+    $g['testers'] = ($_POST['visible'] ?? '') === 'testers';
+    $badTag = '';
+    foreach (explode(',', $g['tags']) as $t) if (mb_strlen(trim($t)) > 24) $badTag = trim($t);
+    if ($badTag === '' && count(array_filter(array_map('trim', explode(',', $g['tags'])), 'strlen')) > 6) $badTag = '(more than 6)';
     $badSave = null;
     rs_saves_list($g['saves'], $badSave);
     $badLog = null;
@@ -75,7 +84,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($badLog !== null) $error = 'Log files: "' . $badLog . '" isn\'t a path inside the game\'s folder (one per line, like logs/*.log, with no .. or \\).';
     elseif ($g['sha256'] !== '' && !preg_match('/^[A-Fa-f0-9]{64}$/', $g['sha256'])) $error = 'The SHA-256 should be 64 letters and numbers (0-9, a-f), or left empty.';
     elseif ($g['min_store'] !== '' && !preg_match('/^\d+(\.\d+){0,3}$/', $g['min_store'])) $error = 'Needs Recomp Store: a version like 1.0.3, or leave it empty.';
-    elseif ($g['source'] === 'github' && strpbrk($g['asset'], '*?') !== false && !preg_match('/\.zip$/i', $g['asset'])) $error = 'A zip name with * has to end in .zip, so it can only match the release\'s zip (not a checksum or another file).';
+    elseif ($g['source'] === 'github' && strpbrk($g['asset'], '*?') !== false && !preg_match('/\.(zip|7z)$/i', $g['asset'])) $error = 'A file name with * has to end in .zip or .7z, so it can only match the release\'s archive (not a checksum or another file).';
+    elseif ($badTag !== '') $error = 'Labels: "' . $badTag . '" is too long. Up to 6 short labels, comma-separated, like Recomp, Xbox 360.';
+    elseif (($isNew || $g['id'] !== $oldId) && rs_move_block($g['id'])) $error = RS_MOVE_BLOCK[0] . ' to ' . RS_MOVE_BLOCK[1] . ' are kept for the PS5 store itself (it gives them to games whose own ID is taken on a console). Pick another title ID.';
+    elseif (($isNew || $g['id'] !== $oldId) && isset(rs_taken_ids()[$g['id']])) $error = $g['id'] . ' is already used outside the store (' . (rs_taken_ids()[$g['id']] ?: 'see Settings') . '). Two apps with one title ID clash on a PS5: pick another.';
     elseif ($g['inside'] !== '' && (!preg_match('/\.zip$/i', $g['inside']) || strlen($g['inside']) > 300 || $g['inside'][0] === '/' || preg_match('#\\\\|(^|/)\.\.(/|$)|[\x00-\x1f\x7f]#', $g['inside']))) $error = 'The zip inside the download: its whole name in that zip, ending in .zip, with / between folders (for example */prospero/builder/Assets/payload.zip). No .. and no \\.';
     elseif ($g['setup'] && $g['slots'] !== '' && !is_array(json_decode($g['slots'], true))) $error = 'The game files list isn\'t valid. Use the template\'s format.';
     elseif ($g['setup'] && $g['slots'] !== '' && ($slotErr = rs_slots_error(json_decode($g['slots'], true)))) $error = 'Game files: ' . $slotErr;
@@ -142,6 +154,22 @@ $hero = $g['hero_web'] ?: $g['hero'];
       </select>
     </label>
     <label>Author<input name="author" value="<?= h($g['author']) ?>"><small>Shown under community games.</small></label>
+    <label>Category
+      <select name="category">
+        <?php foreach (RS_CATEGORIES as $ck => $cl): ?>
+        <option value="<?= h($ck) ?>" <?= rs_category((string)$g['category']) === $ck ? 'selected' : '' ?>><?= h($cl) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <small>Its part of the store (Recomp Store 2.0). Older stores list everything as games.</small>
+    </label>
+    <label><span>Labels <span class="muted">(optional)</span></span><input name="tags" value="<?= h($g['tags']) ?>" maxlength="200" placeholder="Recomp, Xbox 360"><small>Up to 6, comma-separated, shown on its page.</small></label>
+    <label>Visible to
+      <select name="visible">
+        <option value="everyone" <?= empty($g['testers']) ? 'selected' : '' ?>>Everyone</option>
+        <option value="testers" <?= !empty($g['testers']) ? 'selected' : '' ?>>Testers only</option>
+      </select>
+      <small>Testers only: left out of the published catalog and the website; consoles marked as testers (Settings) get it right away, marked as testing.</small>
+    </label>
     <label class="span2">Short line<input name="blurb" value="<?= h($g['blurb']) ?>" maxlength="180"><small>One sentence for the featured banner.</small></label>
     <label class="span2">Description<textarea name="description" rows="4"><?= h($g['description']) ?></textarea></label>
     <label class="span2">What's new<textarea name="news" rows="3"><?= h($g['news']) ?></textarea></label>
@@ -151,6 +179,7 @@ $hero = $g['hero_web'] ?: $g['hero'];
       <label class="check"><input type="checkbox" name="featured" <?= $g['featured'] ? 'checked' : '' ?>> Featured on the banner</label>
       <label class="check"><input type="checkbox" name="hidden" <?= $g['hidden'] ? 'checked' : '' ?>> Hidden (kept here, left out when publishing)</label>
       <label class="check"><input type="checkbox" name="soon" data-soon <?= $g['soon'] ? 'checked' : '' ?>> Coming soon (not out yet)</label>
+      <label class="check" title="When another app already has this title ID on a console, the store can install this one under a new ID (PPSA97001 on) and keep its updates going there. Untick it for a port that only works from its own folder."><input type="checkbox" name="can_move" <?= $g['can_move'] ? 'checked' : '' ?>> Can move to a new title ID if its own is taken</label>
     </div>
     <label class="span2" data-soon-fields><span>When it's coming <span class="muted">(optional)</span></span><input name="date" value="<?= h($g['date']) ?>" maxlength="40" placeholder="December 2026"><small>Shown in place of a version, in the store's Coming soon row and on the site. Leave empty for just "Coming soon". A Coming soon game needs only its name, title ID and art; untick it when it's out and fill in Download.</small></label>
   </div>
@@ -167,11 +196,11 @@ $hero = $g['hero_web'] ?: $g['hero'];
       </select>
     </label>
     <label data-gh>GitHub repo<input name="repo" value="<?= h($g['repo']) ?>" placeholder="elripalda/SvR2011-Recomp-PS5"></label>
-    <label data-gh>Zip name on the release<input name="asset" value="<?= h($g['asset']) ?>" placeholder="PPSA92011.zip"><small>The file the store downloads from each release. When its name changes with each version, put * for that part, like WindWaker-PS5-*.zip: the store then finds the newest itself (needs Recomp Store 1.0.3, set for you).</small></label>
+    <label data-gh>Zip name on the release<input name="asset" value="<?= h($g['asset']) ?>" placeholder="PPSA92011.zip"><small>The file the store downloads from each release. When its name changes with each version, put * for that part, like WindWaker-PS5-*.zip: the store then finds the newest itself (needs Recomp Store 1.0.3, set for you). A .7z works too, from Recomp Store 2.0 (set for you).</small></label>
     <label data-url>Download link<input name="url" value="<?= h($g['url']) ?>" placeholder="https://…/PPSA92011.zip"></label>
     <label class="span2">Zip inside the download (optional)<input name="inside" value="<?= h($g['inside']) ?>" placeholder="*/prospero/builder/Assets/payload.zip"><small>Only for a release that has no zip of its own PS5 files, just a bigger one (like a source zip) with that zip inside. Put its whole name inside the download, with * for a part that changes with each version. The store takes it out and installs it (needs Recomp Store 1.0.4, set for you). Leave empty for a normal release.</small></label>
     <label>Version<input name="version" value="<?= h($g['version']) ?>" placeholder="1.0.0"><small>Shown until the store and the site have read GitHub; updates come from GitHub's newest release.</small></label>
-    <label>Needs Recomp Store<input name="min_store" value="<?= h($g['min_store']) ?>" placeholder="any version"><small>The oldest store that can install it; older ones are told to update first (before 1.0.3 they don't list it at all). <?php $auto = rs_min_store(array_merge($g, ['min_store' => ''])); echo $auto !== '' ? 'This game needs at least ' . h($auto) . ' for its zip name or its game files.' : 'Leave empty for any.'; ?></small></label>
+    <label>Needs Recomp Store<input name="min_store" value="<?= h($g['min_store']) ?>" placeholder="any version"><small>The oldest store that can install it; older ones are told to update first (before 1.0.3 they don't list it at all). <?php $auto = rs_min_store(array_merge($g, ['min_store' => ''])); echo $auto !== '' ? 'This game needs at least ' . h($auto) . ' for its category, zip name or game files' . (version_compare($auto, RS_V2_FROM, '>=') ? ' (2.0 only: older stores never see it)' : '') . '.' : 'Leave empty for any.'; ?></small></label>
     <label>Build<input type="number" min="1" name="build" value="<?= h((string)$g['build']) ?>"></label>
     <label>Release date<input type="date" name="released" value="<?= h($g['released']) ?>"></label>
     <label>Download size<input name="size" value="<?= h($g['size']) ?>" placeholder="55 MB"></label>

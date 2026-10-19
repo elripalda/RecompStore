@@ -12,7 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'publish') {
             $n = rs_publish();
             $soon = rs_soon_count();
-            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . ($soon ? " and $soon Coming soon" : '') . '; the PS5 store and the site pick it up on their next load.');
+            $t = count(array_filter(rs_games(false), fn($g) => !empty($g['testers'])));
+            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . ($soon ? " and $soon Coming soon" : '') . '; the PS5 store and the site pick it up on their next load.' . ($t ? ' ' . ($t === 1 ? '1 app is' : "$t apps are") . ' for testers only and stay out of it.' : ''));
         } elseif ($action === 'order') {
             // The whole list in its new order, from dragging on this page (Save order).
             $want = json_decode((string)($_POST['order'] ?? ''), true);
@@ -74,6 +75,8 @@ rs_head('Games');
         <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'Recomp Store' : 'By ' . h($g['author']) ?></span>
         <?php if ($g['featured']): ?><span class="tag">Featured</span><?php endif; ?>
         <?php if ($g['hidden']): ?><span class="tag">Hidden</span><?php endif; ?>
+        <?php if (!empty($g['testers'])): ?><span class="tag test">Testers only</span><?php endif; ?>
+        <?php if (rs_category((string)$g['category']) !== 'games'): ?><span class="tag"><?= h(RS_CATEGORIES[rs_category((string)$g['category'])]) ?></span><?php endif; ?>
         <?php if ($g['beta']): ?><span class="tag beta">Beta</span><?php endif; ?>
         <?php if ($g['soon']): ?><span class="tag soon">Coming soon<?= $g['date'] !== '' ? ' · ' . h($g['date']) : '' ?></span><?php endif; ?>
         <?php if ($g['setup'] && !$g['soon']): ?><span class="tag">Store sets up files</span><?php endif; ?>

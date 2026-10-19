@@ -21,6 +21,36 @@ constexpr const char *kHomebrew = "/data/homebrew";
 constexpr const char *kBetaUrl = "https://recompstore.com/api/beta.php";
 /* (1.1.0) Send logs: a game page's logs, to the admin's inbox. */
 constexpr const char *kLogsUrl = "https://recompstore.com/api/logs.php";
+/* (2.0) The site's side of a linked phone, custom sources, the GitHub proxy and the charts. */
+constexpr const char *kLinkUrl = "https://recompstore.com/api/link.php";
+constexpr const char *kSourceUrl = "https://recompstore.com/api/source.php";
+constexpr const char *kGhUrl = "https://recompstore.com/api/gh.php";
+constexpr const char *kStatsUrl = "https://recompstore.com/api/stats.php";
+constexpr const char *kChartsUrl = "https://recompstore.com/api/charts.php";
+/* (2.0) Every title ID the site knows is taken (the catalog's, and apps outside it): the title ID
+ * guard never gives one of them to an app it moves. */
+constexpr const char *kIdsUrl = "https://recompstore.com/api/ids.php";
+/* (2.0) The catalog with the testers-only apps in it, for a console the admin marked as a tester. */
+constexpr const char *kTestCatalogUrl = "https://recompstore.com/api/catalog.php";
+
+/* (2.0) A phone or PC linked to this console (Settings > Link a phone). */
+struct LinkDevice
+{
+    std::string id, label, since, seen;
+};
+struct LinkInfo
+{
+    int code_state = 0; /* 0 none yet, 1 asking for one, 2 here it is, 3 the site couldn't give one */
+    std::string code, url, error;
+    int expires_in = 0; /* seconds the code is good for */
+    std::vector<LinkDevice> devices;
+    bool known = false; /* the site has answered this session */
+};
+/* Something a linked phone sent: install an app, add a source, read things again, a report done. */
+struct LinkAction
+{
+    std::string kind, app, repo, list, report;
+};
 
 /* (1.1.2) A file a disc must have: its path on the disc, its exact size and, when has_crc,
  * its CRC-32. */
@@ -146,14 +176,39 @@ struct App
     /* (1.1.2) A download from a fixed link (a beta game's, from the site): its exact size,
      * so its progress shows and a cut-off download is caught. 0: not known. */
     std::uint64_t bytes = 0;
+    /* (2.0) Which part of the store it's in: "games", "emulators", "apps" or "tools",
+     * and up to 6 short labels shown on its page ("Recomp", "Port", "Homebrew"). */
+    std::string category = "games";
+    std::vector<std::string> tags;
+    /* (2.0) false: the app expects its own title ID's folder, so the title ID guard won't
+     * install it under a new ID (it may only be installed over a clash, or not at all). */
+    bool can_move = true;
+    /* (2.0) An app from a source the player added (Settings > Sources), not the catalog:
+     * not checked by Recomp Store. source_name / source_value: which source (as the site
+     * named it, and the repo or list address the player added). title_id: its title ID when
+     * the site could read it from the release, "" until the store reads it on install.
+     * stars and downloads: its repo's GitHub numbers (-1 when not known). */
+    bool custom = false;
+    std::string source_name, source_value, title_id;
+    long long stars = -1, downloads = -1;
+    /* (2.0) Only consoles the admin marked as testers see it (the test catalog): a badge says so. */
+    bool testing = false;
     /* Filled by the engine: where its art was saved, empty until it is. */
     std::string icon_file, hero_file, logo_file;
+    /* (2.0) data_dir and saves as the catalog says them, before the engine points them at
+     * where the game is (a new title ID's folder, a drive): worked out from these each time. */
+    std::string data_dir_src;
+    std::vector<std::string> saves_src;
+    bool src_set = false;
 };
 
 /* A part of Discover, under the featured banner (1.0.6), set up in the admin. */
 struct Section
 {
-    std::string type;   /* "games", "spotlight" (one game as a still banner) or "soon" */
+    std::string type;   /* "games", "spotlight" (one game as a still banner), "soon", or (2.0)
+                           "category": every app in one part of the store (category); "top",
+                           "trending", "new", "updated": the charts' lists (Charts), in order */
+    std::string category;
     std::string title;  /* above it; a spotlight's kicker */
     std::string layout; /* "row" (sideways), "grid" (every game, rows of six) or "wide" */
     bool all = false;   /* "games": every game in the store, in the admin's order */
@@ -173,6 +228,45 @@ struct Catalog
 };
 
 bool parse_catalog(const std::string &text, Catalog &out);
+
+/* (2.0) A custom source the player added: a GitHub repo, or a list of repos at an https
+ * address. recompstore.com reads it (api/source.php) and answers with its apps, catalog-shaped. */
+struct Source
+{
+    std::string kind;         /* "repo" or "list" */
+    std::string value;        /* "owner/name", or the list's address */
+    std::string name, author; /* as the site named it ("" until it has) */
+    int state = 0;            /* 0 not read yet, 1 reading, 2 read, 3 couldn't be read, 4 taken down */
+    std::string error;        /* 3, 4: why, in the site's words */
+    std::size_t apps = 0;
+    std::vector<std::string> problems; /* repos in it that couldn't be used: "owner/name: why" */
+};
+
+/* (2.0) The charts (recompstore.com/api/charts.php): app IDs in order, and each app's numbers. */
+struct ChartStat
+{
+    long long installs = 0, stars = -1, downloads = -1;
+};
+struct Charts
+{
+    std::vector<std::string> top, trending, fresh /* "new" */, updated;
+    std::vector<std::pair<std::string, ChartStat>> stats;
+    bool have = false;
+    /* The ids of a Discover section of one of the charts' types ("top", "trending", "new", "updated"). */
+    const std::vector<std::string> *list(const std::string &type) const
+    {
+        return type == "top" ? &top : type == "trending" ? &trending : type == "new" ? &fresh : type == "updated" ? &updated : nullptr;
+    }
+    const ChartStat *stat(const std::string &id) const
+    {
+        for (const auto &kv : stats)
+            if (kv.first == id) return &kv.second;
+        return nullptr;
+    }
+};
+/* (2.0) What the player typed for a source, made plain: a repo ("owner/name", from its github.com
+ * address too) or a list's https address. false and why when it's neither. */
+bool source_from_text(const std::string &text, std::string &kind, std::string &value, std::string &why);
 /* True when a game needs a newer Recomp Store than this one. */
 bool store_too_old(const App &a);
 /* True when version a is newer than b ("v1.0.10" > "1.0.9"). */
@@ -203,6 +297,14 @@ struct JobState
     int home = 0;
     /* Done: what to tell the player, when the job has its own words for it. */
     std::string note;
+    /* (2.0) The title ID guard: an install that stopped before writing anything, because
+     * another app on this PS5 already has the game's title ID. clash_with: that app's name
+     * ("" when it can't be told); clash_pkg: it's installed as a package (so this one can
+     * only go under a new ID); clash_new: the ID this one can have instead. The download is
+     * kept, so whichever the player picks (resolve_clash) doesn't download it again. */
+    bool clash = false, clash_pkg = false;
+    std::string clash_with, clash_new;
+    std::string clash_tid; /* (2.0) the title ID that clashed (a custom app's, as its release says) */
 };
 
 class Engine
@@ -220,6 +322,14 @@ public:
 
     /* Download and install a game's newest release (or the catalog's link). One job at a time. */
     bool install(const std::string &app_id);
+    /* (2.0) After an install stopped on a clash (JobState::clash): 1 install it under its own
+     * new title ID (clash_new; its updates go there from then on), 2 install it over the
+     * other app's folder (an older copy of the same app), 0 neither (the kept download goes). */
+    bool resolve_clash(const std::string &app_id, int choice);
+    /* (2.0) Refresh: the catalog and this console's beta games read again, every installed
+     * game's updates looked for, and the apps on the console found again (one installed
+     * while the store was open shows up), without closing the store. */
+    void refresh();
     /* Copy a game's files out of the player's own disc image into its data folder.
      * Files already there at the right size are kept (a stopped setup carries on). */
     bool setup(const std::string &app_id, const std::string &slot_key, const std::string &image);
@@ -275,6 +385,51 @@ public:
     bool send_logs(const std::string &app_id, const std::string &message);
     int logs_state(std::string &message) const;
     void logs_ack();
+    /* (2.0) The report the last logs started on the site, to finish on a phone: its code and
+     * address ("" when the site didn't give one). */
+    std::string logs_report(std::string &url) const;
+
+    /* (2.0) Link a phone. While Settings > Link a phone is open the store asks the site
+     * every few seconds what's new (a phone that scanned the code, things sent); with a
+     * device linked, every 15 s; else now and then. link_new_code asks for a fresh code;
+     * link_unlink lets a device go; take_link_action hands the screens what a phone sent,
+     * once each. */
+    void link_screen(bool open);
+    void link_new_code();
+    LinkInfo link_info() const;
+    void link_unlink(const std::string &device_id);
+    bool take_link_action(LinkAction &out);
+    /* (2.0) This console's ID on recompstore.com ("" until the site gave it one). */
+    std::string install_id() const;
+
+    /* (2.0) Custom sources (Settings > Sources), kept in /data/recompstore/sources.json.
+     * add_source: what the player typed (source_from_text); false and why when it isn't a
+     * source, or it's there already. A source is read straight away, then with each catalog
+     * refresh; its apps join the store's (after the catalog's own, which win on a shared ID),
+     * marked custom. remove_source takes it and its apps out (installed ones stay installed). */
+    std::vector<Source> sources() const;
+    bool add_source(const std::string &text, std::string &why);
+    void remove_source(const std::string &value);
+    /* Report a source (it's broken, or shouldn't be there) to recompstore.com's inbox.
+     * source_report_state as logs_state: 0 nothing asked, 1 sending, 2 sent, 3 didn't go. */
+    bool report_source(const std::string &value, const std::string &why);
+    int source_report_state(std::string &message) const;
+    void source_report_ack();
+    /* (2.0) The charts, as last read with the catalog (have false before). */
+    Charts charts() const;
+    /* (2.0) A console the admin marked as a tester (the site says so): it reads the test
+     * catalog, with the testers-only apps in it, unless test_view is off (Settings), when it
+     * sees what everyone sees. */
+    bool tester() const;
+    bool test_view() const;
+    void set_test_view(bool on);
+    /* (2.0) Advanced mode: where new apps install. The console's homebrew folder, or one on a
+     * drive ShadowMountPlus scans (the M.2 SSD, extended storage, a USB drive), as Place{label,
+     * path to its homebrew folder}; only drives that are connected. Updates always go where an
+     * app already is. Kept in /data/recompstore/install-root.txt. */
+    std::vector<struct Place> install_places() const;
+    std::string install_root() const;
+    void set_install_root(const std::string &homebrew_folder);
 
     /* The version installed: "" when it isn't installed, "?" when it's on the console but
      * the store didn't install it. */
@@ -336,6 +491,19 @@ std::string log_path();
 /* Where a game lives: the folder under /data/homebrew whose sce_sys/param.json has its
  * title ID (found when the store starts and after each install), else /data/homebrew/<id>. */
 std::string app_folder(const std::string &app_id);
+/* (2.0) The title ID guard. The title ID an app is installed under: its own, or the one it
+ * was given because its own was taken on this PS5 (moved_id: that one, "" when it has its
+ * own). Kept in /data/recompstore/moves.json and in the marker in the app's folder. */
+std::string installed_id(const std::string &app_id);
+std::string moved_id(const std::string &app_id);
+/* (2.0) An app's own title ID: its ID, or for a custom source's app the one its release's
+ * param.json said when it was installed (until then its ID, which may be "gh-..."). */
+std::string own_id(const std::string &app_id);
+/* (2.0) When the store last installed or updated an app (its record's time), 0 if never. */
+long long installed_time(const std::string &app_id);
+/* (2.0) The file the store leaves in every app folder it installs: which app it is, the
+ * title ID it's under and where it came from, so the guard knows its own installs. */
+constexpr const char *kMarker = "recompstore-install.json";
 
 /* ShadowMountPlus: the player's own copy of its payload, sent to the loader on port 9021
  * after each install and setup so the game shows up on the home screen. */

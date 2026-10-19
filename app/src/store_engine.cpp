@@ -45,6 +45,8 @@
 namespace recomp
 {
 void slog(const char *fmt, ...);
+static bool title_id_ok(const std::string &id);
+static bool custom_owns(const std::string &dir, const std::string &repo);
 namespace
 {
 void scan_homebrew();
@@ -79,7 +81,10 @@ bool read_bytes(const std::string &path, std::vector<std::uint8_t> &out)
 
 bool write_file(const std::string &path, const void *data, std::size_t n)
 {
-    const std::string tmp = path + ".part";
+    /* (2.0) Its own temporary file each time: two threads saving one file (sources.json,
+     * beta.json) never write into the same one; the last rename wins, whole. */
+    static std::atomic<unsigned> serial{0};
+    const std::string tmp = path + ".part" + std::to_string(++serial);
     std::FILE *f = std::fopen(tmp.c_str(), "wb");
     if (!f) return false;
     const bool ok = std::fwrite(data, 1, n, f) == n;
@@ -158,6 +163,7 @@ struct Shared
     unsigned revision = 0;
     JobState job;
     std::string pending_install; /* asked for, not yet started */
+    int pending_resolve = 0;     /* (2.0) with it: the answer to a title ID clash (resolve_clash) */
     std::string pending_setup_app, pending_setup_slot, pending_setup_image;
     bool pending_setup_fetch = false; /* (1.0.8) the slot's Title Update, downloaded first */
     bool pending_bench = false;
@@ -173,6 +179,7 @@ struct Shared
     bool auto_update = false;
     /* Settings > Check for updates: asked (the worker checks everything now), and how it went. */
     bool force_check = false;
+    bool rescan = false; /* (2.0) Refresh: the console's apps looked for again too */
     int update_check = 0;
     std::string store_zip, store_zip_sha, store_zip_ver;
     /* Patch notes by repo, and when each was last asked of GitHub (mono seconds). */
@@ -193,6 +200,34 @@ struct Shared
     std::string pending_logs_app, pending_logs_msg;
     int logs = 0;
     std::string logs_msg;
+    std::string logs_report, logs_report_url; /* (2.0) the report to finish on a phone */
+    /* (2.0) Link a phone: whether its screen is open, a code asked for, a poll wanted now,
+     * devices to let go, what the site last said, and what phones sent (for the screens). */
+    bool link_open = false, link_want_code = false, link_poll_now = false, link_hello = false;
+    std::vector<std::string> link_unlinks;
+    LinkInfo link;
+    double link_code_until = 0;
+    std::vector<LinkAction> link_actions;
+    /* (2.0) Custom sources (sources.json, in the order added), each one's apps as the site
+     * last gave them (sources/<key>.json), the ones to read now, and a report being sent
+     * (src_report as logs). */
+    std::vector<Source> sources;
+    std::map<std::string, std::vector<App>> source_apps; /* by Source::value */
+    std::set<std::string> sources_due;
+    bool pending_src_report = false;
+    std::string src_report_value, src_report_why, src_report_msg;
+    int src_report = 0;
+    /* (2.0) The charts; whether the admin marked this console as a tester, and whether it
+     * looks at the test catalog (testview: on unless the player turned it off). */
+    Charts charts;
+    bool tester = false, test_view = true;
+    /* (2.0) Install counts for the charts, to tell the site: "+id version" or "-id". */
+    std::vector<std::string> stats_due;
+    /* (2.0) Title IDs the site says are taken (ids.json): never given to a moved app. */
+    std::set<std::string> taken_ids;
+    /* (2.0) The custom sources' apps in the catalog now, and each one's repo: whose installs
+     * they can call theirs (Engine::installed). */
+    std::map<std::string, std::string> custom_repos;
 };
 Shared g;
 
@@ -273,13 +308,42 @@ void fail_job(const std::string &why)
 /* ---- The catalog ------------------------------------------------------------------ */
 void load_beta();
 void merge_beta(Catalog &c);
+void apply_moves(Catalog &c);
+void load_sources();
+bool parse_charts(const std::string &text, Charts &out);
+bool parse_ids(const std::string &text, std::set<std::string> &out);
+std::string json_text(const std::string &s);
+void adopt_renamed(Catalog &c);
 
 void load_cached()
 {
     load_beta();
+    load_sources();
     std::string text;
     Catalog c;
-    if (read_file(g.data + "/catalog.json", text) && parse_catalog(text, c))
+    {
+        /* (2.0) The charts and the taken title IDs, as last read. */
+        Charts ch;
+        if (read_file(g.data + "/charts.json", text) && parse_charts(text, ch))
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.charts = ch;
+        }
+        std::set<std::string> ids;
+        if (read_file(g.data + "/ids.json", text) && parse_ids(text, ids))
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.taken_ids.swap(ids);
+        }
+    }
+    /* (2.0) A tester's console: the test catalog it last read, when it has one. */
+    bool test = false;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        test = g.tester && g.test_view;
+    }
+    if ((test && read_file(g.data + "/catalog-test.json", text) && parse_catalog(text, c)) ||
+        (read_file(g.data + "/catalog.json", text) && parse_catalog(text, c)))
     {
         std::lock_guard<std::mutex> l(g.m);
         g.catalog = c;
@@ -303,15 +367,65 @@ void attach_art(Catalog &c)
         }
 }
 
+std::string beta_form(const char *action, const std::string &more);
+
+/* (2.0) The catalog this console saved last, the test one or everyone's: straight away when
+ * it stops (or starts) being a tester or the player switches, before the site is asked. */
+void use_cached_catalog(bool test)
+{
+    std::string text;
+    Catalog c;
+    if (!((test && read_file(g.data + "/catalog-test.json", text) && parse_catalog(text, c)) ||
+          (!test && read_file(g.data + "/catalog.json", text) && parse_catalog(text, c))))
+        return;
+    std::lock_guard<std::mutex> l(g.m);
+    g.catalog = c;
+    merge_beta(g.catalog);
+    attach_art(g.catalog);
+    g.have_catalog = true;
+    ++g.revision;
+}
+
 void refresh_catalog(porpoise::http::Session &http)
 {
-    std::vector<std::uint8_t> body;
-    const int status = http.get(kCatalogUrl, body, {}, 4u << 20);
-    Catalog c;
-    const std::string text(body.begin(), body.end());
-    if (status == 200 && parse_catalog(text, c))
+    bool test = false;
     {
-        write_file(g.data + "/catalog.json", text.data(), text.size());
+        std::lock_guard<std::mutex> l(g.m);
+        test = g.tester && g.test_view && !g.beta_install.empty();
+    }
+    std::vector<std::uint8_t> body;
+    Catalog c;
+    int status = 0;
+    bool from_test = false;
+    if (test)
+    {
+        /* (2.0) A tester's console: the catalog with the testers-only apps in it. If the site
+         * won't give it (no longer a tester), the one everyone gets. */
+        const std::string form = beta_form("test", "");
+        status = http.request(kTestCatalogUrl, &form, body, 4u << 20);
+        from_test = status == 200 && parse_catalog(std::string(body.begin(), body.end()), c);
+        if (!from_test) slog("catalog: the test catalog didn't come (HTTP %d); reading the public one", status);
+        if (status == 403)
+        {
+            /* Not a tester any more: everyone's catalog from here on, the saved one first. */
+            std::remove((g.data + "/tester").c_str());
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                g.tester = false;
+                ++g.revision;
+            }
+            use_cached_catalog(false);
+        }
+    }
+    if (!from_test)
+    {
+        body.clear();
+        status = http.get(kCatalogUrl, body, {}, 4u << 20);
+    }
+    const std::string text(body.begin(), body.end());
+    if (status == 200 && (from_test || parse_catalog(text, c)))
+    {
+        write_file(g.data + (from_test ? "/catalog-test.json" : "/catalog.json"), text.data(), text.size());
         std::lock_guard<std::mutex> l(g.m);
         g.catalog = c;
         merge_beta(g.catalog);
@@ -320,7 +434,7 @@ void refresh_catalog(porpoise::http::Session &http)
         g.online = true;
         ++g.revision;
     }
-    slog("catalog: HTTP %d, %zu bytes, %zu games\n", status, body.size(), c.apps.size());
+    slog("catalog%s: HTTP %d, %zu bytes, %zu games\n", from_test ? " (test)" : "", status, body.size(), c.apps.size());
 }
 
 /* ---- Beta games (1.1.0) ------------------------------------------------------------- */
@@ -344,6 +458,31 @@ void merge_beta(Catalog &c)
         for (const App &a : c.soon) there = there || a.id == b.id;
         if (!there) c.apps.push_back(b);
     }
+    /* (2.0) The custom sources' apps, after the catalog's: an ID the catalog (or a source
+     * before) has is theirs. */
+    c.apps.erase(std::remove_if(c.apps.begin(), c.apps.end(), [](const App &a) { return a.custom; }), c.apps.end());
+    std::set<std::string> ids;
+    for (const App &a : c.apps) ids.insert(a.id);
+    for (const App &a : c.soon) ids.insert(a.id);
+    int order = 100000;
+    std::size_t custom = 0;
+    for (const Source &s : g.sources)
+    {
+        auto it = g.source_apps.find(s.value);
+        if (it == g.source_apps.end()) continue;
+        for (App a : it->second)
+            if (custom < 300 && ids.insert(a.id).second) /* 300 in all, from every source */
+            {
+                ++custom;
+                a.order = order++;
+                c.apps.push_back(a);
+            }
+    }
+    adopt_renamed(c);
+    apply_moves(c); /* (2.0) games under a new title ID: their folders follow */
+    g.custom_repos.clear();
+    for (const App &a : c.apps)
+        if (a.custom) g.custom_repos[a.id] = a.repo;
 }
 
 /* What the store kept: its ID and token on the site, and the beta games it had. */
@@ -460,6 +599,15 @@ void run_redeem(const std::string &code)
         return redeem_done(3, status < 0 ? "recompstore.com didn't answer. Check your connection and try again."
                                          : "recompstore.com can't check codes right now. Try again in a moment.", "");
     if (!ok) return redeem_done(3, j["error"].str("That code didn't work."), "");
+    if (j["linked"].boolean(false))
+    {
+        /* (2.0) A code the website made: a phone is linked to this console now. */
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.link_poll_now = true;
+        }
+        return redeem_done(2, j["message"].str("Your phone is linked."), "");
+    }
     const std::string install = j["install"].str(), token = j["token"].str();
     if (lower_hex(install, 16) && lower_hex(token, 32))
     {
@@ -530,6 +678,11 @@ void run_send_logs(const std::string &id, const std::string &message)
         ++n;
         form += "&name%5B%5D=" + form_value(f.name) + "&text%5B%5D=" + form_value(text);
     }
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        g.logs_report.clear();
+        g.logs_report_url.clear();
+    }
     porpoise::http::Session http("logs", "RecompStore/1.1");
     if (!http.init()) return logs_done(3, "Your PS5 isn't online. Connect it and try again.");
     std::vector<std::uint8_t> body;
@@ -543,7 +696,617 @@ void run_send_logs(const std::string &id, const std::string &message)
         return logs_done(3, status < 0 ? "recompstore.com didn't answer. Check your connection and try again."
                                        : "recompstore.com couldn't take them right now. Try again in a moment.");
     if (!ok) return logs_done(3, j["error"].str("They didn't go. Try again in a moment."));
+    {
+        /* (2.0) The site's report for them, to finish on a phone (with pictures). */
+        std::lock_guard<std::mutex> l(g.m);
+        g.logs_report = j["report"].str();
+        g.logs_report_url = j["url"].str();
+        if (g.logs_report.size() > 12 || g.logs_report_url.rfind("https://", 0) != 0) g.logs_report.clear(), g.logs_report_url.clear();
+    }
     logs_done(2, j["message"].str("Sent. Thanks for helping."));
+}
+
+/* ---- Link a phone (2.0) ---------------------------------------------------------------
+ * A thread of its own, so the screens never wait on it. The console's HTTP is one session
+ * at a time across the store, so it opens one for a short burst of requests and lets it go
+ * straight after (during an install it simply waits its turn). */
+double mono_s();
+std::string sources_state_json();
+
+/* What the site keeps for My PS5: the apps on this console, what's newer, free space. */
+std::string link_state_json()
+{
+    Catalog c;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        c = g.catalog;
+    }
+    std::string apps;
+    auto esc = [](const std::string &v) {
+        std::string o;
+        for (const unsigned char ch : v)
+            if (ch == '"' || ch == '\\') { o += '\\'; o += char(ch); }
+            else if (ch >= 0x20) o += char(ch);
+        return o;
+    };
+    for (const App &a : c.apps)
+    {
+        std::string v = engine().installed(a.id);
+        if (v.empty()) continue;
+        std::string want = engine().newest_version(a);
+        if (want.empty() || (!a.version.empty() && version_newer(a.version, want))) want = a.version;
+        want.erase(0, version_start(want));
+        const bool update = v != "?" && !want.empty() && version_key(v) != version_key(want) && !version_newer(v, want);
+        v.erase(0, version_start(v));
+        apps += std::string(apps.empty() ? "" : ",") + "{\"id\":\"" + esc(a.id) + "\",\"name\":\"" + esc(a.name) + "\",\"version\":\"" +
+                esc(v == "?" ? std::string() : v) + "\",\"update\":\"" + esc(update ? want : std::string()) + "\",\"category\":\"" +
+                esc(a.category) + "\"}";
+    }
+    double free_gb = 0;
+    struct statvfs fs;
+    if (statvfs("/data", &fs) == 0) free_gb = double(fs.f_bavail) * double(fs.f_frsize) / 1073741824.0;
+    char tail[64];
+    std::snprintf(tail, sizeof tail, "],\"free_gb\":%.1f}", free_gb);
+    return "{\"apps\":[" + apps + "],\"sources\":[" + sources_state_json() + tail;
+}
+
+/* The site's answer to a link request, as JSON; false when it didn't answer with one. */
+bool link_ask(porpoise::http::Session &http, const char *action, const std::string &more, Json &j, int *status = nullptr)
+{
+    const std::string form = beta_form(action, more);
+    std::vector<std::uint8_t> body;
+    const int st = http.request(kLinkUrl, &form, body, 256u << 10);
+    if (status) *status = st;
+    return Json::parse(std::string(body.begin(), body.end()), j) && j.is_object();
+}
+
+/* This console's ID and token, made by the site the first time (beta.json, as beta codes
+ * have used since 1.1.0). */
+bool link_hello(porpoise::http::Session &http)
+{
+    Json j;
+    int st = 0;
+    if (!link_ask(http, "hello", "", j, &st) || !j["ok"].boolean(false))
+    {
+        slog("link: hello HTTP %d, %s", st, j["error"].str("no answer").c_str());
+        return false;
+    }
+    const std::string install = j["install"].str(), token = j["token"].str();
+    if (!lower_hex(install, 16) || !lower_hex(token, 32)) return false;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        changed = install != g.beta_install || token != g.beta_token;
+        g.beta_install = install;
+        g.beta_token = token;
+    }
+    if (changed)
+    {
+        const std::string text = "{\"install\":\"" + install + "\",\"token\":\"" + token + "\"}\n";
+        if (!write_file(g.data + "/beta.json", text.data(), text.size()))
+            slog("link: couldn't save this console's ID in %s/beta.json", g.data.c_str());
+        slog("link: this console is %s on recompstore.com%s", install.c_str(), j["new"].boolean(false) ? " (new)" : "");
+    }
+    /* (2.0) A console the admin marked as a tester reads the test catalog (the next refresh,
+     * straight away). */
+    const bool tester = j["tester"].boolean(false);
+    bool flip = false;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        flip = tester != g.tester;
+        g.tester = tester;
+        if (flip && g.test_view) g.force_check = true;
+        if (flip) ++g.revision;
+    }
+    if (flip)
+    {
+        if (tester) write_file(g.data + "/tester", "1\n", 2);
+        else std::remove((g.data + "/tester").c_str());
+        bool view = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            view = g.test_view;
+        }
+        if (view) use_cached_catalog(tester);
+        slog("link: %s", tester ? "this console is a tester: it reads the test catalog" : "this console isn't a tester (any more)");
+    }
+    return true;
+}
+
+/* (2.0) Installs and deletes, counted for the charts (one per console and app). */
+void link_stats(porpoise::http::Session &http)
+{
+    std::vector<std::string> due;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        due.swap(g.stats_due);
+    }
+    for (const std::string &d : due)
+    {
+        if (d.size() < 2) continue;
+        const bool add = d[0] == '+';
+        const std::size_t sp = d.find(' ');
+        const std::string app = d.substr(1, sp == std::string::npos ? std::string::npos : sp - 1);
+        const std::string ver = sp == std::string::npos ? std::string() : d.substr(sp + 1);
+        const std::string form = beta_form(add ? "installed" : "removed", "&app=" + form_value(app) + (add ? "&version=" + form_value(ver) : ""));
+        std::vector<std::uint8_t> body;
+        const int st = http.request(kStatsUrl, &form, body, 16u << 10);
+        if (st != 200) slog("stats: %s %s: HTTP %d", add ? "installed" : "removed", app.c_str(), st);
+    }
+}
+
+void link_poll(porpoise::http::Session &http)
+{
+    Json j;
+    int st = 0;
+    if (!link_ask(http, "poll", "", j, &st) || !j["ok"].boolean(false))
+    {
+        slog("link: poll HTTP %d, %s", st, j["error"].str("no answer").c_str());
+        return;
+    }
+    std::vector<LinkDevice> devices;
+    for (std::size_t i = 0; i < j["devices"].size() && devices.size() < 16; ++i)
+    {
+        const Json &d = j["devices"][i];
+        LinkDevice x;
+        x.id = d["id"].str().substr(0, 32);
+        x.label = d["label"].str("A phone").substr(0, 60);
+        x.since = d["since"].str().substr(0, 20);
+        x.seen = d["seen"].str().substr(0, 32);
+        if (!x.id.empty()) devices.push_back(x);
+    }
+    std::vector<LinkAction> actions;
+    for (std::size_t i = 0; i < j["actions"].size() && actions.size() < 16; ++i)
+    {
+        const Json &a = j["actions"][i];
+        LinkAction x;
+        x.kind = a["kind"].str();
+        x.app = a["data"]["app"].str().substr(0, 64);
+        x.repo = a["data"]["repo"].str().substr(0, 140);
+        x.list = a["data"]["list"].str().substr(0, 500);
+        x.report = a["data"]["report"].str().substr(0, 16);
+        if (x.kind == "install" || x.kind == "source" || x.kind == "refresh" || x.kind == "report") actions.push_back(x);
+    }
+    std::lock_guard<std::mutex> l(g.m);
+    bool changed = devices.size() != g.link.devices.size();
+    for (std::size_t i = 0; !changed && i < devices.size(); ++i) changed = devices[i].id != g.link.devices[i].id;
+    g.link.devices = devices;
+    g.link.known = true;
+    for (const LinkAction &a : actions)
+    {
+        slog("link: from a phone: %s %s%s%s", a.kind.c_str(), a.app.c_str(), a.repo.c_str(), a.list.c_str());
+        if (a.kind == "refresh") g.force_check = true;
+        else g.link_actions.push_back(a);
+    }
+    if (changed || !actions.empty()) ++g.revision;
+}
+
+void link_code(porpoise::http::Session &http)
+{
+    Json j;
+    int st = 0;
+    const bool answered = link_ask(http, "code", "", j, &st);
+    std::lock_guard<std::mutex> l(g.m);
+    if (answered && j["ok"].boolean(false) && !j["code"].str().empty() && j["code"].str().size() <= 8)
+    {
+        g.link.code_state = 2;
+        g.link.code = j["code"].str();
+        g.link.url = j["url"].str();
+        if (g.link.url.rfind("https://", 0) != 0) g.link.url = "https://recompstore.com/l/" + g.link.code;
+        g.link.error.clear();
+        g.link_code_until = mono_s() + double(std::clamp<long long>(j["expires"].integer(600), 30, 3600));
+    }
+    else
+    {
+        g.link.code_state = 3;
+        g.link.error = answered ? j["error"].str("The site couldn't make a code. Try again in a moment.")
+                                : "recompstore.com didn't answer. Check your connection and try again.";
+    }
+    ++g.revision;
+    slog("link: code HTTP %d, %s", st, g.link.code_state == 2 ? "got one" : g.link.error.c_str());
+}
+
+void *link_worker(void *)
+{
+    bool hello_ok = false;
+    double next_try = 0, next_poll = 0, last_push = -1e9;
+    std::string last_state;
+    for (;;)
+    {
+        usleep(200000);
+        const double now = mono_s();
+        bool open = false, want_code = false, poll_now = false;
+        std::vector<std::string> unlinks;
+        std::size_t devices = 0;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            open = g.link_open;
+            want_code = g.link_want_code;
+            poll_now = g.link_poll_now;
+            unlinks.swap(g.link_unlinks);
+            devices = g.link.devices.size();
+            if (g.link_hello) hello_ok = false; /* asked again (Refresh) */
+            g.link_hello = false;
+            /* A code that ran out: a new one while the screen shows it. */
+            if (open && g.link.code_state == 2 && now > g.link_code_until - 5) want_code = true;
+        }
+        bool stats = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            stats = !g.stats_due.empty();
+        }
+        const double interval = open ? 3 : devices > 0 ? 15 : 300;
+        const bool push_due = devices > 0 && now - last_push >= 60;
+        if (now < next_try || (hello_ok && !want_code && !poll_now && unlinks.empty() && now < next_poll && !push_due && !stats))
+            continue;
+        porpoise::http::Session http("link", "RecompStore/2.0");
+        if (!http.init())
+        {
+            next_try = now + 30;
+            continue;
+        }
+        if (!hello_ok)
+        {
+            hello_ok = link_hello(http);
+            if (!hello_ok)
+            {
+                next_try = now + 60;
+                continue;
+            }
+            next_poll = 0;
+        }
+        if (want_code)
+        {
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                g.link_want_code = false;
+                if (g.link.code_state != 2) g.link.code_state = 1;
+            }
+            link_code(http);
+        }
+        for (const std::string &d : unlinks)
+        {
+            Json j;
+            link_ask(http, "unlink", "&device=" + form_value(d), j);
+            slog("link: unlinked %s: %s", d.c_str(), j["ok"].boolean(false) ? "ok" : j["error"].str("no answer").c_str());
+            poll_now = true;
+        }
+        if (poll_now || mono_s() >= next_poll)
+        {
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                g.link_poll_now = false;
+            }
+            link_poll(http);
+            next_poll = mono_s() + interval;
+        }
+        if (stats) link_stats(http);
+        if (push_due)
+        {
+            const std::string state = link_state_json();
+            if (state != last_state && state.size() < (60u << 10))
+            {
+                Json j;
+                link_ask(http, "state", "&state=" + form_value(state), j);
+                last_state = state;
+            }
+            last_push = mono_s();
+        }
+    }
+    return nullptr;
+}
+
+/* ---- Custom sources (2.0) -------------------------------------------------------------
+ * A GitHub repo or a list of them the player added. recompstore.com reads it (source.php)
+ * and answers with its apps, shaped like the catalog's; they join the store's after the
+ * catalog's own, marked custom. Kept in sources.json, each one's last answer in sources/. */
+bool repo_text_ok(const std::string &r)
+{
+    const std::size_t slash = r.find('/');
+    if (slash == std::string::npos || slash == 0 || slash > 100 || r.size() - slash - 1 == 0 || r.size() - slash - 1 > 100 ||
+        r.find('/', slash + 1) != std::string::npos || r.find("..") != std::string::npos)
+        return false;
+    for (const unsigned char c : r)
+        if (!(std::isalnum(c) || c == '_' || c == '.' || c == '-' || c == '/')) return false;
+    return true;
+}
+
+/* An app ID a source may use: a title ID or "gh-" and hex from the site, never the store's own. */
+bool source_id_ok(const std::string &id)
+{
+    if (id.size() < 3 || id.size() > 48 || id == "PPSA92000" || id.find("..") != std::string::npos) return false;
+    for (const unsigned char c : id)
+        if (!(std::isalnum(c) || c == '_' || c == '.' || c == '-')) return false;
+    return true;
+}
+
+std::string source_file(const std::string &value)
+{
+    unsigned long long h = 1469598103934665603ULL;
+    for (const unsigned char c : value) h = (h ^ c) * 1099511628211ULL;
+    char b[24];
+    std::snprintf(b, sizeof b, "%016llx", h);
+    return g.data + "/sources/" + b + ".json";
+}
+
+/* A source's apps from the site's answer, made safe whatever it says: GitHub releases only,
+ * nothing that reaches outside the app's own folder (no saves, kept files or disc slots). */
+std::vector<App> source_apps_from(const Catalog &c, const Source &s)
+{
+    std::vector<App> out;
+    for (App a : c.apps)
+    {
+        if (!source_id_ok(a.id) || a.source != "github" || !repo_text_ok(a.repo) || a.asset.empty() ||
+            a.asset.find('/') != std::string::npos || a.title_id == "PPSA92000")
+            continue;
+        bool twice = false;
+        for (const App &o : out) twice = twice || o.id == a.id;
+        if (twice) continue;
+        a.custom = true;
+        a.beta = a.soon = a.testing = a.has_setup = false;
+        a.kind = "community";
+        a.source_value = s.value;
+        if (a.source_name.empty()) a.source_name = s.name.empty() ? s.value : s.name;
+        a.url.clear();
+        a.sha256.clear(); /* GitHub's own digest for the file is checked */
+        a.inside.clear();
+        a.bytes = 0;
+        a.saves.clear();
+        a.keep.clear();
+        a.logs.clear();
+        a.slots.clear();
+        a.data_dir.clear();
+        a.logo_url.clear();
+        a.hero_web_url.clear();
+        a.news.clear();
+        /* Pictures only from the site (it keeps a copy of each app's icon): never fetched from
+         * anywhere a source names. */
+        for (std::string *u : {&a.icon_url, &a.hero_url})
+            if (u->rfind("https://recompstore.com/media/", 0) != 0 || u->size() > 300 || u->find("..") != std::string::npos) u->clear();
+        if (!a.title_id.empty() && a.title_id != a.id && a.id.rfind("gh-", 0) != 0) a.title_id = a.id;
+        out.push_back(a);
+        if (out.size() >= 100) break;
+    }
+    return out;
+}
+
+void save_sources()
+{
+    std::string text = "[";
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const Source &s : g.sources)
+            text += std::string(text.size() > 1 ? ",\n " : "") + "{\"kind\":" + json_text(s.kind) + ",\"value\":" + json_text(s.value) +
+                    ",\"name\":" + json_text(s.name) + ",\"author\":" + json_text(s.author) + "}";
+    }
+    text += "]\n";
+    if (!write_file(g.data + "/sources.json", text.data(), text.size())) slog("sources: couldn't save sources.json");
+}
+
+/* At start: the sources, and the apps each had the last time the site was asked. */
+void load_sources()
+{
+    std::string text;
+    Json j;
+    std::vector<Source> list;
+    std::map<std::string, std::vector<App>> apps;
+    if (read_file(g.data + "/sources.json", text) && Json::parse(text, j) && j.is_array())
+        for (std::size_t i = 0; i < j.size() && list.size() < 30; ++i)
+        {
+            Source s;
+            s.kind = j[i]["kind"].str();
+            s.value = j[i]["value"].str();
+            s.name = j[i]["name"].str().substr(0, 80);
+            s.author = j[i]["author"].str().substr(0, 60);
+            if ((s.kind == "repo" && !repo_text_ok(s.value)) || (s.kind == "list" && s.value.rfind("https://", 0) != 0) ||
+                (s.kind != "repo" && s.kind != "list"))
+                continue;
+            std::string cached;
+            Catalog c;
+            if (read_file(source_file(s.value), cached) && parse_catalog(cached, c))
+            {
+                apps[s.value] = source_apps_from(c, s);
+                s.apps = apps[s.value].size();
+                s.state = 2;
+            }
+            list.push_back(s);
+        }
+    std::lock_guard<std::mutex> l(g.m);
+    g.sources = list;
+    g.source_apps = apps;
+    for (const Source &s : list) g.sources_due.insert(s.value);
+}
+
+/* One source, read through the site. Its apps change only when the site answered: one it
+ * couldn't read keeps the apps it had (a repo that's down for a moment), one taken down
+ * loses them. */
+void fetch_source(porpoise::http::Session &http, const std::string &value)
+{
+    Source s;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        bool found = false;
+        for (Source &x : g.sources)
+            if (x.value == value)
+            {
+                if (x.state != 2) x.state = 1;
+                s = x;
+                found = true;
+            }
+        if (!found) return;
+        ++g.revision;
+    }
+    const std::string url = std::string(kSourceUrl) + (s.kind == "repo" ? "?repo=" : "?list=") + form_value(s.value);
+    std::vector<std::uint8_t> body;
+    const int st = http.get(url, body, {}, 4u << 20);
+    const std::string text(body.begin(), body.end());
+    Json j;
+    const bool answered = Json::parse(text, j) && j.is_object();
+    Catalog c;
+    std::vector<App> apps;
+    bool keep_apps = true, drop = false;
+    if (!answered)
+    {
+        s.error = st < 0 ? "recompstore.com didn't answer. It's tried again with the next refresh."
+                         : "recompstore.com couldn't read it right now. It's tried again with the next refresh.";
+        if (s.state != 2) s.state = 3;
+    }
+    else if (!j["ok"].boolean(false))
+    {
+        s.error = j["error"].str("It couldn't be read.").substr(0, 200);
+        s.state = j["blocked"].boolean(false) ? 4 : 3;
+        drop = s.state == 4;
+        keep_apps = !drop;
+    }
+    else if (parse_catalog(text, c))
+    {
+        s.name = j["source"]["name"].str(s.name.empty() ? s.value : s.name).substr(0, 80);
+        s.author = j["source"]["author"].str(s.author).substr(0, 60);
+        s.problems.clear();
+        for (std::size_t i = 0; i < j["errors"].size() && s.problems.size() < 20; ++i)
+            s.problems.push_back((j["errors"][i]["repo"].str() + ": " + j["errors"][i]["error"].str()).substr(0, 200));
+        apps = source_apps_from(c, s);
+        s.apps = apps.size();
+        s.state = 2;
+        s.error.clear();
+        keep_apps = false;
+        make_dirs(g.data + "/sources");
+        write_file(source_file(s.value), text.data(), text.size());
+    }
+    else
+    {
+        s.error = "recompstore.com's answer couldn't be read.";
+        if (s.state != 2) s.state = 3;
+    }
+    if (drop) std::remove(source_file(s.value).c_str());
+    if (s.state == 2 && !keep_apps)
+        slog("source %s: HTTP %d, %zu apps, %zu problems", s.value.c_str(), st, apps.size(), s.problems.size());
+    else
+        slog("source %s: HTTP %d, %s", s.value.c_str(), st, s.error.c_str());
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (Source &x : g.sources)
+            if (x.value == value)
+            {
+                if (keep_apps) s.apps = g.source_apps.count(value) ? g.source_apps[value].size() : 0;
+                x = s;
+                if (!keep_apps) g.source_apps[value] = apps;
+                if (drop) g.source_apps.erase(value);
+            }
+        merge_beta(g.catalog);
+        attach_art(g.catalog);
+        ++g.revision;
+    }
+    save_sources();
+}
+
+/* What the site keeps for My PS5: the sources, as {kind, value, name}. */
+std::string sources_state_json()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    std::string out;
+    for (const Source &s : g.sources)
+        out += std::string(out.empty() ? "" : ",") + "{\"kind\":" + json_text(s.kind) + ",\"value\":" + json_text(s.value) +
+               ",\"name\":" + json_text(s.name.empty() ? s.value : s.name) + "}";
+    return out;
+}
+
+void run_report_source(const std::string &value, const std::string &why)
+{
+    auto done = [](int state, const std::string &msg) {
+        std::lock_guard<std::mutex> l(g.m);
+        g.src_report = state;
+        g.src_report_msg = msg;
+        ++g.revision;
+    };
+    porpoise::http::Session http("source", "RecompStore/2.0");
+    if (!http.init()) return done(3, "Your PS5 isn't online. Connect it and try again.");
+    const std::string form = beta_form("report", "&value=" + form_value(value) + "&why=" + form_value(why));
+    std::vector<std::uint8_t> body;
+    const int st = http.request(kSourceUrl, &form, body, 64u << 10);
+    Json j;
+    const bool answered = Json::parse(std::string(body.begin(), body.end()), j) && j.is_object();
+    slog("source report %s: HTTP %d", value.c_str(), st);
+    if (!answered) return done(3, "recompstore.com didn't answer. Try again in a moment.");
+    if (!j["ok"].boolean(false)) return done(3, j["error"].str("It didn't go. Try again in a moment."));
+    done(2, j["message"].str("Thanks. We'll look at it."));
+}
+
+/* ---- The charts (2.0) ------------------------------------------------------------------ */
+bool parse_charts(const std::string &text, Charts &out)
+{
+    Json j;
+    if (!Json::parse(text, j) || !j.is_object() || !j["ok"].boolean(false)) return false;
+    out = Charts();
+    auto ids = [&](const Json &a, std::vector<std::string> &v) {
+        for (std::size_t i = 0; i < a.size() && v.size() < 50; ++i)
+        {
+            const std::string id = a[i].is_object() ? a[i]["id"].str() : a[i].str();
+            if (!id.empty() && id.size() <= 48) v.push_back(id);
+        }
+    };
+    ids(j["top"], out.top);
+    ids(j["trending"], out.trending);
+    ids(j["new"], out.fresh);
+    ids(j["updated"], out.updated);
+    for (const auto &kv : j["stats"].members())
+    {
+        if (out.stats.size() >= 500) break;
+        ChartStat c;
+        c.installs = kv.second["installs"].integer(0);
+        c.stars = kv.second["stars"].integer(-1);
+        c.downloads = kv.second["downloads"].integer(-1);
+        out.stats.push_back({kv.first, c});
+    }
+    out.have = true;
+    return true;
+}
+
+/* (2.0) The site's list of taken title IDs (api/ids.php): every app in the store and the ones the
+ * admin knows of outside it. */
+bool parse_ids(const std::string &text, std::set<std::string> &out)
+{
+    Json j;
+    if (!Json::parse(text, j) || !j.is_object() || !j["ok"].boolean(false)) return false;
+    out.clear();
+    for (const char *list : {"store", "taken"})
+        for (std::size_t i = 0; i < j[list].size() && out.size() < 5000; ++i)
+        {
+            const std::string id = j[list][i]["id"].str();
+            if (title_id_ok(id)) out.insert(id);
+        }
+    return true;
+}
+
+void refresh_ids(porpoise::http::Session &http)
+{
+    std::vector<std::uint8_t> body;
+    const int st = http.get(kIdsUrl, body, {}, 1u << 20);
+    const std::string text(body.begin(), body.end());
+    std::set<std::string> ids;
+    if (st == 200 && parse_ids(text, ids))
+    {
+        write_file(g.data + "/ids.json", text.data(), text.size());
+        std::lock_guard<std::mutex> l(g.m);
+        g.taken_ids.swap(ids);
+    }
+}
+
+void refresh_charts(porpoise::http::Session &http)
+{
+    std::vector<std::uint8_t> body;
+    const int st = http.get(kChartsUrl, body, {}, 1u << 20);
+    const std::string text(body.begin(), body.end());
+    Charts c;
+    const bool ok = st == 200 && parse_charts(text, c);
+    if (ok)
+    {
+        write_file(g.data + "/charts.json", text.data(), text.size());
+        std::lock_guard<std::mutex> l(g.m);
+        g.charts = c;
+        ++g.revision;
+    }
+    slog("charts: HTTP %d%s", st, ok ? "" : " (not read)");
 }
 
 void fetch_art(porpoise::http::Session &http)
@@ -586,6 +1349,20 @@ struct Target
 
 void remember_releases(const std::string &repo, const std::string &text);
 
+/* (2.0) A repo's releases (GitHub's /releases?per_page=30): through recompstore.com first,
+ * which asks GitHub once for every PS5 and keeps a copy when GitHub is down; from GitHub
+ * itself when the site doesn't answer with them. The HTTP status, as GitHub's. */
+int github_releases(porpoise::http::Session &http, const std::string &repo, std::vector<std::uint8_t> &body)
+{
+    body.clear();
+    const int st = http.get(std::string(kGhUrl) + "?repo=" + form_value(repo), body, {}, 8u << 20);
+    Json j;
+    if (st == 200 && Json::parse(std::string(body.begin(), body.end()), j) && j.is_array()) return 200;
+    slog("github %s: recompstore.com answered HTTP %d; asking GitHub", repo.c_str(), st);
+    body.clear();
+    return http.get("https://api.github.com/repos/" + repo + "/releases?per_page=30", body, {}, 8u << 20);
+}
+
 bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string &err)
 {
     if (a.source != "github")
@@ -600,7 +1377,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
     /* The newest release that has the game's zip. Pre-releases count: many ports ship as
      * one before they call a version final. */
     std::vector<std::uint8_t> body;
-    const int status = http.get("https://api.github.com/repos/" + a.repo + "/releases?per_page=30", body, {}, 8u << 20);
+    const int status = github_releases(http, a.repo, body);
     Json list;
     if (status != 200 || !Json::parse(std::string(body.begin(), body.end()), list) || !list.is_array())
     {
@@ -685,7 +1462,130 @@ enum class Copier : int { Done, Failed, Unavailable };
 Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed = nullptr,
                   const std::string &extra = "");
 
-void run_install(const std::string &id)
+/* (2.0) The title ID guard (below, with the games already on the console). */
+struct Clash
+{
+    bool found = false, pkg = false;
+    std::string with; /* the other app's name, "" when it can't be told */
+};
+Clash find_clash(const App &a, const std::string &tid, const std::string &incoming_param);
+std::string free_move_id();
+void remember_own(const std::string &app_id, const std::string &tid);
+std::string lower_text(std::string s);
+std::string tid_folder(const std::string &tid);
+std::vector<std::string> homebrew_roots();
+
+/* (2.0) The drive a folder is on: "/mnt/usb0", "/mnt/ext1", or "/data" for the console's own. */
+std::string drive_of(const std::string &path)
+{
+    if (path.rfind("/mnt/", 0) != 0) return "/data";
+    const std::size_t end = path.find('/', 5);
+    return end == std::string::npos ? path : path.substr(0, end);
+}
+
+/* A drive that's there: an extended storage or M.2 folder that opens, a USB port with something in it. */
+bool drive_ready(const std::string &drive)
+{
+    if (drive == "/data") return true;
+    DIR *d = opendir(drive.c_str());
+    if (!d) return false;
+    bool any = false;
+    while (dirent *e = readdir(d))
+        if (std::strcmp(e->d_name, ".") && std::strcmp(e->d_name, "..")) { any = true; break; }
+    closedir(d);
+    return any || drive.rfind("/mnt/usb", 0) != 0;
+}
+
+/* (2.0) A custom app's release: the folder in it that's a PS5 app (eboot.bin with
+ * sce_sys/param.json beside it, the shallowest), as the name app_prefix finds it by (hint: its
+ * last part, "" at the top), and the title ID its param.json says. */
+bool learn_title(const std::string &archive, const std::string &want, std::string &tid, std::string &hint, std::string &param,
+                 std::string &why)
+{
+    std::vector<zip::Entry> entries;
+    if (!zip::list_any(archive, entries))
+    {
+        why = "The download couldn't be read. Try installing it again.";
+        return false;
+    }
+    std::set<std::string> names;
+    for (const zip::Entry &e : entries) names.insert(lower_text(e.name));
+    /* Every folder that's a PS5 app, the shallowest first. */
+    std::vector<std::string> apps;
+    for (const zip::Entry &e : entries)
+    {
+        const std::string n = lower_text(e.name);
+        if (n.size() < 9 || n.compare(n.size() - 9, 9, "eboot.bin") != 0) continue;
+        const std::string prefix = e.name.substr(0, e.name.size() - 9);
+        if (!prefix.empty() && prefix.back() != '/') continue;
+        if (names.count(lower_text(prefix) + "sce_sys/param.json") && apps.size() < 16) apps.push_back(prefix);
+    }
+    std::stable_sort(apps.begin(), apps.end(), [](const std::string &x, const std::string &y) {
+        return std::count(x.begin(), x.end(), '/') < std::count(y.begin(), y.end(), '/');
+    });
+    if (apps.empty())
+    {
+        why = "This release isn't a PS5 app: it has no eboot.bin with an sce_sys/param.json beside it.";
+        return false;
+    }
+    /* A release with several apps in it: the one whose title ID the source named, else the
+     * shallowest. */
+    Json pj;
+    bool read_any = false;
+    for (std::size_t i = 0; i < apps.size(); ++i)
+    {
+        std::string h = apps[i].empty() ? std::string() : apps[i].substr(0, apps[i].size() - 1);
+        h = h.substr(h.find_last_of('/') + 1);
+        std::string text;
+        Json j;
+        if (!zip::read_one(archive, h, "sce_sys/param.json", text, 1u << 20) || !Json::parse(text, j) || !j.is_object()) continue;
+        if (want.empty() || j["titleId"].str() == want)
+        {
+            pj = j;
+            hint = h;
+            param = text;
+            read_any = true;
+            break;
+        }
+    }
+    if (!read_any)
+    {
+        /* The app the source named isn't in this release (it was dropped from it): never
+         * another app in its place. */
+        why = want.empty() ? "The store couldn't read this release's sce_sys/param.json."
+                           : "This release doesn't have the app with title ID " + want + " any more, so nothing was installed.";
+        return false;
+    }
+    for (const unsigned char ch : hint)
+        if (ch < 0x20 || ch == 0x7F || ch == '\\')
+        {
+            why = "This release's folder name has characters the store can't use, so it wasn't installed.";
+            return false;
+        }
+    tid = pj["titleId"].str();
+    if (!title_id_ok(tid))
+    {
+        why = "This release's param.json has no title ID a PS5 app can have (like PPSA12345).";
+        return false;
+    }
+    if (tid == "PPSA92000")
+    {
+        why = "This release says it's Recomp Store itself (PPSA92000), so it wasn't installed.";
+        return false;
+    }
+    return true;
+}
+void remember_move(const std::string &app_id, const std::string &new_id);
+void forget_move(const std::string &app_id);
+bool retitle(const std::string &folder, const std::string &from, const std::string &to, std::string &why);
+void write_marker(const App &a, const std::string &folder, const std::string &title_id, const std::string &version);
+void apply_moves(Catalog &c);
+void scan_homebrew();
+std::string field_of(const std::string &text, const char *key);
+
+/* answer (2.0): 0 a plain install; after a title ID clash, 1 under its own new title ID,
+ * 2 over the other app's folder. */
+void run_install(const std::string &id, int answer)
 {
     porpoise::http::Session http("store-install", "RecompStore/0.1");
     App a;
@@ -702,43 +1602,103 @@ void run_install(const std::string &id)
     }
     if (!found) return fail_job("That game isn't in the catalog.");
     if (store_too_old(a))
-        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
+        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from the Library first (Updates).");
+    /* (2.0) Keep both: the game gets its own new title ID before anything is fetched, so the
+     * install below goes to that ID's folder (and every update after it). */
+    /* The move made here is taken back if the install stops before writing anything (a
+     * download that didn't finish): the game isn't left under a new ID with nothing there. */
+    struct MoveUndo
+    {
+        std::string id;
+        bool armed = false;
+        ~MoveUndo() { if (armed) forget_move(id); }
+    } undo{a.id};
+    if (answer == 1 && moved_id(a.id).empty())
+    {
+        if (!a.can_move) return fail_job(a.name + " has to keep its own title ID, so it can't be installed under a new one.");
+        const std::string fresh = free_move_id();
+        if (fresh.empty()) return fail_job("The store couldn't find a free title ID to give " + a.name + ".");
+        remember_move(a.id, fresh);
+        undo.armed = true;
+        std::lock_guard<std::mutex> l(g.m);
+        for (App &x : g.catalog.apps)
+            if (x.id == a.id) a = x; /* its data folder now under the new ID */
+    }
     if (!http.init()) return fail_job("Your PS5 isn't online.");
 
     Target t;
     std::string err;
     if (!resolve(http, a, t, err)) return fail_job(err);
 
-    /* Room for the zip and its unpacked files on disk, with some to spare. */
+    /* (2.0) The download kept from an install that stopped on a title ID clash: taken as it
+     * is when it's the same file, rather than downloaded twice. */
+    make_dirs(g.data + "/downloads");
+    const std::string held = g.data + "/downloads/" + a.id + ".held", held_info = held + ".txt";
+    bool reused = false, reused_inner = false;
+    {
+        std::string info;
+        struct stat hs;
+        if (answer != 0 && read_file(held_info, info) && stat(held.c_str(), &hs) == 0 && field_of(info, "url") == t.url &&
+            (t.size == 0 || field_of(info, "inner") == "1" || std::uint64_t(hs.st_size) == t.size))
+        {
+            reused = true;
+            reused_inner = field_of(info, "inner") == "1";
+            slog("install %s: using the download kept from before (%lld bytes)", a.id.c_str(), (long long)hs.st_size);
+        }
+        else
+            std::remove(held.c_str());
+        std::remove(held_info.c_str());
+    }
+
+    /* (2.0) Where it goes: where it already is, else the homebrew folder the player chose (the
+     * console's own, or a drive's). A drive that isn't there now stops it before the download. */
+    const std::string dest = app_folder(a.id), drive = drive_of(dest);
+    if (drive != "/data" && !drive_ready(drive))
+        return fail_job(a.name + " installs to " + dest.substr(0, dest.find_last_of('/')) +
+                        ", and that drive isn't connected. Connect it, or pick another place in Settings > Customize.");
+    /* Room for the zip and its unpacked files on disk, with some to spare: on the console for
+     * the download, and where it unpacks. */
     struct statvfs fs;
-    if (statvfs("/data", &fs) == 0 && t.size && std::uint64_t(fs.f_bavail) * fs.f_frsize < t.size * 3 + (512ull << 20))
+    const std::uint64_t data_need = t.size * (drive == "/data" ? 3 : 1) + (512ull << 20);
+    if (!reused && statvfs("/data", &fs) == 0 && t.size && std::uint64_t(fs.f_bavail) * fs.f_frsize < data_need)
         return fail_job("There isn't enough free space on your PS5.");
+    if (!reused && drive != "/data" && statvfs(drive.c_str(), &fs) == 0 && t.size &&
+        std::uint64_t(fs.f_bavail) * fs.f_frsize < t.size * 2 + (64ull << 20))
+        return fail_job("There isn't enough free space on " + drive + " for " + a.name + ".");
 
     /* Download to the store's own folder, checking the checksum as it arrives. */
-    make_dirs(g.data + "/downloads");
     const std::string zip_path = g.data + "/downloads/" + a.id + ".zip";
+    const std::string inner_path = g.data + "/downloads/" + a.id + ".inner.zip";
     std::remove(zip_path.c_str());
-    std::FILE *out = std::fopen(zip_path.c_str(), "wb");
-    if (!out) return fail_job("The store couldn't save the download on your PS5.");
     Sha256 sha;
     std::uint64_t got = 0;
     bool write_ok = true;
-    set_job("Downloading", 0, t.size);
-    timespec dl0;
-    clock_gettime(CLOCK_MONOTONIC, &dl0);
-    auto take = [&](const std::uint8_t *p, std::size_t n) {
-        if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
-        sha.update(p, n);
-        got += n;
-        set_job("Downloading", got, t.size);
-        return true;
-    };
-    const bool in_parts = a.source != "github" && t.size > 0;
-    slog("download %s: started%s", a.id.c_str(), in_parts ? " (in parts)" : "");
-    const int status = in_parts ? download_in_parts(http, t.url, t.size, take, got, write_ok)
-                                : http.get_stream(t.url, take);
-    std::fclose(out);
+    int status = 200;
+    if (reused)
     {
+        struct stat hs;
+        if (stat(held.c_str(), &hs) == 0) got = std::uint64_t(hs.st_size);
+        if (std::rename(held.c_str(), (reused_inner ? inner_path : zip_path).c_str()) != 0) status = -1;
+        t.size = got; /* checked when it was downloaded; (2.0) a kept inner zip is its own size */
+    }
+    else
+    {
+        std::FILE *out = std::fopen(zip_path.c_str(), "wb");
+        if (!out) return fail_job("The store couldn't save the download on your PS5.");
+        set_job("Downloading", 0, t.size);
+        timespec dl0;
+        clock_gettime(CLOCK_MONOTONIC, &dl0);
+        auto take = [&](const std::uint8_t *p, std::size_t n) {
+            if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
+            sha.update(p, n);
+            got += n;
+            set_job("Downloading", got, t.size);
+            return true;
+        };
+        const bool in_parts = a.source != "github" && t.size > 0;
+        slog("download %s: started%s", a.id.c_str(), in_parts ? " (in parts)" : "");
+        status = in_parts ? download_in_parts(http, t.url, t.size, take, got, write_ok) : http.get_stream(t.url, take);
+        std::fclose(out);
         timespec dl1;
         clock_gettime(CLOCK_MONOTONIC, &dl1);
         const double secs = double(dl1.tv_sec - dl0.tv_sec) + double(dl1.tv_nsec - dl0.tv_nsec) / 1e9;
@@ -754,13 +1714,13 @@ void run_install(const std::string &id)
         std::string path;
         std::FILE *f = nullptr;
         ~ZipFile() { if (f) std::fclose(f); std::remove(path.c_str()); } /* the store's own download, not the game */
-    } zf{zip_path};
+    } zf{zip_path}, kept_inner{reused_inner ? inner_path : std::string()}; /* (2.0) a kept inner zip goes too */
     if (!write_ok) return fail_job("Your PS5 ran out of room while downloading.");
     if (status != 200 || got == 0 || (t.size && got != t.size))
         return fail_job("The download didn't finish. Check your connection and try again.");
 
     set_job("Checking the download", got, got);
-    if (!t.sha256.empty())
+    if (!reused && !t.sha256.empty())
     {
         std::string want = t.sha256;
         for (char &c : want) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -774,7 +1734,12 @@ void run_install(const std::string &id)
         std::string path;
         ~InnerFile() { if (!path.empty()) std::remove(path.c_str()); }
     } inner;
-    if (!a.inside.empty())
+    if (reused_inner)
+    {
+        inner.path = inner_path;
+        install_zip = inner_path;
+    }
+    else if (!a.inside.empty())
     {
         set_job("Taking out the game's files", 0, 0);
         const std::string pattern = a.inside;
@@ -797,17 +1762,82 @@ void run_install(const std::string &id)
         install_zip = inner.path;
     }
 
+    /* (2.0) A custom source's app: its title ID is the one its release's param.json says (an
+     * ID like "gh-..." is only the store's name for it), and its folder in the archive is the
+     * one that's a PS5 app. A catalog app's folder is named after its ID, as before. */
+    std::string own = a.id, hint = a.id, learned_param;
+    if (a.custom)
+    {
+        set_job("Reading the release", 0, 0);
+        std::string why;
+        const std::string want = !a.title_id.empty() ? a.title_id : a.id.rfind("gh-", 0) != 0 ? a.id : std::string();
+        if (!learn_title(install_zip, want, own, hint, learned_param, why))
+        {
+            slog("install %s: %s", a.id.c_str(), why.c_str());
+            return fail_job(why);
+        }
+        slog("install %s: a PS5 app with title ID %s, in %s", a.id.c_str(), own.c_str(), hint.empty() ? "the top of the archive" : hint.c_str());
+        if (moved_id(a.id).empty() && answer != 2)
+        {
+            /* The catalog's own app, or another source's, with this title ID: that's the one. */
+            std::lock_guard<std::mutex> l(g.m);
+            for (const App &x : g.catalog.apps)
+                if (x.id != a.id && !x.custom && x.id == own && exists(g.data + "/installed/" + x.id + ".txt"))
+                    slog("install %s: %s from the catalog is installed with the same title ID", a.id.c_str(), x.id.c_str());
+        }
+    }
+
+    /* (2.0) The title ID guard: another app on this PS5 with this game's title ID stops the
+     * install before anything is written. The download is kept and the player picks: keep
+     * both (this one under a new ID), install over it (an older copy of the same app), or
+     * neither. A game already under its new ID, or going over by choice, isn't asked again. */
+    if (answer != 2 && moved_id(a.id).empty())
+    {
+        std::string incoming = learned_param; /* a custom app's, read already */
+        if (incoming.empty() && !zip::read_one(install_zip, hint, "sce_sys/param.json", incoming, 1u << 20)) incoming.clear();
+        const Clash c = find_clash(a, own, incoming);
+        if (c.found)
+        {
+            const bool is_inner = install_zip != zip_path;
+            std::remove(held.c_str());
+            if (std::rename(install_zip.c_str(), held.c_str()) == 0)
+            {
+                const std::string info = "url=" + t.url + "\ninner=" + (is_inner ? "1" : "0") + "\n";
+                write_file(held_info, info.data(), info.size());
+            }
+            const std::string fresh = a.can_move ? free_move_id() : std::string();
+            slog("install %s: stopped before writing anything: title ID %s is %s on this console (%s)%s%s", a.id.c_str(),
+                 own.c_str(), c.pkg ? "an installed package's" : "another app's folder", c.with.empty() ? "?" : c.with.c_str(),
+                 fresh.empty() ? "" : "; it can go under ", fresh.c_str());
+            std::lock_guard<std::mutex> l(g.m);
+            g.job.phase = Phase::Failed;
+            g.job.clash = true;
+            g.job.clash_pkg = c.pkg;
+            g.job.clash_with = c.with;
+            g.job.clash_new = fresh;
+            g.job.clash_tid = own;
+            g.job.error = (c.with.empty() ? std::string("Another app") : c.with) + " already uses " + a.name + "'s title ID (" +
+                          own + ") on your PS5, so nothing was installed.";
+            return;
+        }
+    }
+
     /* Unpacking: by the copier payload at the drive's full speed (the PS5 holds an app's
      * writes back after about a gigabyte), or here when there's no payload loader. */
-    const std::string root = app_folder(a.id); /* where it already is, if it's on the console */
+    /* Where it already is, if it's on the console: under its new title ID when it was moved,
+     * else its own (a custom app's, as just read). */
+    const std::string under = moved_id(a.id).empty() ? own : moved_id(a.id);
+    const std::string root = tid_folder(under);
     const std::string record = g.data + "/installed/" + a.id + ".txt";
+    make_dirs(root.substr(0, root.find_last_of('/'))); /* (2.0) a drive's homebrew folder, the first time */
+    undo.armed = false; /* writing starts: a move made for it stays, so trying again goes to the same place */
     std::size_t nfiles = 0;
     {
         bool changed = false;
         /* (1.1.2) The player's own files an update leaves alone. */
         std::string keep_job;
         for (std::size_t k = 0; k < a.keep.size(); ++k) keep_job += "keep" + std::to_string(k) + "=" + a.keep[k] + "\n";
-        keep_job += "app=" + a.id + "\n"; /* (1.1.3) the folder of the zip that's this game's */
+        keep_job += "app=" + hint + "\n"; /* (1.1.3) the folder of the zip that's this game's */
         const Copier c = run_copier("unzip", install_zip, root, &changed, keep_job);
         if (c == Copier::Failed)
         {
@@ -819,7 +1849,7 @@ void run_install(const std::string &id)
             std::string error;
             if (!zip::unpack(
                     install_zip, root, [](const char *step, std::uint64_t d, std::uint64_t n) { set_job(step, d, n); },
-                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles, &a.keep, a.id))
+                    [](const std::string &l) { slog("%s", l.c_str()); }, nullptr, error, changed, nfiles, &a.keep, hint))
             {
                 if (changed) std::remove(record.c_str());
                 return fail_job(error);
@@ -827,17 +1857,16 @@ void run_install(const std::string &id)
         }
         else
         {
-            /* The store checks the copier's work itself: every file read back against the zip. */
+            /* The store checks the copier's work itself: every file read back against the
+             * download, (2.0) a zip or a .7z. */
             std::vector<zip::Entry> entries;
-            const int zfd = open(install_zip.c_str(), O_RDONLY);
-            const bool listed = zfd >= 0 && zip::list(zfd, entries);
-            if (zfd >= 0) close(zfd);
+            const bool listed = zip::list_any(install_zip, entries);
             if (!listed)
             {
                 std::remove(record.c_str());
                 return fail_job("The store couldn't read the download back to check the install. Install it again.");
             }
-            const std::string strip = zip::app_prefix(entries, a.id);
+            const std::string strip = zip::app_prefix(entries, hint);
             std::uint64_t i = 0;
             for (const zip::Entry &e : entries)
             {
@@ -847,7 +1876,7 @@ void run_install(const std::string &id)
                 if (name.empty() || name.back() == '/') continue;
                 if (zip::kept(name, a.keep)) continue; /* the player's own, as the copier left it */
                 std::string why;
-                if (!zip::safe_name(name) || !zip::file_matches(root + "/" + name, e.usize, e.crc, &why))
+                if (!zip::safe_name(name) || !zip::entry_matches(root + "/" + name, e, &why))
                 {
                     slog("install check %s: %s", name.c_str(), why.c_str());
                     std::remove(record.c_str());
@@ -859,11 +1888,38 @@ void run_install(const std::string &id)
         }
     }
 
-    make_dirs(g.data + "/installed");
+    /* (2.0) A game under a new title ID: its param.json says so (the release's says its own),
+     * after every install and update. Then the marker that says whose folder this is. */
+    const std::string tid = under;
+    if (tid != own)
+    {
+        std::string why;
+        if (!retitle(root, own, tid, why))
+        {
+            slog("install %s: giving it title ID %s failed: %s", a.id.c_str(), tid.c_str(), why.c_str());
+            std::remove(record.c_str());
+            return fail_job("The store couldn't give " + a.name + " its new title ID (" + tid + "). Install it again.");
+        }
+    }
     const std::string ver = t.version.empty() ? a.version : t.version;
+    if (a.custom) remember_own(a.id, own); /* its folder is found by this from now on */
+    write_marker(a, root, tid, ver);
+    make_dirs(g.data + "/installed");
     write_file(g.data + "/installed/" + a.id + ".txt", ver.data(), ver.size());
-    slog("installed %s %s: %zu files in %s", a.id.c_str(), ver.c_str(), nfiles, root.c_str());
+    slog("installed %s %s: %zu files in %s%s", a.id.c_str(), ver.c_str(), nfiles, root.c_str(),
+         tid != a.id ? (" as " + tid).c_str() : "");
+    {
+        /* (2.0) Counted for the charts (the link thread tells the site). */
+        std::lock_guard<std::mutex> l(g.m);
+        g.stats_due.push_back("+" + a.id + " " + ver);
+    }
     scan_homebrew();
+    {
+        /* (2.0) Its data folders follow it, where it is now. */
+        std::lock_guard<std::mutex> l(g.m);
+        apply_moves(g.catalog);
+        ++g.revision;
+    }
     std::string smp_why;
     const int home = refresh_smp(smp_why);
     if (home == 0) slog("install: ShadowMountPlus: %s", smp_why.c_str());
@@ -1471,7 +2527,7 @@ void n64_to_z64(std::vector<std::uint8_t> &d, int order)
 bool port_name(const std::string &leaf)
 {
     const std::string low = lower_ascii(leaf);
-    return low == "eboot.bin" || low == "sce_sys" || low == "sce_module" || low == "recompstore.json";
+    return low == "eboot.bin" || low == "sce_sys" || low == "sce_module" || low == "recompstore.json" || low == kMarker;
 }
 
 /* src into the folder target under its own name: by the copier, else here. size is
@@ -1922,7 +2978,7 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     set_job(slot.kind == "stfs" || slot.kind == "arcade" ? "Reading the package" : slot.kind == "file" ? "Reading your file" : "Reading the disc image", 0, 0);
     if (!found) return fail_job("This game doesn't take that file.");
     if (store_too_old(a))
-        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from Latest Updates first.");
+        return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from the Library first (Updates).");
     if (fetch)
     {
         if (!slot_fetchable(slot)) return fail_job("The store can't download this update. Choose it from your own files instead.");
@@ -2413,7 +3469,8 @@ void run_delete(const std::string &id, bool keep_saves)
     for (const std::string &k : keep) slog("delete %s: keeping %s", id.c_str(), k.c_str());
     /* ShadowMountPlus lets go of the game first, if it will (it won't while the store is
      * the app on screen; deleting works anyway). */
-    unmount_smp(id);
+    const std::string tid = installed_id(id); /* (2.0) the title ID it's under */
+    unmount_smp(tid);
     const double t0 = mono_s();
     std::string extra;
     for (std::size_t i = 0; i < paths.size(); ++i) extra += "path" + std::to_string(i) + "=" + paths[i] + "\n";
@@ -2481,8 +3538,12 @@ void run_delete(const std::string &id, bool keep_saves)
     const std::string other = app_folder(id);
     const bool another = other != folder && exists(other + "/eboot.bin");
     if (another) slog("delete %s: another copy is still at %s", id.c_str(), other.c_str());
-    const bool tile_gone = !another && forget_smp(id); /* the folder first, so a scan can't add it back */
+    const bool tile_gone = !another && forget_smp(tid); /* the folder first, so a scan can't add it back */
+    /* (2.0) Gone from its new title ID: installed again, it's checked for a clash afresh. */
+    if (!another && !moved_id(id).empty()) forget_move(id);
+    if (!another && own_id(id) != id) remember_own(id, id); /* (2.0) a custom app's title ID is read again on its next install */
     std::lock_guard<std::mutex> l(g.m);
+    if (!another) g.stats_due.push_back("-" + id); /* (2.0) for the charts */
     g.job.phase = Phase::Done;
     g.job.home = tile_gone ? 2 : 0;
     g.job.step = "Deleted";
@@ -2662,7 +3723,7 @@ void remember_releases(const std::string &repo, const std::string &text)
 bool fetch_notes(porpoise::http::Session &http, const std::string &repo)
 {
     std::vector<std::uint8_t> body;
-    const int status = http.get("https://api.github.com/repos/" + repo + "/releases?per_page=30", body, {}, 8u << 20);
+    const int status = github_releases(http, repo, body);
     const std::string text(body.begin(), body.end());
     std::vector<Release> rel;
     const bool ok = status == 200 && parse_releases(text, rel);
@@ -2731,11 +3792,20 @@ void *worker(void *)
         timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         const long long now = ts.tv_sec;
-        bool forced = false;
+        bool forced = false, rescan = false;
         {
             std::lock_guard<std::mutex> l(g.m);
             forced = g.force_check;
             g.force_check = false;
+            rescan = g.rescan;
+            g.rescan = false;
+        }
+        if (rescan)
+        {
+            /* (2.0) Refresh: an app installed some other way while the store was open shows up. */
+            scan_homebrew();
+            std::lock_guard<std::mutex> l(g.m);
+            ++g.revision;
         }
         if (forced)
             next_refresh = next_store_check = next_games_check = 0;
@@ -2749,6 +3819,18 @@ void *worker(void *)
                 {
                     refresh_catalog(http);
                     refresh_beta(http);
+                    {
+                        /* (2.0) Every custom source, read again, and the charts. */
+                        std::vector<std::string> all;
+                        {
+                            std::lock_guard<std::mutex> l(g.m);
+                            for (const Source &x : g.sources) all.push_back(x.value);
+                            g.sources_due.clear();
+                        }
+                        for (const std::string &v : all) fetch_source(http, v);
+                        refresh_charts(http);
+                        refresh_ids(http);
+                    }
                     fetch_art(http);
                     if (now >= next_store_check)
                     {
@@ -2810,13 +3892,55 @@ void *worker(void *)
                 run_send_logs(lapp, lmsg);
                 continue;
             }
+            /* (2.0) A source added (read it now, so its apps show), and a report on one. */
+            std::vector<std::string> due;
+            bool report = false;
+            std::string rvalue, rwhy;
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                due.assign(g.sources_due.begin(), g.sources_due.end());
+                g.sources_due.clear();
+                report = g.pending_src_report;
+                g.pending_src_report = false;
+                rvalue.swap(g.src_report_value);
+                rwhy.swap(g.src_report_why);
+            }
+            if (report)
+            {
+                run_report_source(rvalue, rwhy);
+                continue;
+            }
+            if (!due.empty())
+            {
+                porpoise::http::Session http("source", "RecompStore/2.0");
+                if (http.init())
+                {
+                    for (const std::string &v : due) fetch_source(http, v);
+                    fetch_art(http);
+                }
+                else
+                {
+                    std::lock_guard<std::mutex> l(g.m);
+                    for (Source &x : g.sources)
+                        if (x.state == 0 || x.state == 1)
+                        {
+                            x.state = 3;
+                            x.error = "Your PS5 isn't online. It's read once it is.";
+                        }
+                    ++g.revision;
+                }
+                continue;
+            }
         }
         std::string id, sapp, sslot, simage;
         bool bench = false, sfetch = false;
         std::string del;
         bool store_dl = false, del_keep = false;
+        int answer = 0;
         {
             std::lock_guard<std::mutex> l(g.m);
+            answer = g.pending_resolve;
+            g.pending_resolve = 0;
             del_keep = g.pending_delete_keep;
             store_dl = g.pending_store_dl;
             g.pending_store_dl = false;
@@ -2831,7 +3955,7 @@ void *worker(void *)
             g.pending_setup_fetch = false;
         }
         if (!id.empty())
-            run_install(id);
+            run_install(id, answer);
         else if (!sapp.empty())
             run_setup(sapp, sslot, simage, sfetch);
         else if (bench)
@@ -2876,16 +4000,30 @@ namespace
 {
 std::mutex g_fold_m;
 std::map<std::string, std::string> g_folders; /* title ID -> folder */
+std::string g_install_root = kHomebrew;       /* (2.0) where a new app goes; under g_fold_m */
+
+/* (2.0) The homebrew folders the store looks in for apps, and can install to: the console's own,
+ * then the drives' (the ones ShadowMountPlus scans: the M.2 SSD, extended storage, USB). */
+std::vector<std::string> homebrew_roots()
+{
+    std::vector<std::string> r{kHomebrew, "/mnt/ext1/homebrew", "/mnt/ext0/homebrew"};
+    for (int i = 0; i < 8; ++i) r.push_back("/mnt/usb" + std::to_string(i) + "/homebrew");
+    return r;
+}
 
 void scan_homebrew()
 {
     std::map<std::string, std::string> found;
-    if (DIR *d = opendir(kHomebrew))
+    for (const std::string &root : homebrew_roots())
     {
+        DIR *d = opendir(root.c_str());
+        if (!d) continue;
+        std::map<std::string, std::string> here; /* this folder's apps: title ID -> folder */
         while (dirent *e = readdir(d))
         {
             if (e->d_name[0] == '.') continue;
-            const std::string dir = std::string(kHomebrew) + "/" + e->d_name;
+            const std::string dir = root + "/" + e->d_name;
+            if (!exists(dir + "/eboot.bin")) continue;
             std::string text;
             Json pj;
             if (read_file(dir + "/sce_sys/param.json", text) && Json::parse(text, pj))
@@ -2893,21 +4031,477 @@ void scan_homebrew()
                 const std::string tid = pj["titleId"].str();
                 /* Two copies of one game: the folder named after its title ID (where the
                  * store installs) wins over any other. */
-                if (!tid.empty() && exists(dir + "/eboot.bin") && (!found.count(tid) || tid == e->d_name))
-                    found[tid] = dir;
+                if (!tid.empty() && (!here.count(tid) || tid == e->d_name)) here[tid] = dir;
             }
-            if (!found.count(e->d_name) && exists(dir + "/eboot.bin"))
-                found[e->d_name] = dir;
-            else if (found.count(e->d_name) && found[e->d_name] != dir && exists(dir + "/eboot.bin"))
-                found[e->d_name] = dir; /* a folder named after a title ID is that game's */
+            here[e->d_name] = dir; /* a folder named after a title ID is that game's */
         }
         closedir(d);
+        /* (2.0) A drive's apps: what the console's own folder (or a drive before it) doesn't
+         * have, or has only under another folder's name. */
+        const auto leaf = [](const std::string &p) { return p.substr(p.find_last_of('/') + 1); };
+        for (const auto &kv : here)
+        {
+            auto it = found.find(kv.first);
+            if (it == found.end() || (leaf(it->second) != kv.first && leaf(kv.second) == kv.first)) found[kv.first] = kv.second;
+        }
     }
     std::string list;
-    for (const auto &f : found) list += " " + f.first + "=" + f.second.substr(f.second.find_last_of('/') + 1);
+    for (const auto &f : found)
+        list += " " + f.first + "=" + (f.second.rfind(std::string(kHomebrew) + "/", 0) == 0 ? f.second.substr(f.second.find_last_of('/') + 1) : f.second);
     slog("homebrew on this console:%s", list.empty() ? " none" : list.c_str());
     std::lock_guard<std::mutex> l(g_fold_m);
     g_folders.swap(found);
+}
+
+/* ---- The title ID guard (2.0) --------------------------------------------------------
+ * Two apps with one title ID can't both be on a PS5: installing the second writes into the
+ * first one's folder, or fights an installed package for the same home screen tile. Before
+ * an install writes anything, the store looks for another app with the game's title ID. If
+ * there is one, the player can keep both: the game goes under a new ID from a block kept
+ * for this (PPSA97001 on), its param.json says so after every install and update, and the
+ * store remembers the move (moves.json, and the marker in the game's folder). */
+std::mutex g_move_m;
+std::map<std::string, std::string> g_moves; /* app ID -> the title ID it's installed under */
+/* A custom source's app whose ID isn't its title ID ("gh-..."): the title ID its release's
+ * param.json said when it was installed (titles.json). Under g_move_m. */
+std::map<std::string, std::string> g_own;
+
+std::string json_text(const std::string &s)
+{
+    std::string out = "\"";
+    for (const unsigned char c : s)
+    {
+        if (c == '"' || c == '\\') { out += '\\'; out += char(c); }
+        else if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); out += b; }
+        else out += char(c);
+    }
+    return out + "\"";
+}
+
+/* A param.json's name for its app: its default language's titleName, else any. */
+std::string param_name(const Json &pj)
+{
+    const Json &lp = pj["localizedParameters"];
+    std::string name = lp[lp["defaultLanguage"].str("en-US").c_str()]["titleName"].str();
+    for (std::size_t i = 0; i < lp.members().size() && name.empty(); ++i) name = lp.members()[i].second["titleName"].str();
+    return name;
+}
+
+std::string lower_text(std::string s)
+{
+    for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+std::string title_folder(const std::string &tid)
+{
+    std::lock_guard<std::mutex> l(g_fold_m);
+    auto it = g_folders.find(tid);
+    return it != g_folders.end() ? it->second : std::string();
+}
+
+bool g_moves_lost = false; /* (2.0) moves.json or titles.json couldn't be read at start */
+
+void load_moves()
+{
+    std::string text;
+    Json j;
+    std::map<std::string, std::string> m, own;
+    g_moves_lost = (exists(g.data + "/moves.json") && !(read_file(g.data + "/moves.json", text) && Json::parse(text, j) && j.is_object())) ||
+                   (exists(g.data + "/titles.json") && !(read_file(g.data + "/titles.json", text) && Json::parse(text, j) && j.is_object())) ||
+                   (!exists(g.data + "/moves.json") && exists(g.data + "/installed"));
+    if (read_file(g.data + "/moves.json", text) && Json::parse(text, j) && j.is_object())
+        for (const auto &kv : j.members())
+            if (!kv.first.empty() && kv.second.str().size() == 9) m[kv.first] = kv.second.str();
+    if (read_file(g.data + "/titles.json", text) && Json::parse(text, j) && j.is_object())
+        for (const auto &kv : j.members())
+            if (!kv.first.empty() && title_id_ok(kv.second.str())) own[kv.first] = kv.second.str();
+    std::lock_guard<std::mutex> l(g_move_m);
+    g_moves.swap(m);
+    g_own.swap(own);
+}
+
+void save_moves()
+{
+    std::string text = "{", own = "{";
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        for (const auto &kv : g_moves) text += (text.size() > 1 ? "," : "") + json_text(kv.first) + ":" + json_text(kv.second);
+        for (const auto &kv : g_own) own += (own.size() > 1 ? "," : "") + json_text(kv.first) + ":" + json_text(kv.second);
+    }
+    text += "}\n";
+    own += "}\n";
+    if (!write_file(g.data + "/moves.json", text.data(), text.size())) slog("title ID guard: couldn't save moves.json");
+    if (!write_file(g.data + "/titles.json", own.data(), own.size())) slog("title ID guard: couldn't save titles.json");
+}
+
+/* (2.0) A custom app's own title ID, read from its release on install. */
+void remember_own(const std::string &app_id, const std::string &tid)
+{
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        if (tid == app_id) g_own.erase(app_id);
+        else g_own[app_id] = tid;
+    }
+    save_moves();
+}
+
+/* The install the store made for gh-... (its folder's marker) is this app's: the same repo. */
+bool renamed_same(const std::string &old_id, const App &a)
+{
+    std::string folder;
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        auto mv = g_moves.find(old_id);
+        auto ow = g_own.find(old_id);
+        folder = mv != g_moves.end() ? mv->second : ow != g_own.end() ? ow->second : std::string();
+    }
+    if (folder.empty()) return false;
+    folder = tid_folder(folder);
+    std::string text;
+    Json mk;
+    return read_file(folder + "/" + kMarker, text) && Json::parse(text, mk) && mk["app"].str() == old_id &&
+           lower_text(mk["source"].str()) == lower_text("github:" + a.repo);
+}
+
+/* A source that gave an app as "gh-..." and later by its title ID (the site could read it
+ * now): what the store kept under the old ID follows it. g.m held. */
+void adopt_renamed(Catalog &c)
+{
+    std::map<std::string, std::string> own;
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        own = g_own;
+    }
+    if (own.empty()) return;
+    bool changed = false;
+    for (const App &a : c.apps)
+    {
+        if (!a.custom || a.id.rfind("gh-", 0) == 0 || exists(g.data + "/installed/" + a.id + ".txt")) continue;
+        for (const auto &kv : own)
+            if (kv.second == a.id && kv.first.rfind("gh-", 0) == 0 && exists(g.data + "/installed/" + kv.first + ".txt") &&
+                renamed_same(kv.first, a))
+            {
+                std::rename((g.data + "/installed/" + kv.first + ".txt").c_str(), (g.data + "/installed/" + a.id + ".txt").c_str());
+                std::lock_guard<std::mutex> l(g_move_m);
+                g_own.erase(kv.first);
+                auto mv = g_moves.find(kv.first);
+                if (mv != g_moves.end())
+                {
+                    g_moves[a.id] = mv->second;
+                    g_moves.erase(kv.first);
+                }
+                changed = true;
+                slog("sources: %s is %s now; its install record follows it", kv.first.c_str(), a.id.c_str());
+                break;
+            }
+    }
+    if (changed) save_moves();
+}
+
+/* A data folder or save path under the game's own folder (from) follows the game to where it
+ * is (to): its new title ID's folder, or (2.0) a homebrew folder on a drive. */
+std::string moved_path(const std::string &p, const std::string &from, const std::string &to)
+{
+    if (p == from) return to;
+    if (p.compare(0, from.size() + 1, from + "/") == 0) return to + p.substr(from.size());
+    return p;
+}
+
+void apply_moves(Catalog &c)
+{
+    std::map<std::string, std::string> m, own, folders;
+    std::string root;
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        m = g_moves;
+        own = g_own;
+    }
+    {
+        std::lock_guard<std::mutex> l(g_fold_m);
+        folders = g_folders;
+        root = g_install_root;
+    }
+    for (App &a : c.apps)
+    {
+        /* The catalog's own paths, kept the first time: every later change starts from them. */
+        if (!a.src_set)
+        {
+            a.data_dir_src = a.data_dir;
+            a.saves_src = a.saves;
+            a.src_set = true;
+        }
+        a.data_dir = a.data_dir_src;
+        a.saves = a.saves_src;
+        if (a.data_dir.empty() && a.saves.empty()) continue;
+        const std::string own_tid = own.count(a.id) ? own[a.id] : a.id;
+        auto mv = m.find(a.id);
+        const std::string tid = mv != m.end() ? mv->second : own_tid;
+        /* The homebrew folder it's in (or goes to), and its title ID's folder there: a game kept
+         * under another folder name keeps its data where the catalog says, as before 2.0. */
+        auto f = folders.find(tid);
+        const std::string base = f != folders.end() ? f->second.substr(0, f->second.find_last_of('/')) : root;
+        const std::string from = std::string(kHomebrew) + "/" + own_tid, to = base + "/" + tid;
+        if (from == to) continue;
+        a.data_dir = moved_path(a.data_dir, from, to);
+        for (std::string &s : a.saves) s = moved_path(s, from, to);
+    }
+}
+
+void remember_move(const std::string &app_id, const std::string &new_id)
+{
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        g_moves[app_id] = new_id;
+    }
+    save_moves();
+    slog("title ID guard: %s goes under %s from now on", app_id.c_str(), new_id.c_str());
+    std::lock_guard<std::mutex> l(g.m);
+    apply_moves(g.catalog);
+    ++g.revision;
+}
+
+void forget_move(const std::string &app_id)
+{
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        if (!g_moves.erase(app_id)) return;
+    }
+    save_moves();
+    slog("title ID guard: %s goes under its own title ID again", app_id.c_str());
+    std::lock_guard<std::mutex> l(g.m);
+    apply_moves(g.catalog);
+    ++g.revision;
+}
+
+/* A package installed on the console with this title ID (its app.pkg in /user/app), and
+ * its name when the system's copy of its param.json can be read. */
+bool package_there(const std::string &tid, std::string &name)
+{
+    if (!exists("/user/app/" + tid + "/app.pkg")) return false;
+    for (const std::string &p : {"/user/appmeta/" + tid + "/param.json", "/system_data/priv/appmeta/" + tid + "/param.json"})
+    {
+        std::string text;
+        Json pj;
+        if (read_file(p, text) && Json::parse(text, pj) && !param_name(pj).empty())
+        {
+            name = param_name(pj);
+            break;
+        }
+    }
+    return true;
+}
+
+Clash find_clash(const App &a, const std::string &tid, const std::string &incoming_param)
+{
+    Clash c;
+    const std::string folder = title_folder(tid);
+    if (folder.empty() || !exists(folder + "/eboot.bin"))
+    {
+        /* Nothing in a homebrew folder: an installed package with the same ID still fights
+         * it for the home screen. */
+        c.found = package_there(tid, c.with);
+        c.pkg = c.found;
+        return c;
+    }
+    /* The store's own install of this game: its marker says so, or (before 2.0) its record.
+     * An app from the same GitHub repo is this one too (a custom source's app the catalog
+     * has since, or the other way round). */
+    std::string text;
+    Json mk;
+    const bool same_repo = a.source == "github" && !a.repo.empty();
+    if (read_file(folder + "/" + kMarker, text) && Json::parse(text, mk) && mk.is_object())
+    {
+        /* A custom source's app: only an install of its own repo is its own (whatever ID the
+         * source gives it, it can't claim another app's folder). */
+        if (a.custom)
+        {
+            if (same_repo && lower_text(mk["source"].str()) == lower_text("github:" + a.repo)) return c;
+            c.found = true;
+            c.with = mk["name"].str();
+            return c;
+        }
+        if (mk["app"].str() == a.id) return c;
+        if (same_repo && lower_text(mk["source"].str()) == lower_text("github:" + a.repo)) return c;
+        c.found = true;
+        c.with = mk["name"].str();
+        return c;
+    }
+    if (!a.custom && exists(g.data + "/installed/" + a.id + ".txt")) return c;
+    /* (2.0) A custom source's app and a folder without its marker: always asked. */
+    if (a.custom)
+    {
+        Json have;
+        if (read_file(folder + "/sce_sys/param.json", text) && Json::parse(text, have) && have.is_object()) c.with = param_name(have);
+        c.found = true;
+        return c;
+    }
+    /* Put there some other way (by hand, or another store): the same app when its content ID
+     * or its name matches the release's; anything else is another app. Without a param.json
+     * on either side there's nothing to tell them apart by, so it's taken to be this one. */
+    Json have, want;
+    if (!read_file(folder + "/sce_sys/param.json", text) || !Json::parse(text, have) || !have.is_object()) return c;
+    if (incoming_param.empty() || !Json::parse(incoming_param, want) || !want.is_object()) return c;
+    const std::string cid = have["contentId"].str(), name = param_name(have);
+    if (!cid.empty() && cid == want["contentId"].str()) return c;
+    if (!name.empty() && lower_text(name) == lower_text(param_name(want))) return c;
+    c.found = true;
+    c.with = name;
+    return c;
+}
+
+/* The first ID of the block kept for moves that nothing on the console or in the catalog uses. */
+std::string free_move_id()
+{
+    std::set<std::string> used;
+    {
+        std::lock_guard<std::mutex> l(g_fold_m);
+        for (const auto &f : g_folders)
+        {
+            used.insert(f.first);
+            used.insert(f.second.substr(f.second.find_last_of('/') + 1));
+        }
+    }
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        for (const auto &kv : g_moves) used.insert(kv.second);
+        for (const auto &kv : g_own) used.insert(kv.second);
+    }
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const App &x : g.catalog.apps) used.insert(x.id), used.insert(x.title_id);
+        for (const App &x : g.catalog.soon) used.insert(x.id);
+        used.insert(g.taken_ids.begin(), g.taken_ids.end()); /* (2.0) every ID the site knows is taken */
+    }
+    /* Apps already out with an ID in this block (before it was kept), in case the site's list
+     * hasn't been read yet. */
+    for (const char *known : {"PPSA97358", "PPSA97510"}) used.insert(known);
+    for (int n = 1; n <= 999; ++n)
+    {
+        char id[16];
+        std::snprintf(id, sizeof id, "PPSA97%03d", n);
+        bool there = exists(std::string("/user/app/") + id);
+        for (const std::string &r : homebrew_roots()) there = there || exists(r + "/" + id);
+        if (used.count(id) || there) continue;
+        return id;
+    }
+    return "";
+}
+
+/* One string value in a JSON text, in place (the rest of the file as it is): false when
+ * the key isn't there with a plain string. */
+bool set_string(std::string &text, const char *key, const std::function<std::string(const std::string &)> &change)
+{
+    const std::string k = std::string("\"") + key + "\"";
+    std::size_t at = text.find(k);
+    if (at == std::string::npos) return false;
+    at += k.size();
+    while (at < text.size() && std::isspace(static_cast<unsigned char>(text[at]))) ++at;
+    if (at >= text.size() || text[at] != ':') return false;
+    ++at;
+    while (at < text.size() && std::isspace(static_cast<unsigned char>(text[at]))) ++at;
+    if (at >= text.size() || text[at] != '"') return false;
+    const std::size_t end = text.find('"', at + 1);
+    if (end == std::string::npos) return false;
+    const std::string old = text.substr(at + 1, end - at - 1);
+    if (old.find('\\') != std::string::npos) return false;
+    text.replace(at + 1, end - at - 1, change(old));
+    return true;
+}
+
+bool retitle(const std::string &folder, const std::string &from, const std::string &to, std::string &why)
+{
+    const std::string path = folder + "/sce_sys/param.json";
+    std::string text;
+    Json pj;
+    if (!read_file(path, text) || !Json::parse(text, pj) || !pj.is_object()) { why = "no readable param.json"; return false; }
+    if (pj["titleId"].str() == to) return true;
+    if (pj["titleId"].str() != from) { why = "its param.json has title ID " + pj["titleId"].str(); return false; }
+    if (!set_string(text, "titleId", [&](const std::string &) { return to; })) { why = "titleId"; return false; }
+    /* The ID inside the content ID (UP9000-PPSA93004_00-...), and a concept ID that's the
+     * ID's own number. */
+    set_string(text, "contentId", [&](std::string v) {
+        const std::size_t p = v.find(from);
+        if (p != std::string::npos) v.replace(p, from.size(), to);
+        return v;
+    });
+    set_string(text, "conceptId", [&](const std::string &v) { return v == from.substr(4) ? to.substr(4) : v; });
+    Json check;
+    if (!Json::parse(text, check) || check["titleId"].str() != to) { why = "the changed param.json didn't read back"; return false; }
+    const std::string tmp = path + ".new";
+    if (!write_file(tmp, text.data(), text.size()) || std::rename(tmp.c_str(), path.c_str()) != 0)
+    {
+        std::remove(tmp.c_str());
+        why = "couldn't write param.json (errno " + std::to_string(errno) + ")";
+        return false;
+    }
+    slog("title ID guard: %s now says %s (was %s)", path.c_str(), to.c_str(), from.c_str());
+    return true;
+}
+
+void write_marker(const App &a, const std::string &folder, const std::string &title_id, const std::string &version)
+{
+    const std::string source = a.beta ? std::string("beta") : a.source == "github" ? "github:" + a.repo : a.url;
+    /* (2.0) ownId: the title ID its release has (a moved app's titleId is its new one). */
+    const std::string text = "{\"app\":" + json_text(a.id) + ",\"name\":" + json_text(a.name) + ",\"titleId\":" + json_text(title_id) +
+                             ",\"ownId\":" + json_text(own_id(a.id)) + ",\"source\":" + json_text(source) +
+                             ",\"version\":" + json_text(version) + "}\n";
+    if (!write_file(folder + "/" + kMarker, text.data(), text.size())) slog("install: couldn't write %s in %s", kMarker, folder.c_str());
+    else chmod((folder + "/" + kMarker).c_str(), 0777);
+}
+
+/* (2.0) At start, when moves.json or titles.json was lost: what the markers in the store's own
+ * installs say (an app the store installed, under a title ID from the move block, or a custom
+ * app's own title ID), so a moved app's updates and Delete never land on the other app. */
+void rebuild_moves()
+{
+    if (!g_moves_lost) return;
+    std::map<std::string, std::string> folders;
+    {
+        std::lock_guard<std::mutex> l(g_fold_m);
+        folders = g_folders;
+    }
+    bool changed = false;
+    for (const auto &kv : folders)
+    {
+        std::string text;
+        Json mk;
+        if (!read_file(kv.second + "/" + kMarker, text) || !Json::parse(text, mk) || !mk.is_object()) continue;
+        const std::string app = mk["app"].str(), tid = mk["titleId"].str();
+        if (app.empty() || app.size() > 48 || app.find('/') != std::string::npos || tid != kv.first) continue;
+        if (!exists(g.data + "/installed/" + app + ".txt")) continue; /* the store's own install, by its record */
+        std::string own = mk["ownId"].str();
+        if (!title_id_ok(own)) own = title_id_ok(app) ? app : std::string();
+        if (!title_id_ok(own)) continue;
+        std::lock_guard<std::mutex> l(g_move_m);
+        if (app.rfind("gh-", 0) == 0 && !g_own.count(app)) { g_own[app] = own; changed = true; }
+        if (tid != own && tid.rfind("PPSA97", 0) == 0 && !g_moves.count(app)) { g_moves[app] = tid; changed = true; }
+    }
+    if (changed)
+    {
+        save_moves();
+        slog("title ID guard: moves.json rebuilt from the markers in the apps' folders");
+    }
+}
+
+/* At start: a moved game whose param.json was put back to its own ID (an update stopped
+ * halfway) says its new one again. */
+void repair_moves()
+{
+    std::map<std::string, std::string> m, own;
+    {
+        std::lock_guard<std::mutex> l(g_move_m);
+        m = g_moves;
+        own = g_own;
+    }
+    for (const auto &kv : m)
+    {
+        const std::string folder = tid_folder(kv.second);
+        if (!exists(folder + "/eboot.bin")) continue;
+        std::string why;
+        const std::string from = own.count(kv.first) ? own[kv.first] : kv.first;
+        if (!retitle(folder, from, kv.second, why)) slog("title ID guard: %s: %s", folder.c_str(), why.c_str());
+    }
 }
 
 /* "01.020.000" -> "1.20.0" */
@@ -2930,11 +4524,54 @@ std::string tidy_version(const std::string &v)
 }
 } // namespace
 
-std::string app_folder(const std::string &app_id)
+std::string installed_id(const std::string &app_id)
+{
+    std::lock_guard<std::mutex> l(g_move_m);
+    auto it = g_moves.find(app_id);
+    if (it != g_moves.end()) return it->second;
+    auto own = g_own.find(app_id);
+    return own != g_own.end() ? own->second : app_id;
+}
+
+std::string own_id(const std::string &app_id)
+{
+    std::lock_guard<std::mutex> l(g_move_m);
+    auto own = g_own.find(app_id);
+    return own != g_own.end() ? own->second : app_id;
+}
+
+std::string moved_id(const std::string &app_id)
+{
+    std::lock_guard<std::mutex> l(g_move_m);
+    auto it = g_moves.find(app_id);
+    return it != g_moves.end() ? it->second : std::string();
+}
+
+long long installed_time(const std::string &app_id)
+{
+    std::string data;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        data = g.data;
+    }
+    struct stat st;
+    return stat((data + "/installed/" + app_id + ".txt").c_str(), &st) == 0 ? (long long)st.st_mtime : 0;
+}
+
+namespace
+{
+/* The folder of the app with this title ID: where it was found, else /data/homebrew/<id>. */
+std::string tid_folder(const std::string &tid)
 {
     std::lock_guard<std::mutex> l(g_fold_m);
-    auto it = g_folders.find(app_id);
-    return it != g_folders.end() ? it->second : std::string(kHomebrew) + "/" + app_id;
+    auto it = g_folders.find(tid);
+    return it != g_folders.end() ? it->second : g_install_root + "/" + tid; /* (2.0) a new one: where the player chose */
+}
+} // namespace
+
+std::string app_folder(const std::string &app_id)
+{
+    return tid_folder(installed_id(app_id)); /* (2.0) a game moved to a new ID lives under it */
 }
 
 std::vector<LogFile> game_log_files(const App &a)
@@ -3040,6 +4677,18 @@ bool Engine::adopt(const std::string &app_id, std::string &version_out)
 {
     const std::string dir = app_folder(app_id);
     if (!exists(dir + "/eboot.bin")) return false;
+    {
+        /* (2.0) Never a custom source's app over a folder that isn't its own install. */
+        std::string repo;
+        bool custom = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            auto it = g.custom_repos.find(app_id);
+            custom = it != g.custom_repos.end();
+            if (custom) repo = it->second;
+        }
+        if (custom && !custom_owns(dir, repo)) return false;
+    }
     std::string text, v;
     Json j;
     if (read_file(dir + "/recompstore.json", text) && Json::parse(text, j)) v = j["version"].str();
@@ -3087,7 +4736,43 @@ void Engine::start(const std::string &data_dir)
             slog("space on %s: %.1f GB free of %.1f GB", where, double(fs.f_bavail) * fs.f_frsize / 1073741824.0,
                  double(fs.f_blocks) * fs.f_frsize / 1073741824.0);
     }
+    {
+        /* (2.0) Where new apps go (Settings > Customize, Advanced mode): a homebrew folder the
+         * store knows, else the console's own. */
+        std::string root;
+        const auto roots = homebrew_roots();
+        if (read_file(data_dir + "/install-root.txt", root) && std::find(roots.begin(), roots.end(), root) != roots.end())
+        {
+            std::lock_guard<std::mutex> l(g_fold_m);
+            g_install_root = root;
+        }
+    }
     scan_homebrew();
+    load_moves();   /* (2.0) the title ID guard's moves */
+    rebuild_moves();
+    repair_moves();
+    {
+        /* (2.0) A download kept for a clash question the store was closed on: the question is gone. */
+        if (DIR *d = opendir((data_dir + "/downloads").c_str()))
+        {
+            std::vector<std::string> held;
+            while (dirent *e = readdir(d))
+            {
+                const std::string n = e->d_name;
+                if ((n.size() > 5 && n.compare(n.size() - 5, 5, ".held") == 0) || (n.size() > 9 && n.compare(n.size() - 9, 9, ".held.txt") == 0))
+                    held.push_back(n);
+            }
+            closedir(d);
+            for (const std::string &n : held) std::remove((data_dir + "/downloads/" + n).c_str());
+        }
+    }
+    {
+        /* (2.0) A tester's console, as the site last said (before the threads start, so the
+         * link thread's answer can't be overwritten by this). */
+        std::lock_guard<std::mutex> l(g.m);
+        g.tester = exists(data_dir + "/tester");
+        g.test_view = !exists(data_dir + "/testview-off");
+    }
     {
         std::string a;
         if (read_file(data_dir + "/selfupdate/autoupdate", a))
@@ -3108,6 +4793,10 @@ void Engine::start(const std::string &data_dir)
     pthread_t t;
     create_title_thread(&t, worker, nullptr);
     pthread_detach(t);
+    /* (2.0) Link a phone, beside it. */
+    pthread_t lt;
+    create_title_thread(&lt, link_worker, nullptr);
+    pthread_detach(lt);
 }
 
 bool Engine::catalog(Catalog &out) const
@@ -3133,6 +4822,48 @@ bool Engine::install(const std::string &app_id)
     g.job.app_id = app_id;
     g.job.step = "Starting";
     return true;
+}
+
+bool Engine::resolve_clash(const std::string &app_id, int choice)
+{
+    if (choice != 1 && choice != 2)
+    {
+        /* Neither: the download kept for it goes. */
+        std::string data;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            data = g.data;
+        }
+        std::remove((data + "/downloads/" + app_id + ".held").c_str());
+        std::remove((data + "/downloads/" + app_id + ".held.txt").c_str());
+        slog("title ID guard: %s not installed (the player's choice)", app_id.c_str());
+        return true;
+    }
+    /* As install(), with the answer set in the same breath (the worker takes both at once). */
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
+    g.pending_install = app_id;
+    g.pending_resolve = choice;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = "install";
+    g.job.app_id = app_id;
+    g.job.step = "Starting";
+    slog("title ID guard: %s %s", app_id.c_str(), choice == 1 ? "goes under its own new title ID" : "goes over the other app");
+    return true;
+}
+
+void Engine::refresh()
+{
+    /* The worker does it (reading the console's folders off the drawing thread, so the
+     * screen never stutters), first thing on its next turn. */
+    std::lock_guard<std::mutex> l(g.m);
+    g.force_check = true;
+    g.rescan = true;
+    g.update_check = 1;
+    g.link_hello = true; /* (2.0) and whether it's a tester now, and what phones sent */
+    g.link_poll_now = true;
+    slog("refresh: asked by the player");
 }
 
 bool Engine::redeem(const std::string &code)
@@ -3176,6 +4907,276 @@ bool Engine::send_logs(const std::string &app_id, const std::string &message)
     g.logs = 1;
     g.logs_msg.clear();
     return true;
+}
+
+std::string Engine::logs_report(std::string &url) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    url = g.logs_report_url;
+    return g.logs_report;
+}
+
+void Engine::link_screen(bool open)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (open && !g.link_open)
+    {
+        g.link_poll_now = true;
+        /* A code to show straight away, unless the one there is still good for a while. */
+        if (g.link.code_state != 2 || mono_s() > g.link_code_until - 60) g.link_want_code = true;
+    }
+    g.link_open = open;
+}
+
+void Engine::link_new_code()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.link_want_code = true;
+    g.link.code_state = 1;
+}
+
+LinkInfo Engine::link_info() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    LinkInfo i = g.link;
+    i.expires_in = i.code_state == 2 ? std::max(0, int(g.link_code_until - mono_s())) : 0;
+    return i;
+}
+
+void Engine::link_unlink(const std::string &device_id)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.link_unlinks.push_back(device_id);
+    for (std::size_t i = 0; i < g.link.devices.size(); ++i)
+        if (g.link.devices[i].id == device_id)
+        {
+            g.link.devices.erase(g.link.devices.begin() + std::ptrdiff_t(i));
+            break;
+        }
+    ++g.revision;
+}
+
+bool Engine::take_link_action(LinkAction &out)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.link_actions.empty()) return false;
+    out = g.link_actions.front();
+    g.link_actions.erase(g.link_actions.begin());
+    return true;
+}
+
+std::string Engine::install_id() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.beta_install;
+}
+
+bool source_from_text(const std::string &text, std::string &kind, std::string &value, std::string &why)
+{
+    std::string t;
+    for (const char c : text)
+        if (!std::isspace(static_cast<unsigned char>(c))) t += c;
+    auto lower = [](std::string v) {
+        for (char &c : v) c = char(std::tolower(static_cast<unsigned char>(c)));
+        return v;
+    };
+    std::string rest = t;
+    const std::string low = lower(t);
+    const bool https = low.rfind("https://", 0) == 0;
+    for (const char *p : {"https://", "http://"})
+        if (lower(rest).rfind(p, 0) == 0) rest.erase(0, std::strlen(p));
+    if (lower(rest).rfind("www.", 0) == 0) rest.erase(0, 4);
+    if (lower(rest).rfind("github.com/", 0) == 0)
+    {
+        /* github.com/owner/name, and anything after it (/releases, .git) */
+        rest.erase(0, 11);
+        const std::size_t a = rest.find('/');
+        std::string owner = rest.substr(0, a), name = a == std::string::npos ? std::string() : rest.substr(a + 1);
+        name = name.substr(0, name.find_first_of("/?#"));
+        if (name.size() > 4 && lower(name).compare(name.size() - 4, 4, ".git") == 0) name.erase(name.size() - 4);
+        if (repo_text_ok(owner + "/" + name))
+        {
+            kind = "repo";
+            value = owner + "/" + name;
+            return true;
+        }
+        why = "That GitHub address doesn't name a repo. It looks like github.com/owner/name.";
+        return false;
+    }
+    if (t.find("://") == std::string::npos && repo_text_ok(t))
+    {
+        kind = "repo";
+        value = t;
+        return true;
+    }
+    if (https && t.size() > 12 && t.size() <= 500 && t.find('.', 8) != std::string::npos)
+    {
+        kind = "list";
+        value = t;
+        return true;
+    }
+    why = t.empty() ? "Type a GitHub repo (owner/name) or a list's https:// address."
+          : t.find("://") != std::string::npos && !https ? "A list has to be at an https:// address."
+                                                         : "That isn't a GitHub repo (owner/name) or a list's https:// address.";
+    return false;
+}
+
+std::vector<Source> Engine::sources() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.sources;
+}
+
+bool Engine::add_source(const std::string &text, std::string &why)
+{
+    std::string kind, value;
+    if (!source_from_text(text, kind, value, why)) return false;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const Source &s : g.sources)
+        {
+            std::string a = s.value, b = value;
+            for (char &c : a) c = char(std::tolower(static_cast<unsigned char>(c)));
+            for (char &c : b) c = char(std::tolower(static_cast<unsigned char>(c)));
+            if (a == b)
+            {
+                why = "That source is in your list already.";
+                return false;
+            }
+        }
+        if (g.sources.size() >= 30)
+        {
+            why = "That's 30 sources, as many as the store keeps. Remove one first.";
+            return false;
+        }
+        Source s;
+        s.kind = kind;
+        s.value = value;
+        g.sources.push_back(s);
+        g.sources_due.insert(value);
+        ++g.revision;
+    }
+    slog("sources: added %s %s", kind.c_str(), value.c_str());
+    save_sources();
+    return true;
+}
+
+void Engine::remove_source(const std::string &value)
+{
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        const std::size_t before = g.sources.size();
+        g.sources.erase(std::remove_if(g.sources.begin(), g.sources.end(), [&](const Source &s) { return s.value == value; }),
+                        g.sources.end());
+        if (g.sources.size() == before) return;
+        g.source_apps.erase(value);
+        g.sources_due.erase(value);
+        merge_beta(g.catalog);
+        ++g.revision;
+    }
+    std::remove(source_file(value).c_str());
+    slog("sources: removed %s", value.c_str());
+    save_sources();
+}
+
+bool Engine::report_source(const std::string &value, const std::string &why)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.pending_src_report || g.src_report == 1) return false;
+    g.pending_src_report = true;
+    g.src_report_value = value;
+    g.src_report_why = why;
+    g.src_report = 1;
+    g.src_report_msg.clear();
+    ++g.revision;
+    return true;
+}
+
+int Engine::source_report_state(std::string &message) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    message = g.src_report_msg;
+    return g.src_report;
+}
+
+void Engine::source_report_ack()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.src_report != 1) g.src_report = 0;
+}
+
+Charts Engine::charts() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.charts;
+}
+
+std::vector<Place> Engine::install_places() const
+{
+    std::vector<Place> out{{"Console storage", kHomebrew}};
+    for (const char *ext : {"/mnt/ext1", "/mnt/ext0"})
+        if (drive_ready(ext)) out.push_back({std::string(ext) == "/mnt/ext1" ? "M.2 SSD" : "Extended storage", std::string(ext) + "/homebrew"});
+    for (int i = 0; i < 8; ++i)
+    {
+        const std::string usb = "/mnt/usb" + std::to_string(i);
+        if (drive_ready(usb)) out.push_back({"USB drive " + std::to_string(i + 1), usb + "/homebrew"});
+    }
+    return out;
+}
+
+std::string Engine::install_root() const
+{
+    std::lock_guard<std::mutex> l(g_fold_m);
+    return g_install_root;
+}
+
+void Engine::set_install_root(const std::string &folder)
+{
+    const auto roots = homebrew_roots();
+    if (std::find(roots.begin(), roots.end(), folder) == roots.end()) return;
+    std::string data;
+    {
+        std::lock_guard<std::mutex> l(g_fold_m);
+        if (g_install_root == folder) return;
+        g_install_root = folder;
+    }
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        data = g.data;
+        apply_moves(g.catalog); /* not-yet-installed games' data folders, where they'll go */
+        ++g.revision;
+    }
+    if (folder == kHomebrew) std::remove((data + "/install-root.txt").c_str());
+    else write_file(data + "/install-root.txt", folder.data(), folder.size());
+    slog("install: new apps go to %s", folder.c_str());
+}
+
+bool Engine::tester() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.tester;
+}
+
+bool Engine::test_view() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.test_view;
+}
+
+void Engine::set_test_view(bool on)
+{
+    std::string data;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        if (g.test_view == on) return;
+        g.test_view = on;
+        g.force_check = true; /* the other catalog, now */
+        data = g.data;
+    }
+    if (on) std::remove((data + "/testview-off").c_str());
+    else write_file(data + "/testview-off", "1\n", 2);
+    use_cached_catalog(on);
+    slog("testing: %s", on ? "showing the test catalog" : "showing what everyone sees");
 }
 
 int Engine::logs_state(std::string &message) const
@@ -3988,14 +5989,32 @@ void Engine::acknowledge()
     ++g_slot_epoch;
 }
 
+/* (2.0) The folder holds an install of this custom source's app: the marker the store left
+ * there names its repo. */
+static bool custom_owns(const std::string &dir, const std::string &repo)
+{
+    std::string text;
+    Json mk;
+    return read_file(dir + "/" + kMarker, text) && Json::parse(text, mk) && mk.is_object() &&
+           lower_text(mk["source"].str()) == lower_text("github:" + repo);
+}
+
 std::string Engine::installed(const std::string &app_id) const
 {
-    std::string data;
+    std::string data, repo;
+    bool custom = false;
     {
         std::lock_guard<std::mutex> l(g.m);
         data = g.data;
+        auto it = g.custom_repos.find(app_id);
+        custom = it != g.custom_repos.end();
+        if (custom) repo = it->second;
     }
-    const bool there = exists(app_folder(app_id) + "/eboot.bin");
+    const std::string dir = app_folder(app_id);
+    const bool there = exists(dir + "/eboot.bin");
+    /* (2.0) A custom source's app is installed only where the store installed it from that repo:
+     * another app in the folder its ID points at isn't it. */
+    if (there && custom && !custom_owns(dir, repo)) return "";
     std::string v;
     if (there && read_file(data + "/installed/" + app_id + ".txt", v) && !v.empty()) return v;
     return there ? "?" : "";

@@ -206,3 +206,49 @@ table.codes td form{margin:0;display:inline}
 .drop-status.bad{color:#ff8a80}
 .beta-note{margin:0 0 14px;padding:10px 14px;border-radius:12px;background:rgba(245,185,66,.12);border:1px solid rgba(245,185,66,.45);font-size:15px}
 [data-download-card].waiting .grid2{opacity:.55}
+/* (2.0) A report finished on a phone: its words and pictures, under the logs */
+.phone-report{margin:6px 0 14px;padding:14px 16px;border-radius:14px;background:rgba(53,214,244,.07);border:1px solid rgba(53,214,244,.3)}
+.phone-report .kicker{display:block;font:700 12px Figtree,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:#35D6F4;margin-bottom:4px}
+.phone-report .body{margin:8px 0}
+.phone-report .pics{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.phone-report .pics img{width:160px;height:110px;object-fit:cover;border-radius:10px;border:1px solid rgba(244,248,252,.16);display:block}
+.phone-report .pics a:hover img{border-color:#35D6F4}
+/* (2.0) Stats */
+.stats-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:0 0 22px}
+.stats-tiles div{padding:16px 18px;border-radius:16px;background:rgba(244,248,252,.06);border:1px solid rgba(244,248,252,.12)}
+.stats-tiles strong{display:block;font:700 30px Sora,sans-serif}
+.stats-tiles span{color:#a7b3c4;font-size:14px}
+table.stats{width:100%;border-collapse:collapse;font-size:15px}
+table.stats th,table.stats td{text-align:left;padding:10px 12px;border-top:1px solid rgba(244,248,252,.1)}
+table.stats th{color:#a7b3c4;font-weight:600}
+table.stats td.n,table.stats th.n{text-align:right;font-variant-numeric:tabular-nums}
+/* (2.0) The store's category buttons, in the Discover preview */
+.dstage .d-cat{display:flex;align-items:center;gap:20px;padding:0 28px;border-radius:28px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 18px 36px rgba(0,0,0,.28)}
+.dstage .d-cat i{width:48px;height:48px;border-radius:15px;background:#0f1d30;border:1px solid rgba(53,214,244,.5);flex:none}
+.dstage .d-cat span{font:700 26px Sora,sans-serif;flex:1}
+.dstage .d-cat b{font:700 18px Figtree,sans-serif;color:#AAB6C6}
+/* (2.0) Settings: the website's 2.0 switch, and testers */
+.choice{display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+.choice label.check{align-items:flex-start}
+.choice label.check input{margin-top:3px;flex:none}
+.choice label.check span{display:flex;flex-direction:column;gap:2px}
+input[type=radio]{width:20px;height:20px;accent-color:var(--cyan)}
+.find-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.find-row input{max-width:260px}
+.table-wrap{overflow-x:auto}
+table.testers code.cid{font:600 15px ui-monospace,Menlo,Consolas,monospace;color:var(--frost)}
+table.testers .rest{font:13px ui-monospace,Menlo,Consolas,monospace;margin-left:1px}
+table.testers tr.on td{background:rgba(53,214,244,.07)}
+.table-wrap+button{margin-top:14px}
+.tag.test{background:rgba(53,214,244,.14);color:var(--cyan);border-color:rgba(53,214,244,.5)}
+/* (2.0) Import */
+table.import td{vertical-align:middle}
+table.import input.id{width:130px;padding:7px 9px;font:600 14px ui-monospace,Menlo,Consolas,monospace}
+table.import select{width:auto;padding:7px 9px}
+table.import .why{font-size:13px;color:var(--muted)}
+table.import .why.bad{color:var(--danger)}
+table.import tr.skip td{opacity:.55}
+table.import .app{display:flex;align-items:center;gap:10px;min-width:180px}
+table.import .app img,table.import .app .blank{width:36px;height:36px;border-radius:10px;object-fit:cover;flex:none;background:rgba(244,248,252,.08)}
+table.import .app strong{display:block}
+.drop{display:grid;gap:14px}

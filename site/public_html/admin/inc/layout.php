@@ -24,8 +24,10 @@ function rs_head(string $title, bool $nav = true): void {
     <a href="index.php">Games</a>
     <a href="discover.php">Discover</a>
     <a href="beta.php">Beta</a>
+    <a href="import.php">Import</a>
     <?php $inboxNew = rs_inbox_new_count(); ?>
     <a href="inbox.php">Inbox<?= $inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : '' ?></a>
+    <a href="stats.php">Stats</a>
     <a href="settings.php">Settings</a>
     <a href="/" target="_blank" rel="noopener">View site</a>
     <a href="logout.php">Log out</a>

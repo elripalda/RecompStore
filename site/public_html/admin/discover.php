@@ -36,9 +36,10 @@ foreach (rs_games() as $g) {
         'icon' => $g['icon'], 'hero' => $g['hero_web'] ?: $g['hero'],
         'x' => (int)$g['focus_x'], 'y' => (int)$g['focus_y'], 'zoom' => (int)$g['zoom'],
         'featured' => (bool)$g['featured'], 'hidden' => (bool)$g['hidden'], 'soon' => (bool)$g['soon'], 'date' => $g['date'],
+        'category' => rs_category((string)$g['category']), 'testers' => !empty($g['testers']),
     ];
 }
-$state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null];
+$state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null, 'categories' => RS_CATEGORIES];
 rs_head('Discover');
 ?>
 <section class="head-row">
@@ -60,8 +61,13 @@ rs_head('Discover');
       <button type="button" data-add="games">Games</button>
       <button type="button" data-add="soon">Coming soon</button>
       <button type="button" data-add="spotlight">Spotlight</button>
+      <button type="button" data-add="category">Category</button>
+      <button type="button" data-add="top">Top charts</button>
+      <button type="button" data-add="trending">Trending</button>
+      <button type="button" data-add="new">New</button>
+      <button type="button" data-add="updated">Recently updated</button>
     </div>
-    <p class="muted small-note">Games: a row (six at a time, scrolls sideways), a grid (every one, six to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Stores older than 1.0.6 keep their own single row.</p>
+    <p class="muted small-note">Games: a row (seven at a time, scrolls sideways), a grid (every one, seven to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Category: every game in one part of the store (Games, Emulators, Apps, Tools), from Recomp Store 2.0; older stores leave it out. Top charts, Trending, New and Recently updated fill themselves in from installs and GitHub's releases (2.0 and newer too). Stores older than 1.0.6 keep their own single row.</p>
   </div>
   <div class="disc-preview">
     <div class="preview-head"><h2>Preview</h2><span class="muted">The store on a TV. Above the dashed line shows first; the rest scrolls up.</span></div>

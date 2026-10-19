@@ -1,0 +1,1452 @@
+{
+ "source": "PS5 Homebrew Catalog, github.com/blackbearreloaded/ps5-homebrew-catalog (GPL-3.0)",
+ "apps": [
+  {
+   "id": "PPSA01153",
+   "name": "OliSe Player",
+   "author": "Marice",
+   "category": "apps",
+   "tags": [
+    "Music"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/OliSePlayer",
+   "asset": "PPSA01153.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/OliSePlayer/02.001.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA01153.json)"
+  },
+  {
+   "id": "PPSA06464",
+   "name": "PS64",
+   "author": "dantaipan",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/dantaipan/PS64",
+   "asset": "PPSA06464.zip",
+   "icon": "https://raw.githubusercontent.com/dantaipan/PS64/01.000.000/ps5/native/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA06464.json)"
+  },
+  {
+   "id": "PPSA17641",
+   "name": "SymphonyStation5",
+   "author": "TsvetomirGT",
+   "category": "apps",
+   "tags": [
+    "Music"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/TsvetomirGT/SymphonyStation5",
+   "asset": "SymphonyStation5-*.zip",
+   "icon": "https://raw.githubusercontent.com/TsvetomirGT/SymphonyStation5/refs/heads/main/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA17641.json)"
+  },
+  {
+   "id": "PPSA19111",
+   "name": "XashPS5",
+   "author": "GordonProsperoMan",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/GordonProsperoMan/xash3d-ps5",
+   "asset": "PPSA19111.zip",
+   "icon": "https://raw.githubusercontent.com/GordonProsperoMan/xash3d-ps5/v1.3/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA19111.json)"
+  },
+  {
+   "id": "PPSA28319",
+   "name": "Middle Ages Ping Pong",
+   "author": "STL1te",
+   "category": "games",
+   "tags": [
+    "Homebrew"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/STL1te/MedievalTennis",
+   "asset": "PPSA28319.zip",
+   "icon": "https://raw.githubusercontent.com/STL1te/MedievalTennis/01.000.000/Assets/Art/Icons/Art/game_icon_en.png",
+   "from": "PS5 Homebrew Catalog (PPSA28319.json)"
+  },
+  {
+   "id": "PPSA39410",
+   "name": "VITA5",
+   "author": "StonedModder",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/StonedModder/VITA5",
+   "asset": "PPSA17035.zip",
+   "icon": "https://raw.githubusercontent.com/StonedModder/VITA5/v1.0.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA39410.json)"
+  },
+  {
+   "id": "PPSA47402",
+   "name": "Syobon Action",
+   "author": "Andrei Kvapil",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/kvaps/syobon-action-ps5",
+   "asset": "PPSA47402.zip",
+   "icon": "https://raw.githubusercontent.com/kvaps/syobon-action-ps5/01.001.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA47402.json)"
+  },
+  {
+   "id": "PPSA47770",
+   "name": "Afterglow",
+   "author": "DevvNirvana",
+   "category": "apps",
+   "tags": [
+    "Music"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/DevvNirvana/afterglow",
+   "asset": "PPSA47770.zip",
+   "icon": "https://raw.githubusercontent.com/DevvNirvana/afterglow/01.000.006/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA47770.json)"
+  },
+  {
+   "id": "PPSA59322",
+   "name": "ccleste",
+   "author": "AngelXex",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/darkxex/PS5_Celeste",
+   "asset": "PPSA59322.zip",
+   "icon": "https://raw.githubusercontent.com/darkxex/PS5_Celeste/master/dist/PPSA59322/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA59322.json)"
+  },
+  {
+   "id": "PPSA67670",
+   "name": "PayLoader",
+   "author": "Marice",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/ps5-payloader",
+   "asset": "PPSA67670.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/ps5-payloader/v00.001.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA67670.json)"
+  },
+  {
+   "id": "PPSA68091",
+   "name": "Ruffle Flash",
+   "author": "AZiZ",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/ZiZc3/Ruffle-Flash-PS5",
+   "asset": "PPSA68091.zip",
+   "icon": "https://raw.githubusercontent.com/ZiZc3/Ruffle-Flash-PS5/1.2.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA68091.json)"
+  },
+  {
+   "id": "PPSA69420",
+   "name": "ScreenTester5",
+   "author": "Marice",
+   "category": "tools",
+   "tags": [
+    "Tool"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/ScreenTester5",
+   "asset": "PPSA69420.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/ScreenTester5/01.000.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA69420.json)"
+  },
+  {
+   "id": "PPSA69421",
+   "name": "SuperTuxKart",
+   "author": "Marice",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/stk-ps5",
+   "asset": "PPSA69421.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/stk-ps5/00.001.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA69421.json)"
+  },
+  {
+   "id": "PPSA69423",
+   "name": "Rush 2 Recompiled",
+   "author": "Marice",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/rush2-ps5",
+   "asset": "Rush2Recompiled-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/rush2-ps5/952b3728f4a7285ee3d6a971e652545918a5b20f/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA69423.json)"
+  },
+  {
+   "id": "PPSA69424",
+   "name": "Wave Race 64 Recompiled",
+   "author": "Marice",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/wave-race-64-ps5",
+   "asset": "WaveRace64Recompiled-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/wave-race-64-ps5/b8125c47fd01edbe6f4b49fe04d74d6f849d8ece/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA69424.json)"
+  },
+  {
+   "id": "PPSA69426",
+   "name": "Signal Companion",
+   "author": "Marice",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Marice/ps5-signal-companion",
+   "asset": "SignalCompanion-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/Marice/ps5-signal-companion/v00.003.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA69426.json)"
+  },
+  {
+   "id": "PPSA74126",
+   "name": "Stremio Plus",
+   "author": "LoZazaMastro",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/LoZazaMastro/Stremio-Plus",
+   "asset": "PPSA74126.zip",
+   "icon": "https://raw.githubusercontent.com/LoZazaMastro/Stremio-Plus/0.5.11/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA74126.json)"
+  },
+  {
+   "id": "PPSA74207",
+   "name": "The Simpsons Game",
+   "author": "ZazaMastro",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/LoZazaMastro/TheSimpsonsGame-PS5-Builder",
+   "asset": "TheSimpsonsGame-PS5-Builder-*-Source.zip",
+   "icon": "https://raw.githubusercontent.com/LoZazaMastro/TheSimpsonsGame-PS5-Builder/v3.10.6/prospero/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA74207.json)"
+  },
+  {
+   "id": "PPSA75837",
+   "name": "Jewel Case",
+   "author": "SkaRift",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/SkaRift/JewelCase",
+   "asset": "PPSA75837.zip",
+   "icon": "https://raw.githubusercontent.com/SkaRift/JewelCase/v1.1.1/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA75837.json)"
+  },
+  {
+   "id": "PPSA76677",
+   "name": "RommPS",
+   "author": "s0liton",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/s0liton/RommPS",
+   "asset": "PPSA76677.zip",
+   "icon": "https://raw.githubusercontent.com/s0liton/RommPS/v1.2.1/platform/ps5/app/rommps/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA76677.json)"
+  },
+  {
+   "id": "PPSA85300",
+   "name": "VLC",
+   "author": "AZiZ",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/ZiZc3/VLC",
+   "asset": "PPSA85300.zip",
+   "icon": "https://raw.githubusercontent.com/ZiZc3/VLC/v0.4.6/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA85300.json)"
+  },
+  {
+   "id": "PPSA90210",
+   "name": "Prospero Themes",
+   "author": "Darkatek7",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Darkatek7/ProsperoThemes",
+   "asset": "PPSA90210.zip",
+   "icon": "https://raw.githubusercontent.com/Darkatek7/ProsperoThemes/01.000.008/ThemeApp/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA90210.json)"
+  },
+  {
+   "id": "PPSA92280",
+   "name": "Capy Mobile",
+   "author": "Khalifa Al-Khatri",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/khalifa007/CapyMobile",
+   "asset": "CapyMobile-*.zip",
+   "icon": "https://raw.githubusercontent.com/khalifa007/CapyMobile/v0.5.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA92280.json)"
+  },
+  {
+   "id": "PPSA92878",
+   "name": "Breeze",
+   "author": "Milad",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/MiladRTX/Breeze",
+   "asset": "PPSA92878.zip",
+   "icon": "https://raw.githubusercontent.com/MiladRTX/Breeze/v1.8/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA92878.json)"
+  },
+  {
+   "id": "PPSA94002",
+   "name": "Raptor: Call of the Shadows (PS5)",
+   "author": "ChaDea1",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/ChaDea1/RaptorPS5",
+   "asset": "raptor-ps5-*.zip",
+   "icon": "https://raw.githubusercontent.com/ChaDea1/RaptorPS5/v1.0.0-rc.2/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA94002.json)"
+  },
+  {
+   "id": "PPSA97358",
+   "name": "XPSemu",
+   "author": "AZiZ",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/ZiZc3/XPSemu",
+   "asset": "PPSA97358.zip",
+   "icon": "https://raw.githubusercontent.com/ZiZc3/XPSemu/Alpha-2.1/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA97358.json)"
+  },
+  {
+   "id": "PPSA97510",
+   "name": "PSXS5",
+   "author": "SynoPiia",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/SynoPiia/PSXS5",
+   "asset": "PSXS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/SynoPiia/PSXS5/v2.2.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA97510.json)"
+  },
+  {
+   "id": "PPSA98001",
+   "name": "PokeMMO Prospero",
+   "author": "Shabbypenguin",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Shabbypenguin/PokeMMO-Prospero",
+   "asset": "PPSA98001.zip",
+   "icon": "https://raw.githubusercontent.com/Shabbypenguin/PokeMMO-Prospero/v1.0.2/assets/branding/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98001.json)"
+  },
+  {
+   "id": "PPSA98427",
+   "name": "CD Player",
+   "author": "LoZazaMastro",
+   "category": "apps",
+   "tags": [
+    "Music"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/LoZazaMastro/CD-Player",
+   "asset": "PPSA98427.zip",
+   "icon": "https://raw.githubusercontent.com/LoZazaMastro/CD-Player/v1.1.1/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98427.json)"
+  },
+  {
+   "id": "PPSA98510",
+   "name": "SwanStationPS5",
+   "author": "AngelXex",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/darkxex/SwanStationPS5",
+   "asset": "PPSA98510.zip",
+   "icon": "https://raw.githubusercontent.com/darkxex/SwanStationPS5/master/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98510.json)"
+  },
+  {
+   "id": "PPSA98511",
+   "name": "ReKHCoM",
+   "author": "AngelXex",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/darkxex/ReKHCom-PS5",
+   "asset": "PPSA98511.zip",
+   "icon": "https://raw.githubusercontent.com/darkxex/ReKHCom-PS5/master/port/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98511.json)"
+  },
+  {
+   "id": "PPSA98512",
+   "name": "FFTARecomp",
+   "author": "AngelXex",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/darkxex/FFTARecomp-PS5",
+   "asset": "PPSA98512.zip",
+   "icon": "https://raw.githubusercontent.com/darkxex/FFTARecomp-PS5/main/PS5Port/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98512.json)"
+  },
+  {
+   "id": "PPSA98766",
+   "name": "DriftCheck",
+   "author": "Felipe Melchior",
+   "category": "tools",
+   "tags": [
+    "Tool"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/felipemelchior/driftcheck5",
+   "asset": "PPSA98766.zip",
+   "icon": "https://raw.githubusercontent.com/felipemelchior/driftcheck5/01.000.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA98766.json)"
+  },
+  {
+   "id": "PPSA99002",
+   "name": "ProsperoLight",
+   "author": "LedyBacer",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/LedyBacer/ProsperoLight",
+   "asset": "PPSA99002.zip",
+   "icon": "https://raw.githubusercontent.com/LedyBacer/ProsperoLight/01.000.110/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99002.json)"
+  },
+  {
+   "id": "PPSA99003",
+   "name": "ProsperoTV",
+   "author": "ThatGuyKalvin",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/ThatGuyKalvin/ProsperoTV",
+   "asset": "PPSA99003.zip",
+   "icon": "https://raw.githubusercontent.com/ThatGuyKalvin/ProsperoTV/01.000.080/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99003.json)"
+  },
+  {
+   "id": "PPSA99004",
+   "name": "ProsperoAI",
+   "author": "BlackBearReloaded",
+   "category": "apps",
+   "tags": [
+    "AI"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/blackbearreloaded/ProsperoAI",
+   "asset": "PPSA99004.zip",
+   "icon": "https://raw.githubusercontent.com/blackbearreloaded/ProsperoAI/01.006.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99004.json)"
+  },
+  {
+   "id": "PPSA99008",
+   "name": "ProsperoEden",
+   "author": "BlackBearReloaded",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/blackbearreloaded/ProsperoEden",
+   "asset": "ProsperoEden-*.zip",
+   "icon": "https://raw.githubusercontent.com/blackbearreloaded/ProsperoEden/v1.005.000/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99008.json)"
+  },
+  {
+   "id": "PPSA99010",
+   "name": "vkQuake",
+   "author": "Mihawk",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mihawk-99/PS5_vkQuake",
+   "asset": "PPSA99010.zip",
+   "icon": "https://raw.githubusercontent.com/mihawk-99/PS5_vkQuake/1.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99010.json)"
+  },
+  {
+   "id": "PPSA99015",
+   "name": "Media Player Classic PS5",
+   "author": "MisterTemaki",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/MisterTemaki/MediaPlayerClassicPS5",
+   "asset": "MediaPlayerClassicPS5-*-PPSA99015.zip",
+   "icon": "https://raw.githubusercontent.com/MisterTemaki/MediaPlayerClassicPS5/v1.2.3/ps5/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99015.json)"
+  },
+  {
+   "id": "PPSA99030",
+   "name": "Forever Launcher",
+   "author": "bizkut",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/bizkut/ps5-forever",
+   "asset": "PPSA99030.zip",
+   "icon": "https://raw.githubusercontent.com/bizkut/ps5-forever/01.000.014/ps5/title/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99030.json)"
+  },
+  {
+   "id": "PPSA99039",
+   "name": "EVO Player",
+   "author": "Sain Saji",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/sainsaji/EVO-PLAYER-PS5",
+   "asset": "EVOPlayer-*-PPSA99039.zip",
+   "icon": "https://raw.githubusercontent.com/sainsaji/EVO-PLAYER-PS5/v0.12.5/projects/evoplayer/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99039.json)"
+  },
+  {
+   "id": "PPSA99051",
+   "name": "Surround Sound Studio",
+   "author": "sain.saji",
+   "category": "tools",
+   "tags": [
+    "Tool"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/sainsaji/PS5-Audio-Passthrough-Research",
+   "asset": "PPSA99051.zip",
+   "icon": "https://raw.githubusercontent.com/sainsaji/PS5-Audio-Passthrough-Research/01.000.003/sample-app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99051.json)"
+  },
+  {
+   "id": "PPSA99061",
+   "name": "Spot5",
+   "author": "abhi245y",
+   "category": "apps",
+   "tags": [
+    "Music"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/abhi245y/spot5",
+   "asset": "PPSA99061.zip",
+   "icon": "https://raw.githubusercontent.com/abhi245y/spot5/v1.1.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99061.json)"
+  },
+  {
+   "id": "PPSA99082",
+   "name": "OpenNOW PS5 - Prototype",
+   "author": "OpenCloudGaming",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/OpenCloudGaming/OpenNOW-PS5",
+   "asset": "OpenNOW-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/Portablelle/OpenNOW-PS5/main/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99082.json)"
+  },
+  {
+   "id": "PPSA99105",
+   "name": "Codex PS5 - Prototype",
+   "author": "Portablelle",
+   "category": "apps",
+   "tags": [
+    "AI"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Portablelle/Codex-PS5",
+   "asset": "codex-ps5-*-Folder.zip",
+   "icon": "https://raw.githubusercontent.com/Portablelle/Codex-PS5/v0.0.4/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99105.json)"
+  },
+  {
+   "id": "PPSA99109",
+   "name": "Prospero Explorer",
+   "author": "SvenGDK",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/SvenGDK/Prospero-Explorer",
+   "asset": "ProsperoExplorer-v*.zip",
+   "icon": "https://raw.githubusercontent.com/SvenGDK/Prospero-Explorer/v1.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99109.json)"
+  },
+  {
+   "id": "PPSA99110",
+   "name": "Prospero Multi Tools",
+   "author": "SvenGDK",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/SvenGDK/Prospero-Multi-Tools",
+   "asset": "ProsperoMultiTools.zip",
+   "icon": "https://raw.githubusercontent.com/SvenGDK/Prospero-Multi-Tools/v1/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99110.json)"
+  },
+  {
+   "id": "PPSA99141",
+   "name": "Mortalfin",
+   "author": "mortaljinx",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mortaljinx/mortalfin",
+   "asset": "Mortalfin-*.zip",
+   "icon": "https://raw.githubusercontent.com/mortaljinx/mortalfin/1.0.0-beta.5/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99141.json)"
+  },
+  {
+   "id": "PPSA99142",
+   "name": "Seedee5",
+   "author": "mortaljinx",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mortaljinx/Seedee5",
+   "asset": "Seedee5-*.zip",
+   "icon": "https://raw.githubusercontent.com/mortaljinx/Seedee5/v1.21/title/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99142.json)"
+  },
+  {
+   "id": "PPSA99169",
+   "name": "RetroArch",
+   "author": "Mihawk",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mihawk-99/PS5_RetroArch",
+   "asset": "PS5_RetroArch-*.zip",
+   "icon": "https://raw.githubusercontent.com/mihawk-99/PS5_RetroArch/v3.0.0-beta-3/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99169.json)"
+  },
+  {
+   "id": "PPSA99203",
+   "name": "PS5SX2",
+   "author": "Sword",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Swordpdf/PS5SX2",
+   "asset": "PS5SX2-*.zip",
+   "icon": "https://raw.githubusercontent.com/Swordpdf/PS5SX2/main/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99203.json)"
+  },
+  {
+   "id": "PPSA99247",
+   "name": "PSFlyCast",
+   "author": "Press5elect",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Press5elect/PSFlycast",
+   "asset": "PSFlyCast-*.zip",
+   "icon": "https://raw.githubusercontent.com/Press5elect/PSFlycast/v1.2.0/shell/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99247.json)"
+  },
+  {
+   "id": "PPSA99248",
+   "name": "PSSwanStation",
+   "author": "Press5elect",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/Press5elect/PSSwanStation",
+   "asset": "PSSwanStation-PS5-PPSA99248-*.zip",
+   "icon": "https://raw.githubusercontent.com/Press5elect/PSSwanStation/build24/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99248.json)"
+  },
+  {
+   "id": "PPSA99288",
+   "name": "Nuvio Max'd",
+   "author": "HandshakeHackin",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/HandshakeHackin/Nuvio-maxd-releases",
+   "asset": "PPSA99288.zip",
+   "icon": "https://raw.githubusercontent.com/HandshakeHackin/Nuvio-maxd-releases/v0.5.34-native-experimental/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99288.json)"
+  },
+  {
+   "id": "PPSA99300",
+   "name": "Spider-Man: Edge of Time",
+   "author": "KongaTime",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/KongaTime/PS5_EdgeOfTimeTitle",
+   "asset": "Spider.Man.Edge.Of.Time.*.zip",
+   "icon": "https://raw.githubusercontent.com/KongaTime/PS5_EdgeOfTimeTitle/d42a03ad351fb8c0e69f7c9685535ac0595703fb/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99300.json)"
+  },
+  {
+   "id": "PPSA99303",
+   "name": "Quake3e",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_Quake3e",
+   "asset": "Quake3-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_Quake3e/v1.2.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99303.json)"
+  },
+  {
+   "id": "PPSA99305",
+   "name": "Dusklight",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_Dusklight",
+   "asset": "Dusklight-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_Dusklight/v1.0.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99305.json)"
+  },
+  {
+   "id": "PPSA99309",
+   "name": "Wind Waker",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_SwitchWaker",
+   "asset": "WindWaker-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_SwitchWaker/v1.0.3/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99309.json)"
+  },
+  {
+   "id": "PPSA99310",
+   "name": "Mario 64",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_Ghostship",
+   "asset": "Mario64-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_Ghostship/v1.0.1/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99310.json)"
+  },
+  {
+   "id": "PPSA99312",
+   "name": "Super Mario Sunshine",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_Sunshine",
+   "asset": "Sunshine-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_Sunshine/v0.10.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99312.json)"
+  },
+  {
+   "id": "PPSA99313",
+   "name": "Doom 3 BFG",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_Doom3",
+   "asset": "Doom3BFG-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_Doom3/v1.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99313.json)"
+  },
+  {
+   "id": "PPSA99314",
+   "name": "Eternal Darkness",
+   "author": "Gary Riches",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/griches/PS5_EternalDarkness",
+   "asset": "EternalDarkness-PS5-*.zip",
+   "icon": "https://raw.githubusercontent.com/griches/PS5_EternalDarkness/v0.9.3/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99314.json)"
+  },
+  {
+   "id": "PPSA99320",
+   "name": "Ship of Harkinian (Vulkan)",
+   "author": "damiantw",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/damiantw/PS5_Shipwright",
+   "asset": "PPSA99320.zip",
+   "icon": "https://raw.githubusercontent.com/damiantw/PS5_Shipwright/01.000.000/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99320.json)"
+  },
+  {
+   "id": "PPSA99350",
+   "name": "Steam Remote Play",
+   "author": "jmelovich",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/jmelovich/Steam-Link-PS5",
+   "asset": "PPSA99350.zip",
+   "icon": "https://raw.githubusercontent.com/jmelovich/Steam-Link-PS5/v1.0.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99350.json)"
+  },
+  {
+   "id": "PPSA99360",
+   "name": "PS5CEMU-HAR",
+   "author": "premohq",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/premohq/PS5CEMU-HAR",
+   "asset": "PS5CEMU-HAR-*.zip",
+   "icon": "https://raw.githubusercontent.com/premohq/PS5CEMU-HAR/v4.0.1/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99360.json)"
+  },
+  {
+   "id": "PPSA99403",
+   "name": "NFS Black Box",
+   "author": "lavavex",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/lavavex/nfs-blackbox-ps5",
+   "asset": "PPSA99403.zip",
+   "icon": "https://raw.githubusercontent.com/lavavex/nfs-blackbox-ps5/01.000.000/art/nfs-most-wanted-2005.png",
+   "from": "PS5 Homebrew Catalog (PPSA99403.json)"
+  },
+  {
+   "id": "PPSA99420",
+   "name": "PS5MC",
+   "author": "VivaLaVent",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/VivaLaVent/PS5MC",
+   "asset": "PS5MC-*-kodi22-PPSA99420.zip",
+   "icon": "https://raw.githubusercontent.com/VivaLaVent/PS5MC/1.2/ps5/title/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99420.json)"
+  },
+  {
+   "id": "PPSA99474",
+   "name": "Twispero",
+   "author": "unicxrn",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/unicxrn/twispero",
+   "asset": "PPSA99474.zip",
+   "icon": "https://raw.githubusercontent.com/unicxrn/twispero/v1.0.0/app/projects/evoplayer/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99474.json)"
+  },
+  {
+   "id": "PPSA99505",
+   "name": "Jelly5",
+   "author": "02dnot",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/02dnot/Jelly5",
+   "asset": "Jelly5-*.zip",
+   "icon": "https://raw.githubusercontent.com/02dnot/Jelly5/v0.7.0/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99505.json)"
+  },
+  {
+   "id": "PPSA99510",
+   "name": "GyroAim",
+   "author": "jmelovich",
+   "category": "tools",
+   "tags": [
+    "Tool"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/jmelovich/ps5-gyroaim",
+   "asset": "PPSA99510.zip",
+   "icon": "https://raw.githubusercontent.com/jmelovich/ps5-gyroaim/v1.0.2/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99510.json)"
+  },
+  {
+   "id": "PPSA99515",
+   "name": "Emby5",
+   "author": "bornaradusin",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/bornaradusin/Emby5",
+   "asset": "Emby5-*.zip",
+   "icon": "https://raw.githubusercontent.com/bornaradusin/Emby5/1.2.5/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99515.json)"
+  },
+  {
+   "id": "PPSA99520",
+   "name": "Régie5",
+   "author": "Vivian",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/viviandsx/regie5",
+   "asset": "PPSA99520.zip",
+   "icon": "https://raw.githubusercontent.com/viviandsx/regie5/v0.7.0/ps5/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99520.json)"
+  },
+  {
+   "id": "PPSA99575",
+   "name": "PS5LM",
+   "author": "Mert Cobanov",
+   "category": "apps",
+   "tags": [
+    "AI"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/cobanov/PS5LM",
+   "asset": "ps5lm-app-*.zip",
+   "icon": "https://raw.githubusercontent.com/cobanov/PS5LM/v0.9.0/ps5/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99575.json)"
+  },
+  {
+   "id": "PPSA99581",
+   "name": "PS5LM Plus",
+   "author": "Abhiram",
+   "category": "apps",
+   "tags": [
+    "AI"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/abhi245y/PS5LM-Plus",
+   "asset": "ps5lm-plus-*.zip",
+   "icon": "https://raw.githubusercontent.com/abhi245y/PS5LM-Plus/v0.8.4/ps5/app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99581.json)"
+  },
+  {
+   "id": "PPSA99600",
+   "name": "Cloud Play",
+   "author": "tertiumndatur",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/tertiumndatur/ps5-cloud-play",
+   "asset": "CloudPlay-PS5.zip",
+   "icon": "https://raw.githubusercontent.com/tertiumndatur/ps5-cloud-play/v1.0.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99600.json)"
+  },
+  {
+   "id": "PPSA99620",
+   "name": "Ship of Harkinian (Ocarina of Time)",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/oot64-ps5",
+   "asset": "PPSA99620.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/oot64-ps5/v1.2.0/ps5/art/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99620.json)"
+  },
+  {
+   "id": "PPSA99621",
+   "name": "2 Ship 2 Harkinian (Majora's Mask)",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/tmm64-ps5",
+   "asset": "PPSA99621.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/tmm64-ps5/v1.1.0/ps5/art/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99621.json)"
+  },
+  {
+   "id": "PPSA99630",
+   "name": "Morrowind (OpenMW)",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/morrowind-ps5",
+   "asset": "PPSA99630.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/morrowind-ps5/v1.0.1/art/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99630.json)"
+  },
+  {
+   "id": "PPSA99640",
+   "name": "Twilight Princess (Dusklight)",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/dusklight-ps5",
+   "asset": "PPSA99640.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/dusklight-ps5/ps5-v0.1.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99640.json)"
+  },
+  {
+   "id": "PPSA99641",
+   "name": "Wind Waker HD",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/ww-ps5",
+   "asset": "PPSA99641.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/ww-ps5/ps5-v0.1.2/ps5/art/catalog-icon.png",
+   "from": "PS5 Homebrew Catalog (PPSA99641.json)"
+  },
+  {
+   "id": "PPSA99660",
+   "name": "Animal Crossing for PS5",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/ac-ps5",
+   "asset": "PPSA99660.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/ac-ps5/v1.0.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99660.json)"
+  },
+  {
+   "id": "PPSA99666",
+   "name": "DOOM Native Port",
+   "author": "lowbit",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/lowbit/ps5-doom",
+   "asset": "PPSA99666.zip",
+   "icon": "https://raw.githubusercontent.com/lowbit/ps5-doom/v1.1.1/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99666.json)"
+  },
+  {
+   "id": "PPSA99670",
+   "name": "Link’s Awakening for PS5",
+   "author": "mshivam019",
+   "category": "games",
+   "tags": [
+    "Port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mshivam019/la-ps5",
+   "asset": "PPSA99670.zip",
+   "icon": "https://raw.githubusercontent.com/mshivam019/la-ps5/v0.1.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99670.json)"
+  },
+  {
+   "id": "PPSA99728",
+   "name": "OpenRCT2 Native Port",
+   "author": "lowbit",
+   "category": "games",
+   "tags": [
+    "PC port"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/lowbit/ps5-openrct2",
+   "asset": "PPSA99728.zip",
+   "icon": "https://raw.githubusercontent.com/lowbit/ps5-openrct2/v1.0.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99728.json)"
+  },
+  {
+   "id": "PPSA99764",
+   "name": "Porpoise",
+   "author": "Ruben Ripalda",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+   "asset": "Porpoise-*.zip",
+   "icon": "https://raw.githubusercontent.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5/v3.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99764.json)"
+  },
+  {
+   "id": "PPSA99773",
+   "name": "PShare",
+   "author": "StonedModder",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/StonedModder/PShare",
+   "asset": "PPSA99773.zip",
+   "icon": "https://raw.githubusercontent.com/StonedModder/PShare/1.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99773.json)"
+  },
+  {
+   "id": "PPSA99808",
+   "name": "PICO-8 for PS5",
+   "author": "RafaelNGP",
+   "category": "emulators",
+   "tags": [],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/RafaelNGP/pico8-ps5",
+   "asset": "PPSA99808.zip",
+   "icon": "https://raw.githubusercontent.com/RafaelNGP/pico8-ps5/v0.1.2/pico8_app/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99808.json)"
+  },
+  {
+   "id": "PPSA99810",
+   "name": "PSBox Cloud Gaming",
+   "author": "RafaelNGP",
+   "category": "apps",
+   "tags": [
+    "Streaming"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/RafaelNGP/xbox-cloud-gaming-ps5",
+   "asset": "PPSA99810.zip",
+   "icon": "https://raw.githubusercontent.com/RafaelNGP/xbox-cloud-gaming-ps5/v1.3.0/ps5/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99810.json)"
+  },
+  {
+   "id": "PPSA99920",
+   "name": "Prospero Vibrate",
+   "author": "SvenGDK",
+   "category": "tools",
+   "tags": [
+    "Tool"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/SvenGDK/Prospero-Vibrate",
+   "asset": "PPSA99920.zip",
+   "icon": "https://raw.githubusercontent.com/SvenGDK/Prospero-Vibrate/v1.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99920.json)"
+  },
+  {
+   "id": "PPSA99930",
+   "name": "Forwarder Manager",
+   "author": "heydemoura",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/heydemoura/ps5-forwarder-manager",
+   "asset": "PPSA99930.zip",
+   "icon": "https://raw.githubusercontent.com/heydemoura/ps5-forwarder-manager/00.001.004/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99930.json)"
+  },
+  {
+   "id": "PPSA99991",
+   "name": "YouTube Max’d",
+   "author": "HandshakeHackin",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/HandshakeHackin/youtube-maxd",
+   "asset": "PPSA99991.zip",
+   "icon": "https://raw.githubusercontent.com/HandshakeHackin/youtube-maxd/v1.3.0-preview.1/store/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99991.json)"
+  },
+  {
+   "id": "PPSA99993",
+   "name": "Pulse",
+   "author": "shwan-ps5",
+   "category": "games",
+   "tags": [
+    "Homebrew"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/shwan-ps5/pulse",
+   "asset": "Pulse-*.zip",
+   "icon": "https://raw.githubusercontent.com/shwan-ps5/pulse/01.000.000/ps5/art/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99993.json)"
+  },
+  {
+   "id": "PPSA99995",
+   "name": "Prospero Win",
+   "author": "mpereiraesaa",
+   "category": "tools",
+   "tags": [
+    "Utility"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/mpereiraesaa/prospero-win",
+   "asset": "prospero-win-*.zip",
+   "icon": "https://raw.githubusercontent.com/mpereiraesaa/prospero-win/v0.2.0/sce_sys/icon0.png",
+   "from": "PS5 Homebrew Catalog (PPSA99995.json)"
+  },
+  {
+   "id": "PPSA99997",
+   "name": "Nuvio PS5",
+   "author": "Bilawal Riaz",
+   "category": "apps",
+   "tags": [
+    "Video"
+   ],
+   "blurb": "",
+   "description": "",
+   "repo": "https://github.com/bilawalriaz/nuvio-ps5-homebrew",
+   "asset": "PPSA99997.zip",
+   "icon": "https://raw.githubusercontent.com/bilawalriaz/nuvio-ps5-homebrew/v0.1.0-alpha.7/assets/icon.png",
+   "from": "PS5 Homebrew Catalog (PPSA99997.json)"
+  }
+ ],
+ "leftOut": [
+  {
+   "id": "PPSA77711",
+   "name": "Stremio",
+   "why": "not a .zip or .7z (PPSA77711.ffpfsc)"
+  },
+  {
+   "id": "PPSA99000",
+   "name": "ProsperoStore",
+   "why": "ProsperoStore itself"
+  },
+  {
+   "id": "PPSA99186",
+   "name": "ProsperoEden Switch UI",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99429",
+   "name": "APRICOT",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99555",
+   "name": "TokenStation5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99573",
+   "name": "Foxhollow PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99731",
+   "name": "PRIMEPHAZON PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99732",
+   "name": "OpenSA2B PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99874",
+   "name": "PS5 Minecraft Java",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99921",
+   "name": "Genesis Plus GX PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99922",
+   "name": "Snes9x PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99924",
+   "name": "FBNeo PS5",
+   "why": "no release yet"
+  },
+  {
+   "id": "PPSA99925",
+   "name": "Beetle PCE PS5",
+   "why": "no release yet"
+  }
+ ]
+}

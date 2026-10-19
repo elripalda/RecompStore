@@ -6,6 +6,13 @@
   const backdrop = document.getElementById('backdrop-img');
   let cat = null;
   let slideTimer = null;
+  let charts = null; // (2.0) /api/charts.php: Top, Trending, New, Recently updated
+  // (2.0) The website's 2.0 side (categories, charts, apps only 2.0 lists, My PS5, Title IDs) shows
+  // when the admin turned it on for everyone (catalog.json site.v2), to the logged-in admin as a
+  // preview, and to a browser linked to a PS5 (it has 2.0). Everyone else sees the site as before.
+  let siteV2 = false;
+  let admin = false;
+  const v2on = () => siteV2 || admin || !!(me && me.linked);
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const byId = (id) => cat.apps.find((a) => a.id === id);
@@ -42,12 +49,12 @@
     { type: 'games', title: 'Latest games', layout: 'grid', all: true },
     { type: 'soon', title: 'Coming soon', layout: 'row' },
   ];
-  function tileHTML(a, soon) {
+  function tileHTML(a, soon, rank) {
     const href = soon ? `#/soon/${encodeURIComponent(a.id)}` : `#/game/${encodeURIComponent(a.id)}`;
     const sub = soon ? (a.date || 'Coming soon') : (a.kind === 'original' ? 'Recomp Store' : esc(a.author)) + (a.version ? ' · ' + esc(a.version) : '');
     return `
       <a class="tile" href="${href}" data-id="${esc(a.id)}"${soon ? ' data-soon' : ''}>
-        <span class="tile-art">${iconHTML(a, 256)}${soon ? '<span class="badge-soon">Soon</span>' : ''}</span>
+        <span class="tile-art">${iconHTML(a, 256)}${soon ? '<span class="badge-soon">Soon</span>' : ''}${rank ? `<span class="rank">${rank}</span>` : ''}</span>
         <span class="tile-name">${esc(a.name)}</span>
         <span class="tile-sub">${soon ? esc(sub) : sub}</span>
       </a>`;
@@ -88,9 +95,24 @@
         const a = byId(sec.game);
         return a ? spotlightHTML(a, sec.title || 'Spotlight') : '';
       }
+      if (['top', 'trending', 'new', 'updated'].includes(sec.type)) {
+        // (2.0) The charts: installs counted by the store, and GitHub's releases.
+        if (!charts || !v2on()) return '';
+        const ranked = sec.type === 'top' || sec.type === 'trending';
+        const ids = (charts[sec.type] || []).map((x) => (typeof x === 'string' ? x : x && x.id));
+        const items = ids.map(byId).filter(Boolean).slice(0, sec.layout === 'grid' ? 24 : 12);
+        if (!items.length) return '';
+        const title = `<h2>${esc(sec.title || { top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated' }[sec.type])}</h2>`;
+        if (sec.layout === 'wide') return `<section class="games">${title}<div class="rowscroll wides">${items.map((a) => wideHTML(a, false)).join('')}</div></section>`;
+        const tiles = items.map((a, i) => tileHTML(a, false, ranked ? i + 1 : 0)).join('');
+        return `<section class="games">${title}<div class="${sec.layout === 'grid' ? 'grid' : 'rowscroll'}">${tiles}</div></section>`;
+      }
       const soon = sec.type === 'soon';
-      const items = soon ? (cat.soon || []) : sec.all ? cat.apps : (sec.games || []).map(byId).filter(Boolean);
-      if (sec.type !== 'games' && !soon) return '';
+      if (sec.type === 'category' && !v2on()) return '';
+      // (2.0) A category section: every game in one part of the store (Games, Emulators, Apps, Tools).
+      const items = soon ? (cat.soon || []) : sec.type === 'category' ? cat.apps.filter((a) => (a.category || 'games') === sec.category)
+        : sec.all ? cat.apps : (sec.games || []).map(byId).filter(Boolean);
+      if (sec.type !== 'games' && sec.type !== 'category' && !soon) return '';
       if (!items.length) return '';
       const title = sec.title ? `<h2>${esc(sec.title)}</h2>` : '';
       if (sec.layout === 'wide') return `<section class="games">${title}<div class="rowscroll wides">${items.map((a) => wideHTML(a, soon)).join('')}</div></section>`;
@@ -138,8 +160,54 @@
       </section>`;
   }
 
+  // ---- (2.0) The parts of the store: a row of buttons on the home page, and a page each ----
+  const CATS = [
+    { key: 'games', route: '/games', name: 'Games', icon: '<path d="M7.5 8.5h9a4.5 4.5 0 0 1 4.4 5.4l-.6 3a2.6 2.6 0 0 1-4.5 1.2L14 16h-4l-1.8 2.1a2.6 2.6 0 0 1-4.5-1.2l-.6-3A4.5 4.5 0 0 1 7.5 8.5z"/><path d="M8 11v3M6.5 12.5h3"/><circle cx="15.5" cy="11.6" r=".9"/><circle cx="17.4" cy="13.6" r=".9"/>' },
+    { key: 'emulators', route: '/emulators', name: 'Emulators', icon: '<rect x="4" y="15" width="16" height="5.5" rx="2"/><path d="M12 15V8.6"/><circle cx="12" cy="6.2" r="2.6"/><circle cx="16.6" cy="17.75" r=".9"/><path d="M6.8 17.75h3"/>' },
+    { key: 'apps', route: '/apps', name: 'Apps', icon: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>' },
+    { key: 'tools', route: '/tools', name: 'Tools', icon: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>' },
+  ];
+  const catIcon = (c) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${c.icon}</svg>`;
+  const inCat = (key) => cat.apps.filter((a) => (a.category || 'games') === key);
+  // Only parts that have something get a button, and the row shows when at least two do.
+  function catRowHTML() {
+    if (!v2on()) return '';
+    const have = CATS.map((c) => [c, inCat(c.key).length]).filter(([, n]) => n > 0);
+    if (have.length < 2) return '';
+    return `<nav class="cat-row" aria-label="Browse by category">${have.map(([c, n]) => `
+      <a class="glass cat-btn" href="#${c.route}"><span class="cat-ico">${catIcon(c)}</span><span class="cat-name">${esc(c.name)}</span><span class="cat-n">${n}</span></a>`).join('')}</nav>`;
+  }
+  function categoryPage(key) {
+    const c = CATS.find((x) => x.key === key);
+    const apps = inCat(key);
+    // Its apps' labels, the most used first, to filter by.
+    const count = {};
+    apps.forEach((a) => (Array.isArray(a.tags) ? a.tags : []).forEach((t) => { if (typeof t === 'string' && t) count[t] = (count[t] || 0) + 1; }));
+    const tags = Object.keys(count).sort((x, y) => count[y] - count[x] || x.localeCompare(y)).slice(0, 16);
+    view.innerHTML = `
+      <article class="cat-page">
+        <a class="back" href="#/">← All games</a>
+        <header class="cat-head"><span class="cat-ico big">${catIcon(c)}</span><div><h1>${esc(c.name)}</h1><p class="muted">${apps.length === 1 ? '1 app' : apps.length + ' apps'}</p></div></header>
+        ${tags.length ? `<div class="chips filter" role="group" aria-label="Filter by label"><button type="button" class="tag on" data-tag="">All</button>${tags.map((t) => `<button type="button" class="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
+        ${apps.length ? '<div class="grid" data-grid></div>' : '<p class="lead">Nothing here yet.</p>'}
+      </article>`;
+    setBackdrop(null);
+    const grid = view.querySelector('[data-grid]');
+    const draw = (tag) => {
+      if (!grid) return;
+      const list = tag ? apps.filter((a) => Array.isArray(a.tags) && a.tags.includes(tag)) : apps;
+      grid.innerHTML = list.map((a) => tileHTML(a, false)).join('');
+      grid.querySelectorAll('.tile').forEach((t) => t.addEventListener('pointerenter', () => { const a = byId(t.dataset.id); if (a && art(a)) setBackdrop(a); }));
+    };
+    draw('');
+    view.querySelectorAll('[data-tag]').forEach((b) => b.addEventListener('click', () => {
+      view.querySelectorAll('[data-tag]').forEach((x) => x.classList.toggle('on', x === b));
+      draw(b.dataset.tag);
+    }));
+  }
+
   function home() {
-    const featured = (cat.featured || []).map(byId).filter(Boolean);
+    const featured = ((v2on() && Array.isArray(cat.featuredV2) ? cat.featuredV2 : cat.featured) || []).map(byId).filter(Boolean);
     const slides = featured.length ? featured : cat.apps.filter((a) => art(a)).slice(0, 3);
     view.innerHTML = `
       <section class="intro">
@@ -162,6 +230,7 @@
           </a>`).join('')}
         ${slides.length > 1 ? `<div class="dots">${slides.map((a, i) => `<button data-dot="${i}" aria-label="Show ${esc(a.name)}"${i === 0 ? ' aria-current="true"' : ''}></button>`).join('')}</div>` : ''}
       </section>` : ''}
+      ${catRowHTML()}
       ${sectionsHTML()}
       <section class="help">
         <a class="glass help-card" href="#/report">
@@ -269,6 +338,7 @@
     const rows = [
       ['Title ID', a.id], ['Version', a.version], ['Download', a.size], ['You bring', 'Your ' + (a.needs || 'own game')],
       ['Installs to', '/data/homebrew/' + a.id], ['Needs', a.minStore ? 'Recomp Store ' + a.minStore + ' or newer' : ''],
+      ['On consoles', v2on() && charts && charts.stats && charts.stats[a.id] && charts.stats[a.id].installs ? Number(charts.stats[a.id].installs).toLocaleString() : ''],
     ].filter((r) => r[1]);
     view.innerHTML = `
       <article class="game">
@@ -291,7 +361,7 @@
           </div>
           <aside class="glass panel">
             <div class="panel-head">${iconHTML(a, 112)}<div><strong>${esc(a.name)}</strong><span>${a.kind === 'original' ? 'Recomp Store' : 'By ' + esc(a.author)}</span></div></div>
-            <a class="btn primary" href="#/get" data-get>Install with Recomp Store</a>
+            ${installHTML(a)}
             ${a.minStore ? `<p class="note needs">Needs Recomp Store ${esc(a.minStore)} or newer. On your PS5, update the store from Latest Updates first.</p>` : ''}
             <a class="btn" id="dl" href="${esc(a.url || (repoUrl ? repoUrl + '/releases/latest' : '#'))}" target="_blank" rel="noopener">${repoUrl && a.source.inside ? "The developer's release" : 'Download the zip'}</a>
             <dl>${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd${r[0] === 'Version' ? ' data-version' : ''}>${esc(r[1])}</dd></div>`).join('')}</dl>
@@ -526,6 +596,461 @@
       ['Thanks, your message is in.', 'We\'ll reply to the email you gave.']);
   }
 
+  // ---- Title IDs (2.0): what's taken, so two apps never share one on a PS5 ----------------
+  function idsPage() {
+    view.innerHTML = `
+      <article class="form-page ids">
+        <a class="back" href="#/">← All games</a>
+        <h1>Title IDs</h1>
+        <p class="lead">Two apps with the same title ID clash on a PS5: installing one writes over the other. Check yours here before you release.</p>
+        <form class="glass form ids-check" novalidate>
+          <label>Your title ID<input name="id" maxlength="9" placeholder="PPSA12345" autocomplete="off" spellcheck="false"></label>
+          <div class="form-row"><button class="btn primary" type="submit">Check it</button><span class="status" role="status"></span></div>
+        </form>
+        <section class="ids-list"><p class="muted">Loading the list…</p></section>
+      </article>`;
+    setBackdrop(null);
+    const list = view.querySelector('.ids-list');
+    const form = view.querySelector('.ids-check');
+    const status = form.querySelector('.status');
+    const input = form.querySelector('[name="id"]');
+    let data = null;
+    const row = (id, what, kind) => `<li class="glass"><code>${esc(id)}</code><span>${esc(what)}</span><em class="tag ${kind}">${kind === 'store' ? 'In Recomp Store' : kind === 'test' ? 'Reserved' : kind === 'block' ? 'Kept by the store' : 'Taken'}</em></li>`;
+    fetch('/api/ids.php', { cache: 'no-cache' })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((d) => {
+        data = d;
+        const b = d.block || {};
+        list.innerHTML = `
+          <h2>In Recomp Store</h2><ul class="ids-ul">${(d.store || []).map((x) => row(x.id, x.name, x.testing ? 'test' : 'store')).join('')}</ul>
+          <h2>Taken outside the store</h2><ul class="ids-ul">${(d.taken || []).map((x) => row(x.id, x.note || 'Another app', 'taken')).join('')}</ul>
+          <h2>Kept by the store</h2><ul class="ids-ul">${row(`${b.from} – ${b.to}`, 'Recomp Store gives these to an app whose own ID is already taken on a console. Don\'t release with one.', 'block')}</ul>
+          <p class="muted">Using an ID that isn't listed? <a href="#/contact">Tell us</a> and we'll add it.</p>`;
+      })
+      .catch(() => { list.innerHTML = '<p class="muted">The list didn\'t load. Refresh the page in a moment.</p>'; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const id = input.value.trim().toUpperCase();
+      input.value = id;
+      if (!/^[A-Z]{4}\d{5}$/.test(id)) { status.textContent = 'A title ID is four letters and five numbers, like PPSA12345.'; status.className = 'status bad'; return; }
+      if (!data) { status.textContent = 'The list is still loading. Try again in a second.'; status.className = 'status bad'; return; }
+      const inStore = (data.store || []).find((x) => x.id === id);
+      const taken = (data.taken || []).find((x) => x.id === id);
+      const b = data.block || {};
+      if (inStore) { status.textContent = inStore.testing ? `${id} is taken: it's kept for an app that isn't out yet.` : `${id} is taken: ${inStore.name} uses it.`; status.className = 'status bad'; }
+      else if (taken) { status.textContent = `${id} is taken${taken.note ? ': ' + taken.note : ''}.`; status.className = 'status bad'; }
+      else if (id >= b.from && id <= b.to) { status.textContent = `${id} is kept by the store for apps it moves. Pick another.`; status.className = 'status bad'; }
+      else { status.textContent = `${id} isn't on our list. Tell us when you use it, so nobody else does.`; status.className = 'status ok'; }
+    });
+  }
+
+  // ---- (2.0) A phone or computer linked to a PS5 ---------------------------------------------
+  // me: what /api/link.php says about this browser ({linked, device, console, state}). Linked, a
+  // game's page installs it on the PS5, and My PS5 shows what's on it.
+  let me = null;
+  let pageTimers = [];
+  const later = (fn, ms) => { const t = setTimeout(fn, ms); pageTimers.push(t); return t; };
+  const every = (fn, ms) => { const t = setInterval(fn, ms); pageTimers.push(t); return t; };
+  const stopPageTimers = () => { pageTimers.forEach((t) => { clearTimeout(t); clearInterval(t); }); pageTimers = []; };
+  const failed = { ok: false, error: 'That didn\'t go through. Check your connection and try again.' };
+  const api = (a, data) => fetch('/api/link.php', {
+    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ a }, data || {})),
+  }).then((r) => r.json().catch(() => failed)).catch(() => failed);
+  function refreshMe() {
+    return fetch('/api/link.php?a=mine', { cache: 'no-store', credentials: 'same-origin' })
+      .then((r) => r.json()).catch(() => null)
+      .then((j) => { if (j && j.ok) me = j; else if (!me) me = { ok: true, linked: false }; markLinked(); return me; });
+  }
+  function markLinked() {
+    document.querySelectorAll('[data-nav="my"]').forEach((n) => { n.hidden = !(me && me.linked); });
+    setLists();
+  }
+  // What the site lists: today's catalog, plus what only 2.0 lists when its 2.0 side shows.
+  let raw = null;
+  function setLists() {
+    if (!raw || !cat) return;
+    const on = v2on();
+    cat.apps = (raw.apps || []).concat(raw.newerStoreApps || [], on ? raw.v2Apps || [] : []);
+    cat.apps.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9)); // the admin's order, all lists together
+    cat.soon = (raw.comingSoon || []).concat(on ? raw.comingSoonV2 || [] : []).sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9));
+    const ids = document.querySelector('[data-foot-ids]');
+    if (ids) ids.hidden = !on;
+  }
+  // What to call this browser: a phone, or a computer (once linked, the name the site gave it).
+  const deviceWord = () => (matchMedia('(pointer: coarse)').matches || /Mobi|iPhone|iPad|Android/i.test(navigator.userAgent) ? 'phone' : 'computer');
+  const thisDevice = () => (me && me.device && me.device.label && me.device.label !== 'Phone or computer' ? me.device.label : deviceWord());
+  const code6 = (c) => String(c || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
+  const show6 = (c) => (c.length > 3 ? c.slice(0, 3) + '-' + c.slice(3) : c);
+  const show8 = (c) => String(c).replace(/^(\d{2})(\d{3})(\d{3})$/, '$1-$2-$3');
+  function ago(iso) {
+    const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (!Number.isFinite(s)) return '';
+    if (s < 90) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' minutes ago';
+    if (s < 86400 * 1.5) return Math.round(s / 3600) + (Math.round(s / 3600) === 1 ? ' hour ago' : ' hours ago');
+    return Math.round(s / 86400) + ' days ago';
+  }
+  const appsOnPs5 = () => (me && me.linked && me.state && Array.isArray(me.state.apps) ? me.state.apps.filter((x) => x && x.id) : []);
+  const onPs5 = (id) => appsOnPs5().find((x) => x.id === id);
+  const PS5_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="6" width="18" height="36" rx="6"/><path d="M27 9c5 1 9 4 9 15s-4 14-9 15"/><path d="M15 16h6M15 22h6"/></svg>';
+  const PHONE_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38" rx="5"/><path d="M21 37h6"/></svg>';
+  const linkArt = (done) => `
+    <div class="link-art${done ? ' done' : ''}" aria-hidden="true">
+      <span class="dev">${PHONE_SVG}</span><span class="wire"><i></i><i></i><i></i></span><span class="dev ps5">${PS5_SVG}</span>
+      ${done ? '<span class="tick"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></span>' : ''}
+    </div>`;
+
+  function linkedDone(box) {
+    box.innerHTML = `
+      ${linkArt(true)}
+      <h1>Linked</h1>
+      <p class="lead">This ${deviceWord()} and your PS5 are linked. Install apps on it from any game's page here, or open My PS5 to see what's on it.</p>
+      <div class="btn-col"><a class="btn primary big" href="#/my-ps5">Open My PS5</a><a class="btn" href="#/">Browse the store</a></div>`;
+  }
+
+  // recompstore.com/l/<code>: the code the PS5 shows (its QR code opens this), one button.
+  function linkClaimPage(code) {
+    const c = code6(code);
+    view.innerHTML = `
+      <article class="form-page link-page">
+        <div class="glass link-card">
+          ${linkArt(false)}
+          <span class="kicker">Recomp Store</span>
+          <h1>Link this ${deviceWord()} to your PS5</h1>
+          <p class="lead">Your PS5 is showing <strong class="code-inline">${esc(show6(c))}</strong>. Once they're linked, you can install apps and add sources on your PS5 from here.</p>
+          <button class="btn primary big" type="button" data-claim>Link this ${deviceWord()}</button>
+          <p class="status" role="status"></p>
+          <p class="small">${me && me.linked ? 'This browser is linked to a PS5 already. Linking moves it to this one. ' : ''}No account needed. Unlink it any time, here or in Recomp Store's Settings.</p>
+        </div>
+      </article>`;
+    setBackdrop(null);
+    const card = view.querySelector('.link-card');
+    const btn = card.querySelector('[data-claim]');
+    const st = card.querySelector('.status');
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      st.textContent = 'Linking…'; st.className = 'status';
+      api('claim', { code: c }).then((res) => {
+        if (!res.ok) { st.textContent = res.error || 'That code didn\'t work. Make a new one on your PS5.'; st.className = 'status bad'; btn.disabled = false; return; }
+        refreshMe().then(() => linkedDone(card));
+      });
+    });
+  }
+
+  // #/link: type the code the PS5 shows, or make a code here to type on the PS5.
+  function linkPage() {
+    const dw = deviceWord();
+    view.innerHTML = `
+      <article class="form-page link-page">
+        <a class="back" href="#/">← All games</a>
+        <h1>Link your PS5</h1>
+        <p class="lead">Link this ${dw} to Recomp Store on your PS5. Then install apps and add sources on it from here, without the controller. No account needed.</p>
+        ${me && me.linked ? `<p class="glass note-card">This ${dw} is linked already. <a href="#/my-ps5">Open My PS5</a>, or link it again below to move it to another PS5.</p>` : ''}
+        <div class="link-ways">
+          <form class="glass form" data-way="ps5" novalidate>
+            <span class="kicker">Your PS5 shows a code</span>
+            <p class="form-note">In Recomp Store on your PS5, open Settings and choose to link a phone. Scan the QR code it shows, or type its code here.</p>
+            <label>The code on your PS5<input name="code" class="code-input" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7Q-4X2"></label>
+            <div class="form-row"><button class="btn primary" type="submit">Link</button><span class="status" role="status"></span></div>
+          </form>
+          <div class="glass form" data-way="web">
+            <span class="kicker">Or type a code on your PS5</span>
+            <p class="form-note">Make a code here, then type it on your PS5 where you redeem codes: Settings, then Redeem a code.</p>
+            <div class="webcode" hidden><strong class="big-code"></strong><span class="muted" data-left></span></div>
+            <div class="form-row"><button class="btn" type="button" data-make>Make a code</button><span class="status" role="status"></span></div>
+          </div>
+        </div>
+      </article>`;
+    setBackdrop(null);
+    const f = view.querySelector('[data-way="ps5"]');
+    const input = f.querySelector('input');
+    const st = f.querySelector('.status');
+    input.addEventListener('input', () => { const c = code6(input.value); input.value = show6(c); });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const c = code6(input.value);
+      if (c.length !== 6) { st.textContent = 'The code has 6 letters and numbers, like K7Q-4X2.'; st.className = 'status bad'; input.focus(); return; }
+      const b = f.querySelector('button');
+      b.disabled = true; st.textContent = 'Linking…'; st.className = 'status';
+      api('claim', { code: c }).then((res) => {
+        b.disabled = false;
+        if (!res.ok) { st.textContent = res.error; st.className = 'status bad'; return; }
+        refreshMe().then(() => { const w = view.querySelector('.link-ways'); w.classList.add('one'); w.innerHTML = '<div class="glass link-card"></div>'; linkedDone(w.firstChild); });
+      });
+    });
+    const web = view.querySelector('[data-way="web"]');
+    const make = web.querySelector('[data-make]');
+    const wst = web.querySelector('.status');
+    make.addEventListener('click', () => {
+      make.disabled = true; wst.textContent = 'Making a code…'; wst.className = 'status';
+      const before = me && me.linked && me.console ? me.console.id : '';
+      api('webcode').then((res) => {
+        make.disabled = false;
+        if (!res.ok) { wst.textContent = res.error; wst.className = 'status bad'; return; }
+        stopPageTimers();
+        web.querySelector('.webcode').hidden = false;
+        web.querySelector('.big-code').textContent = show8(res.code);
+        make.textContent = 'Make another';
+        wst.textContent = 'Waiting for your PS5…'; wst.className = 'status';
+        const until = Date.now() + (res.expires || 600) * 1000;
+        const left = web.querySelector('[data-left]');
+        const tick = () => {
+          const s = Math.max(0, Math.round((until - Date.now()) / 1000));
+          left.textContent = s ? `Works for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} more` : 'This code ran out. Make another.';
+          if (!s) { stopPageTimers(); wst.textContent = ''; }
+        };
+        tick();
+        every(tick, 1000);
+        every(() => refreshMe().then(() => {
+          if (me && me.linked && me.console && me.console.id !== before) {
+            stopPageTimers();
+            const w = view.querySelector('.link-ways'); w.classList.add('one'); w.innerHTML = '<div class="glass link-card"></div>'; linkedDone(w.firstChild);
+          }
+        }), 3000);
+      });
+    });
+  }
+
+  // #/my-ps5: the linked PS5, what's on it, and what this browser can send it.
+  function myPage() {
+    view.innerHTML = `<article class="form-page my-ps5"><a class="back" href="#/">← All games</a><h1>My PS5</h1><div data-my><p class="muted">Loading…</p></div></article>`;
+    setBackdrop(null);
+    refreshMe().then(drawMy);
+    every(() => refreshMe().then(() => { if (!document.activeElement || !view.contains(document.activeElement) || document.activeElement === document.body) drawMy(); }), 30000);
+  }
+  function appRow(x) {
+    const a = byId(x.id);
+    const name = (a && a.name) || x.name || x.id;
+    return `
+      <li class="glass ps5-app">
+        ${a ? `<a href="#/game/${encodeURIComponent(a.id)}">${iconHTML(a, 56)}</a>` : `<span class="ico mono">${esc(String(name).slice(0, 2))}</span>`}
+        <span class="ps5-app-words"><strong>${a ? `<a href="#/game/${encodeURIComponent(a.id)}">${esc(name)}</a>` : esc(name)}</strong>
+          <span>${x.version ? esc(x.version) : 'Installed'}${x.update ? ` · <em class="upd">${esc(x.update)} ready</em>` : ''}</span></span>
+        ${x.update ? `<button class="btn small" type="button" data-send-app="${esc(x.id)}">Update</button>` : ''}
+      </li>`;
+  }
+  function drawMy() {
+    const box = view.querySelector('[data-my]');
+    if (!box) return;
+    if (!me || !me.linked) {
+      box.innerHTML = `
+        <div class="glass link-card">
+          ${linkArt(false)}
+          <p class="lead">This ${deviceWord()} isn't linked to a PS5 yet. Link it to see what's on your PS5 and install apps on it from here.</p>
+          <a class="btn primary big" href="#/link">Link your PS5</a>
+        </div>`;
+      return;
+    }
+    const st = me.state || {};
+    const apps = appsOnPs5().slice().sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id)));
+    const ups = apps.filter((x) => x.update);
+    const srcs = Array.isArray(st.sources) ? st.sources.filter((x) => x && x.value) : [];
+    const sendable = cat.apps.filter((a) => !onPs5(a.id)).slice().sort((x, y) => x.name.localeCompare(y.name));
+    const free = Number(st.free_gb);
+    box.innerHTML = `
+      <section class="glass console-card">
+        <span class="console-ico">${PS5_SVG}</span>
+        <div class="console-words">
+          <strong>Your PS5</strong>
+          <span>${me.console.store ? 'Recomp Store ' + esc(me.console.store) + ' · ' : ''}seen ${esc(ago(me.console.seen))}${Number.isFinite(free) && free > 0 ? ' · ' + free.toFixed(1) + ' GB free' : ''}</span>
+        </div>
+        <span class="tag">Linked to this ${esc(thisDevice())}</span>
+      </section>
+      <h2 class="my-h2">On your PS5 <span class="muted">${apps.length || ''}</span></h2>
+      ${ups.length ? `<p class="glass note-card upd-card">${ups.length === 1 ? '1 update is' : ups.length + ' updates are'} ready. Install ${ups.length === 1 ? 'it' : 'them'} from here, or from Latest Updates on your PS5.</p>` : ''}
+      ${apps.length ? `<ul class="ps5-apps">${apps.map(appRow).join('')}</ul>`
+        : `<p class="muted">${me.state_at ? 'Nothing from Recomp Store is installed on it yet.' : 'Open Recomp Store on your PS5 and what\'s on it shows up here.'}</p>`}
+      <div class="my-forms">
+        <form class="glass form" data-send-form novalidate>
+          <span class="kicker">Install an app</span>
+          <label>App<select name="app"><option value="">Choose an app</option>${sendable.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label>
+          <div class="form-row"><button class="btn primary" type="submit">Install on your PS5</button><span class="status" role="status"></span></div>
+        </form>
+        <form class="glass form" data-source-form novalidate>
+          <span class="kicker">Add a custom source</span>
+          <p class="form-note">A GitHub repo (owner/name) or the https:// address of a list of them. Apps from it aren't checked by Recomp Store, and your PS5 asks you before adding it.</p>
+          <label>Repo or list<input name="v" maxlength="500" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="owner/name"></label>
+          <div class="src-preview" hidden></div>
+          <div class="form-row"><button class="btn" type="submit" data-step="check">Check it</button><span class="status" role="status"></span></div>
+          ${srcs.length ? `<div class="srcs"><span class="muted">On your PS5:</span> ${srcs.map((x) => `<span class="tag">${esc(x.name || x.value)}</span>`).join(' ')}</div>` : ''}
+        </form>
+        <form class="glass form" data-redeem-form novalidate>
+          <span class="kicker">Redeem a beta code</span>
+          <label>Code<input name="code" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="12-345-678"></label>
+          <div class="form-row"><button class="btn" type="submit">Redeem</button><span class="status" role="status"></span></div>
+        </form>
+      </div>
+      <p class="unlink-row"><button class="linkish" type="button" data-forget>Unlink this ${esc(thisDevice())}</button></p>`;
+    // Install an app
+    const sf = box.querySelector('[data-send-form]');
+    sf.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = sf.querySelector('.status');
+      const id = sf.querySelector('[name="app"]').value;
+      if (!id) { s.textContent = 'Choose an app.'; s.className = 'status bad'; return; }
+      sendInstall(id, s, sf.querySelector('button'));
+    });
+    // A custom source: checked here first, then sent.
+    const src = box.querySelector('[data-source-form]');
+    const prev = src.querySelector('.src-preview');
+    const sbtn = src.querySelector('button');
+    const sst = src.querySelector('.status');
+    let checked = null;
+    const sv = src.querySelector('[name="v"]');
+    sv.addEventListener('input', () => { checked = null; prev.hidden = true; sbtn.textContent = 'Check it'; sst.textContent = ''; });
+    src.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = sv.value.trim().replace(/^https:\/\/(www\.)?github\.com\//i, '').replace(/\/+$/, '');
+      const isRepo = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v);
+      const isList = /^https:\/\/\S+$/.test(sv.value.trim());
+      if (!isRepo && !isList) { sst.textContent = 'Enter a GitHub repo like owner/name, or a list\'s https:// address.'; sst.className = 'status bad'; return; }
+      if (checked) {
+        sbtn.disabled = true; sst.textContent = 'Sending…'; sst.className = 'status';
+        api('send', { kind: 'source', data: checked }).then((res) => {
+          sbtn.disabled = false;
+          sst.textContent = res.ok ? 'Sent. Your PS5 asks you to confirm it, then adds it.' : res.error; sst.className = res.ok ? 'status ok' : 'status bad';
+          if (res.ok) { checked = null; sbtn.textContent = 'Check it'; }
+        });
+        return;
+      }
+      sbtn.disabled = true; sst.textContent = 'Checking…'; sst.className = 'status';
+      fetch('/api/source.php?' + (isRepo ? 'repo=' + encodeURIComponent(v) : 'list=' + encodeURIComponent(sv.value.trim())))
+        .then((r) => r.json()).catch(() => ({ ok: false, error: 'That couldn\'t be checked right now. Try again in a moment.' }))
+        .then((res) => {
+          sbtn.disabled = false;
+          if (!res.ok) { sst.textContent = res.error; sst.className = 'status bad'; prev.hidden = true; return; }
+          const apps = res.apps || [];
+          prev.hidden = false;
+          prev.innerHTML = `
+            <strong>${esc(res.source && res.source.name)}</strong>${res.source && res.source.author ? ` <span class="muted">by ${esc(res.source.author)}</span>` : ''}
+            <ul>${apps.slice(0, 8).map((a) => `<li>${a.icon ? `<img src="${esc(a.icon)}" alt="" loading="lazy">` : `<span class="ico mono">${esc(String(a.name).slice(0, 2))}</span>`}<span>${esc(a.name)}${a.version ? ` <span class="muted">${esc(a.version)}${a.size ? ' · ' + esc(a.size) : ''}</span>` : ''}</span></li>`).join('')}</ul>
+            ${apps.length > 8 ? `<p class="muted">And ${apps.length - 8} more.</p>` : ''}
+            ${(res.errors || []).length ? `<p class="muted">${res.errors.length === 1 ? '1 repo in it couldn\'t be read' : res.errors.length + ' repos in it couldn\'t be read'}: ${res.errors.slice(0, 3).map((x) => esc(x.repo) + ' (' + esc(x.error) + ')').join('; ')}</p>` : ''}`;
+          if (!apps.length) { sst.textContent = 'Nothing in it can be installed yet.'; sst.className = 'status bad'; return; }
+          checked = isRepo ? { repo: v } : { list: sv.value.trim() };
+          sbtn.textContent = 'Send to your PS5';
+          sst.textContent = ''; sst.className = 'status';
+        });
+    });
+    // A beta code
+    const rf = box.querySelector('[data-redeem-form]');
+    const rc = rf.querySelector('[name="code"]');
+    rc.addEventListener('input', () => { const d = rc.value.replace(/\D/g, '').slice(0, 8); rc.value = d.length > 5 ? d.slice(0, 2) + '-' + d.slice(2, 5) + '-' + d.slice(5) : d.length > 2 ? d.slice(0, 2) + '-' + d.slice(2) : d; });
+    rf.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = rf.querySelector('.status');
+      const d = rc.value.replace(/\D/g, '');
+      if (d.length !== 8) { s.textContent = 'A code is 8 numbers, like 12-345-678.'; s.className = 'status bad'; return; }
+      const b = rf.querySelector('button');
+      b.disabled = true; s.textContent = 'Checking…'; s.className = 'status';
+      api('redeem', { code: d }).then((res) => { b.disabled = false; s.textContent = res.ok ? res.message : res.error; s.className = res.ok ? 'status ok' : 'status bad'; if (res.ok) rc.value = ''; });
+    });
+    box.querySelector('[data-forget]').addEventListener('click', () => {
+      if (!confirm(`Unlink this ${thisDevice()} from your PS5? You can link it again any time.`)) return;
+      api('forget').then(() => { me = { ok: true, linked: false }; markLinked(); drawMy(); });
+    });
+  }
+
+  // Installing an app on the linked PS5: from a game's page, My PS5, or an Update button.
+  function sendInstall(id, status, btn) {
+    if (btn) btn.disabled = true;
+    if (status) { status.hidden = false; status.textContent = 'Sending…'; status.className = status.className.replace(/\b(ok|bad)\b/g, '').trim(); }
+    api('send', { kind: 'install', data: { app: id } }).then((res) => {
+      if (btn) btn.disabled = false;
+      if (!status) return;
+      status.textContent = res.ok ? res.message : res.error || 'That didn\'t go through.';
+      status.classList.add(res.ok ? 'ok' : 'bad');
+      if (res.linked === false) refreshMe();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-send-app]');
+    if (!b || b.closest('form')) return;
+    const holder = b.closest('.panel, .ps5-app');
+    let st = holder && holder.querySelector('.send-status');
+    if (!st && holder && holder.classList.contains('ps5-app')) {
+      st = document.createElement('span'); st.className = 'note send-status'; holder.querySelector('.ps5-app-words').appendChild(st);
+    }
+    sendInstall(b.dataset.sendApp, st, b);
+  });
+
+  // A game's page, its install button: on the linked PS5, or the way to get the store.
+  function installHTML(a) {
+    if (!v2on()) return '<a class="btn primary" href="#/get" data-get>Install with Recomp Store</a>';
+    if (me && me.linked) {
+      const on = onPs5(a.id);
+      const label = on ? (on.update ? `Update to ${esc(on.update)} on your PS5` : 'Install again on your PS5') : 'Install on your PS5';
+      return `${on ? `<p class="on-ps5"><span class="dot"></span>On your PS5${on.version ? ' · ' + esc(on.version) : ''}</p>` : ''}
+        <button class="btn primary" type="button" data-send-app="${esc(a.id)}">${label}</button>
+        <p class="note send-status" role="status" hidden></p>
+        <a class="small-link" href="#/get">Don't have Recomp Store yet?</a>`;
+    }
+    return `<a class="btn primary" href="#/get" data-get>Install with Recomp Store</a>
+      <a class="small-link" href="#/link">Have Recomp Store? Link your PS5 to install from here.</a>`;
+  }
+
+  // ---- (2.0) /r/<code>: a bug report the store sent, finished here ----------------------------
+  function reportPage(code) {
+    const c = code6(code);
+    view.innerHTML = `
+      <article class="form-page report-page">
+        <span class="kicker">Bug report</span>
+        <h1>Finish your report</h1>
+        <div data-r><p class="muted">Loading…</p></div>
+      </article>`;
+    setBackdrop(null);
+    const box = view.querySelector('[data-r]');
+    fetch('/api/report.php?a=info&code=' + encodeURIComponent(c), { cache: 'no-store' })
+      .then((r) => r.json()).catch(() => ({ ok: false, error: 'recompstore.com didn\'t answer. Try again in a moment.' }))
+      .then((info) => {
+        if (!info.ok) { box.innerHTML = `<p class="lead">${esc(info.error)}</p><a class="btn" href="#/report">Report a bug another way</a>`; return; }
+        if (info.finished) { box.innerHTML = '<p class="lead">This report is finished already. Thanks for helping!</p><a class="btn" href="#/">Back to all games</a>'; return; }
+        const g = byId(info.app.id);
+        box.innerHTML = `
+          <p class="lead">Your logs from <strong>${esc(info.app.name)}</strong>${info.version ? ' ' + esc(info.version) : ''} are in. Tell us what happened, and add pictures if they help.</p>
+          <form class="glass form" novalidate>
+            <div class="report-about">${g ? iconHTML(g, 56) : ''}<span>${esc(info.app.name)}<span class="muted">${info.version ? 'Version ' + esc(info.version) + ' · ' : ''}sent ${esc(ago(info.sent))}</span></span></div>
+            <label>What happened?<textarea name="what" rows="6" maxlength="5000" required placeholder="What you expected, and what happened instead."></textarea></label>
+            <label>What were you doing right before? <span class="opt">optional</span><textarea name="before" rows="3" maxlength="5000" placeholder="The menu, the level, the button you pressed…"></textarea></label>
+            <label>Pictures <span class="opt">optional, up to 4</span><input name="pictures[]" type="file" accept="image/png,image/jpeg,image/webp" multiple class="pics-input"></label>
+            <div class="pics-preview"></div>
+            <label>How can we reach you? <span class="opt">optional</span><input name="contact" maxlength="200" placeholder="Email or Discord name, if you'd like a reply"></label>
+            <div class="form-row"><button class="btn primary" type="submit">Send the report</button><span class="status" role="status"></span></div>
+          </form>`;
+        const f = box.querySelector('form');
+        const st = f.querySelector('.status');
+        const pics = f.querySelector('.pics-input');
+        const pv = f.querySelector('.pics-preview');
+        let urls = [];
+        pics.addEventListener('change', () => {
+          urls.forEach((u) => URL.revokeObjectURL(u));
+          urls = [...pics.files].slice(0, 4).map((x) => URL.createObjectURL(x));
+          pv.innerHTML = urls.map((u) => `<img src="${u}" alt="">`).join('');
+          st.textContent = pics.files.length > 4 ? 'Four pictures at most: only the first four go.' : ''; st.className = 'status';
+        });
+        f.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const fv = (n) => f.querySelector(`[name="${n}"]`);
+          if (fv('what').value.trim().length < 10) { st.textContent = 'Tell us a little more about what happened.'; st.className = 'status bad'; fv('what').focus(); return; }
+          const files = [...pics.files].slice(0, 4);
+          if (files.some((x) => x.size > 8 * 1048576)) { st.textContent = 'Each picture can be 8 MB at most.'; st.className = 'status bad'; return; }
+          if (files.some((x) => !/^image\/(png|jpeg|webp)$/.test(x.type))) { st.textContent = 'Only pictures can be sent: PNG, JPEG or WebP.'; st.className = 'status bad'; return; }
+          const fd = new FormData();
+          fd.append('a', 'finish'); fd.append('code', c);
+          fd.append('what', fv('what').value); fd.append('before', fv('before').value); fd.append('contact', fv('contact').value);
+          files.forEach((x) => fd.append('pictures[]', x, x.name));
+          const b = f.querySelector('button');
+          b.disabled = true; st.textContent = files.length ? 'Sending the report and pictures…' : 'Sending…'; st.className = 'status';
+          fetch('/api/report.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then((r) => r.json()).catch(() => ({ ok: false, error: 'That didn\'t send. Check your connection and try again.' }))
+            .then((res) => {
+              if (!res.ok) { b.disabled = false; st.textContent = res.error; st.className = 'status bad'; return; }
+              f.innerHTML = `<div class="sent"><strong>Thanks, the report is in.</strong><p>${esc(res.message)}</p><a class="btn" href="#/">Back to all games</a></div>`;
+            });
+        });
+      });
+  }
+
   function notFound() {
     view.innerHTML = '<section class="intro"><h1>That page isn\'t here.</h1><p><a href="#/">Back to all games</a></p></section>';
     setBackdrop(null);
@@ -537,19 +1062,23 @@
   function current() {
     if (location.hash.length > 1) return location.hash.slice(1);
     const p = location.pathname.match(/^\/(game|soon)\/([A-Za-z0-9_-]+)\/?$/);
-    return p ? `/${p[1]}/${p[2]}` : '/';
+    // (2.0) /l/<code>: link this phone to a PS5; /r/<code>: finish a bug report.
+    const q = location.pathname.match(/^\/(l|r)\/([A-Za-z0-9-]{4,12})\/?$/);
+    return p ? `/${p[1]}/${p[2]}` : q ? `/${q[1]}/${q[2]}` : '/';
   }
   let routed = '';
   function route() {
     clearInterval(slideTimer);
+    stopPageTimers();
     const h = current();
     if (h === '/get') { if (!dlg.open) dlg.showModal(); if (!view.innerHTML) home(); routed = location.href; return; }
     if (dlg.open) dlg.close();
     const m = h.match(/^\/game\/(.+)$/);
     const ms = h.match(/^\/soon\/(.+)$/);
     const own = m ? byId(decodeURIComponent(m[1])) && `/game/${m[1]}` : ms ? soonById(decodeURIComponent(ms[1])) && `/soon/${ms[1]}` : '';
+    const coded = h.match(/^\/(l|r)\/([A-Za-z0-9-]{4,12})$/);
     if (own && location.pathname + location.hash !== own) history.replaceState(history.state, '', own);
-    else if (!own && location.pathname !== '/') history.replaceState(history.state, '', '/' + location.hash);
+    else if (!own && !coded && location.pathname !== '/') history.replaceState(history.state, '', '/' + location.hash);
     routed = location.href;
     if (m) game(decodeURIComponent(m[1]));
     else if (ms) soonPage(decodeURIComponent(ms[1]));
@@ -557,8 +1086,14 @@
     else if (h === '/report') formPage('bug');
     else if (h === '/submit') formPage('submit');
     else if (h === '/contact') contactPage();
+    else if (h === '/ids' && v2on()) idsPage();
+    else if (coded && coded[1] === 'l') linkClaimPage(coded[2]);
+    else if (coded) reportPage(coded[2]);
+    else if (h === '/link') linkPage();
+    else if (['/games', '/emulators', '/apps', '/tools'].includes(h) && v2on()) categoryPage(h.slice(1));
+    else if (h === '/my-ps5') myPage();
     else home();
-    const here = h === '/about' ? 'about' : ['/contact', '/report', '/submit'].includes(h) ? 'contact' : 'home';
+    const here = h === '/about' ? 'about' : ['/contact', '/report', '/submit', '/ids'].includes(h) ? 'contact' : ['/link', '/my-ps5'].includes(h) || (coded && coded[1] === 'l') ? 'my' : 'home';
     document.querySelectorAll('[data-nav]').forEach((n) => n.toggleAttribute('aria-current', n.dataset.nav === here));
     window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
     view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
@@ -573,15 +1108,33 @@
     navigator.clipboard && navigator.clipboard.writeText(el.textContent.trim()).then(() => { b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500); });
   });
 
+  // (2.0) At most a moment for the charts and this browser's link: the page doesn't wait longer.
+  const atMost = (p, ms) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(null), ms))]);
+  const chartsLoad = atMost(fetch('/api/charts.php').then((r) => (r.ok ? r.json() : null)).catch(() => null), 2500);
+  const meLoad = atMost(refreshMe(), 2000);
+  // Only the admin's own browser gets a yes here (its login cookie only goes to /admin).
+  const adminLoad = atMost(fetch('/admin/me.php', { cache: 'no-store', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).catch(() => null), 2000);
   fetch('/catalog.json', { cache: 'no-cache' })
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then((c) => {
-      cat = c;
-      // Games that need Recomp Store 1.0.3 or newer are listed apart (older stores don't read them).
-      cat.apps = (c.apps || []).concat(c.newerStoreApps || []);
-      cat.apps.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9)); // the admin's order, both lists together
-      cat.soon = (c.comingSoon || []).slice().sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9));
+    .then((c) => Promise.all([c, chartsLoad, meLoad, adminLoad]))
+    .then(([c, ch, , ad]) => {
+      charts = ch && ch.ok ? ch : null;
+      siteV2 = !!(c.site && c.site.v2 === true);
+      admin = !!(ad && ad.admin === true);
+      // Games that need Recomp Store 1.0.3 or newer are listed apart (older stores don't read them),
+      // and (2.0) what only 2.0 lists, apart again.
+      raw = c;
+      cat = Object.assign({}, c);
+      setLists();
       const s = cat.site || {};
+      if (admin && !siteV2) {
+        const rib = document.createElement('a');
+        rib.className = 'preview-ribbon';
+        rib.href = '/admin/settings.php#site-v2';
+        rib.innerHTML = '<strong>Preview</strong> Only you see 2.0';
+        rib.title = 'Visitors see the site without 2.0. Change it in the admin\'s Settings.';
+        document.body.appendChild(rib);
+      }
       document.getElementById('payload-slot').innerHTML = s.payload
         ? `<a class="btn primary" href="${esc(s.payload)}">Download RecompStore-Installer.elf</a>`
         : '<em class="soon">The installer is on its way with the first release.</em>';
@@ -591,9 +1144,11 @@
         '<a href="https://github.com/elripalda/RecompStore" target="_blank" rel="noopener">GitHub</a>',
         '<a href="#/report">Report a bug</a>',
         '<a href="#/submit">Submit your recomp</a>',
+        '<a href="#/ids" data-foot-ids>Title IDs</a>',
         '<a href="#/contact">Contact</a>',
         '<a href="#/about">About</a>',
       ].filter(Boolean).join('');
+      setLists();
       // A link or Back can bring both events for one move: the page is drawn once.
       const moved = () => { if (location.href !== routed) route(); };
       window.addEventListener('hashchange', moved);

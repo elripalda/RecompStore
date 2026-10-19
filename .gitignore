@@ -9,3 +9,5 @@ site/public_html/catalog.json
 site/public_html/media/
 app/release/
 app/payload/*/*.o
+app/payload/*/lzma-obj/
+app/payload/*/embed.o

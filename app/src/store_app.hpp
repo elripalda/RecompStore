@@ -57,13 +57,104 @@ public:
     {
         open_logs(page_id_);
         logs_t_ = 1; logs_msg_ = msg; logs_sel_ = sel; logs_view_ = view; logs_result_ = result;
-        kb_ = kb; kb_t_ = 1; kb_row_ = kb_row; kb_col_ = kb_col;
+        kb_ = kb; kb_t_ = 1; kb_row_ = kb_row; kb_col_ = kb_col; kb_mode_ = 0;
     }
     void preview_logs_close() { logs_ = kb_ = false; }
     void preview_redeem_note(const std::string &t, bool bad) { redeem_note_ = t; redeem_note_bad_ = bad; }
+    /* (2.0) The title ID guard's question over the open game's page. */
+    void preview_clash(const std::string &with, const std::string &fresh, bool pkg, int sel = 0)
+    {
+        clash_ = true; clash_t_ = 1; clash_sel_ = sel;
+        clash_job_ = JobState(); clash_job_.app_id = page_id_; clash_job_.clash = true;
+        clash_job_.clash_with = with; clash_job_.clash_new = fresh; clash_job_.clash_pkg = pkg;
+    }
+    void preview_clash_close() { clash_ = false; }
+    /* (2.0) The Refresh pill at the top right: 1 refreshing, 2 done, 3 failed. */
+    void preview_refresh(int st) { refresh_shown_ = true; refresh_preview_ = st; refresh_t_ = 0; }
+
+    /* (2.0) The Library's views (0 My Apps, 1 Updates, 2 Betas) and a category tab. */
+    void preview_library(int view, int row = 0) { preview_tab(Library); lib_view_ = view; col_ = row; lib_bar_ = false; }
+    void preview_category(int tab, int chip = 0, int row = 0, bool chips = false)
+    {
+        preview_tab(tab); cat_chip_ = chip; col_ = row; cat_on_chips_ = chips;
+    }
+    void preview_customize(int row) { preview_settings(SecCustomize); in_section_ = true; cus_row_ = row; }
+    void preview_pin(const std::string &id) { toggle_pin(id); }
+    void preview_queue(const std::vector<std::string> &ids, int done) { queue_ = ids; queue_total_ = int(ids.size()) + done; queue_done_ = done; }
+    void preview_prefs(int lib_view, bool advanced) { prefs_.lib_view = lib_view; prefs_.advanced = advanced; }
+    /* (2.0) Settings > Link a phone and Sources: the row focused; a sheet over the store (1 a
+     * phone sent a source to add, 2 a source's choices); the keyboard in a mode (1 a source,
+     * 2 why it's reported). */
+    void preview_link(int row) { preview_settings(SecLink); in_section_ = row >= 0; link_row_ = std::max(0, row); }
+    void preview_sources(int row) { preview_settings(SecSources); in_section_ = row >= 0; src_row_ = std::max(0, row); }
+    void preview_sheet(int kind, const std::string &value, int sel = 0) { sheet_ = true; sheet_t_ = 1; sheet_kind_ = kind; sheet_value_ = value; sheet_sel_ = sel; }
+    void preview_sheet_close() { sheet_ = false; }
+    void preview_kb(int mode, const std::string &text, int row, int col)
+    {
+        kb_mode_ = mode; kb_text() = text; kb_ = true; kb_t_ = 1; kb_row_ = row; kb_col_ = col; kb_caps_ = false;
+    }
+    void preview_src_note(const std::string &t, bool bad) { src_note_ = t; src_note_bad_ = bad; }
 
 private:
-    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, TabCount = 4 };
+    /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
+     * are shown when the catalog has something in them). tab_ holds a kind; tab_order() the
+     * kinds in the order the tab bar shows them. */
+    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, Games = 4, Emulators = 5, Apps = 6, Tools = 7 };
+    /* Settings' sections, by kind; settings_order() lists them as shown. */
+    enum SetSec { SecGeneral = 0, SecAdding = 1, SecRedeem = 2, SecAbout = 3, SecCustomize = 4, SecLink = 5, SecSources = 6 };
+    std::vector<int> tab_order() const;
+    std::vector<int> settings_order() const;
+    static const char *tab_name(int kind);
+    static const char *category_of(int kind); /* "games", "emulators", "apps", "tools"; "" for others */
+    static bool is_category(int kind) { return kind == Games || kind == Emulators || kind == Apps || kind == Tools; }
+    void go_tab(int kind, int dir);
+
+    /* (2.0) What the player chose to keep: Settings > Customize, the pins, menu sounds.
+     * /data/recompstore/prefs.json. */
+    struct Prefs
+    {
+        int start_tab = Discover;
+        int lib_view = 0;     /* 0 grid, 1 list */
+        int lib_order = 0;    /* 0 name, 1 recently installed, 2 updates first */
+        bool pins_on_discover = true;
+        int backdrop = 0;     /* 0 the game's art, 1 calm (the gradient only) */
+        bool reduced_motion = false;
+        bool advanced = false;
+        bool sounds = true;
+        std::vector<std::string> pins; /* newest first */
+    };
+    void load_prefs();
+    void save_prefs();
+    bool pinned(const std::string &id) const;
+    void toggle_pin(const std::string &id);
+
+    /* (2.0) The Library, the category tabs and Update All (store_app_library.cpp). */
+    std::vector<const App *> library_apps() const;  /* My Apps, in the chosen order, pins first */
+    std::vector<const App *> update_apps() const;   /* installed, with an update ready */
+    std::vector<const App *> beta_apps() const;
+    std::vector<const App *> category_apps(int kind) const; /* with the chip's label applied */
+    std::vector<std::string> category_chips(int kind) const; /* "All" then the labels used */
+    std::vector<int> library_views() const;          /* 0 My Apps, 1 Updates, 2 Betas (when there are some) */
+    bool update_library(float dt, int moves, bool u, bool d);
+    bool update_category(float dt, int moves, bool u, bool d);
+    void draw_library2(porpoise::ui::Gfx &gfx);
+    void draw_category(porpoise::ui::Gfx &gfx);
+    /* A game as a wide row (the Library's list and Updates): icon, name, version, a line, the button. */
+    void draw_app_row(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float focus, const std::string &line,
+                      const std::string &button, int button_style);
+    void draw_tab_header(porpoise::ui::Gfx &gfx, const std::string &title, const std::string &count);
+    void start_update_all();
+    void tick_queue();
+    /* A tile's pin, top right (2.0). */
+    void draw_pin(porpoise::ui::Gfx &gfx, float x, float y);
+    void draw_customize(porpoise::ui::Gfx &gfx, float cx, float top, float cw);
+    std::string square_hint() const; /* what Square does here, "" nothing */
+    std::string cross_hint() const;
+    bool update_customize(float dt, bool l, bool r, bool u, bool d);
+    std::string install_label() const; /* (2.0) where new apps install, by name */
+    const std::vector<Place> &install_places_now() const;
+    mutable std::vector<Place> places_now_;
+    mutable float places_t_ = -1;
     struct Art
     {
         porpoise::ui::Texture *icon = nullptr, *hero = nullptr, *blur = nullptr, *logo = nullptr;
@@ -73,18 +164,21 @@ private:
     /* The game page's controls, top to bottom: what the D-pad moves between. */
     struct Control
     {
-        enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */ } kind;
+        enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
      * banner, then the catalog's sections (a grid is a line per six games). */
     struct DLine
     {
-        int kind = 0;        /* 0 the featured banner, 1 a row of tiles, 2 a line of a grid, 3 wide tiles, 4 a spotlight */
+        int kind = 0;        /* 0 the featured banner, 1 a row of tiles, 2 a line of a grid, 3 wide tiles, 4 a spotlight,
+                                (2.0) 5 the category buttons */
         float y = 0, h = 0;  /* in Discover's own space: 0 is its top */
         float head = 0;      /* the section's title above it: its height (0 none) */
         std::string title;   /* the title; a spotlight's names it */
         std::vector<const App *> items;
+        std::vector<int> cats; /* kind 5: the category tabs, in order */
+        int count() const { return kind == 5 ? int(cats.size()) : int(items.size()); }
     };
 
     bool pressed(std::uint32_t bits) const { return (held_ & ~prev_ & bits) != 0; }
@@ -99,7 +193,6 @@ private:
     float item_x(const DLine &l, int i, int first) const;
     std::string state_of(const App &a, bool *update_ready) const;
     std::string version_of(const App &a) const;
-    std::vector<const App *> installed_apps() const;
     std::vector<const App *> featured_apps() const;
     void open(const std::string &id);
     void close();
@@ -117,8 +210,6 @@ private:
     void draw_backdrop(porpoise::ui::Gfx &gfx);
     void draw_top(porpoise::ui::Gfx &gfx);
     void draw_discover(porpoise::ui::Gfx &gfx);
-    void draw_library(porpoise::ui::Gfx &gfx);
-    void draw_updates(porpoise::ui::Gfx &gfx);
     void draw_settings(porpoise::ui::Gfx &gfx);
     void draw_page(porpoise::ui::Gfx &gfx);
     void draw_picker(porpoise::ui::Gfx &gfx);
@@ -138,6 +229,11 @@ private:
     /* glow: the cyan outline with a soft glow (buttons on the game page, which can be white). */
     void ring(porpoise::ui::Gfx &gfx, float x, float y, float w, float h, float r, float amount, bool glow = false);
     void draw_confirm(porpoise::ui::Gfx &gfx);
+    /* (2.0) The title ID guard's question: Keep both, Install over it, Cancel. */
+    std::vector<int> clash_choices() const;
+    bool update_clash(float dt);
+    void draw_clash(porpoise::ui::Gfx &gfx);
+    void draw_refresh(porpoise::ui::Gfx &gfx);
     /* The game's logo in a box (fitted, then sized and nudged as the catalog says):
      * the height it takes, or -1 when there's no logo (yet) and the name is drawn. */
     float draw_logo(porpoise::ui::Gfx &gfx, const App &a, const LogoPlace &place, float x, float y, float box_w,
@@ -180,6 +276,12 @@ private:
     porpoise::ui::Texture *logo_small_ = nullptr, *logo_ = nullptr;
     porpoise::ui::Texture *mark_[3] = {}, *mark_glow_ = nullptr, *gradient_ = nullptr;
     porpoise::ui::Texture *hint_cross_ = nullptr, *hint_circle_ = nullptr, *chevron_ = nullptr, *shield_ = nullptr;
+    porpoise::ui::Texture *hint_triangle_ = nullptr, *hint_square_ = nullptr; /* (2.0) Refresh, Pin */
+    porpoise::ui::Texture *cat_icon_[4] = {}; /* (2.0) Games, Emulators, Apps, Tools */
+    porpoise::ui::Texture *hfade_ = nullptr;  /* (2.0) white fading out to the right */
+    void draw_cat_button(porpoise::ui::Gfx &gfx, int kind, float x, float y, float w, float h, float focus);
+    /* (2.0) An app with no icon yet: its category's colour and icon, in a rounded square. */
+    void draw_no_icon(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float size, float radius);
     porpoise::ui::Texture *disc_icon_ = nullptr, *folder_icon_ = nullptr;
 
     bool booted_ = false;
@@ -293,5 +395,92 @@ private:
     float kb_t_ = 0;
     int kb_row_ = 1, kb_col_ = 0;
     bool kb_caps_ = false;
+
+    /* (2.0) The title ID guard: an install stopped because another app has the game's title
+     * ID. The question over its page; clash_job_ is the job that stopped (who, which new ID);
+     * clash_sel_ the choice focused, in clash_choices() (1 Keep both, 2 Install over it, 0 Cancel). */
+    bool clash_ = false;
+    float clash_t_ = 0;
+    int clash_sel_ = 0;
+    JobState clash_job_;
+    /* (2.0) Refresh (Triangle, or Settings > General): the pill at the top right while it
+     * reads the catalog, then how it went for a moment. */
+    bool refresh_shown_ = false;
+    float refresh_t_ = 0;
+    int refresh_preview_ = 0;
+
+    /* (2.0) The tab bar's sliding highlight (where it is, where it's going). */
+    float tab_hl_x_ = -1, tab_hl_w_ = 0;
+    Prefs prefs_;
+    bool prefs_loaded_ = false;
+    /* The Library: its view, the bar of views focused (Up from the top row), and its note. */
+    int lib_view_ = 0;
+    bool lib_bar_ = false;
+    float lib_view_t_ = 1;
+    std::string lib_note_;
+    bool lib_note_bad_ = false;
+    /* A category tab: the label chip picked, and whether the chips row has the focus. */
+    int cat_chip_ = 0;
+    bool cat_on_chips_ = false;
+    float cscroll_ = 0, cscroll_to_ = 0;
+    /* Update All: the games still to update, how many in all, how many done, which failed. */
+    std::vector<std::string> queue_;
+    int queue_total_ = 0, queue_done_ = 0;
+    std::string queue_now_;
+    std::vector<std::string> queue_failed_;
+    /* Settings > Customize: the row focused. */
+    int cus_row_ = 0;
+    /* (2.0) A short note at the top right ("Pinned"), for a couple of seconds. */
+    std::string toast_;
+    float toast_t_ = 9;
+    void toast(const std::string &t) { toast_ = t; toast_t_ = 0; }
+    bool start_applied_ = false; /* the start tab, once the catalog is in */
+
+    /* (2.0) The rest of 2.0's screens (store_app_link.cpp). */
+    Charts charts_;
+    /* The keyboard types into one of three things (kb_mode_): 0 the logs' message, 1 a source to
+     * add (a repo or a list's address), 2 why a source is reported. */
+    int kb_mode_ = 0;
+    std::string src_text_, src_why_;
+    std::string &kb_text() { return kb_mode_ == 1 ? src_text_ : kb_mode_ == 2 ? src_why_ : logs_msg_; }
+    void open_kb(int mode);
+    void kb_finished(); /* Done on the keyboard: what its text was for */
+    /* Settings > Sources: the row focused (0 Add a source, then the sources), and how the last
+     * thing done there went. A report is about src_report_value_; from a game page it says how it
+     * went there (src_report_page_). */
+    int src_row_ = 0;
+    std::string src_note_;
+    bool src_note_bad_ = false;
+    std::string src_report_value_;
+    bool src_report_page_ = false;
+    void draw_sources(porpoise::ui::Gfx &gfx, float cx, float top, float cw, float bottom);
+    bool update_sources(float dt, bool u, bool d);
+    void report_source(const std::string &value, bool from_page);
+    /* Settings > Link a phone: the row focused (0 New code, then the devices), a device asked
+     * to be unlinked (Cross again unlinks it), and the QR code's texture for the text it shows. */
+    int link_row_ = 0;
+    std::string link_armed_;
+    porpoise::ui::Texture *qr_ = nullptr;
+    std::string qr_text_;
+    void draw_qr(porpoise::ui::Gfx &gfx, const std::string &text, float x, float y, float size);
+    void draw_link(porpoise::ui::Gfx &gfx, float cx, float top, float cw, float bottom);
+    bool update_link(float dt, bool u, bool d);
+    /* A sheet over the store: 1 "add this source?" (a phone sent it), 2 a source's choices
+     * (Report, Remove, Close). sheet_sel_: the button focused. */
+    bool sheet_ = false;
+    float sheet_t_ = 0;
+    int sheet_kind_ = 0, sheet_sel_ = 0;
+    std::string sheet_value_, sheet_from_;
+    bool update_sheet(float dt);
+    void draw_sheet(porpoise::ui::Gfx &gfx);
+    /* What linked phones sent, waiting for a moment nothing else is open over the store. */
+    std::vector<LinkAction> link_waiting_;
+    void take_link_actions();
+    bool queue_fresh_ = false; /* the queue has installs, not only updates (a phone sent them) */
+    void draw_toast(porpoise::ui::Gfx &gfx);
+    std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
+    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_; }
+    /* A game page's line for an app from a custom source. */
+    std::string source_line(const App &a) const;
 };
 } // namespace recomp

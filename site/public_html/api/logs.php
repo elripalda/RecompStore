@@ -4,6 +4,7 @@
 // They land in the admin's Inbox under Logs. Form POST in, JSON out.
 //   app, version (the game's, as installed), store (the store's version), message,
 //   install + token (a beta tester's console, when it has one), name[] + text[] (the files)
+// (2.0) The answer also has report and url: a code for finishing the report on a phone (/r/<code>).
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 
@@ -86,6 +87,8 @@ try {
         $put = $db->prepare('INSERT INTO inbox_files (inbox_id, name, size, body) VALUES (?, ?, ?, ?)');
         foreach ($files as $f) $put->execute([$id, $f['name'], strlen($f['body']), $f['body']]);
         $db->commit();
+        // (2.0) A code to finish the report on a phone (what happened, pictures): 7 days.
+        try { $report = rs_report_code($db, $id); } catch (Throwable $e) { $report = ''; }
     } finally {
         if ($db->inTransaction()) $db->rollBack();
         $db->query("SELECT RELEASE_LOCK('rs_inbox')");
@@ -93,4 +96,6 @@ try {
 } catch (Throwable $e) {
     rs_reply(500, ['ok' => false, 'error' => 'The logs couldn\'t be saved right now. Try again later.']);
 }
-rs_reply(200, ['ok' => true, 'message' => 'Sent. Thanks for helping.']);
+$done = ['ok' => true, 'message' => 'Sent. Thanks for helping.'];
+if (!empty($report)) $done += ['report' => $report, 'url' => rs_abs('/r/' . $report)];
+rs_reply(200, $done);

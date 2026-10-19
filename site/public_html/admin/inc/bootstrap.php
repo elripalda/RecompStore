@@ -115,6 +115,13 @@ function rs_game_defaults(): array {
         'keep' => '',
         // Extra buttons on the game's page on the website (texture packs, patches...): [{label, url, color}].
         'links' => [],
+        // (2.0) Its part of the store: games, emulators, apps or tools; short labels shown on
+        // its page (comma-separated, at most 6: "Recomp, Xbox 360"); and whether the store may install
+        // it under a new title ID when its own is taken on a console (off: it expects its own folder).
+        'category' => 'games', 'tags' => '', 'can_move' => true,
+        // (2.0) Testers only: left out of catalog.json and everything public; consoles the admin
+        // marked as testers get it in the test catalog (api/catalog.php), marked "testing".
+        'testers' => false,
         // Beta: left out of the public catalog; only consoles that redeemed one of its codes see it,
         // and they download beta_file (a zip in RS_BETA_DIR) from this site, not from GitHub.
         'beta' => false, 'beta_file' => '', 'beta_sha256' => '', 'beta_size' => 0, 'beta_version' => '',
@@ -147,10 +154,18 @@ const RS_FILE_FROM = '1.0.6';
 const RS_ARCADE_FROM = '1.0.7';
 const RS_READY_FROM = '1.0.8';
 const RS_PART_FROM = '1.1.2';
+// (2.0) A .7z download: the 2.0 previews (1.9.x) and 2.0 unpack them; older stores only read zips.
+const RS_7Z_FROM = '1.9.1';
+// (2.0) What only the 2.0 store reads: an app that isn't a game (Emulators, Apps, Tools) needs it,
+// and anything that needs it is published apart, in v2Apps, which 1.x stores never read.
+const RS_V2_FROM = '1.9.1';
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
+    if (rs_category((string)($g['category'] ?? 'games')) !== 'games') $needs(RS_V2_FROM);
     if ($g['source'] === 'github' && strpbrk((string)$g['asset'], '*?') !== false) $needs(RS_GATED_FROM);
+    $file = $g['source'] === 'github' ? (string)$g['asset'] : (string)parse_url((string)$g['url'], PHP_URL_PATH);
+    if (preg_match('/\.7z$/i', $file)) $needs(RS_7Z_FROM);
     if (trim((string)$g['inside']) !== '') $needs(RS_INSIDE_FROM);
     if ($g['setup']) {
         $slots = json_decode((string)$g['slots'], true);
@@ -168,6 +183,45 @@ function rs_min_store(array $g): string {
     }
     if (rs_keep_list((string)($g['keep'] ?? ''))) $needs(RS_PART_FROM);
     return $min;
+}
+
+// (2.0) Title IDs other apps use outside the store, one per line ("PPSA92004 what it is"): the
+// admin won't give a game one of them, and recompstore.com/#/ids lists them so developers can
+// steer clear too. Edited under Settings.
+const RS_TAKEN_DEFAULT = "PPSA92004 An app already on many consoles\nPPSA92405 An app seen in /data/homebrew\nPPSA99901 ps5-plume-triangle demo (Nazky)";
+function rs_taken_ids(): array {
+    $out = [];
+    foreach (preg_split('/\r\n|\r|\n/', (string)rs_setting('taken_ids', RS_TAKEN_DEFAULT)) as $line) {
+        if (!preg_match('/^\s*([A-Z]{4}\d{5})\b\s*(.*)$/', $line, $m)) continue;
+        $out[$m[1]] = mb_substr(trim($m[2]), 0, 80);
+    }
+    return $out;
+}
+// (2.0) The block the PS5 store gives a game whose own title ID is taken on a console (its title
+// ID guard): never a game's own ID.
+const RS_MOVE_BLOCK = ['PPSA97001', 'PPSA97999'];
+// Apps already out with an ID in that block (from before it was kept): they can be listed, and the
+// PS5 store skips them (it skips every ID in the catalog and in the taken list too).
+const RS_MOVE_BLOCK_IN_USE = ['PPSA97358' => 'XPSemu', 'PPSA97510' => 'PSXS5'];
+function rs_move_block(string $id): bool {
+    if (isset(RS_MOVE_BLOCK_IN_USE[$id])) return false;
+    return (bool)preg_match('/^PPSA97\d{3}$/', $id) && $id >= RS_MOVE_BLOCK[0] && $id <= RS_MOVE_BLOCK[1];
+}
+
+// (2.0) The parts of the store, as the admin and the website name them.
+const RS_CATEGORIES = ['games' => 'Games', 'emulators' => 'Emulators', 'apps' => 'Apps', 'tools' => 'Tools'];
+function rs_category(string $c): string {
+    return array_key_exists($c, RS_CATEGORIES) ? $c : 'games';
+}
+// (2.0) Short labels for a game's page: comma-separated, each 1-24 characters, at most 6.
+function rs_tags_list(string $text): array {
+    $out = [];
+    foreach (explode(',', $text) as $t) {
+        $t = trim(preg_replace('/\s+/', ' ', $t));
+        if ($t === '' || mb_strlen($t) > 24 || count($out) >= 6 || in_array($t, $out, true)) continue;
+        $out[] = $t;
+    }
+    return $out;
 }
 
 // A game's save folders: one per line (or comma), inside its folder (or a full /data path),
@@ -289,10 +343,23 @@ function rs_clean_sections($in): array {
     $out = [];
     foreach (is_array($in) ? $in : [] as $s) {
         if (!is_array($s) || count($out) >= 32) continue;
-        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight'], true) ? $s['type'] : null;
+        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight', 'category', 'top', 'trending', 'new', 'updated'], true) ? $s['type'] : null;
         if (!$type) continue;
         $title = mb_substr(trim((string)($s['title'] ?? '')), 0, 60);
         $id = fn($v) => is_string($v) && preg_match('/^[A-Za-z0-9_-]{3,32}$/', $v) ? $v : null;
+        if (in_array($type, ['top', 'trending', 'new', 'updated'], true)) {
+            // (2.0) The charts (installs counted by the store, and GitHub's releases): filled in by
+            // the store and the site from /api/charts.php. Stores before 2.0 leave them out.
+            $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
+            $out[] = ['type' => $type, 'title' => $title, 'layout' => $layout];
+            continue;
+        }
+        if ($type === 'category') {
+            // (2.0) Every app in one part of the store; stores before 2.0 leave it out.
+            $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
+            $out[] = ['type' => 'category', 'title' => $title, 'layout' => $layout, 'category' => rs_category((string)($s['category'] ?? 'games'))];
+            continue;
+        }
         if ($type === 'spotlight') {
             $game = $id($s['game'] ?? '');
             if ($game) $out[] = ['type' => 'spotlight', 'title' => $title, 'game' => $game];
@@ -465,6 +532,11 @@ function rs_app_entry(array $g, int $order): array {
     if ($logs) $app['logs'] = $logs;
     $keep = rs_keep_list((string)($g['keep'] ?? ''));
     if ($keep) $app['keep'] = $keep;
+    // (2.0) Older stores don't read these, and list every entry as a game, as before.
+    $app['category'] = rs_category((string)($g['category'] ?? 'games'));
+    $tags = rs_tags_list((string)($g['tags'] ?? ''));
+    if ($tags) $app['tags'] = $tags;
+    if (array_key_exists('can_move', $g) && !$g['can_move']) $app['canMove'] = false;
     $min = rs_min_store($g);
     if ($min !== '') $app['minStore'] = $min;
     return $app;
@@ -473,13 +545,21 @@ function rs_app_entry(array $g, int $order): array {
 // Builds catalog.json from the database. Written to a temporary file first and then
 // renamed over the old one, so the PS5 store never reads a half-written catalog.
 // Beta games are left out: only consoles that redeemed one of their codes get them (api/beta.php).
-function rs_build_catalog(): array {
+// (2.0) Apps only the 2.0 store reads (not a game, or needing 1.9.1) go in v2Apps, never in apps
+// or newerStoreApps, so a 1.x store never lists them; Coming soon ones that aren't games, in
+// comingSoonV2. featured names only what 1.x stores list; featuredV2 is the admin's whole list.
+// Testers-only apps are left out, unless $testing (the test catalog, api/catalog.php): then
+// they're in, each marked "testing".
+function rs_build_catalog(bool $testing = false): array {
     $abs = 'rs_abs';
     $apps = [];
     $newer = [];
-    $featured = [];
+    $v2 = [];
+    $featuredV2 = [];
     $soon = [];
-    foreach (array_values(array_filter(rs_games(false), fn($g) => !$g['beta'])) as $i => $g) {
+    $soonV2 = [];
+    foreach (array_values(array_filter(rs_games(false), fn($g) => !$g['beta'] && ($testing || empty($g['testers'])))) as $i => $g) {
+        $notGame = rs_category((string)$g['category']) !== 'games';
         if ($g['soon']) {
             // Not out yet: what the store and the site show of it, nothing to install.
             $entry = [
@@ -495,17 +575,23 @@ function rs_build_catalog(): array {
             ];
             if ($g['source'] === 'github' && preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', (string)$g['repo'])) $entry['source'] = ['type' => 'github', 'repo' => $g['repo']];
             elseif (preg_match('#^https://#', (string)$g['url'])) $entry['url'] = $g['url'];
-            $soon[] = $entry;
+            if (!empty($g['testers'])) $entry['testing'] = true;
+            if ($notGame) { $entry['category'] = rs_category((string)$g['category']); $soonV2[] = $entry; }
+            else $soon[] = $entry;
             continue;
         }
         $app = rs_app_entry($g, $i);
+        if (!empty($g['testers'])) $app['testing'] = true;
         $min = $app['minStore'] ?? '';
-        if ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;
+        if ($notGame || ($min !== '' && version_compare($min, RS_V2_FROM, '>='))) $v2[] = $app;
+        elseif ($min !== '' && version_compare($min, RS_GATED_FROM, '>=')) $newer[] = $app;
         else $apps[] = $app;
-        if ($g['featured']) $featured[] = $g['id'];
+        if ($g['featured']) $featuredV2[] = $g['id'];
     }
+    $old = array_merge(array_column($apps, 'id'), array_column($newer, 'id'));
+    $featured = array_values(array_filter($featuredV2, fn($id) => in_array($id, $old, true)));
     // Discover's sections, as the admin arranged them: a spotlight only on a game that's listed.
-    $listed = array_merge(array_column($apps, 'id'), array_column($newer, 'id'));
+    $listed = array_merge($old, array_column($v2, 'id'));
     $sections = [];
     foreach (rs_discover_sections() as $s) {
         if ($s['type'] === 'spotlight' && !in_array($s['game'], $listed, true)) continue;
@@ -526,25 +612,59 @@ function rs_build_catalog(): array {
             'payload' => rs_setting('payload_url', ''),
             'discord' => rs_setting('discord_url', ''),
             'kofi' => rs_setting('kofi_url', 'https://ko-fi.com/ripalda'),
+            // (2.0) Whether the website shows its 2.0 side to everyone (true) or only to the
+            // logged-in admin as a preview (false). Settings changes it in place, no Publish needed.
+            'v2' => rs_site_v2(),
         ],
         'featured' => $featured,
         'apps' => $apps,
         'newerStoreApps' => $newer,
         // Read by Recomp Store 1.0.6 and newer, and the site; older stores skip them.
         'comingSoon' => $soon,
+        // (2.0) Read only by the 2.0 store, and the site when its 2.0 side is on.
+        'featuredV2' => $featuredV2,
+        'v2Apps' => $v2,
+        'comingSoonV2' => $soonV2,
         'discover' => ['sections' => $sections],
     ];
 }
 
-function rs_publish(): int {
-    $cat = rs_build_catalog();
+// (2.0) The website's 2.0 side: 'all' shows it to everyone; anything else ('me', the default) only
+// to the logged-in admin, with a Preview ribbon.
+function rs_site_v2(): bool {
+    return rs_setting('site_v2', 'me') === 'all';
+}
+
+// (2.0) Writes catalog.json as it is now with only site.v2 changed: switching the website's 2.0
+// side doesn't publish anything else that's waiting.
+function rs_catalog_set_site_v2(bool $on): void {
+    $cat = json_decode((string)@file_get_contents(RS_CATALOG), true);
+    if (!is_array($cat)) { rs_publish(); return; }
+    $cat['site'] = (is_array($cat['site'] ?? null) ? $cat['site'] : []);
+    $cat['site']['v2'] = $on;
+    rs_write_catalog($cat);
+}
+
+function rs_write_catalog(array $cat): void {
     $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $tmp = RS_CATALOG . '.tmp';
-    if (file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_CATALOG)) {
+    if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_CATALOG)) {
         throw new RuntimeException('Could not write catalog.json. Check that public_html is writable.');
     }
+}
+
+function rs_publish(): int {
+    $cat = rs_build_catalog();
+    rs_write_catalog($cat);
     rs_set_setting('published_at', gmdate('c'));
-    return count($cat['apps']) + count($cat['newerStoreApps']);
+    // (2.0) When each app first went out, for the charts' New.
+    try {
+        rs_stats_tables();
+        $mark = rs_db()->prepare('INSERT IGNORE INTO app_published (app_id, first_at) VALUES (?, NOW())');
+        foreach (array_merge($cat['apps'], $cat['newerStoreApps'], $cat['v2Apps']) as $a) $mark->execute([(string)$a['id']]);
+    } catch (Throwable $e) {
+    }
+    return count($cat['apps']) + count($cat['newerStoreApps']) + count($cat['v2Apps']);
 }
 
 // How many Coming soon entries the last build listed (for Publish's message).
@@ -670,8 +790,13 @@ function rs_beta_tables(): void {
         token_hash CHAR(64) NOT NULL,
         created DATETIME NOT NULL,
         last_seen DATETIME NOT NULL,
-        store_version VARCHAR(32) NOT NULL DEFAULT \'\'
+        store_version VARCHAR(32) NOT NULL DEFAULT \'\',
+        tester TINYINT NOT NULL DEFAULT 0
     ) CHARACTER SET utf8mb4');
+    // (2.0) A console the admin marked as a tester (Settings, Testers): it gets the test catalog.
+    if (!$db->query("SHOW COLUMNS FROM beta_installs LIKE 'tester'")->fetch()) {
+        $db->exec('ALTER TABLE beta_installs ADD COLUMN tester TINYINT NOT NULL DEFAULT 0');
+    }
     $db->exec('CREATE TABLE IF NOT EXISTS beta_tries (
         ip_hash CHAR(64) NOT NULL,
         at DATETIME NOT NULL,
@@ -689,9 +814,14 @@ function rs_beta_make_codes(string $gameId, int $n, string $note): array {
     rs_beta_tables();
     $db = rs_db();
     $ins = $db->prepare('INSERT IGNORE INTO beta_codes (code, game_id, note, created) VALUES (?, ?, ?, NOW())');
+    // (2.0) Never the number of a web link code (they're typed into the same keypad).
+    rs_link_tables();
+    $web = $db->prepare('SELECT COUNT(*) FROM link_codes WHERE code = ?');
     $made = [];
     for ($tries = 0; count($made) < $n && $tries < $n * 20; ++$tries) {
         $code = str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+        $web->execute([$code]);
+        if ((int)$web->fetchColumn() > 0) continue;
         $ins->execute([$code, $gameId, $note]);
         if ($ins->rowCount() === 1) $made[] = $code;
     }
@@ -731,3 +861,6 @@ function rs_human_size(int $b): string {
     if ($b >= 1024 ** 2) return round($b / 1024 ** 2) . ' MB';
     return max(1, (int)round($b / 1024)) . ' KB';
 }
+
+// (2.0) The store and the site talking: consoles, linked phones, reports, GitHub, sources, charts.
+require __DIR__ . '/connect.php';
