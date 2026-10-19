@@ -71,6 +71,8 @@ static std::string g_smp;
 std::string smp_path() { if (const char *e = std::getenv("PREVIEW_SMP")) return e; return g_smp; }
 void set_smp_path(const std::string &p) { g_smp = p; }
 int refresh_smp(std::string &) { return 2; }
+void smp_scan_later() {}
+void smp_scan_again() {}
 bool forget_smp(const std::string &) { return true; }
 bool open_game(const std::string &, std::string &) { return true; }
 int open_game_state() { return 0; }

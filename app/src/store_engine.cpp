@@ -223,6 +223,10 @@ struct Shared
     bool tester = false, test_view = true;
     /* (2.0) Install counts for the charts, to tell the site: "+id version" or "-id". */
     std::vector<std::string> stats_due;
+    /* (2.0) When to ask ShadowMountPlus again to look for new games (monotonic seconds). */
+    std::vector<long long> smp_scan_at;
+    /* (2.0) Art still to fetch, left for a job that came first. */
+    bool art_more = false;
     /* (2.0) Title IDs the site says are taken (ids.json): never given to a moved app. */
     std::set<std::string> taken_ids;
     /* (2.0) The custom sources' apps in the catalog now, and each one's repo: whose installs
@@ -1309,35 +1313,129 @@ void refresh_charts(porpoise::http::Session &http)
     slog("charts: HTTP %d%s", st, ok ? "" : " (not read)");
 }
 
+/* (2.0) Something the player asked for is waiting: the art can wait for it. */
+bool job_waiting()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return !g.pending_install.empty() || !g.pending_setup_app.empty() || !g.pending_delete.empty() || g.pending_store_dl ||
+           g.pending_bench || !g.pending_redeem.empty() || g.pending_logs || !g.sources_due.empty() || g.pending_src_report;
+}
+
+/* (2.0) Pictures on recompstore.com/media, up to 24 in one request (api/art.php). On a PS5
+ * each request costs about as much as a small picture, so fetching them one at a time kept
+ * a new store's icons coming for a minute. The answer: for each picture, a line with its
+ * path and size, then its bytes (size 0: not on the site; -1: over the answer's size cap,
+ * ask again). Pictures saved go in saved; those to fetch on their own, in alone. false when
+ * the site didn't answer with them (a site from before 2.0). */
+const std::string kSite = "https://recompstore.com";
+constexpr std::size_t kArtBatch = 24;
+
+bool fetch_art_batch(porpoise::http::Session &http, const std::vector<std::string> &urls, std::size_t &saved,
+                     std::vector<std::string> &alone)
+{
+    saved = 0;
+    std::map<std::string, std::string> left; /* path -> address */
+    std::string paths;
+    for (const std::string &u : urls)
+    {
+        const std::string p = u.substr(kSite.size());
+        left[p] = u;
+        paths += (paths.empty() ? "" : "\n") + p;
+    }
+    const std::string form = "paths=" + form_value(paths);
+    std::vector<std::uint8_t> body;
+    const int st = http.request(std::string(kSite) + "/api/art.php", &form, body, 24u << 20);
+    if (st != 200)
+    {
+        slog("art: api/art.php answered HTTP %d; one request each", st);
+        return false;
+    }
+    std::size_t at = 0;
+    while (at < body.size() && !left.empty())
+    {
+        std::size_t nl = at;
+        while (nl < body.size() && body[nl] != '\n' && nl - at < 400) ++nl;
+        if (nl >= body.size() || body[nl] != '\n') break;
+        const std::string line(reinterpret_cast<const char *>(body.data()) + at, nl - at);
+        at = nl + 1;
+        const std::size_t sp = line.rfind(' ');
+        const auto it = sp == std::string::npos ? left.end() : left.find(line.substr(0, sp));
+        if (it == left.end()) break; /* not a picture asked for: the rest can't be trusted */
+        const long long n = std::strtoll(line.c_str() + sp + 1, nullptr, 10);
+        if (n > 0 && std::uint64_t(n) > body.size() - at) break;
+        if (n > 0 && write_file(g.data + "/art/" + art_name(it->second), body.data() + at, std::size_t(n))) ++saved;
+        else if (n == 0) slog("art %s: not on the site", it->second.c_str());
+        else if (n < 0) alone.push_back(it->second);
+        if (n > 0) at += std::size_t(n);
+        left.erase(it);
+    }
+    for (const auto &kv : left) alone.push_back(kv.second); /* the answer stopped short */
+    slog("art: %zu of %zu pictures in one request (%zu KB)", saved, urls.size(), body.size() / 1024);
+    return true;
+}
+
 void fetch_art(porpoise::http::Session &http)
 {
     Catalog c;
     {
         std::lock_guard<std::mutex> l(g.m);
         c = g.catalog;
+        g.art_more = false;
     }
     make_dirs(g.data + "/art");
-    std::vector<const App *> all;
-    for (const App &a : c.apps) all.push_back(&a);
-    for (const App &a : c.soon) all.push_back(&a);
-    for (const App *ap : all)
-        for (const std::string *u : {&ap->icon_url, &ap->hero_url, &ap->logo_url})
+    /* (2.0) Icons first, every app's (each tile shows one), then logos, then the big banners. */
+    std::vector<std::string> want;
+    std::set<std::string> seen, single;
+    const auto add = [&](const std::string &u) {
+        if (!u.empty() && seen.insert(u).second && !exists(g.data + "/art/" + art_name(u))) want.push_back(u);
+    };
+    for (const std::string App::*field : {&App::icon_url, &App::logo_url, &App::hero_url})
+    {
+        for (const App &a : c.apps) add(a.*field);
+        for (const App &a : c.soon) add(a.*field);
+    }
+    const auto shown = [] {
+        std::lock_guard<std::mutex> l(g.m);
+        attach_art(g.catalog);
+        ++g.revision;
+    };
+    const std::string media = kSite + "/media/";
+    bool batches = true;
+    for (std::size_t i = 0; i < want.size();)
+    {
+        if (job_waiting())
         {
-            if (u->empty()) continue;
-            const std::string path = g.data + "/art/" + art_name(*u);
-            if (exists(path)) continue;
-            std::vector<std::uint8_t> body;
-            const int status = http.get(*u, body, {}, 32u << 20);
-            const bool saved = status == 200 && !body.empty() && write_file(path, body.data(), body.size());
-            slog("art %s: HTTP %d, %zu bytes%s\n", u->c_str(), status, body.size(),
-                         saved ? "" : " (not saved)");
-            if (saved)
-            {
-                std::lock_guard<std::mutex> l(g.m);
-                attach_art(g.catalog);
-                ++g.revision;
-            }
+            /* An install the player chose doesn't wait for pictures: the rest after it. */
+            slog("art: %zu left for after the job waiting", want.size() - i);
+            std::lock_guard<std::mutex> l(g.m);
+            g.art_more = true;
+            return;
         }
+        const auto batchable = [&](const std::string &u) { return batches && u.rfind(media, 0) == 0 && !single.count(u); };
+        if (batchable(want[i]))
+        {
+            std::vector<std::string> batch, alone;
+            const std::size_t from = i;
+            while (i < want.size() && batch.size() < kArtBatch && batchable(want[i])) batch.push_back(want[i++]);
+            std::size_t saved = 0;
+            if (!fetch_art_batch(http, batch, saved, alone))
+            {
+                batches = false;
+                i = from;
+                continue;
+            }
+            for (const std::string &u : alone)
+                if (single.insert(u).second) want.push_back(u); /* on its own, after the rest */
+            if (saved) shown();
+            continue;
+        }
+        const std::string &u = want[i++];
+        std::vector<std::uint8_t> body;
+        const int status = http.get(u, body, {}, 32u << 20);
+        const bool saved = status == 200 && !body.empty() && write_file(g.data + "/art/" + art_name(u), body.data(), body.size());
+        slog("art %s: HTTP %d, %zu bytes%s\n", u.c_str(), status, body.size(), saved ? "" : " (not saved)");
+        if (saved) shown();
+    }
 }
 
 /* ---- Installing --------------------------------------------------------------------- */
@@ -1923,6 +2021,7 @@ void run_install(const std::string &id, int answer)
     std::string smp_why;
     const int home = refresh_smp(smp_why);
     if (home == 0) slog("install: ShadowMountPlus: %s", smp_why.c_str());
+    smp_scan_later();
     std::lock_guard<std::mutex> l(g.m);
     g.job.phase = Phase::Done;
     g.job.home = home;
@@ -3106,6 +3205,7 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
         std::string smp_why;
         const int home = refresh_smp(smp_why);
         if (home == 0) slog("setup: ShadowMountPlus: %s", smp_why.c_str());
+        smp_scan_later();
         std::lock_guard<std::mutex> l(g.m);
         g.job.phase = Phase::Done;
         g.job.home = home;
@@ -3807,6 +3907,17 @@ void *worker(void *)
             std::lock_guard<std::mutex> l(g.m);
             ++g.revision;
         }
+        {
+            /* (2.0) ShadowMountPlus asked again, once a new folder has settled (smp_scan_later). */
+            bool ask = false;
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                for (auto it = g.smp_scan_at.begin(); it != g.smp_scan_at.end();)
+                    if (*it <= now) { ask = true; it = g.smp_scan_at.erase(it); }
+                    else ++it;
+            }
+            if (ask) smp_scan_again();
+        }
         if (forced)
             next_refresh = next_store_check = next_games_check = 0;
         if (now >= next_refresh)
@@ -3967,11 +4078,25 @@ void *worker(void *)
         else
         {
             std::set<std::string> repos;
+            bool art = false;
             {
                 std::lock_guard<std::mutex> l(g.m);
                 repos.swap(g.notes_wanted);
+                art = g.art_more;
             }
-            if (repos.empty())
+            if (repos.empty() && art)
+            {
+                /* (2.0) The pictures left for a job, now it's done. */
+                porpoise::http::Session http("art", "RecompStore/2.0");
+                if (http.init())
+                    fetch_art(http);
+                else
+                {
+                    std::lock_guard<std::mutex> l(g.m);
+                    g.art_more = false; /* the next refresh tries again */
+                }
+            }
+            else if (repos.empty())
                 usleep(50000);
             else
             {
@@ -5401,6 +5526,25 @@ int refresh_smp(std::string &why)
         return 0;
     }
     return start_smp(why) ? 1 : 0;
+}
+
+void smp_scan_later()
+{
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    std::lock_guard<std::mutex> l(g.m);
+    g.smp_scan_at.push_back(ts.tv_sec + 12);
+    g.smp_scan_at.push_back(ts.tv_sec + 30);
+}
+
+/* (2.0) The worker's follow-up: only asks one that's running (never starts a second). */
+void smp_scan_again()
+{
+    std::string reply;
+    bool answered = false;
+    const bool ok = smp_api("/api/v1/scan", "{}", reply, &answered);
+    slog("ShadowMountPlus, asked again to look for new games: %s",
+         ok ? reply.c_str() : answered ? "it didn't take it" : "it isn't running");
 }
 
 bool unmount_smp(const std::string &title_id)
