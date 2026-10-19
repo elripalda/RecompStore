@@ -43,6 +43,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <vector>
 
 #ifndef RECOMP_DIR
 #define RECOMP_DIR "/data/recompstore"
@@ -410,6 +411,43 @@ bool download(porpoise::http::Session &http, const Release &rel, const std::stri
     }
     return true;
 }
+
+#ifdef RS_EMBEDDED
+/* (2.0) "v1.10.2" -> 1, 10, 2 (anything after the numbers, like "-beta", is left out). */
+std::vector<unsigned> version_parts(const std::string &v)
+{
+    std::vector<unsigned> out;
+    std::size_t i = !v.empty() && (v[0] == 'v' || v[0] == 'V') ? 1 : 0;
+    while (i < v.size() && v[i] >= '0' && v[i] <= '9' && out.size() < 8)
+    {
+        unsigned n = 0;
+        while (i < v.size() && v[i] >= '0' && v[i] <= '9')
+        {
+            if (n < 1000000) n = n * 10 + unsigned(v[i] - '0');
+            ++i;
+        }
+        out.push_back(n);
+        if (i < v.size() && v[i] == '.') ++i;
+        else break;
+    }
+    return out;
+}
+
+/* (2.0) The copy built in is a newer store than GitHub's newest release (a preview that isn't
+ * on GitHub yet): installing GitHub's would put an older store on the console. A tag that
+ * doesn't read as a version is taken as GitHub's being the one to install, as before. */
+bool built_in_is_newer(const std::string &github_tag)
+{
+    const std::vector<unsigned> mine = version_parts(RS_EMBEDDED_VERSION), theirs = version_parts(github_tag);
+    if (mine.empty() || theirs.empty()) return false;
+    for (std::size_t i = 0; i < mine.size() || i < theirs.size(); ++i)
+    {
+        const unsigned a = i < mine.size() ? mine[i] : 0, b = i < theirs.size() ? theirs[i] : 0;
+        if (a != b) return a > b;
+    }
+    return false;
+}
+#endif
 } // namespace
 
 namespace ps5::debug
@@ -527,7 +565,14 @@ int main()
             Release rel;
             if (!http.init())
                 why = "The PS5 isn't online, or its network couldn't be set up.";
-            else if (newest_release(http, rel, why) && download(http, rel, zip, why))
+            else if (!newest_release(http, rel, why))
+                log_line("GitHub didn't work from here (console error 0x%08x)", unsigned(http.last_error()));
+#ifdef RS_EMBEDDED
+            else if (built_in_is_newer(rel.tag))
+                log_line("GitHub's newest release (%s) is older than the copy built into the installer (%s)", rel.tag.c_str(),
+                         RS_EMBEDDED_VERSION);
+#endif
+            else if (download(http, rel, zip, why))
             {
                 tag = rel.tag;
                 have = true;
