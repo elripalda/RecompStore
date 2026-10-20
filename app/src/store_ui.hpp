@@ -101,6 +101,10 @@ inline std::string long_date(const std::string &d)
     static const char *months[12] = {"January", "February", "March", "April", "May", "June", "July",
                                      "August", "September", "October", "November", "December"};
     if (d.size() < 10) return d;
+    /* (2.1) Only a date written that way: a beta build's ("Oct 19, 2026") is shown as it is. */
+    for (int i : {0, 1, 2, 3, 5, 6, 8, 9})
+        if (d[std::size_t(i)] < '0' || d[std::size_t(i)] > '9') return d;
+    if (d[4] != '-' || d[7] != '-') return d;
     const int m = std::atoi(d.substr(5, 2).c_str()), day = std::atoi(d.substr(8, 2).c_str());
     if (m < 1 || m > 12 || day < 1) return d;
     return std::string(months[m - 1]) + " " + std::to_string(day) + ", " + d.substr(0, 4);

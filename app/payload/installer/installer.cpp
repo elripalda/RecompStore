@@ -25,8 +25,10 @@
 #include "store_json.hpp"
 #include "store_sha256.hpp"
 #include "store_zip.hpp"
+#include "rs_sig.h"
 
 #include <arpa/inet.h>
+#include <cctype>
 #include <cerrno>
 #include <cstdarg>
 #include <cstdint>
@@ -59,7 +61,7 @@
 #ifdef RS_EMBEDDED_VERSION
 #define INSTALLER_VERSION RS_EMBEDDED_VERSION
 #else
-#define INSTALLER_VERSION "2.0.1"
+#define INSTALLER_VERSION "2.1.0"
 #endif
 
 #ifdef RECOMP_DESKTOP_TEST
@@ -319,9 +321,27 @@ std::string sha256_of(const std::string &path)
 
 struct Release
 {
-    std::string tag, url, sha256;
+    std::string tag, url, sha256, sig_url; /* (2.1) and its signature's */
     std::uint64_t size = 0;
 };
+
+/* (2.1) A store zip signed on the owner's PC (Recomp Store Signer, rs_sig.h), with one of the
+ * keys built into this installer. */
+bool signed_store(const std::string &sigtext, const std::string &sha_hex)
+{
+    rs_sig s;
+    return !sigtext.empty() && rs_sig_parse(sigtext.data(), sigtext.size(), &s) && rs_sig_check(&s, "store", sha_hex.c_str());
+}
+
+/* (2.1) Only the store's own GitHub releases. */
+bool own_release_url(const std::string &url)
+{
+    const std::string want = "https://github.com/elripalda/recompstore/releases/download/";
+    if (url.size() <= want.size()) return false;
+    for (std::size_t i = 0; i < want.size(); ++i)
+        if (char(std::tolower(static_cast<unsigned char>(url[i]))) != want[i]) return false;
+    return url.find("..") == std::string::npos && url.find_first_of("?#\\") == std::string::npos;
+}
 
 /* The newest release with the store's zip: a full release if there is one, else the
  * newest pre-release. */
@@ -344,23 +364,28 @@ bool newest_release(porpoise::http::Session &http, Release &out, std::string &wh
         const recomp::Json &r = j[i];
         if (r["draft"].boolean(false)) continue;
         const recomp::Json &assets = r["assets"];
+        Release x;
         for (std::size_t k = 0; k < assets.size(); ++k)
         {
+            if (assets[k]["name"].str() == STORE_ASSET ".sig")
+            {
+                x.sig_url = assets[k]["browser_download_url"].str();
+                continue;
+            }
             if (assets[k]["name"].str() != STORE_ASSET) continue;
-            Release x;
             x.tag = r["tag_name"].str();
             x.url = assets[k]["browser_download_url"].str();
             x.size = std::uint64_t(assets[k]["size"].num(0));
             const std::string digest = assets[k]["digest"].str();
             if (digest.rfind("sha256:", 0) == 0) x.sha256 = digest.substr(7);
-            if (!r["prerelease"].boolean(false) && !have_stable) { stable = x; have_stable = true; }
-            else if (r["prerelease"].boolean(false) && !have_pre) { pre = x; have_pre = true; }
-            break;
         }
+        if (x.url.empty() || x.sig_url.empty()) continue; /* (2.1) signed releases only */
+        if (!r["prerelease"].boolean(false) && !have_stable) { stable = x; have_stable = true; }
+        else if (r["prerelease"].boolean(false) && !have_pre) { pre = x; have_pre = true; }
     }
     const bool have = have_stable || have_pre;
     if (have) out = have_stable ? stable : pre;
-    if (!have || out.url.rfind("https://", 0) != 0)
+    if (!have || !own_release_url(out.url) || !own_release_url(out.sig_url))
     {
         why = "There's no Recomp Store release on GitHub yet.";
         return false;
@@ -402,6 +427,17 @@ bool download(porpoise::http::Session &http, const Release &rel, const std::stri
         std::remove(part.c_str());
         why = "The download didn't match GitHub's checksum, so nothing was installed. Try again.";
         return false;
+    }
+    {
+        std::vector<std::uint8_t> sb;
+        const int st = http.get(rel.sig_url, sb, {}, 64u << 10);
+        if (st != 200 || !signed_store(std::string(sb.begin(), sb.end()), hash))
+        {
+            std::remove(part.c_str());
+            log_line("signature %s: HTTP %d, doesn't check out", rel.sig_url.c_str(), st);
+            why = "GitHub's newest Recomp Store isn't signed by its developer, so nothing was installed.";
+            return false;
+        }
     }
     if (std::rename(part.c_str(), path.c_str()) != 0)
     {
@@ -549,7 +585,11 @@ int main()
         if (updating && !field(job, "zip").empty())
         {
             const std::string given = field(job, "zip"), want = field(job, "sha256");
-            if (given.rfind(kDir + "/downloads/", 0) == 0 && given.find("..") == std::string::npos && sha256_of(given) == want && !want.empty())
+            std::string sigtext;
+            /* (2.1) The store checked its download's signature; this checks it again. */
+            const bool fine = given.rfind(kDir + "/downloads/", 0) == 0 && given.find("..") == std::string::npos && !want.empty() &&
+                              sha256_of(given) == want && read_file(given + ".sig", sigtext) && signed_store(sigtext, want);
+            if (fine)
             {
                 zip = given;
                 tag = field(job, "version");
@@ -557,7 +597,7 @@ int main()
                 log_line("using the store's download %s (%s)", zip.c_str(), tag.c_str());
             }
             else
-                log_line("the store's download %s is missing or doesn't match its checksum", given.c_str());
+                log_line("the store's download %s is missing, or doesn't match its checksum or signature", given.c_str());
         }
         if (!have)
         {

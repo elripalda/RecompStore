@@ -89,6 +89,18 @@ void Store::start(Gfx &gfx, const std::string &data_dir, bool freed, float px_sc
         }
         hfade_ = gfx.texture_rgba(px.data(), w, 1);
     }
+    /* (2.1) Clear at the top to white at the bottom: the mosaic header's shade under its words. */
+    {
+        const int h = 128;
+        std::vector<std::uint8_t> px(std::size_t(h) * 4);
+        for (int y = 0; y < h; ++y)
+        {
+            const float t = (y + 0.5f) / h;
+            px[std::size_t(y) * 4 + 0] = px[std::size_t(y) * 4 + 1] = px[std::size_t(y) * 4 + 2] = 255;
+            px[std::size_t(y) * 4 + 3] = std::uint8_t(std::lround(255.f * t * t * (3 - 2 * t)));
+        }
+        vfade_ = gfx.texture_rgba(px.data(), 1, h);
+    }
     porpoise::sound::load(assets);
     porpoise::sound::set_effects(true, 0.8f);
     porpoise::sound::set_music(false, 0);
@@ -193,6 +205,9 @@ const int kRowShown = 7, kGridPer = 7, kWideShown = 3;
 const float kWideW = (1728 - kTileGap * 2) / 3, kWideH = 280, kWideLine = 280 + 80;
 const float kHead = 50, kSectionGap = 44, kGridGap = 18, kBannerH = 360;
 const float kCatH = 88; /* (2.0) the category buttons */
+/* (2.1) Discover's header: the spotlight's height; split and mosaic's main card, the room beside
+ * it, the cards there and the gap between them (the admin's preview draws the same). */
+const float kSpotH = 520, kMainW = 1150, kSideGap = 24, kSideW = 1728 - kMainW - kSideGap, kCardGap = 16;
 const float kDiscTop = 136, kViewTop = 118, kViewBottom = 1000; /* Discover's top on screen; what's shown of the lists */
 } // namespace
 
@@ -200,15 +215,18 @@ std::vector<Store::DLine> Store::discover_lines() const
 {
     std::vector<DLine> out;
     float y = 0;
-    const auto feat = featured_apps();
-    if (!feat.empty())
+    const auto feat = header_apps();
+    const int hs = header_style();
+    if (!feat.empty() && hs != 4)
     {
+        /* (2.1) In the style the catalog says: the spotlight is taller; none leaves it out. */
         DLine b;
         b.kind = 0;
-        b.h = kBannerH;
+        b.style = hs;
+        b.h = hs == 1 ? kSpotH : kBannerH;
         b.items = feat;
         out.push_back(b);
-        y = kBannerH + kSectionGap;
+        y = b.h + kSectionGap;
     }
     /* (2.0) The parts of the store, as buttons under the banner, once two or more have apps. */
     {
@@ -298,6 +316,7 @@ std::vector<Store::DLine> Store::discover_lines() const
                 {
                     for (const App *a : all)
                         if (a->category == sec.category) items.push_back(a);
+                    sort_apps(sec.category, items); /* (2.1) as its tab is sorted */
                 }
                 else if (const std::vector<std::string> *chart = charts_.list(sec.type))
                 {
@@ -365,11 +384,66 @@ std::string Store::state_of(const App &a, bool *update_ready) const
     const std::string want = version_of(a);
     if (!want.empty() && version_key(v) != version_key(want) && !version_newer(v, want) && !store_too_old(a))
     {
+        /* (2.1) Kept at an older version the player picked: not offered as an update here (Update
+         * All leaves it); its page still offers the newest. */
+        if (!kept_at(a).empty())
+            return "Kept at " + v.substr(version_start(v));
         if (update_ready)
             *update_ready = true;
         return "Update " + want + " ready";
     }
     return "Installed \xC2\xB7 " + v.substr(version_start(v));
+}
+
+bool Store::newer_out(const App &a) const
+{
+    const std::string v = engine().installed(a.id), want = version_of(a);
+    return !v.empty() && v != "?" && !want.empty() && version_key(v) != version_key(want) && !version_newer(v, want) && !store_too_old(a);
+}
+
+std::string Store::kept_at(const App &a) const
+{
+    const std::string h = engine().held(a.id);
+    if (h.empty()) return "";
+    const std::string v = engine().installed(a.id);
+    return !v.empty() && v != "?" && version_key(h) == version_key(v) ? v : std::string(); /* still that one */
+}
+
+int Store::header_style() const
+{
+    const std::string &s = catalog_.header_style;
+    return s == "spotlight" ? 1 : s == "split" ? 2 : s == "mosaic" ? 3 : s == "none" ? 4 : 0;
+}
+
+std::vector<const App *> Store::header_apps() const
+{
+    /* (2.1) The header's own games when the catalog names them, else the featured ones. */
+    std::vector<const App *> out;
+    for (const std::string &id : catalog_.header_games)
+        if (const App *a = find(id); a && !a->beta && std::find(out.begin(), out.end(), a) == out.end())
+            out.push_back(a);
+    if (out.empty())
+        out = featured_apps();
+    const int hs = header_style();
+    const std::size_t most = hs == 1 ? 1 : hs == 3 ? 3 : out.size();
+    if (out.size() > most)
+        out.resize(most);
+    return out;
+}
+
+const App *Store::header_focus(const DLine &l, int col) const
+{
+    const int n = int(l.items.size());
+    if (n == 0)
+        return nullptr;
+    const int cur = std::clamp(slide_, 0, n - 1);
+    if (l.style == 1)
+        return l.items[0];
+    if (l.style == 2)
+        return l.items[std::size_t((cur + std::max(0, col)) % n)]; /* the banner, or a card beside it: the next ones */
+    if (l.style == 3)
+        return l.items[std::size_t(std::clamp(col, 0, n - 1))];
+    return l.items[std::size_t(cur)];
 }
 
 std::vector<const App *> Store::featured_apps() const
@@ -405,6 +479,8 @@ std::vector<Store::Control> Store::page_controls(const App &a) const
     /* (1.1.0) beside Delete; (2.0) for an app from a custom source, reporting the source instead
      * (its logs would only reach Recomp Store, which didn't make it). */
     c.push_back({a.custom ? Control::Report : Control::Logs, -1});
+    if (has_versions(a))
+        c.push_back({Control::Versions, -1}); /* (2.1) after them */
     return c;
 }
 
@@ -442,6 +518,7 @@ void Store::preview_open(const std::string &id)
     page_t_ = 1;
     picker_ = false;
     confirm_ = false;
+    vers_ = vers_ask_ = moved_ = false; /* (2.1) */
     reset_notes();
     if (const App *a = find(id))
         if (a->source == "github" && !a->repo.empty())
@@ -495,6 +572,8 @@ void Store::press_primary()
     }
     bool update = false;
     state_of(*a, &update);
+    if (!update && !kept_at(*a).empty() && newer_out(*a))
+        update = true; /* (2.1) kept at an older version: Update to the newest lets it go */
     const std::string inst = engine().installed(a->id);
     if (inst == "?")
     {
@@ -860,7 +939,7 @@ bool Store::update(const pad::State &p, float dt)
         std::string v;
         if (engine().take_auto_update(v))
         {
-            picker_ = confirm_ = false;
+            picker_ = confirm_ = vers_ = vers_ask_ = false; /* (2.1) Versions too; a question about an app stays */
             page_open_ = notes_focus_ = notes_open_ = false;
             if (tab_ != Updates)
             {
@@ -1000,11 +1079,35 @@ bool Store::update(const pad::State &p, float dt)
         if (find(job.app_id))
         {
             if (!page_open_ || page_id_ != job.app_id) open(job.app_id);
-            picker_ = confirm_ = logs_ = kb_ = keypad_ = false;
+            picker_ = confirm_ = logs_ = kb_ = keypad_ = vers_ = moved_ = false;
             clash_ = true;
             clash_t_ = 0;
             clash_job_ = job;
             clash_sel_ = 0;
+            notice_.clear();
+            play(int(Sfx::Open));
+        }
+        else
+        {
+            notice_ = job.error;
+            notice_bad_ = true;
+            play(int(Sfx::Error));
+        }
+    }
+    else if (job.phase == Phase::Failed && job.source_moved)
+    {
+        /* (2.1) Where it downloads from changed: nothing was downloaded, and the player says
+         * whether to update from the new place, over its page. */
+        engine().acknowledge();
+        if (!queue_now_.empty() && job.app_id == queue_now_) queue_failed_.push_back(job.app_id); /* Update All: it waits for an answer */
+        if (find(job.app_id))
+        {
+            if (!page_open_ || page_id_ != job.app_id) open(job.app_id);
+            picker_ = confirm_ = logs_ = kb_ = keypad_ = vers_ = clash_ = false;
+            moved_ = true;
+            moved_t_ = 0;
+            moved_job_ = job;
+            moved_sel_ = 1; /* Cancel first: the new place is the player's to trust */
             notice_.clear();
             play(int(Sfx::Open));
         }
@@ -1114,6 +1217,12 @@ bool Store::update(const pad::State &p, float dt)
     if (clash_)
         return update_clash(dt);
 
+    if (moved_)
+        return update_moved(dt); /* (2.1) */
+
+    if (vers_)
+        return update_versions(dt); /* (2.1) */
+
     if (confirm_)
     {
         confirm_t_ = std::min(1.f, confirm_t_ + dt * 5.f);
@@ -1195,18 +1304,21 @@ bool Store::update(const pad::State &p, float dt)
             return true;
         }
         {
-            /* (1.1.0) Delete and Send logs sit side by side: Left and Right go between them. */
+            /* (1.1.0) Delete and Send logs sit side by side, (2.1) and Versions after them: Left
+             * and Right go along the row. */
             const auto row = page_controls(*a);
             const int pf = std::clamp(page_focus_, 0, int(row.size()) - 1);
-            const bool on_logs = row[std::size_t(pf)].kind == Control::Logs || row[std::size_t(pf)].kind == Control::Report,
-                       on_del = row[std::size_t(pf)].kind == Control::Delete;
-            if (on_logs && pf > 0 && row[std::size_t(pf - 1)].kind == Control::Delete && nav(pad::BtnLeft, nav_left_, dt))
+            auto pill = [&](int i) {
+                const Control::Kind k = row[std::size_t(i)].kind;
+                return k == Control::Delete || k == Control::Logs || k == Control::Report || k == Control::Versions;
+            };
+            if (pill(pf) && pf > 0 && pill(pf - 1) && nav(pad::BtnLeft, nav_left_, dt))
             {
                 page_focus_ = pf - 1;
                 play(int(Sfx::Move));
                 return true;
             }
-            if (on_del && pf + 1 < int(row.size()) && nav(pad::BtnRight, nav_right_, dt))
+            if (pill(pf) && pf + 1 < int(row.size()) && pill(pf + 1) && nav(pad::BtnRight, nav_right_, dt))
             {
                 page_focus_ = pf + 1;
                 play(int(Sfx::Move));
@@ -1251,6 +1363,8 @@ bool Store::update(const pad::State &p, float dt)
                 open_logs(a->id);
             else if (c.kind == Control::Report)
                 report_source(a->source_value, true);
+            else if (c.kind == Control::Versions)
+                open_versions(*a); /* (2.1) */
             else if (c.kind == Control::Delete)
             {
                 if (engine().job().phase == Phase::Working)
@@ -1306,9 +1420,16 @@ bool Store::update(const pad::State &p, float dt)
 
     if (tab_ == Discover)
     {
-        const auto feat = featured_apps();
+        const auto feat = header_apps();
         const auto lines = discover_lines();
         const int nl = int(lines.size());
+        const int hs = nl > 0 && lines[0].kind == 0 ? lines[0].style : -1; /* (2.1) the header's style, -1 none */
+        if (!catalog_.apps.empty() && (hs >= 0) != had_header_)
+        {
+            /* (2.1) The header came or went (the catalog changed its style): the same line stays focused. */
+            row_ = std::max(0, row_ + (hs >= 0 ? 1 : -1));
+            had_header_ = hs >= 0;
+        }
         dcols_.resize(std::size_t(nl), 0);
         row_ = std::clamp(row_, 0, std::max(0, nl - 1));
         if (nl > 0)
@@ -1316,7 +1437,18 @@ bool Store::update(const pad::State &p, float dt)
             const DLine &L = lines[std::size_t(row_)];
             const int n = L.count();
             col_ = std::clamp(col_, 0, std::max(0, n - 1));
-            if (moves && L.kind == 0 && feat.size() > 1)
+            bool up = u, down = d;
+            if (L.kind == 0 && (L.style == 2 || L.style == 3))
+            {
+                /* (2.1) Split and mosaic: Left and Right go between the big card and the ones beside
+                 * it, Up and Down along those (off the last one, on to the line below). */
+                const int side = std::min(L.style == 2 ? 3 : 2, n - 1);
+                if (side > 0 && moves > 0 && col_ == 0) { col_ = 1; play(int(Sfx::Move)); }
+                else if (moves < 0 && col_ > 0) { col_ = 0; play(int(Sfx::Move)); }
+                if (col_ > 0 && down && col_ < side) { ++col_; down = false; play(int(Sfx::Move)); }
+                else if (col_ > 1 && up) { --col_; up = false; play(int(Sfx::Move)); }
+            }
+            else if (moves && L.kind == 0 && L.style == 0 && feat.size() > 1)
             {
                 slide_ = (slide_ + moves + int(feat.size())) % int(feat.size());
                 slide_t_ = 0;
@@ -1328,7 +1460,7 @@ bool Store::update(const pad::State &p, float dt)
                 const int c = std::clamp(col_ + moves, 0, n - 1);
                 if (c != col_) { col_ = c; play(int(Sfx::Move)); }
             }
-            const int to = std::clamp(row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, nl - 1);
+            const int to = std::clamp(row_ + (down ? 1 : 0) - (up ? 1 : 0), 0, nl - 1);
             if (to != row_)
             {
                 /* Onto the item nearest the one focused, as the lines are drawn. */
@@ -1353,14 +1485,24 @@ bool Store::update(const pad::State &p, float dt)
                         const float dx = std::fabs(item_x(T, i, first) + tw / 2 - fx);
                         if (dx < best_d) { best_d = dx; best = i; }
                     }
+                /* (2.1) Up into a split or mosaic header from under its right side: the card there. */
+                if (T.kind == 0 && (T.style == 2 || T.style == 3) && to < row_ && L.kind != 4)
+                {
+                    const int side = std::min(T.style == 2 ? 3 : 2, tn - 1);
+                    best = side > 0 && fx > 96 + kMainW ? side : 0;
+                }
                 row_ = to;
                 col_ = best;
                 play(int(Sfx::Move));
             }
         }
-        slide_t_ += dt;
+        /* The header turns on its own: the carousel, and split's banner (not while a card beside
+         * it is focused). (2.1) As often as the catalog says. */
+        const bool turns = hs == 0 || hs == 2, waits = hs == 2 && row_ == 0 && col_ > 0;
+        if (!waits)
+            slide_t_ += dt;
         slide_fade_ = std::min(1.f, slide_fade_ + dt * 1.2f);
-        if (feat.size() > 1 && slide_t_ > 8.f)
+        if (turns && feat.size() > 1 && slide_t_ > float(catalog_.header_interval))
         {
             slide_ = (slide_ + 1) % int(feat.size());
             slide_t_ = 0;
@@ -1370,7 +1512,10 @@ bool Store::update(const pad::State &p, float dt)
         {
             const DLine &F = lines[std::size_t(row_)];
             if (F.kind == 0 && !feat.empty())
-                focus_id_ = feat[std::min<std::size_t>(std::size_t(slide_), feat.size() - 1)]->id;
+            {
+                if (const App *h = header_focus(F, col_))
+                    focus_id_ = h->id;
+            }
             else if (!F.items.empty())
                 focus_id_ = F.items[std::size_t(std::clamp(col_, 0, int(F.items.size()) - 1))]->id;
         }
@@ -1770,10 +1915,12 @@ void Store::draw_wide(Gfx &gfx, const App &a, float x, float y, float w, float h
 }
 
 void Store::draw_banner(Gfx &gfx, const App &a, float x, float y, float w, float h, const std::string &kicker_head, float fade,
-                        bool drift, float focus)
+                        bool drift, float focus, bool big)
 {
     /* The banner (1728x400): the art frosted across it, the picture itself on the right
-     * (with its slow drift, on the featured banner), and the words on the left. */
+     * (with its slow drift, on the featured banner), and the words on the left. (2.1) Narrower
+     * beside the split header's cards, its words' side a little narrower too; big, the spotlight
+     * header's: taller, with bigger words. */
     const float R = 36;
     Art &t = art(a);
     gfx.panel(x + 10, y + 26, w - 20, h - 20, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.38f}, 0, 30);
@@ -1785,7 +1932,7 @@ void Store::draw_banner(Gfx &gfx, const App &a, float x, float y, float w, float
     }
     /* The words' side: the frosted art with a light wash, meeting the picture in a clean
      * vertical edge (the picture is drawn over the wash's right end). */
-    const float gx = x, gy = y, gw = 600, gh = h;
+    const float gx = x, gy = y, gw = big ? 720.f : w >= 1500 ? 600.f : float(std::lround(w * 0.46f)), gh = h;
     gfx.panel(x, y, gw + R, h, {1, 1, 1, 0.07f}, 1.f, R);
     if (t.hero)
     {
@@ -1803,26 +1950,194 @@ void Store::draw_banner(Gfx &gfx, const App &a, float x, float y, float w, float
     const bool inst = !engine().installed(a.id).empty();
     state_of(a, &up);
     const std::string kicker = kicker_head + " \xC2\xB7 " + (up ? "UPDATE AVAILABLE" : inst ? "INSTALLED" : "NEW ON RECOMP STORE");
-    const float tx0 = gx + 64, tw0 = gw - 64 - 48;
-    const auto name = wrap(gfx, Font::ExtraBold, 50, tw0, a.name, 2);
-    const auto blurb = wrap(gfx, Font::Regular, 20, tw0, a.blurb.empty() ? a.description : a.blurb, 3);
-    const float k_h = 18, n_lh = 50 * 1.05f, b_lh = 20 * 1.45f;
-    const float total = k_h + 14 + n_lh * float(name.size()) + 14 + b_lh * float(blurb.size());
+    const float pad = big ? 72 : 64;
+    const float tx0 = gx + pad, tw0 = gw - pad - 48;
+    const float n_size = big ? 66 : 50, b_size = big ? 23 : 20, k_size = big ? 17 : 15;
+    const auto name = wrap(gfx, Font::ExtraBold, n_size, tw0, a.name, 2);
+    const auto blurb = wrap(gfx, Font::Regular, b_size, tw0, a.blurb.empty() ? a.description : a.blurb, big ? 4 : 3);
+    const float k_h = big ? 20 : 18, n_lh = n_size * 1.05f, b_lh = b_size * 1.45f, gap = big ? 18 : 14;
+    const float total = k_h + gap + n_lh * float(name.size()) + gap + b_lh * float(blurb.size());
     /* A logo, when the game has one, takes the name's place (its height, not the name's). */
-    const float logo_h = draw_logo(gfx, a, a.logo_banner, tx0, 0, tw0, 140, 0); /* alpha 0: measures only */
+    const float logo_box = big ? 200 : 140;
+    const float logo_h = draw_logo(gfx, a, a.logo_banner, tx0, 0, tw0, logo_box, 0); /* alpha 0: measures only */
     const float name_h = logo_h >= 0 ? logo_h : n_lh * float(name.size());
     const float total2 = total - n_lh * float(name.size()) + name_h;
     float ty = gy + (gh - total2) / 2;
-    gfx.text_mid(Font::Bold, 15, tx0, ty + k_h / 2, C(kCyan, fade), Align::Left, fit(gfx, Font::Bold, 15, tw0, kicker), 2);
-    ty += k_h + 14;
+    gfx.text_mid(Font::Bold, k_size, tx0, ty + k_h / 2, C(kCyan, fade), Align::Left, fit(gfx, Font::Bold, k_size, tw0, kicker), 2);
+    ty += k_h + gap;
     if (logo_h >= 0)
-        draw_logo(gfx, a, a.logo_banner, tx0, ty, tw0, 140, fade);
+        draw_logo(gfx, a, a.logo_banner, tx0, ty, tw0, logo_box, fade);
     else
         for (std::size_t i = 0; i < name.size(); ++i)
-            gfx.text_mid(Font::ExtraBold, 50, tx0, ty + n_lh * (float(i) + 0.5f), C(kFrost, fade), Align::Left, name[i], -1);
-    ty += name_h + 14;
-    draw_lines(gfx, Font::Regular, 20, tx0, ty, b_lh, C(0xE3E9F2, fade), blurb);
+            gfx.text_mid(Font::ExtraBold, n_size, tx0, ty + n_lh * (float(i) + 0.5f), C(kFrost, fade), Align::Left, name[i], big ? -1.5f : -1);
+    ty += name_h + gap;
+    draw_lines(gfx, Font::Regular, b_size, tx0, ty, b_lh, C(0xE3E9F2, fade), blurb);
     ring(gfx, x, y, w, h, R, focus);
+}
+
+/* ---- Discover's header (2.1) ----------------------------------------------------------- */
+void Store::draw_header(Gfx &gfx, const DLine &L, int line, float sy, bool on)
+{
+    const int n = int(L.items.size());
+    if (n == 0)
+        return;
+    const int cur = std::clamp(slide_, 0, n - 1);
+    const float fade = ease_out(slide_fade_);
+    /* Which of the slides is on: a long cyan dot among short ones, at a banner's bottom right. */
+    auto dots = [&](float right) {
+        if (n < 2)
+            return;
+        float dx = right - 28;
+        for (int k = n - 1; k >= 0; --k)
+        {
+            const float dw = k == cur ? 34 : 10;
+            dx -= dw;
+            gfx.panel(dx, sy + kBannerH - 32, dw, 10, k == cur ? C(kCyan) : C(kFrost, 0.45f), 1.f, 5);
+            dx -= 8;
+        }
+    };
+    /* A card's focus, eased as a tile's is. */
+    auto focus = [&](int k) {
+        float &f = dfocus_[line * 1000 + k];
+        f = approach(f, on && col_ == k ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+        return ease_out(f);
+    };
+    if (L.style == 1)
+    {
+        /* Spotlight: one game, taller, staying put. */
+        draw_banner(gfx, *L.items[0], 96, sy, 1728, kSpotH, "SPOTLIGHT", 1.f, true, on ? 1.f : 0.f, true);
+        return;
+    }
+    if (L.style == 2)
+    {
+        /* Split: the turning banner, and beside it the games that come next. */
+        const int side = std::min(3, n - 1);
+        const float bw = side > 0 ? kMainW : 1728;
+        draw_banner(gfx, *L.items[std::size_t(cur)], 96, sy, bw, kBannerH, "FEATURED", fade, true, on && col_ == 0 ? 1.f : 0.f);
+        dots(96 + bw);
+        const float ch = (kBannerH - kCardGap * 2) / 3;
+        for (int k = 1; k <= side; ++k)
+            draw_header_card(gfx, *L.items[std::size_t((cur + k) % n)], 96 + kMainW + kSideGap, sy + float(k - 1) * (ch + kCardGap), kSideW, ch,
+                             focus(k), fade);
+        return;
+    }
+    if (L.style == 3)
+    {
+        /* Mosaic: three games at once, one large and two stacked beside it. */
+        const int side = std::min(2, n - 1);
+        draw_mosaic_card(gfx, *L.items[0], 96, sy, side > 0 ? kMainW : 1728, kBannerH, focus(0), true);
+        const float ch = side == 2 ? (kBannerH - kCardGap) / 2 : kBannerH;
+        for (int k = 1; k <= side; ++k)
+            draw_mosaic_card(gfx, *L.items[std::size_t(k)], 96 + kMainW + kSideGap, sy + float(k - 1) * (ch + kCardGap), kSideW, ch, focus(k), false);
+        return;
+    }
+    /* The carousel: one featured game at a time, turning. */
+    draw_banner(gfx, *L.items[std::size_t(cur)], 96, sy, 1728, kBannerH, "FEATURED", fade, true, on ? 1.f : 0.f);
+    dots(96 + 1728);
+}
+
+void Store::draw_header_card(Gfx &gfx, const App &a, float x0, float y0, float w0, float h0, float focus, float fade)
+{
+    /* A glass card as the Library's rows are: its picture on the left, its name and a line on
+     * the right. Focused: a little bigger, brighter, the ring. */
+    Art &t = art(a);
+    const float s = 1 + 0.02f * focus;
+    const float w = w0 * s, h = h0 * s, x = x0 + (w0 - w) / 2, y = y0 + (h0 - h) / 2;
+    const float R = 24;
+    glass(gfx, x, y, w, h, R, {1, 1, 1, 0.07f + 0.05f * focus}, true);
+    const float ph = h - 20, pw = float(std::lround(ph * 16.f / 9.f)), px = x + 10, py = y + 10;
+    if (t.hero)
+    {
+        float uv[4];
+        cover_uv(t.hero, pw, ph, a.banner_x / 100.f, a.banner_y / 100.f, std::max(1.f, a.banner_zoom / 100.f), uv);
+        gfx.image_part(t.hero, px, py, pw, ph, uv, {1, 1, 1, fade}, 16);
+    }
+    else
+    {
+        /* No wide picture: the icon in the middle of the frosted art. */
+        if (t.blur)
+            gfx.image(t.blur, px, py, pw, ph, {0.7f, 0.7f, 0.7f, fade}, 16);
+        else
+            gfx.panel(px, py, pw, ph, C(0x16233A), 1.f, 16);
+        const float is = ph - 24;
+        if (t.icon)
+            gfx.image(t.icon, px + (pw - is) / 2, py + 12, is, is, {1, 1, 1, fade}, 14);
+        else
+            draw_no_icon(gfx, a, px + (pw - is) / 2, py + 12, is, 14);
+    }
+    gfx.panel(px, py, pw, ph, {0, 0, 0, 0}, 1.f, 16, kRim, 1.25f);
+    ring(gfx, x, y, w, h, R, focus);
+    const float tx = px + pw + 22, tw = x + w - tx - 22;
+    const std::string line = a.blurb.empty() ? state_of(a, nullptr) : a.blurb;
+    gfx.text_mid(Font::ExtraBold, 22, tx, y + h / 2 - 15, C(kFrost, fade), Align::Left, fit(gfx, Font::ExtraBold, 22, tw, a.name));
+    gfx.text_mid(Font::Regular, 17, tx, y + h / 2 + 17, C(kMuted, fade), Align::Left, fit(gfx, Font::Regular, 17, tw, line));
+}
+
+void Store::draw_mosaic_card(Gfx &gfx, const App &a, float x0, float y0, float w0, float h0, float focus, bool big)
+{
+    /* The game's art across the whole card, darkened from the left under its words; focused,
+     * up a little and bigger with the ring, as a wide tile. */
+    Art &t = art(a);
+    const float s = 1 + (big ? 0.012f : 0.025f) * focus;
+    const float w = w0 * s, h = h0 * s, x = x0 + (w0 - w) / 2, y = y0 + (h0 - h) / 2 - 6 * focus;
+    const float R = big ? 36 : 28;
+    gfx.panel(x + 10, y + 22 + 8 * focus, w - 20, h - 20, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.30f + 0.2f * focus}, 0, 26 + 10 * focus);
+    gfx.panel(x, y, w, h, C(kMidnight), 1.f, R);
+    if (t.hero)
+    {
+        float uv[4];
+        cover_uv(t.hero, w, h, a.banner_x / 100.f, a.banner_y / 100.f, std::max(1.f, a.banner_zoom / 100.f), uv);
+        gfx.image_part(t.hero, x, y, w, h, uv, {}, R);
+    }
+    else if (t.blur)
+        gfx.image(t.blur, x, y, w, h, {0.7f, 0.7f, 0.7f, 1}, R);
+    else
+        gfx.panel(x, y, w, h, C(0x16233A), 1.f, R);
+    /* Shade under the words: up from the bottom, and in from the left. */
+    if (vfade_)
+        gfx.image(vfade_, x, y + h * 0.25f, w, h * 0.75f, C(kMidnight, 0.85f), R);
+    if (hfade_)
+        gfx.image(hfade_, x, y, std::min(w, big ? 860.f : 470.f), h, C(kMidnight, 0.8f), R);
+    if (!t.hero)
+    {
+        /* No wide picture: the icon on the right. */
+        const float is = std::min(h - 48, big ? 200.f : 110.f);
+        if (t.icon)
+            gfx.image(t.icon, x + w - 40 - is, y + (h - is) / 2, is, is, {}, is * 0.22f);
+        else
+            draw_no_icon(gfx, a, x + w - 40 - is, y + (h - is) / 2, is, is * 0.22f);
+    }
+    gfx.panel(x, y, w, h, {0, 0, 0, 0}, 1.f, R, kRim, 1.25f);
+    ring(gfx, x, y, w, h, R, focus);
+    bool up = false;
+    const std::string st = state_of(a, &up);
+    if (!big)
+    {
+        /* Its name and where it stands, at the bottom left. */
+        const float tx = x + 30, tw = std::min(w * 0.7f, 400.f);
+        gfx.text_mid(Font::ExtraBold, 26, tx, y + h - 30 - 26 - 14, C(kFrost), Align::Left, fit(gfx, Font::ExtraBold, 26, tw, a.name), -0.5f);
+        gfx.text_mid(Font::Regular, 17, tx, y + h - 30 - 10, C(0xD6DEEA), Align::Left, fit(gfx, Font::Regular, 17, tw, st));
+        return;
+    }
+    /* The big one: as the banner says it, from the bottom left. */
+    const bool inst = !engine().installed(a.id).empty();
+    const std::string kicker = std::string("FEATURED \xC2\xB7 ") + (up ? "UPDATE AVAILABLE" : inst ? "INSTALLED" : "NEW ON RECOMP STORE");
+    const float tx = x + 56, tw = std::min(w * 0.5f, 600.f);
+    const auto name = wrap(gfx, Font::ExtraBold, 48, tw, a.name, 2);
+    const auto blurb = wrap(gfx, Font::Regular, 20, tw, a.blurb.empty() ? a.description : a.blurb, 2);
+    const float n_lh = 48 * 1.05f, b_lh = 20 * 1.45f;
+    const float logo_h = draw_logo(gfx, a, a.logo_banner, tx, 0, tw, 120, 0);
+    const float name_h = logo_h >= 0 ? logo_h : n_lh * float(name.size());
+    float ty = y + h - 48 - b_lh * float(blurb.size()) - 14 - name_h - 14 - 18;
+    gfx.text_mid(Font::Bold, 15, tx, ty + 9, C(kCyan), Align::Left, fit(gfx, Font::Bold, 15, tw, kicker), 2);
+    ty += 18 + 14;
+    if (logo_h >= 0)
+        draw_logo(gfx, a, a.logo_banner, tx, ty, tw, 120, 1.f);
+    else
+        for (std::size_t i = 0; i < name.size(); ++i)
+            gfx.text_mid(Font::ExtraBold, 48, tx, ty + n_lh * (float(i) + 0.5f), C(kFrost), Align::Left, name[i], -1);
+    ty += name_h + 14;
+    draw_lines(gfx, Font::Regular, 20, tx, ty, b_lh, C(0xE3E9F2), blurb);
 }
 
 void Store::draw_cat_button(Gfx &gfx, int kind, float x0, float y0, float w0, float h0, float focus)
@@ -1878,13 +2193,13 @@ void Store::draw_more(Gfx &gfx)
 
 void Store::draw_discover(Gfx &gfx)
 {
-    const auto feat = featured_apps();
     const auto lines = discover_lines();
     const int nl = int(lines.size());
     if (nl == 0)
     {
+        const std::string note = engine().catalog_note();
         gfx.text(Font::Regular, 20, 96, 160 + 60, C(kMuted), Align::Left,
-                 engine().online() ? "No games in the catalog yet." : "Connect your PS5 to the internet to load the catalog.");
+                 !note.empty() ? note.c_str() : engine().online() ? "No games in the catalog yet." : "Connect your PS5 to the internet to load the catalog.");
         return;
     }
     const int row = std::clamp(row_, 0, nl - 1);
@@ -1912,19 +2227,7 @@ void Store::draw_discover(Gfx &gfx)
         const bool on = i == row;
         if (L.kind == 0)
         {
-            const int cur = std::min<int>(slide_, int(L.items.size()) - 1);
-            draw_banner(gfx, *L.items[std::size_t(cur)], 96, sy, 1728, kBannerH, "FEATURED", ease_out(slide_fade_), true, on ? 1.f : 0.f);
-            if (L.items.size() > 1)
-            {
-                float dx = 96 + 1728 - 28;
-                for (int k = int(L.items.size()) - 1; k >= 0; --k)
-                {
-                    const float dw = k == cur ? 34 : 10;
-                    dx -= dw;
-                    gfx.panel(dx, sy + kBannerH - 32, dw, 10, k == cur ? C(kCyan) : C(kFrost, 0.45f), 1.f, 5);
-                    dx -= 8;
-                }
-            }
+            draw_header(gfx, L, i, sy, on); /* (2.1) in the catalog's style */
             continue;
         }
         if (L.kind == 5)
@@ -2370,16 +2673,18 @@ void Store::draw_notes(Gfx &gfx, const App &a, float x, float y, float w, float 
     const float al = clamp01((e - 0.35f) / 0.65f);
     gfx.text_mid(Font::Bold, 15, x + 32, y + 28 + 9, C(kCyan, al), Align::Left, "PATCH NOTES", 2);
     {
-        const std::string from = "From GitHub \xC2\xB7 " + a.repo;
+        /* (2.1) A beta's: what's new in each of its builds. */
+        const std::string from = a.beta ? std::string("Beta builds") : a.source == "github" ? "From GitHub \xC2\xB7 " + a.repo : std::string();
         gfx.text_mid(Font::Regular, 16, x + w - 32, y + 28 + 9, C(kMuted, al), Align::Right, fit(gfx, Font::Regular, 16, w - 260, from));
     }
     const float top = y + 28 + 18 + 22, bottom = y + h - 26;
     std::vector<Release> rel;
-    const int state = a.source == "github" && !a.repo.empty() ? engine().notes(a.repo, rel) : -1;
+    const int state = page_notes(a, rel);
     if (state <= 0)
     {
-        const std::string msg = state == 0 ? "Loading the notes from GitHub\xE2\x80\xA6"
-                                           : "GitHub's notes couldn't be loaded right now. Check back when the PS5 is online.";
+        const std::string msg = a.source != "github" ? std::string() /* (2.1) only GitHub's can be on their way */
+                                : state == 0         ? "Loading the notes from GitHub\xE2\x80\xA6"
+                                                     : "GitHub's notes couldn't be loaded right now. Check back when the PS5 is online.";
         float ty = top;
         if (!a.news.empty())
             ty += draw_lines(gfx, Font::Regular, 20, x + 32, ty, 30, C(kBody, al), wrap(gfx, Font::Regular, 20, w - 64, a.news, 8)) + 16;
@@ -2580,11 +2885,13 @@ void Store::draw_page(Gfx &gfx)
     const float bottom = H - 110;
     const bool notes_box = has_notes_box(a);
     std::vector<Release> rel;
-    const int rel_state = a.source == "github" && !a.repo.empty() ? engine().notes(a.repo, rel) : -1;
+    const int rel_state = page_notes(a, rel); /* (2.1) a beta's builds too */
     if (rel_state > 0)
-        layout_notes(gfx, a.repo + "#" + std::to_string(rel.size()) + "#" + rel.front().tag + "#" + std::to_string(rel.front().body.size()),
+        layout_notes(gfx, (a.beta ? a.id + "#beta" : a.repo) + "#" + std::to_string(rel.size()) + "#" + rel.front().tag + "#" +
+                              std::to_string(rel.front().body.size()),
                      rel, 820 - 64 - 16);
-    std::string news = a.news;
+    /* (2.1) A beta's own notes for its build come first (the first of its lines, as laid out). */
+    std::string news = a.beta && !a.beta_notes.empty() ? std::string() : a.news;
     if (news.empty() && rel_state > 0)
         for (const NoteLine &l : notes_lines_)
             if (l.kind == 3 || l.kind == 4) { news = l.text; break; }
@@ -2682,7 +2989,7 @@ void Store::draw_page(Gfx &gfx)
     const auto ctl = page_controls(a);
     auto focused = [&](Control::Kind kind, int slot) {
         const Control &c = ctl[std::size_t(std::clamp(page_focus_, 0, int(ctl.size()) - 1))];
-        return !picker_ && !confirm_ && !notes_focus_ && !logs_ && c.kind == kind && (kind != Control::Slot || c.slot == slot);
+        return !picker_ && !confirm_ && !notes_focus_ && !logs_ && !vers_ && !moved_ && c.kind == kind && (kind != Control::Slot || c.slot == slot);
     };
 
     /* Heights first, so the glass fits its contents. */
@@ -2806,7 +3113,7 @@ void Store::draw_page(Gfx &gfx)
             label = "Manage with Recomp Store";
             bg = C(kCyan);
         }
-        else if (up)
+        else if (up || (!kept_at(a).empty() && newer_out(a))) /* (2.1) kept at an older one: the newest, still */
         {
             label = "Update to " + version_of(a);
             bg = C(kCyan);
@@ -2978,6 +3285,17 @@ void Store::draw_page(Gfx &gfx)
         glass(gfx, bx, ry, bw, 48, 16, f ? C(kFrost, 0.14f) : Color{1, 1, 1, 0.05f}, false);
         ring(gfx, bx, ry, bw, 48, 16, f ? 1.f : 0.f, true);
         gfx.text_mid(Font::SemiBold, 18, bx + bw / 2, ry + 24, C(kSoft), Align::Center, label);
+        bx += bw + 14;
+        if (has_versions(a))
+        {
+            /* (2.1) Versions: an older one to go back to, or another to try. */
+            const char *vl = "Versions";
+            const float vw = gfx.measure(Font::SemiBold, 18, vl) + 48;
+            const bool vf = focused(Control::Versions, -1);
+            glass(gfx, bx, ry, vw, 48, 16, vf ? C(kFrost, 0.14f) : Color{1, 1, 1, 0.05f}, false);
+            ring(gfx, bx, ry, vw, 48, 16, vf ? 1.f : 0.f, true);
+            gfx.text_mid(Font::SemiBold, 18, bx + vw / 2, ry + 24, C(kSoft), Align::Center, vl);
+        }
         ry += 48;
     }
     ry += 28;
@@ -3812,7 +4130,7 @@ bool Store::update_clash(float dt)
         notice_bad_ = false;
         play(int(Sfx::Back));
     }
-    else if (engine().resolve_clash(id, choice))
+    else if (engine().resolve_clash(id, choice, clash_job_.version)) /* (2.1) the version picked, if one was */
     {
         notice_.clear();
         page_focus_ = 0;
@@ -3957,10 +4275,18 @@ void Store::draw_hints(Gfx &gfx)
         if (key_view_ != 1) hint(hint_cross_, key_view_ == 2 ? "Choose" : "Press");
         return;
     }
-    if (confirm_ || clash_)
+    if (confirm_ || clash_ || moved_ || (vers_ && vers_ask_))
     {
         hint(hint_circle_, "Cancel");
         hint(hint_cross_, "Choose");
+        return;
+    }
+    if (vers_)
+    {
+        /* (2.1) Versions: X asks first, then installs the one picked. */
+        hint(hint_circle_, "Close");
+        int state = 0;
+        if (const App *va = find(vers_app_); va && !version_rows(*va, state).empty()) hint(hint_cross_, "Install");
         return;
     }
     if (page_open_ && !picker_ && notes_open_)
@@ -4102,6 +4428,8 @@ void Store::draw(Gfx &gfx)
     draw_picker(gfx);
     draw_confirm(gfx);
     draw_clash(gfx); /* (2.0) */
+    draw_moved(gfx);    /* (2.1) */
+    draw_versions(gfx); /* (2.1) */
     draw_sheet(gfx);  /* (2.0) */
     draw_keypad(gfx);
     draw_logs(gfx);

@@ -190,6 +190,27 @@ bool parse_catalog(const std::string &text, Catalog &out)
         a.inside = x["source"]["inside"].str();
         a.url = x["url"].str();
         a.sha256 = x["sha256"].str();
+        a.sig = x["sig"].str(); /* (2.1) a beta's */
+        /* (2.1) A beta's notes for its current build, and the earlier builds a tester can go back
+         * to (each signed like the current one, checked when it's installed). */
+        a.beta_notes = x["betaNotes"].str().substr(0, 4000);
+        for (std::size_t k = 0; k < x["versions"].size() && a.beta_builds.size() < 20; ++k)
+        {
+            const Json &v = x["versions"][k];
+            BetaBuild b;
+            b.version = v["version"].str().substr(0, 40);
+            b.file = v["file"].str().substr(0, 200);
+            b.url = v["url"].str();
+            b.sha256 = v["sha256"].str();
+            b.sig = v["sig"].str();
+            b.size = v["size"].str().substr(0, 24);
+            b.notes = v["notes"].str().substr(0, 4000);
+            b.date = v["date"].str().substr(0, 40);
+            const long long n = v["bytes"].integer(0);
+            b.bytes = n > 0 ? std::uint64_t(n) : 0;
+            if (b.version.empty() || b.url.rfind("https://", 0) != 0) continue;
+            a.beta_builds.push_back(b);
+        }
         a.icon_url = x["icon"].str();
         a.hero_url = x["hero"].str();
         a.hero_web_url = x["heroWeb"].str();
@@ -335,6 +356,28 @@ bool parse_catalog(const std::string &text, Catalog &out)
     /* Both lists back in the admin's order. */
     std::stable_sort(out.apps.begin(), out.apps.end(), [](const App &x, const App &y) { return x.order < y.order; });
     std::stable_sort(out.soon.begin(), out.soon.end(), [](const App &x, const App &y) { return x.order < y.order; });
+
+    /* (2.1) How each part of the store is sorted. One this store doesn't know: the admin's order. */
+    {
+        const char *cats[4] = {"games", "emulators", "apps", "tools"};
+        for (int i = 0; i < 4; ++i)
+        {
+            const std::string s = j["categories"][cats[i]]["sort"].str("manual");
+            out.cat_sort[i] = s == "az" || s == "installs" || s == "new" || s == "updated" ? s : "manual";
+        }
+    }
+    /* (2.1) Discover's header. A style this store doesn't know: the carousel, as before. */
+    {
+        const Json &h = j["discover"]["header"];
+        const std::string st = h["style"].str("carousel");
+        out.header_style = st == "spotlight" || st == "split" || st == "mosaic" || st == "none" ? st : "carousel";
+        for (std::size_t k = 0; k < h["games"].size() && out.header_games.size() < 12; ++k)
+        {
+            const std::string id = h["games"][k].str();
+            if (!id.empty() && id.size() <= 64) out.header_games.push_back(id);
+        }
+        out.header_interval = int(std::clamp<long long>(h["interval"].integer(8), 4, 30));
+    }
 
     /* Discover's sections (1.0.6). A kind or layout this store doesn't know is left out,
      * and so is a spotlight on a game that isn't in the catalog. */
