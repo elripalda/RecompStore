@@ -845,11 +845,128 @@ function rs_beta_sig(string $install, string $gameId): string {
     return substr(hash_hmac('sha256', $install . '|' . $gameId, rs_beta_secret()), 0, 32);
 }
 
+// ---- (2.0.1) Beta zips from Cloudflare R2 ------------------------------------------------
+// Served from this site, a beta zip came down to a PS5 at about 0.5 MB/s. With R2 set up
+// (Settings), a beta game's zip is copied there (its page, Beta), and each tester's store gets
+// a link to it that works for 12 hours: still only consoles with a code, from Cloudflare's
+// network. R2 speaks Amazon S3's API; requests are signed with AWS Signature Version 4.
+function rs_r2(): ?array {
+    $c = ['account' => trim((string)rs_setting('r2_account', '')), 'bucket' => trim((string)rs_setting('r2_bucket', '')),
+          'key' => trim((string)rs_setting('r2_key', '')), 'secret' => trim((string)rs_setting('r2_secret', ''))];
+    foreach ($c as $v) if ($v === '') return null;
+    return $c + ['host' => $c['account'] . '.r2.cloudflarestorage.com', 'region' => 'auto'];
+}
+
+// The object's path on the bucket's host, each part encoded once (S3's rule).
+function rs_r2_path(array $c, string $key): string {
+    $p = '/' . rawurlencode($c['bucket']);
+    if ($key !== '') $p .= '/' . implode('/', array_map('rawurlencode', explode('/', $key)));
+    return $p;
+}
+
+function rs_r2_signing_key(array $c, string $day): string {
+    $k = hash_hmac('sha256', $day, 'AWS4' . $c['secret'], true);
+    $k = hash_hmac('sha256', $c['region'], $k, true);
+    $k = hash_hmac('sha256', 's3', $k, true);
+    return hash_hmac('sha256', 'aws4_request', $k, true);
+}
+
+// A link to GET (or HEAD) an object for $ttl seconds, signed in the address (no headers needed:
+// the PS5's store asks for it in pieces with Range, which isn't signed).
+function rs_r2_presign(array $c, string $method, string $key, int $ttl, ?int $now = null): string {
+    $now ??= time();
+    $amz = gmdate('Ymd\THis\Z', $now);
+    $scope = gmdate('Ymd', $now) . '/' . $c['region'] . '/s3/aws4_request';
+    $q = ['X-Amz-Algorithm' => 'AWS4-HMAC-SHA256', 'X-Amz-Credential' => $c['key'] . '/' . $scope, 'X-Amz-Date' => $amz,
+          'X-Amz-Expires' => (string)$ttl, 'X-Amz-SignedHeaders' => 'host'];
+    ksort($q, SORT_STRING);
+    $qs = implode('&', array_map(fn($k, $v) => rawurlencode($k) . '=' . rawurlencode($v), array_keys($q), $q));
+    $path = rs_r2_path($c, $key);
+    $canon = $method . "\n" . $path . "\n" . $qs . "\nhost:" . $c['host'] . "\n\nhost\nUNSIGNED-PAYLOAD";
+    $sts = "AWS4-HMAC-SHA256\n" . $amz . "\n" . $scope . "\n" . hash('sha256', $canon);
+    return 'https://' . $c['host'] . $path . '?' . $qs . '&X-Amz-Signature=' . hash_hmac('sha256', $sts, rs_r2_signing_key($c, gmdate('Ymd', $now)));
+}
+
+// The Authorization header for a request whose headers (lowercase names) are all signed.
+function rs_r2_auth(array $c, string $method, string $path, string $query, array $headers, string $payloadHash, int $now): string {
+    ksort($headers, SORT_STRING);
+    $canonHeaders = '';
+    foreach ($headers as $k => $v) $canonHeaders .= $k . ':' . trim((string)$v) . "\n";
+    $signed = implode(';', array_keys($headers));
+    $scope = gmdate('Ymd', $now) . '/' . $c['region'] . '/s3/aws4_request';
+    $canon = $method . "\n" . $path . "\n" . $query . "\n" . $canonHeaders . "\n" . $signed . "\n" . $payloadHash;
+    $sts = "AWS4-HMAC-SHA256\n" . gmdate('Ymd\THis\Z', $now) . "\n" . $scope . "\n" . hash('sha256', $canon);
+    return 'AWS4-HMAC-SHA256 Credential=' . $c['key'] . '/' . $scope . ', SignedHeaders=' . $signed . ', Signature=' . hash_hmac('sha256', $sts, rs_r2_signing_key($c, gmdate('Ymd', $now)));
+}
+
+// HEAD of the bucket ($key '') or an object: its HTTP status, size and ETag.
+function rs_r2_head(array $c, string $key): array {
+    $now = time();
+    $h = ['host' => $c['host'], 'x-amz-content-sha256' => 'UNSIGNED-PAYLOAD', 'x-amz-date' => gmdate('Ymd\THis\Z', $now)];
+    $path = rs_r2_path($c, $key);
+    $ch = curl_init('https://' . $c['host'] . $path);
+    $out = ['status' => 0, 'size' => -1, 'etag' => '', 'error' => ''];
+    curl_setopt_array($ch, [CURLOPT_NOBODY => true, CURLOPT_CUSTOMREQUEST => 'HEAD', CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 20,
+        CURLOPT_HTTPHEADER => ['Authorization: ' . rs_r2_auth($c, 'HEAD', $path, '', $h, 'UNSIGNED-PAYLOAD', $now),
+                               'x-amz-content-sha256: UNSIGNED-PAYLOAD', 'x-amz-date: ' . $h['x-amz-date']],
+        CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$out) {
+            if (preg_match('/^etag:\s*"?([^"\r\n]*)"?/i', $line, $m)) $out['etag'] = strtolower($m[1]);
+            return strlen($line);
+        }]);
+    curl_exec($ch);
+    $out['status'] = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $out['size'] = (int)curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+    if (curl_errno($ch)) $out['error'] = curl_error($ch);
+    curl_close($ch);
+    return $out;
+}
+
+// A file on this server put on R2 as $key, in one request; checked by R2 against its MD5.
+function rs_r2_put_file(array $c, string $key, string $file, string &$error): bool {
+    $size = filesize($file);
+    $fh = $size === false ? false : fopen($file, 'rb');
+    if ($fh === false) { $error = 'The file can\'t be read on this server.'; return false; }
+    $now = time();
+    $h = ['content-md5' => base64_encode(md5_file($file, true)), 'content-type' => 'application/zip', 'host' => $c['host'],
+          'x-amz-content-sha256' => 'UNSIGNED-PAYLOAD', 'x-amz-date' => gmdate('Ymd\THis\Z', $now)];
+    $path = rs_r2_path($c, $key);
+    $send = ['Authorization: ' . rs_r2_auth($c, 'PUT', $path, '', $h, 'UNSIGNED-PAYLOAD', $now), 'Expect:'];
+    foreach ($h as $k => $v) if ($k !== 'host') $send[] = $k . ': ' . $v;
+    @set_time_limit(0);
+    $ch = curl_init('https://' . $c['host'] . $path);
+    curl_setopt_array($ch, [CURLOPT_UPLOAD => true, CURLOPT_INFILE => $fh, CURLOPT_INFILESIZE => $size, CURLOPT_HTTPHEADER => $send,
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 1800]);
+    $body = (string)curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $err = curl_errno($ch) ? curl_error($ch) : '';
+    curl_close($ch);
+    fclose($fh);
+    if ($status === 200) return true;
+    $code = preg_match('#<Code>([^<]+)</Code>#', $body, $m) ? $m[1] : '';
+    $error = $err !== '' ? 'Cloudflare couldn\'t be reached: ' . $err
+           : ($status === 403 ? 'Cloudflare refused the keys (' . ($code ?: 'HTTP 403') . '). Check the access key, the secret and that the token can write to ' . $c['bucket'] . '.'
+           : ($status === 404 ? 'Cloudflare has no bucket called ' . $c['bucket'] . ' on that account.'
+           : 'Cloudflare answered HTTP ' . $status . ($code ? ' (' . $code . ')' : '') . '.'));
+    return false;
+}
+
+// Where a beta game's zip is on R2, when the copy there is its current zip.
+function rs_r2_beta_copy(array $g): ?array {
+    $copy = json_decode((string)rs_setting('r2_beta_' . $g['id'], ''), true);
+    if (!is_array($copy) || ($copy['file'] ?? '') !== $g['beta_file'] || (int)($copy['size'] ?? -1) !== (int)$g['beta_size'] || $g['beta_file'] === '') return null;
+    return $copy;
+}
+
 // A beta game as the store reads it, for one install: downloads come from this site, signed for it.
 function rs_beta_entry(array $g, string $install, int $order): array {
     $app = rs_app_entry($g, $order);
     $app['source'] = ['type' => 'url'];
     $app['url'] = rs_abs('/api/beta.php') . '?a=file&id=' . rawurlencode($g['id']) . '&install=' . $install . '&sig=' . rs_beta_sig($install, $g['id']);
+    // (2.0.1) From Cloudflare R2 when the zip is there: a link for this console's next 12 hours
+    // (its store reads this list at every refresh, so it never holds an old one).
+    $r2 = rs_r2();
+    $copy = $r2 && rs_setting('r2_on', '1') === '1' ? rs_r2_beta_copy($g) : null;
+    if ($copy) $app['url'] = rs_r2_presign($r2, 'GET', (string)$copy['key'], 43200);
     $app['sha256'] = strtolower((string)$g['beta_sha256']);
     if (trim((string)$g['beta_version']) !== '') $app['version'] = trim((string)$g['beta_version']);
     if ((int)$g['beta_size'] > 0) {

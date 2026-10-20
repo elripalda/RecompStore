@@ -264,3 +264,10 @@ here (icon 512, banner 3840/1920), others linked as given. Not published: tester
   folder as it is, named `name` (its own name when empty), instead of unpacked, and the slot is set up once that file
   is there. For a port whose own installer reads the update file (GTA IV reads TU_1A581VI_000000K000000.0000000000205
   from its install folder). The admin makes such a game need Recomp Store 2.0.1.
+- Beta zips from Cloudflare R2 (site only, no store change): with R2 set in admin Settings (account, bucket, an
+  Object Read & Write token's key pair) and a game's beta zip copied there from its Beta card (`admin/r2.php`:
+  uploads `<id>/<beta_file>`, then checks size, MD5 and two ranged reads through a signed link), beta.php's list
+  gives that tester a SigV4 presigned GET link good for 12 hours instead of `a=file`. The store's 4 MB Range
+  pieces work on it unchanged. The copy only counts while it matches the game's current `beta_file` and size, so
+  a new beta zip goes back to this site until it's copied again. Unticking "Testers download beta zips from R2"
+  sends everyone back to this site.

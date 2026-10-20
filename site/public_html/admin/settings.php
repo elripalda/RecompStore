@@ -42,6 +42,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($r['status'] === 401 ? 'Saved, but GitHub refused it. Make a new token and paste it again.' : 'Saved. GitHub didn\'t answer the check, so it\'s untested.'),
                      $r['status'] === 401 ? 'err' : 'ok');
         }
+    } elseif (($_POST['action'] ?? '') === 'r2') {
+        // (2.0.1) Beta zips from Cloudflare R2: the bucket and an API token's keys.
+        $acct = strtolower(trim((string)($_POST['r2_account'] ?? '')));
+        $bucket = strtolower(trim((string)($_POST['r2_bucket'] ?? '')));
+        $key = trim((string)($_POST['r2_key'] ?? ''));
+        $secret = trim((string)($_POST['r2_secret'] ?? ''));
+        if (!empty($_POST['r2_clear'])) {
+            foreach (['r2_account', 'r2_bucket', 'r2_key', 'r2_secret'] as $k) rs_set_setting($k, '');
+            rs_flash('Cloudflare R2 is off. Beta zips download from this site again.');
+        } elseif (!preg_match('/^[0-9a-f]{32}$/', $acct)) rs_flash('The account ID is 32 letters and numbers. It\'s in the R2 page\'s Account details, and in the S3 address after https://.', 'err');
+        elseif (!preg_match('/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/', $bucket)) rs_flash('The bucket name is lowercase letters, numbers and dashes, as you named it on Cloudflare.', 'err');
+        elseif ($key !== '' && !preg_match('/^[A-Za-z0-9]{16,128}$/', $key)) rs_flash('That doesn\'t look like an R2 access key ID. Copy it again from the token page.', 'err');
+        elseif ($secret !== '' && !preg_match('#^[A-Za-z0-9/+=]{16,128}$#', $secret)) rs_flash('That doesn\'t look like an R2 secret access key. Copy it again from the token page.', 'err');
+        elseif (($key === '' && trim((string)rs_setting('r2_key', '')) === '') || ($secret === '' && trim((string)rs_setting('r2_secret', '')) === '')) rs_flash('Paste the access key ID and the secret access key too.', 'err');
+        else {
+            rs_set_setting('r2_account', $acct);
+            rs_set_setting('r2_bucket', $bucket);
+            if ($key !== '') rs_set_setting('r2_key', $key);
+            if ($secret !== '') rs_set_setting('r2_secret', $secret);
+            rs_set_setting('r2_on', empty($_POST['r2_on']) ? '0' : '1');
+            $h = rs_r2_head(rs_r2(), '');
+            rs_flash($h['status'] === 200 ? 'Saved. Cloudflare R2 answered, and the bucket is there. Copy a beta zip to it from its game\'s page, under Beta.'
+                     : ($h['error'] !== '' ? 'Saved, but Cloudflare couldn\'t be reached from this server: ' . $h['error']
+                     : ($h['status'] === 403 ? 'Saved, but Cloudflare refused the keys. Check the access key, the secret and that the token can read and write ' . $bucket . '.'
+                     : ($h['status'] === 404 ? 'Saved, but there\'s no bucket called ' . $bucket . ' on that account.' : 'Saved, but Cloudflare answered HTTP ' . $h['status'] . '.'))),
+                     $h['status'] === 200 ? 'ok' : 'err');
+        }
     } elseif (($_POST['action'] ?? '') === 'blocked') {
         // (2.0) Custom sources taken down: one repo (owner/name) or list address per line.
         $lines = [];
@@ -185,6 +212,20 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <?php $hasTok = trim((string)rs_setting('github_token', '')) !== ''; ?>
     <label><span>GitHub token <span class="muted">(optional)</span></span><input type="text" name="github_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasTok ? 'A token is saved. Paste a new one to replace it.' : 'Paste a token' ?>"><small>Every PS5 asks recompstore.com about releases and custom sources, and the site asks GitHub once for everyone. Without a token GitHub answers 60 questions an hour; with one, 5,000. Make a fine-grained token on GitHub (Settings, Developer settings, Personal access tokens) with read-only access to public repositories, and paste it here.</small></label>
     <div class="actions"><button class="btn">Save the token</button><?php if ($hasTok): ?><label class="check"><input type="checkbox" name="github_clear" value="1"> Remove the saved token</label><?php endif; ?></div>
+  </form>
+</section>
+<section class="card" id="r2">
+  <h2>Beta downloads from Cloudflare R2</h2>
+  <?php $r2 = rs_r2(); $hasSecret = trim((string)rs_setting('r2_secret', '')) !== ''; $hasKey = trim((string)rs_setting('r2_key', '')) !== ''; ?>
+  <p class="muted">A beta zip downloads from this site at about 0.5 MB/s. From Cloudflare R2 it comes from Cloudflare's network instead, and testers still need a code: each tester's store gets a link that works for 12 hours. Make a bucket on R2, then an R2 API token with Object Read &amp; Write on it, and fill these in. Then copy each beta zip to R2 from its game's page, under Beta.</p>
+  <form method="post" class="grid2">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="r2">
+    <label>Account ID<input name="r2_account" value="<?= h((string)rs_setting('r2_account', '')) ?>" maxlength="32" autocomplete="off" spellcheck="false" class="mono"><small>32 letters and numbers, on the R2 page.</small></label>
+    <label>Bucket<input name="r2_bucket" value="<?= h((string)rs_setting('r2_bucket', '')) ?>" maxlength="63" autocomplete="off" spellcheck="false" placeholder="recompstore-beta"></label>
+    <label>Access key ID<input type="text" name="r2_key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" placeholder="<?= $hasKey ? 'Saved. Paste a new one to replace it.' : 'From the API token page' ?>"></label>
+    <label>Secret access key<input type="text" name="r2_secret" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasSecret ? 'Saved. Paste a new one to replace it.' : 'Shown once, when you make the token' ?>"></label>
+    <label class="check span2"><input type="checkbox" name="r2_on" value="1" <?= rs_setting('r2_on', '1') === '1' ? 'checked' : '' ?>> Testers download beta zips from R2 (untick to send them back to this site, for example if a PS5 can't reach Cloudflare)</label>
+    <div class="actions span2"><button class="btn">Save and check</button><?php if ($r2): ?><label class="check"><input type="checkbox" name="r2_clear" value="1"> Turn R2 off and forget the keys</label><?php endif; ?></div>
   </form>
 </section>
 <section class="card">

@@ -221,7 +221,7 @@ if (!$isNew) {
     } catch (Throwable $e) {}
 }
 ?>
-<section class="card beta-card" data-not-soon>
+<section class="card beta-card" id="beta" data-not-soon>
   <h2>Beta</h2>
   <label class="check"><input type="checkbox" name="beta" <?= $g['beta'] ? 'checked' : '' ?> data-beta> Beta: only testers with a code get this game. It's left out of the public store and the site.</label>
   <div class="grid2" data-beta-fields>
@@ -233,6 +233,15 @@ if (!$isNew) {
         <span class="muted"><?= $g['beta_size'] ? h(rs_human_size((int)$g['beta_size'])) : '' ?><?= $g['beta_sha256'] ? ' · SHA-256 ' . h(substr($g['beta_sha256'], 0, 12)) . '…' : '' ?><?= isset($betaFiles[$g['beta_file']]) ? '' : ' · missing from the beta folder' ?></span>
       <?php else: ?><span class="muted">None yet.</span><?php endif; ?>
     </div>
+    <?php if (!$isNew && $g['beta_file'] !== '' && rs_r2()): $r2copy = rs_r2_beta_copy($g); ?>
+    <div class="beta-file">
+      <span class="lbl">Cloudflare R2</span>
+      <?php if ($r2copy): ?><strong>On R2</strong> <span class="muted">copied <?= h(date('M j, g:i a', (int)$r2copy['at'])) ?><?= rs_setting('r2_on', '1') === '1' ? ' · testers download it from there' : ' · testers download it from this site (R2 is unticked in Settings)' ?></span>
+      <?php else: ?><span class="muted">Not on R2: testers download it from this site.</span><?php endif; ?>
+      <button class="btn" formaction="r2.php?id=<?= h(urlencode($g['id'])) ?>" formmethod="post" formnovalidate><?= $r2copy ? 'Copy to R2 again' : 'Copy to R2' ?></button>
+      <small class="muted">Save your other changes first: this only copies the zip.</small>
+    </div>
+    <?php endif; ?>
     <div class="drop-zone span2" data-beta-drop data-game="<?= h($isNew ? '' : $g['id']) ?>" data-csrf="<?= h(rs_csrf()) ?>">
       <input type="file" accept=".zip,application/zip" hidden data-beta-pick>
       <strong>Drop the beta zip here</strong>
