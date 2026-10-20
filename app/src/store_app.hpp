@@ -72,7 +72,7 @@ public:
     /* (2.0) The Refresh pill at the top right: 1 refreshing, 2 done, 3 failed. */
     void preview_refresh(int st) { refresh_shown_ = true; refresh_preview_ = st; refresh_t_ = 0; }
 
-    /* (2.0) The Library's views (0 My Apps, 1 Updates, 2 Betas) and a category tab. */
+    /* (2.0) The Library's views (0 My Apps, 1 Updates, 2 Betas, (2.2) 3 On this PS5) and a category tab. */
     void preview_library(int view, int row = 0) { preview_tab(Library); lib_view_ = view; col_ = row; lib_bar_ = false; }
     void preview_category(int tab, int chip = 0, int row = 0, bool chips = false)
     {
@@ -113,6 +113,25 @@ public:
         catalog_.header_style = style; catalog_.header_games = games; slide_ = 0; slide_t_ = 0; slide_fade_ = 1;
     }
     void preview_sort(int category, const std::string &mode) { catalog_.cat_sort[std::clamp(category, 0, 3)] = mode; }
+    /* (2.2) Library > On this PS5: the row focused, the sort, a note; the App manager's sheet over it
+     * for the app in that row (stage as mng_stage_, its button focused). */
+    void preview_console(int row, int sort = 0, const std::string &note = "", bool bad = false)
+    {
+        preview_library(3, row); con_sort_ = sort; lib_note_ = note; lib_note_bad_ = bad; mng_ = false; console_rev_ = ~0u;
+    }
+    void preview_manage(int stage, int sel)
+    {
+        sync_console();
+        const auto list = console_list();
+        const int i = col_ - 2;
+        if (i < 0 || i >= int(list.size())) return;
+        open_manage(*list[std::size_t(i)]);
+        mng_t_ = 1;
+        if (stage == 1) { mng_places_.clear(); places_t_ = -1; for (const Place &p : install_places_now()) if (p.path != mng_app_.root) mng_places_.push_back(p); }
+        if (stage == 2) mng_fresh_ = engine().free_title_id();
+        mng_stage_ = stage;
+        mng_sel_ = sel;
+    }
 
 private:
     /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
@@ -155,7 +174,7 @@ private:
     /* (2.1) Apps of one part of the store in the order the catalog says for it (Catalog::cat_sort). */
     void sort_apps(const std::string &category, std::vector<const App *> &apps) const;
     std::vector<std::string> category_chips(int kind) const; /* "All" then the labels used */
-    std::vector<int> library_views() const;          /* 0 My Apps, 1 Updates, 2 Betas (when there are some) */
+    std::vector<int> library_views() const;          /* 0 My Apps, 1 Updates, 2 Betas (when there are some), (2.2) 3 On this PS5 */
     bool update_library(float dt, int moves, bool u, bool d);
     bool update_category(float dt, int moves, bool u, bool d);
     void draw_library2(porpoise::ui::Gfx &gfx);
@@ -554,7 +573,40 @@ private:
     bool queue_fresh_ = false; /* the queue has installs, not only updates (a phone sent them) */
     void draw_toast(porpoise::ui::Gfx &gfx);
     std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
-    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_; }
+    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_; }
+    /* (2.2) Library > On this PS5 (store_app_manager.cpp): every folder in the homebrew folders
+     * (Engine::console_apps), under ShadowMountPlus's two rows; con_sort_ 0 by name, 1 biggest first. */
+    std::vector<ConsoleApp> console_;
+    unsigned console_rev_ = ~0u;
+    bool console_looking_ = false, console_asked_ = false;
+    int con_sort_ = 0;
+    std::map<std::string, std::pair<porpoise::ui::Texture *, bool>> con_icons_; /* icon0.png -> its texture, still loading */
+    void sync_console();
+    std::vector<const ConsoleApp *> console_list() const;
+    porpoise::ui::Texture *console_icon(const ConsoleApp &c);
+    bool update_console(float dt, int moves, bool u, bool d);
+    void draw_console(porpoise::ui::Gfx &gfx, float slide);
+    void draw_console_row(porpoise::ui::Gfx &gfx, const ConsoleApp &c, float x, float y, float w, float focus);
+    /* Refresh home screen (the Library's row, Settings > General): the launcher does it once the
+     * store has closed, then opens the store again. Its words go in the Library or in Settings. */
+    void start_refresh_home(bool from_lib);
+    /* The App manager's sheet over it: mng_stage_ 0 what to do (Open, Move, New ID, Delete), 1 where
+     * to move it, 2 the new title ID's question, 3 Delete's. mng_job_: a job it started is going
+     * (its result goes in the Library); mng_delete_name_: the app a store delete is for. */
+    bool mng_ = false, mng_job_ = false;
+    float mng_t_ = 0;
+    int mng_stage_ = 0, mng_sel_ = 0;
+    ConsoleApp mng_app_;
+    std::string mng_fresh_, mng_delete_name_;
+    std::vector<Place> mng_places_;
+    void open_manage(const ConsoleApp &c);
+    std::vector<std::string> manage_buttons() const;
+    bool update_manage(float dt);
+    void draw_manage(porpoise::ui::Gfx &gfx);
+    bool take_manage_result(const JobState &job);
+    /* Open (or Refresh home screen) started from the Library: what happens is said there. */
+    bool opening_lib_ = false;
+    bool refresh_checked_ = false; /* back from Refresh home screen: said once */
     /* A game page's line for an app from a custom source. */
     std::string source_line(const App &a) const;
 };

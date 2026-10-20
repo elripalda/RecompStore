@@ -270,6 +270,7 @@ std::vector<int> Store::library_views() const
 {
     std::vector<int> v{0, 1};
     if (!beta_apps().empty()) v.push_back(2);
+    v.push_back(3); /* (2.2) On this PS5 */
     return v;
 }
 
@@ -508,6 +509,7 @@ bool Store::update_library(float dt, int moves, bool u, bool d)
         col_ = 0;
         lscroll_ = lscroll_to_ = 0;
         lib_view_t_ = 0;
+        if (to == 3) engine().look_console(); /* (2.2) looked for again each time it's shown */
         play(int(Sfx::Tab));
     };
     if (pressed(pad::BtnL2)) { switch_view(-1); return true; }
@@ -518,6 +520,8 @@ bool Store::update_library(float dt, int moves, bool u, bool d)
         if (d || pressed(pad::BtnCross)) { lib_bar_ = false; play(int(Sfx::Move)); }
         return true;
     }
+    if (lib_view_ == 3)
+        return update_console(dt, moves, u, d); /* (2.2) */
     if (lib_view_ == 0)
     {
         const auto list = library_apps();
@@ -598,12 +602,28 @@ void Store::draw_library2(Gfx &gfx)
     const auto ups = update_apps();
     const int store_up = engine().store_update().empty() ? 0 : 1;
     lib_view_t_ = std::min(1.f, lib_view_t_ + 1.f / 60.f * 4.f);
-    draw_tab_header(gfx, "Library", mine.size() == 1 ? "1 app installed" : std::to_string(mine.size()) + " apps installed");
-
-    /* The views, as a glass bar: My Apps, Updates (with its count), Betas. */
+    if (lib_view_ == 3)
     {
-        const char *names[3] = {"My Apps", "Updates", "Betas"};
-        float widths[3] = {0, 0, 0}, total = 12;
+        /* (2.2) Everything in the homebrew folders, and what it all takes. */
+        sync_console();
+        long long all = 0;
+        bool sized = true;
+        for (const ConsoleApp &c : console_)
+        {
+            if (c.size >= 0) all += c.size;
+            else sized = false;
+        }
+        std::string count = console_.size() == 1 ? "1 folder on this PS5" : std::to_string(console_.size()) + " folders on this PS5";
+        if (!console_.empty()) count += "  \xC2\xB7  " + std::string(sized ? "" : "at least ") + size_text(std::uint64_t(all));
+        draw_tab_header(gfx, "Library", count);
+    }
+    else
+        draw_tab_header(gfx, "Library", mine.size() == 1 ? "1 app installed" : std::to_string(mine.size()) + " apps installed");
+
+    /* The views, as a glass bar: My Apps, Updates (with its count), Betas, (2.2) On this PS5. */
+    {
+        const char *names[4] = {"My Apps", "Updates", "Betas", "On this PS5"};
+        float widths[4] = {0, 0, 0, 0}, total = 12;
         const int badge = int(ups.size()) + store_up;
         for (int v : views)
         {
@@ -644,13 +664,18 @@ void Store::draw_library2(Gfx &gfx)
             gfx.text_mid(Font::Bold, 15, kx + cw / 2, by + bh / 2, C(0xE8EEF6), Align::Center, cap);
             kx += cw + 8;
         }
-        if (!lib_note_.empty())
+        if (!lib_note_.empty() && lib_view_ != 3) /* (2.2) On this PS5 shows it whole, over its list */
             gfx.text_mid(Font::SemiBold, 18, kx + 18, by + bh / 2, lib_note_bad_ ? C(0xFFB4A8) : C(0x9FF0C6), Align::Left,
                          fit(gfx, Font::SemiBold, 18, 1824 - kx - 18, lib_note_));
     }
 
     const float fade = ease_out(lib_view_t_), slide = (1 - fade) * 24;
     const float view_h = kBottom - kContent;
+    if (lib_view_ == 3)
+    {
+        draw_console(gfx, slide); /* (2.2) */
+        return;
+    }
     gfx.clip(0, kContent - 12, gfx.design_w(), kBottom - kContent + 12);
     if (lib_view_ == 0)
     {
@@ -1072,6 +1097,8 @@ std::string Store::square_hint() const
         id = focus_id_;
     else if (tab_ == Library && !lib_bar_ && lib_view_ == 1 && !update_apps().empty())
         return "What's new";
+    else if (tab_ == Library && !lib_bar_ && lib_view_ == 3)
+        return con_sort_ ? "By name" : "Biggest first"; /* (2.2) */
     const App *a = id.empty() ? nullptr : find(id);
     if (!a || a->soon) return "";
     return pinned(id) ? "Unpin" : "Pin";
@@ -1080,6 +1107,7 @@ std::string Store::square_hint() const
 std::string Store::cross_hint() const
 {
     if (tab_ == Library && lib_bar_) return "";
+    if (tab_ == Library && lib_view_ == 3) return col_ == 0 ? "Refresh home screen" : col_ == 1 ? "Reload" : "Manage"; /* (2.2) */
     if (tab_ == Library && lib_view_ == 1) return update_apps().empty() && engine().store_update().empty() ? "" : "Update";
     if (tab_ == Library && lib_view_ == 0 && library_apps().empty()) return "";
     if (is_category(tab_) && cat_on_chips_) return "";

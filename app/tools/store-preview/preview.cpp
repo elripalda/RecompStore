@@ -275,6 +275,26 @@ int main(int argc, char **argv)
     store.preview_settings(0); settle(90); if (want("settings")) frame("settings-general");
     store.preview_settings(1); settle(90); if (want("settings")) frame("settings-adding");
     store.preview_settings(3); settle(90); if (want("settings")) frame("settings-about");
+    /* (2.2) Library > On this PS5 and the App manager. */
+    if (want("v22"))
+    {
+        store.preview_console(0); settle(60); frame("v22-console-top");
+        store.preview_console(4); settle(60); frame("v22-console-app");
+        store.preview_console(5, 1); settle(60); frame("v22-console-biggest");
+        store.preview_console(4, 0, "PS5SX2 is PPSA97003 now. Its new tile shows up once the store closes, and the old one goes. Saves it made as PPSA99203 stay with PPSA99203.");
+        settle(60); frame("v22-console-note");
+        store.preview_console(4); settle(30);
+        store.preview_manage(0, 0); settle(10); frame("v22-manage");
+        store.preview_manage(1, 0); settle(10); frame("v22-manage-move");
+        store.preview_manage(2, 1); settle(10); frame("v22-manage-newid");
+        store.preview_manage(3, 0); settle(10); frame("v22-manage-delete");
+        store.preview_console(9); settle(30); store.preview_manage(3, 0); settle(10); frame("v22-manage-delete-store");
+        store.preview_console(8); settle(30); store.preview_manage(0, 0); settle(10); frame("v22-manage-store");
+        store.preview_console(3); settle(30); store.preview_manage(0, 0); settle(10); frame("v22-manage-folder");
+        recomp::preview_job("mmove", "/data/homebrew/PPSA99203"); store.preview_console(4); settle(30); frame("v22-console-moving");
+        recomp::preview_job("", "");
+        store.preview_general(2); settle(30); frame("v22-settings-refresh");
+    }
     if (const char *id = std::getenv("PREVIEW_PAGE")) { store.preview_open(id); settle(60); if (want("custom")) frame("page-custom"); }
     store.preview_open("PPSA92011"); settle(60); if (want("page")) frame("page-2011");
     store.preview_focus(1); if (want("page")) frame("page-2011-slot");

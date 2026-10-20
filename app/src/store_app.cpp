@@ -901,8 +901,11 @@ bool Store::update(const pad::State &p, float dt)
                 if (s == 0)
                     open_game_cancel();
                 opening_ = false;
-                notice_ = "The launcher didn't start, so the game wasn't opened. Check that your payload loader (etaHEN or elfldr) is running, then try again.";
-                notice_bad_ = true;
+                const std::string why = "The launcher didn't start, so nothing happened. Check that your payload loader (etaHEN or elfldr) is running, then try again.";
+                if (opening_lib_) { lib_note_ = why; lib_note_bad_ = true; } /* (2.2) */
+                else if (tab_ == Settings) { settings_note_ = why; settings_note_bad_ = true; }
+                else { notice_ = "The launcher didn't start, so the game wasn't opened. Check that your payload loader (etaHEN or elfldr) is running, then try again."; notice_bad_ = true; }
+                opening_lib_ = false;
                 play(int(Sfx::Error));
             }
         }
@@ -956,13 +959,38 @@ bool Store::update(const pad::State &p, float dt)
             return true;
         }
     }
+    /* (2.2) Back from Refresh home screen: how it went (once). */
+    if (!refresh_checked_ && booted_)
+    {
+        refresh_checked_ = true;
+        std::string what;
+        if (refresh_result(what))
+            toast(what);
+    }
     /* Back from a game that wouldn't open: its page, saying why (once). */
     if (!open_checked_ && !catalog_.apps.empty())
     {
         open_checked_ = true;
         std::string id;
         unsigned result = 0;
-        if (open_game_failure(id, result) && find(id))
+        bool failed = open_game_failure(id, result);
+        if (failed && !find(id))
+        {
+            /* (2.2) An app the store didn't install, opened from Library > On this PS5. */
+            std::string name = id;
+            for (const ConsoleApp &c : engine().console_apps())
+                if (c.title_id == id) name = c.name;
+            go_tab(Library, 1);
+            lib_view_ = 3;
+            engine().look_console();
+            char t[300];
+            std::snprintf(t, sizeof t, "%s didn't open (0x%08X), and ShadowMountPlus didn't add it to your home screen in time. "
+                                       "Press Refresh home screen, then try again.", name.c_str(), result);
+            lib_note_ = t;
+            lib_note_bad_ = true;
+            failed = false;
+        }
+        if (failed)
         {
             open(id);
             /* (2.0) Most often it isn't on the home screen yet: ShadowMountPlus is asked to add it
@@ -973,9 +1001,9 @@ bool Store::update(const pad::State &p, float dt)
             char t[300];
             if (home > 0)
                 std::snprintf(t, sizeof t,
-                              "%s didn't open (0x%08X). If it isn't on your home screen yet, ShadowMountPlus is %s now: "
-                              "give it about 15 seconds, then press Open again.",
-                              find(id)->name.c_str(), result, home == 2 ? "adding it" : "starting to add it");
+                              "%s didn't open (0x%08X), and ShadowMountPlus %s it to your home screen in time. "
+                              "Press Open to try again, or close the store and look for its tile.",
+                              find(id)->name.c_str(), result, home == 2 ? "didn't add" : "wasn't running to add");
             else
                 std::snprintf(t, sizeof t,
                               "%s didn't open (0x%08X). If it isn't on your home screen yet, start ShadowMountPlus "
@@ -1029,6 +1057,10 @@ bool Store::update(const pad::State &p, float dt)
             play(int(Sfx::Error));
         }
     }
+    else if (take_manage_result(job))
+    {
+        /* (2.2) the App manager's: said in the Library */
+    }
     else if (job.phase == Phase::Done && job.kind == "bench")
     {
         play(int(Sfx::Complete));
@@ -1041,12 +1073,13 @@ bool Store::update(const pad::State &p, float dt)
         if (!job.note.empty())
             notice_ = job.note;
         else if (job.kind == "delete")
-            notice_ = job.home == 2 ? "Deleted. Its folder and everything in it are gone, and ShadowMountPlus took it off your home screen."
-                                    : "Deleted. Its folder and everything in it are gone. If its tile is still on your home screen, delete it there.";
-        else if (job.home == 2)
-            notice_ = done + "ShadowMountPlus is adding it to your home screen; give it about 15 seconds.";
-        else if (job.home == 1)
-            notice_ = done + "ShadowMountPlus is starting and will add it to your home screen.";
+            notice_ = job.home == 2   ? "Deleted. Its folder and everything in it are gone, and ShadowMountPlus took it off your home screen."
+                      : job.home == 3 ? "Deleted. Its folder and everything in it are gone. Its tile comes off your home screen once the store closes."
+                                      : "Deleted. Its folder and everything in it are gone. If its tile is still on your home screen, delete it there.";
+        /* (2.1.1) ShadowMountPlus 1.7 adds nothing while an app is open, and the store is one:
+         * Open closes the store, and the launcher waits for the tile, then opens it. */
+        else if (job.home == 2 || job.home == 1)
+            notice_ = done + "Press Open: the store closes, ShadowMountPlus puts it on your home screen, and it opens.";
         else
             notice_ = done + "Start ShadowMountPlus to see it on your home screen, or let the store do it: Settings > General.";
         notice_bad_ = false;
@@ -1195,6 +1228,9 @@ bool Store::update(const pad::State &p, float dt)
 
     if (sheet_)
         return update_sheet(dt);
+
+    if (mng_)
+        return update_manage(dt); /* (2.2) the App manager */
 
     if (keypad_)
         return update_keypad(dt);
@@ -1402,6 +1438,8 @@ bool Store::update(const pad::State &p, float dt)
     /* (2.0) Triangle: Refresh, from every tab but Settings (it has its own row). */
     if (tab_ != Settings && pressed(pad::BtnTriangle))
     {
+        if (tab_ == Library && lib_view_ == 3)
+            engine().look_console(); /* (2.2) the homebrew folders looked in again too */
         if (engine().update_check() == 1)
             play(int(Sfx::Error));
         else
@@ -1605,16 +1643,7 @@ bool Store::update(const pad::State &p, float dt)
                     }
                 }
                 else
-                {
-                    std::string why;
-                    const int r = refresh_smp(why);
-                    const bool ok = r > 0;
-                    settings_note_ = r == 2 ? "ShadowMountPlus is running; it's looking for new games now."
-                                   : r == 1 ? "Started ShadowMountPlus. New games show up on your home screen in a few seconds."
-                                            : why;
-                    settings_note_bad_ = !ok;
-                    play(int(ok ? Sfx::Complete : Sfx::Error));
-                }
+                    start_refresh_home(false); /* (2.2) the store closes while ShadowMountPlus looks, then opens again */
             }
             if (pressed(pad::BtnCircle) || l) { in_section_ = false; play(int(Sfx::Back)); return true; }
         }
@@ -2334,8 +2363,9 @@ void Store::draw_settings(Gfx &gfx)
         gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, smp.empty() ? C(kCyan) : C(kFrost), Align::Right,
                      smp.empty() ? std::string("Choose its file\xE2\x80\xA6") : fit(gfx, Font::Regular, 19, 380, base_name(smp)));
         ry += 104;
-        option(2, "Refresh ShadowMountPlus", "Has it look for new games now, or starts it (port 9021) if it isn't running.");
-        gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, C(kFrost), Align::Right, "Refresh");
+        /* (2.2) ShadowMountPlus adds nothing while an app is open, the store included. */
+        option(2, "Refresh home screen", "The store closes for a moment while ShadowMountPlus adds new apps, then opens again.");
+        gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, C(kFrost), Align::Right, opening_ ? "Closing\xE2\x80\xA6" : "Refresh");
         ry += 104;
         {
             /* What the last check found: the store's own update and the games', from GitHub. */
@@ -4281,6 +4311,12 @@ void Store::draw_hints(Gfx &gfx)
         hint(hint_cross_, "Choose");
         return;
     }
+    if (mng_)
+    {
+        hint(hint_circle_, mng_stage_ == 0 ? "Close" : "Back"); /* (2.2) */
+        hint(hint_cross_, "Choose");
+        return;
+    }
     if (vers_)
     {
         /* (2.1) Versions: X asks first, then installs the one picked. */
@@ -4431,6 +4467,7 @@ void Store::draw(Gfx &gfx)
     draw_moved(gfx);    /* (2.1) */
     draw_versions(gfx); /* (2.1) */
     draw_sheet(gfx);  /* (2.0) */
+    draw_manage(gfx); /* (2.2) */
     draw_keypad(gfx);
     draw_logs(gfx);
     draw_keyboard(gfx);

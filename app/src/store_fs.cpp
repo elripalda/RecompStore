@@ -249,4 +249,308 @@ void remove_empty_parents(const std::string &path, const std::function<void(cons
         up = up.substr(0, up.find_last_of('/'));
     }
 }
+
+/* ---- (2.2) The App manager: a folder's size, a copy of it, and checking the copy -------------- */
+namespace
+{
+/* A folder's entries (not . and ..); false with errno when it can't be listed. */
+bool list_names(const std::string &path, std::vector<std::string> &names, int &e)
+{
+    names.clear();
+    DIR *d = opendir(path.c_str());
+    if (!d)
+    {
+        e = errno;
+        return false;
+    }
+    while (dirent *x = readdir(d))
+        if (std::strcmp(x->d_name, ".") != 0 && std::strcmp(x->d_name, "..") != 0) names.push_back(x->d_name);
+    closedir(d);
+    return true;
+}
+
+/* A folder this process is refused: listed as its owner (a game's own folder, mode 0700), as
+ * remove_tree does. here becomes the owner when it switched; the caller switches back to cur. */
+bool list_as_owner(const std::string &path, const Who *cur, Who &owner, const Who *&here, bool &switched,
+                   std::vector<std::string> &names, int &e, const ActAs &act_as)
+{
+    if (list_names(path, names, e)) return true;
+    if (e != EACCES || !act_as || switched) return false;
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return false;
+    owner.uid = unsigned(st.st_uid);
+    owner.gid = unsigned(st.st_gid);
+    if (cur && cur->uid == owner.uid && cur->gid == owner.gid) return false;
+    if (!act_as(&owner))
+    {
+        act_as(cur);
+        return false;
+    }
+    switched = true;
+    here = &owner;
+    return list_names(path, names, e);
+}
+
+bool size_at(const std::string &path, int depth, const Who *cur, const ActAs &act_as, std::uint64_t &bytes, std::size_t &files)
+{
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return false;
+    if (!S_ISDIR(st.st_mode))
+    {
+        if (S_ISREG(st.st_mode))
+        {
+            bytes += std::uint64_t(st.st_size);
+            ++files;
+        }
+        return true;
+    }
+    if (depth > 64) return false;
+    std::vector<std::string> names;
+    int e = 0;
+    Who owner;
+    const Who *here = cur;
+    bool switched = false;
+    if (!list_as_owner(path, cur, owner, here, switched, names, e, act_as))
+    {
+        if (switched) act_as(cur);
+        return false;
+    }
+    bool ok = true;
+    for (const std::string &n : names) ok = size_at(path + "/" + n, depth + 1, here, act_as, bytes, files) && ok;
+    if (switched && !act_as(cur)) return false;
+    return ok;
+}
+
+struct CopyCtx
+{
+    std::uint64_t &bytes;
+    std::size_t &files;
+    std::string &bad;
+    int &err;
+    const std::function<bool(std::uint64_t)> &progress;
+    const ActAs &act_as;
+    const std::function<void(const std::string &)> &log;
+    std::vector<unsigned char> buf;
+};
+
+bool copy_file(const std::string &from, const std::string &to, std::uint64_t size, CopyCtx &c)
+{
+    const int in = open(from.c_str(), O_RDONLY);
+    if (in < 0)
+    {
+        c.bad = from;
+        c.err = errno;
+        return false;
+    }
+    const int out = open(to.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0777);
+    if (out < 0)
+    {
+        c.bad = to;
+        c.err = errno;
+        close(in);
+        return false;
+    }
+    std::uint64_t done = 0;
+    bool ok = true;
+    for (;;)
+    {
+        const ssize_t n = pread(in, c.buf.data(), c.buf.size(), off_t(done)); /* pread: what the copier already reads with */
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0)
+        {
+            c.bad = from;
+            c.err = errno;
+            ok = false;
+            break;
+        }
+        if (n == 0) break;
+        std::size_t at = 0;
+        while (at < std::size_t(n))
+        {
+            const ssize_t w = write(out, c.buf.data() + at, std::size_t(n) - at);
+            if (w < 0 && errno == EINTR) continue;
+            if (w <= 0)
+            {
+                c.bad = to;
+                c.err = w < 0 ? errno : ENOSPC;
+                ok = false;
+                break;
+            }
+            at += std::size_t(w);
+        }
+        if (!ok) break;
+        done += std::uint64_t(n);
+        c.bytes += std::uint64_t(n);
+        if (c.progress && !c.progress(c.bytes))
+        {
+            c.bad = from;
+            c.err = ECANCELED;
+            ok = false;
+            break;
+        }
+    }
+    close(in);
+    if (close(out) != 0 && ok)
+    {
+        c.bad = to;
+        c.err = errno;
+        ok = false;
+    }
+    if (ok && done != size)
+    {
+        c.bad = from; /* it changed while it was copied */
+        c.err = EIO;
+        ok = false;
+    }
+    if (ok)
+    {
+        chmod(to.c_str(), 0777);
+        ++c.files;
+    }
+    return ok;
+}
+
+bool copy_at(const std::string &from, const std::string &to, int depth, const Who *cur, CopyCtx &c)
+{
+    struct stat st;
+    if (stat(from.c_str(), &st) != 0)
+    {
+        c.bad = from;
+        c.err = errno;
+        return false;
+    }
+    if (!S_ISDIR(st.st_mode))
+    {
+        if (S_ISREG(st.st_mode)) return copy_file(from, to, std::uint64_t(st.st_size), c);
+        if (c.log) c.log("left out " + from + " (not a file or a folder)");
+        return true;
+    }
+    if (depth > 64)
+    {
+        c.bad = from;
+        c.err = ELOOP;
+        return false;
+    }
+    std::vector<std::string> names;
+    int e = 0;
+    Who owner;
+    const Who *here = cur;
+    bool switched = false;
+    auto back = [&]() { return !switched || c.act_as(cur); };
+    if (!list_as_owner(from, cur, owner, here, switched, names, e, c.act_as))
+    {
+        back();
+        c.bad = from;
+        c.err = e ? e : EACCES;
+        return false;
+    }
+    if (switched && c.log) c.log("reading " + from + " as its owner (uid " + std::to_string(owner.uid) + ")");
+    if (mkdir(to.c_str(), 0777) != 0 && !(depth > 0 && errno == EEXIST))
+    {
+        c.bad = to;
+        c.err = errno;
+        back();
+        return false;
+    }
+    chmod(to.c_str(), 0777);
+    for (const std::string &n : names)
+        if (!copy_at(from + "/" + n, to + "/" + n, depth + 1, here, c))
+        {
+            back();
+            return false;
+        }
+    if (!back())
+    {
+        c.bad = from;
+        c.err = EPERM;
+        return false;
+    }
+    return true;
+}
+
+bool same_at(const std::string &from, const std::string &to, int depth, const Who *cur, const ActAs &act_as, std::string &bad)
+{
+    struct stat a, b;
+    if (stat(from.c_str(), &a) != 0)
+    {
+        bad = from;
+        return false;
+    }
+    if (!S_ISDIR(a.st_mode))
+    {
+        if (!S_ISREG(a.st_mode)) return true; /* left out by copy_tree */
+        if (stat(to.c_str(), &b) != 0 || !S_ISREG(b.st_mode) || b.st_size != a.st_size)
+        {
+            bad = to;
+            return false;
+        }
+        return true;
+    }
+    if (depth > 64 || stat(to.c_str(), &b) != 0 || !S_ISDIR(b.st_mode))
+    {
+        bad = to;
+        return false;
+    }
+    std::vector<std::string> names;
+    int e = 0;
+    Who owner;
+    const Who *here = cur;
+    bool switched = false;
+    if (!list_as_owner(from, cur, owner, here, switched, names, e, act_as))
+    {
+        if (switched) act_as(cur);
+        bad = from;
+        return false;
+    }
+    bool ok = true;
+    for (const std::string &n : names)
+        if (!same_at(from + "/" + n, to + "/" + n, depth + 1, here, act_as, bad))
+        {
+            ok = false;
+            break;
+        }
+    if (switched && !act_as(cur)) ok = false;
+    return ok;
+}
+} // namespace
+
+bool tree_size(const std::string &path, std::uint64_t &bytes, std::size_t &files, const ActAs &act_as)
+{
+    bytes = 0;
+    files = 0;
+    if (path.empty() || path[0] != '/') return false;
+    return size_at(path, 0, nullptr, act_as, bytes, files);
+}
+
+bool copy_tree(const std::string &from, const std::string &to, std::uint64_t &bytes, std::size_t &files, std::string &bad,
+               int &err, const std::function<bool(std::uint64_t)> &progress, const ActAs &act_as,
+               const std::function<void(const std::string &)> &log)
+{
+    bytes = 0;
+    files = 0;
+    bad.clear();
+    err = 0;
+    if (from.empty() || from[0] != '/' || to.empty() || to[0] != '/' || to == from || to.rfind(from + "/", 0) == 0)
+    {
+        bad = to;
+        err = EINVAL;
+        return false;
+    }
+    struct stat st;
+    if (stat(to.c_str(), &st) == 0)
+    {
+        bad = to;
+        err = EEXIST;
+        return false;
+    }
+    CopyCtx c{bytes, files, bad, err, progress, act_as, log, {}};
+    c.buf.resize(4u << 20);
+    return copy_at(from, to, 0, nullptr, c);
+}
+
+bool same_tree(const std::string &from, const std::string &to, std::string &bad, const ActAs &act_as)
+{
+    bad.clear();
+    return same_at(from, to, 0, nullptr, act_as, bad);
+}
 } // namespace recomp::fs
