@@ -353,7 +353,7 @@ bool Store::update_sources(float dt, bool u, bool d)
             sheet_t_ = 0;
             sheet_kind_ = 2;
             sheet_value_ = list[std::size_t(src_row_ - 1)].value;
-            sheet_sel_ = 2; /* Close first */
+            sheet_sel_ = 3; /* Close first */
             play(int(Sfx::Open));
         }
     }
@@ -444,7 +444,7 @@ void Store::kb_finished()
 bool Store::update_sheet(float dt)
 {
     sheet_t_ = std::min(1.f, sheet_t_ + dt * 5.f);
-    const int buttons = sheet_kind_ == 2 ? 3 : 2;
+    const int buttons = sheet_kind_ == 2 ? 4 : 2; /* (2.2.2) Pin as a tab first */
     const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
     const int s = std::clamp(sheet_sel_ + (r ? 1 : 0) - (l ? 1 : 0), 0, buttons - 1);
     if (s != sheet_sel_) { sheet_sel_ = s; play(int(Sfx::Move)); }
@@ -474,9 +474,19 @@ bool Store::update_sheet(float dt)
         }
     }
     else if (sheet_sel_ == 0)
-        report_source(sheet_value_, false);
-    else if (sheet_sel_ == 1)
     {
+        /* (2.2.2) Its own tab, after the parts of the store. */
+        const bool on = !source_pinned(sheet_value_);
+        pin_source(sheet_value_, on);
+        src_note_ = on ? "Pinned as a tab. Customize > Tabs puts it in order." : "Its tab is gone.";
+        src_note_bad_ = false;
+        play(int(Sfx::Select));
+    }
+    else if (sheet_sel_ == 1)
+        report_source(sheet_value_, false);
+    else if (sheet_sel_ == 2)
+    {
+        pin_source(sheet_value_, false); /* (2.2.2) its tab goes with it */
         engine().remove_source(sheet_value_);
         src_note_ = "Removed " + sheet_value_ + ". Apps you installed from it stay installed.";
         src_note_bad_ = false;
@@ -536,13 +546,14 @@ void Store::draw_sheet(Gfx &gfx)
     }
     y += 34;
     std::vector<std::string> labels = sheet_kind_ == 1 ? std::vector<std::string>{"Add it", "Not now"}
-                                                       : std::vector<std::string>{"Report it", "Remove", "Close"};
+                                                       : std::vector<std::string>{source_pinned(sheet_value_) ? "Unpin tab" : "Pin as a tab",
+                                                                                  "Report it", "Remove", "Close"};
     const float gap = 16, w = (iw - gap * float(labels.size() - 1)) / float(labels.size());
     for (std::size_t i = 0; i < labels.size(); ++i)
     {
         const float x = bx + pad + float(i) * (w + gap);
         const bool on = sheet_sel_ == int(i);
-        const bool main = sheet_kind_ == 1 && i == 0, danger = sheet_kind_ == 2 && i == 1;
+        const bool main = sheet_kind_ == 1 && i == 0, danger = sheet_kind_ == 2 && i == 2;
         Color bg = main ? C(kCyan, on ? 1.f : 0.3f) : danger ? C(0xE5484D, on ? 0.9f : 0.16f) : C(kFrost, on ? 1.f : 0.12f);
         gfx.panel(x, y, w, 64, bg, 1.f, 20);
         ring(gfx, x, y, w, 64, 20, on ? 1.f : 0.f, true);
@@ -610,8 +621,7 @@ void Store::take_link_actions()
                                                    : app->name + " is already installed");
             return;
         }
-        if (std::find(queue_.begin(), queue_.end(), app->id) != queue_.end() || queue_now_ == app->id) return;
-        queue_.push_back(app->id);
+        if (queue_place(app->id) || !engine().queue_add(app->id)) return; /* (2.2.2) the download queue */
         ++queue_total_;
         queue_fresh_ = true;
         toast((update ? "Updating " : "Installing ") + app->name + ", sent from your phone");
@@ -627,7 +637,7 @@ void Store::draw_toast(Gfx &gfx)
     const float in = clamp01(toast_t_ / 0.2f), out = clamp01((3.2f - toast_t_) / 0.4f), a = std::min(in, out);
     const std::string t = fit(gfx, Font::SemiBold, 18, 560, toast_);
     const float w = gfx.measure(Font::SemiBold, 18, t) + 26 + 16 + 24, h = 44, x = 1920 - 96 - w;
-    const float cy = (refresh_shown_ ? 76 + 56 : 76) - (1 - in) * 8;
+    const float cy = 76 + (downloads_shown() ? 56.f : 0.f) + (refresh_shown_ ? 56.f : 0.f) - (1 - in) * 8; /* (2.2.2) under Downloads */
     glass(gfx, x, cy - h / 2, w, h, h / 2, Color{kGlass.r, kGlass.g, kGlass.b, kGlass.a * a}, a > 0.5f);
     gfx.panel(x + 20, cy - 5, 10, 10, C(kCyan, a), 1.f, 5);
     gfx.text_mid(Font::SemiBold, 18, x + 20 + 10 + 14, cy, C(kFrost, a), Align::Left, t);

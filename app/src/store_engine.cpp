@@ -46,6 +46,7 @@
 namespace recomp
 {
 void slog(const char *fmt, ...);
+void load_queue(); /* (2.2.2) */
 bool data_lost(int err);
 void data_trouble(const std::string &path, int err);
 static bool title_id_ok(const std::string &id);
@@ -253,6 +254,20 @@ struct Shared
     std::string smp_version;
     /* (2.2) An App manager job asked for (Engine::manage), not yet started. */
     std::string pending_manage, pending_manage_folder, pending_manage_dest;
+    /* (2.2.2) With pending_install: the homebrew folder picked for it. The install's download to
+     * stop (cancel_job). The download queue (queue.txt) and the app it started. Folders to delete
+     * at once (manage_many), ShadowMountPlus to get (get_smp). The drives as last looked, and the
+     * homebrew folders ShadowMountPlus says can be installed to (smp_dests_known: it said). */
+    std::string pending_root;
+    bool cancel_wanted = false;
+    std::vector<QueueItem> queue;
+    std::string queue_now;
+    std::vector<std::string> pending_mdeletes;
+    bool pending_smpget = false;
+    std::vector<DriveSpace> drives;
+    std::vector<std::string> smp_dests;
+    bool smp_dests_known = false;
+    unsigned games_checks = 0; /* (2.2.2) how many times the installed apps' updates were looked for */
 };
 Shared g;
 
@@ -391,6 +406,8 @@ std::string any_case_path(const std::string &dir, const std::string &rel);
 bool at_size_any_case(const std::string &dir, const std::string &rel, std::uint64_t size);
 /* (2.2) The App manager's jobs (Engine::manage), run by the worker; defined with it below. */
 void run_manage(const std::string &kind, const std::string &folder, const std::string &dest);
+void run_manage_many(const std::vector<std::string> &folders); /* (2.2.2) */
+void run_get_smp();                                         /* (2.2.2) */
 
 namespace
 {
@@ -1417,6 +1434,16 @@ void run_report_source(const std::string &value, const std::string &why)
 }
 
 /* ---- The charts (2.0) ------------------------------------------------------------------ */
+/* (2.2.2) A list of app IDs, at most `most`, plain ones only. */
+static void ids_into(const Json &a, std::vector<std::string> &v, std::size_t most)
+{
+    for (std::size_t i = 0; i < a.size() && v.size() < most; ++i)
+    {
+        const std::string id = a[i].is_object() ? a[i]["id"].str() : a[i].str();
+        if (!id.empty() && id.size() <= 48 && id.find('/') == std::string::npos) v.push_back(id);
+    }
+}
+
 bool parse_charts(const std::string &text, Charts &out)
 {
     Json j;
@@ -1441,6 +1468,14 @@ bool parse_charts(const std::string &text, Charts &out)
         c.stars = kv.second["stars"].integer(-1);
         c.downloads = kv.second["downloads"].integer(-1);
         out.stats.push_back({kv.first, c});
+    }
+    /* (2.2.2) People also installed. */
+    for (const auto &kv : j["also"].members())
+    {
+        if (out.also.size() >= 500 || kv.first.empty() || kv.first.size() > 48) break;
+        std::vector<std::string> ids;
+        ids_into(kv.second, ids, 8);
+        if (!ids.empty()) out.also.push_back({kv.first, ids});
     }
     out.have = true;
     return true;
@@ -1735,6 +1770,7 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
  * again from where it stopped, on a fresh connection; five tries in a row that bring nothing
  * new give up. 200 once all of it is here. */
 double mono_s();
+bool cancel_now();
 int download_in_parts(porpoise::http::Session &http, const std::string &url, std::uint64_t size,
                       const std::function<bool(const std::uint8_t *, std::size_t)> &take, std::uint64_t &got,
                       const bool &write_ok)
@@ -1752,7 +1788,7 @@ int download_in_parts(porpoise::http::Session &http, const std::string &url, std
                 return n > 0 && take(p, n) && got < size;
             },
             120);
-        if (!write_ok) return -1;
+        if (!write_ok || cancel_now()) return -1; /* (2.2.2) cancel_now: the player stopped it */
         if (got == size || (st == 206 && got > to)) continue; /* the piece, whole */
         const bool moved = got > from;
         slog("download: bytes %llu-%llu: HTTP %d (error %#x) after %.0f s, %llu bytes came; %s", (unsigned long long)from,
@@ -1785,8 +1821,43 @@ std::string free_move_id();
 void remember_own(const std::string &app_id, const std::string &tid);
 std::string lower_text(std::string s);
 std::string tid_folder(const std::string &tid);
+/* (2.2.2) The same, with root in place of the usual homebrew folder for an app not on the console yet. */
+std::string tid_folder_in(const std::string &tid, const std::string &root);
 std::vector<std::string> homebrew_roots();
 int forget_tile(const std::string &tid); /* (2.2) with the App manager */
+std::string place_name(const std::string &root);
+std::string size_words(std::uint64_t b);
+/* (2.2.2) The bytes free for new files where path is (false when it can't be told). */
+bool free_bytes(const std::string &path, std::uint64_t &out)
+{
+#ifdef RECOMP_ENGINE_TEST
+    /* The tests' small drives: E222_FREE="/mnt/usb0=1000,/data=1000". */
+    if (const char *t = std::getenv("E222_FREE"))
+    {
+        const std::string spec = std::string(t) + ",";
+        for (std::size_t at = 0, c; (c = spec.find(',', at)) != std::string::npos; at = c + 1)
+        {
+            const std::string one = spec.substr(at, c - at);
+            const std::size_t eq = one.find('=');
+            if (eq != std::string::npos && path.rfind(one.substr(0, eq), 0) == 0)
+            {
+                out = std::strtoull(one.c_str() + eq + 1, nullptr, 10);
+                return true;
+            }
+        }
+    }
+#endif
+    struct statvfs fs;
+    if (statvfs(path.c_str(), &fs) != 0) return false;
+    out = std::uint64_t(fs.f_bavail) * fs.f_frsize;
+    return true;
+}
+/* (2.2.2) The player stopped the install that's downloading (Engine::cancel_job). */
+bool cancel_now()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.cancel_wanted;
+}
 
 /* (2.0) The drive a folder is on: "/mnt/usb0", "/mnt/ext1", or "/data" for the console's own. */
 std::string drive_of(const std::string &path)
@@ -1899,7 +1970,7 @@ std::string field_of(const std::string &text, const char *key);
 /* answer (2.0): 0 a plain install; after a title ID clash, 1 under its own new title ID,
  * 2 over the other app's folder; (2.1) 3 from its new GitHub repo (JobState::source_moved).
  * version (2.1): the one the player picked (Engine::install), "" for the newest. */
-void run_install(const std::string &id, int answer, const std::string &version)
+void run_install(const std::string &id, int answer, const std::string &version, const std::string &want_root)
 {
     porpoise::http::Session http("store-install", "RecompStore/0.1");
     App a;
@@ -1914,6 +1985,8 @@ void run_install(const std::string &id, int answer, const std::string &version)
         g.job.app_id = id;
         g.job.step = "Finding the newest release";
         g.job.version = version; /* (2.1) */
+        g.job.root = want_root;  /* (2.2.2) */
+        g.cancel_wanted = false;
     }
     if (!found) return fail_job("That game isn't in the catalog.");
     if (store_too_old(a))
@@ -2016,19 +2089,30 @@ void run_install(const std::string &id, int answer, const std::string &version)
 
     /* (2.0) Where it goes: where it already is, else the homebrew folder the player chose (the
      * console's own, or a drive's). A drive that isn't there now stops it before the download. */
-    const std::string dest = app_folder(a.id), drive = drive_of(dest);
+    /* (2.2.2) A new app goes to the homebrew folder the player picked for it, if they did. */
+    const std::string dest = tid_folder_in(installed_id(a.id), want_root), drive = drive_of(dest);
     if (drive != "/data" && !drive_ready(drive))
         return fail_job(a.name + " installs to " + dest.substr(0, dest.find_last_of('/')) +
                         ", and that drive isn't connected. Connect it, or pick another place in Settings > Customize.");
     /* Room for the zip and its unpacked files on disk, with some to spare: on the console for
      * the download, and where it unpacks. */
-    struct statvfs fs;
+    /* (2.2.2) Said with the numbers, and before anything is downloaded. */
     const std::uint64_t data_need = t.size * (drive == "/data" ? 3 : 1) + (512ull << 20);
-    if (!reused && statvfs("/data", &fs) == 0 && t.size && std::uint64_t(fs.f_bavail) * fs.f_frsize < data_need)
-        return fail_job("There isn't enough free space on your PS5.");
-    if (!reused && drive != "/data" && statvfs(drive.c_str(), &fs) == 0 && t.size &&
-        std::uint64_t(fs.f_bavail) * fs.f_frsize < t.size * 2 + (64ull << 20))
-        return fail_job("There isn't enough free space on " + drive + " for " + a.name + ".");
+    std::uint64_t room = 0;
+    if (!reused && t.size && free_bytes("/data", room) && room < data_need)
+    {
+        slog("install %s: refused before downloading: %llu bytes free on /data, %llu needed", a.id.c_str(), (unsigned long long)room,
+             (unsigned long long)data_need);
+        return fail_job("Not enough space on Console storage for " + a.name + ": it needs about " + size_words(data_need) + " and " +
+                        size_words(room) + " is free. Clear the download cache in Settings > Storage, or make some room.");
+    }
+    if (!reused && drive != "/data" && t.size && free_bytes(drive, room) && room < t.size * 2 + (64ull << 20))
+    {
+        slog("install %s: refused before downloading: %llu bytes free on %s, %llu needed", a.id.c_str(), (unsigned long long)room,
+             drive.c_str(), (unsigned long long)(t.size * 2 + (64ull << 20)));
+        return fail_job("Not enough space on " + place_name(dest.substr(0, dest.find_last_of('/'))) + " for " + a.name + ": it needs about " +
+                        size_words(t.size * 2 + (64ull << 20)) + " and " + size_words(room) + " is free. Pick another place, or make some room.");
+    }
 
     /* Download to the store's own folder, checking the checksum as it arrives. */
     const std::string zip_path = g.data + "/downloads/" + a.id + ".zip";
@@ -2036,7 +2120,7 @@ void run_install(const std::string &id, int answer, const std::string &version)
     std::remove(zip_path.c_str());
     Sha256 sha;
     std::uint64_t got = 0;
-    bool write_ok = true;
+    bool write_ok = true, cancelled = false;
     int status = 200;
     if (reused)
     {
@@ -2053,6 +2137,7 @@ void run_install(const std::string &id, int answer, const std::string &version)
         timespec dl0;
         clock_gettime(CLOCK_MONOTONIC, &dl0);
         auto take = [&](const std::uint8_t *p, std::size_t n) {
+            if (cancel_now()) { cancelled = true; return false; } /* (2.2.2) the player stopped it */
             if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
             sha.update(p, n);
             got += n;
@@ -2079,6 +2164,17 @@ void run_install(const std::string &id, int answer, const std::string &version)
         std::FILE *f = nullptr;
         ~ZipFile() { if (f) std::fclose(f); std::remove(path.c_str()); } /* the store's own download, not the game */
     } zf{zip_path}, kept_inner{reused_inner ? inner_path : std::string()}; /* (2.0) a kept inner zip goes too */
+    if (cancelled || cancel_now())
+    {
+        /* (2.2.2) Stopped by the player: nothing was written but the download, which goes. */
+        slog("install %s: cancelled while downloading (%llu bytes came)", a.id.c_str(), (unsigned long long)got);
+        std::lock_guard<std::mutex> l(g.m);
+        g.cancel_wanted = false;
+        g.job.phase = Phase::Failed;
+        g.job.cancelled = true;
+        g.job.error = "Cancelled. Nothing was installed.";
+        return;
+    }
     if (!write_ok) return fail_job("Your PS5 ran out of room while downloading.");
     if (status != 200 || got == 0 || (t.size && got != t.size))
         return fail_job("The download didn't finish. Check your connection and try again.");
@@ -2202,7 +2298,7 @@ void run_install(const std::string &id, int answer, const std::string &version)
     /* Where it already is, if it's on the console: under its new title ID when it was moved,
      * else its own (a custom app's, as just read). */
     const std::string under = moved_id(a.id).empty() ? own : moved_id(a.id);
-    const std::string root = tid_folder(under);
+    const std::string root = tid_folder_in(under, want_root); /* (2.2.2) where it already is, else where the player picked */
     const std::string record = g.data + "/installed/" + a.id + ".txt";
     /* (2.1.1) Already on the console: an update, which ShadowMountPlus doesn't need to add. */
     const bool was_there = !fs::gone(root + "/eboot.bin");
@@ -4352,6 +4448,7 @@ void *worker(void *)
                         next_games_check = now + (games_ok ? 6 * 3600 : 600);
                         std::lock_guard<std::mutex> l(g.m);
                         ++g.revision; /* the screens show what's newer */
+                        if (games_ok) ++g.games_checks; /* (2.2.2) auto-update looks then */
                     }
                     ok = true;
                 }
@@ -4439,8 +4536,15 @@ void *worker(void *)
         bool store_dl = false, del_keep = false;
         int answer = 0;
         std::string mkind, mfolder, mdest; /* (2.2) */
+        std::string want_root;              /* (2.2.2) */
+        std::vector<std::string> mdeletes;
+        bool smpget = false;
         {
             std::lock_guard<std::mutex> l(g.m);
+            want_root.swap(g.pending_root);
+            mdeletes.swap(g.pending_mdeletes);
+            smpget = g.pending_smpget;
+            g.pending_smpget = false;
             mkind.swap(g.pending_manage);
             mfolder.swap(g.pending_manage_folder);
             mdest.swap(g.pending_manage_dest);
@@ -4461,7 +4565,7 @@ void *worker(void *)
             g.pending_setup_fetch = false;
         }
         if (!id.empty())
-            run_install(id, answer, picked);
+            run_install(id, answer, picked, want_root);
         else if (!sapp.empty())
             run_setup(sapp, sslot, simage, sfetch);
         else if (bench)
@@ -4470,6 +4574,10 @@ void *worker(void *)
             run_delete(del, del_keep);
         else if (!mkind.empty())
             run_manage(mkind, mfolder, mdest); /* (2.2) */
+        else if (!mdeletes.empty())
+            run_manage_many(mdeletes); /* (2.2.2) */
+        else if (smpget)
+            run_get_smp(); /* (2.2.2) */
         else if (store_dl)
             run_store_download();
         else
@@ -5095,6 +5203,13 @@ std::string tid_folder(const std::string &tid)
     auto it = g_folders.find(tid);
     return it != g_folders.end() ? it->second : g_install_root + "/" + tid; /* (2.0) a new one: where the player chose */
 }
+
+std::string tid_folder_in(const std::string &tid, const std::string &root)
+{
+    std::lock_guard<std::mutex> l(g_fold_m);
+    auto it = g_folders.find(tid);
+    return it != g_folders.end() ? it->second : (root.empty() ? g_install_root : root) + "/" + tid;
+}
 } // namespace
 
 std::string app_folder(const std::string &app_id)
@@ -5316,6 +5431,7 @@ void Engine::start(const std::string &data_dir)
         std::lock_guard<std::mutex> l(g.m);
         g.holds.swap(holds);
     }
+    load_queue(); /* (2.2.2) the download queue, as the store was closed on it */
     {
         /* (2.0) A tester's console, as the site last said (before the threads start, so the
          * link thread's answer can't be overwritten by this). */
@@ -5362,19 +5478,33 @@ bool Engine::online() const { std::lock_guard<std::mutex> l(g.m); return g.onlin
 std::string Engine::catalog_note() const { std::lock_guard<std::mutex> l(g.m); return g.catalog_note; }
 bool Engine::loading() const { std::lock_guard<std::mutex> l(g.m); return g.loading; }
 
-bool Engine::install(const std::string &app_id, const std::string &version)
+/* (2.2.2) A homebrew folder the player may pick for a new app: one the store knows ("" the usual). */
+static bool root_ok(const std::string &root)
 {
+    if (root.empty()) return true;
+    const auto roots = homebrew_roots();
+    if (std::find(roots.begin(), roots.end(), root) != roots.end()) return true;
+    slog("install: %s isn't a homebrew folder the store installs to; refused", root.c_str());
+    return false;
+}
+
+bool Engine::install(const std::string &app_id, const std::string &version, const std::string &root)
+{
+    if (!root_ok(root)) return false;
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
     g.pending_install = app_id;
     g.pending_version = version; /* (2.1) */
+    g.pending_root = root;       /* (2.2.2) */
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "install";
     g.job.app_id = app_id;
     g.job.step = "Starting";
     g.job.version = version;
+    g.job.root = root;
     if (!version.empty()) slog("install %s: version %s asked for", app_id.c_str(), version.c_str());
+    if (!root.empty()) slog("install %s: to %s, if it isn't on the console yet", app_id.c_str(), root.c_str());
     return true;
 }
 
@@ -5385,7 +5515,7 @@ std::string Engine::held(const std::string &app_id) const
     return it == g.holds.end() ? std::string() : it->second;
 }
 
-bool Engine::resolve_clash(const std::string &app_id, int choice, const std::string &version)
+bool Engine::resolve_clash(const std::string &app_id, int choice, const std::string &version, const std::string &root)
 {
     if (choice != 1 && choice != 2 && choice != 3)
     {
@@ -5401,17 +5531,20 @@ bool Engine::resolve_clash(const std::string &app_id, int choice, const std::str
         return true;
     }
     /* As install(), with the answer set in the same breath (the worker takes both at once). */
+    if (!root_ok(root)) return false;
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
     g.pending_install = app_id;
     g.pending_resolve = choice;
     g.pending_version = version; /* (2.1) the one the player picked, again */
+    g.pending_root = root;       /* (2.2.2) and the place */
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "install";
     g.job.app_id = app_id;
     g.job.step = "Starting";
     g.job.version = version;
+    g.job.root = root;
     if (choice == 3) slog("install %s: updating from its new GitHub repo, as the player said", app_id.c_str());
     else slog("title ID guard: %s %s", app_id.c_str(), choice == 1 ? "goes under its own new title ID" : "goes over the other app");
     return true;
@@ -5677,13 +5810,36 @@ Charts Engine::charts() const
 
 std::vector<Place> Engine::install_places() const
 {
-    std::vector<Place> out{{"Console storage", kHomebrew}};
-    for (const char *ext : {"/mnt/ext1", "/mnt/ext0"})
-        if (drive_ready(ext)) out.push_back({std::string(ext) == "/mnt/ext1" ? "M.2 SSD" : "Extended storage", std::string(ext) + "/homebrew"});
-    for (int i = 0; i < 8; ++i)
+    /* (2.2.2) Where ShadowMountPlus says apps can go, when it said (its /api/v1/storage); else every
+     * homebrew folder on a drive that's connected. With each one's free space. */
+    std::vector<DriveSpace> known;
+    std::vector<std::string> dests;
+    bool smp = false;
     {
-        const std::string usb = "/mnt/usb" + std::to_string(i);
-        if (drive_ready(usb)) out.push_back({"USB drive " + std::to_string(i + 1), usb + "/homebrew"});
+        std::lock_guard<std::mutex> l(g.m);
+        known = g.drives;
+        dests = g.smp_dests;
+        smp = g.smp_dests_known;
+    }
+    std::vector<Place> out;
+    for (const std::string &root : homebrew_roots())
+    {
+        const std::string drive = drive_of(root);
+        const bool listed = std::find(dests.begin(), dests.end(), root) != dests.end();
+        if (root != kHomebrew && (smp ? !listed : false)) continue;
+        if (root != kHomebrew && !drive_ready(drive)) continue;
+        Place p{place_name(root), root};
+        bool from = false;
+        for (const DriveSpace &d : known)
+            if (d.homebrew == root && d.total) { p.free = d.free; p.total = d.total; from = true; }
+        if (!from)
+        {
+            struct statvfs fs;
+            if (statvfs(drive.c_str(), &fs) == 0) { p.free = std::uint64_t(fs.f_bavail) * fs.f_frsize; p.total = std::uint64_t(fs.f_blocks) * fs.f_frsize; }
+            std::uint64_t f = 0;
+            if (free_bytes(drive, f)) p.free = f;
+        }
+        out.push_back(p);
     }
     return out;
 }
@@ -6122,6 +6278,7 @@ std::vector<ConsoleApp> list_console()
             ConsoleApp c;
             c.folder = dir;
             c.root = root;
+            c.mtime = (long long)st.st_mtime;
             c.place = place_name(root);
             std::string text;
             Json pj;
@@ -6151,6 +6308,7 @@ std::vector<ConsoleApp> list_console()
 
 /* ShadowMountPlus's API, asked what it is (read only: it answers while an app runs). */
 int ask_smp_version(std::string &version);
+void look_drives(bool smp_running); /* (2.2.2) */
 
 void *console_main(void *)
 {
@@ -6195,6 +6353,7 @@ void *console_main(void *)
             g.smp_version = ver;
             ++g.console_rev;
         }
+        look_drives(smp == 1); /* (2.2.2) */
         for (const ConsoleApp &c : list)
         {
             {
@@ -7295,6 +7454,581 @@ std::string Engine::installed(const std::string &app_id) const
     std::string v;
     if (there && read_file(data + "/installed/" + app_id + ".txt", v) && !v.empty()) return v;
     return there ? "?" : "";
+}
+
+/* ---- (2.2.2) The download queue, the drives, the download cache, deleting several at once,
+ * Get ShadowMountPlus ------------------------------------------------------------------------- */
+namespace
+{
+/* queue.txt: one install a line, "id<TAB>version<TAB>root". Written as it changes (g.m held). */
+void save_queue_locked()
+{
+    std::string text;
+    for (const QueueItem &q : g.queue) text += q.id + "\t" + q.version + "\t" + q.root + "\n";
+    const std::string f = g.data + "/queue.txt";
+    if (text.empty()) std::remove(f.c_str());
+    else write_file(f, text.data(), text.size());
+}
+
+bool queue_text_ok(const std::string &s, std::size_t most)
+{
+    if (s.size() > most) return false;
+    for (const char c : s)
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) return false;
+    return true;
+}
+} // namespace
+
+void load_queue()
+{
+    std::string text;
+    if (!read_file(g.data + "/queue.txt", text)) return;
+    const auto roots = homebrew_roots();
+    std::vector<QueueItem> q;
+    std::size_t at = 0;
+    while (at < text.size() && q.size() < 64)
+    {
+        std::size_t end = text.find('\n', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = text.substr(at, end - at);
+        at = end + 1;
+        const std::size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+        if (t2 == std::string::npos) continue;
+        QueueItem it{line.substr(0, t1), line.substr(t1 + 1, t2 - t1 - 1), line.substr(t2 + 1)};
+        if (it.id.empty() || it.id.find('/') != std::string::npos || !queue_text_ok(it.id, 64) || !queue_text_ok(it.version, 128) ||
+            (!it.root.empty() && std::find(roots.begin(), roots.end(), it.root) == roots.end()))
+            continue;
+        bool dup = false;
+        for (const QueueItem &x : q) dup = dup || x.id == it.id;
+        if (!dup) q.push_back(it);
+    }
+    if (!q.empty()) slog("download queue: %zu waiting from before", q.size());
+    std::lock_guard<std::mutex> l(g.m);
+    g.queue = q;
+}
+
+bool Engine::queue_add(const std::string &app_id, const std::string &version, const std::string &root)
+{
+    if (app_id.empty() || app_id.find('/') != std::string::npos || !queue_text_ok(app_id, 64) || !queue_text_ok(version, 128) || !root_ok(root))
+        return false;
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase != Phase::Idle && g.job.app_id == app_id) return false; /* it's the one going */
+    for (const QueueItem &q : g.queue)
+        if (q.id == app_id) return false;
+    if (g.queue.size() >= 64) return false;
+    g.queue.push_back({app_id, version, root});
+    save_queue_locked();
+    slog("download queue: %s added%s%s (%zu waiting)", app_id.c_str(), version.empty() ? "" : ", version ", version.c_str(), g.queue.size());
+    return true;
+}
+
+std::vector<QueueItem> Engine::queue() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.queue;
+}
+
+bool Engine::queue_remove(const std::string &app_id)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    for (auto it = g.queue.begin(); it != g.queue.end(); ++it)
+        if (it->id == app_id)
+        {
+            g.queue.erase(it);
+            save_queue_locked();
+            slog("download queue: %s taken out (%zu waiting)", app_id.c_str(), g.queue.size());
+            return true;
+        }
+    return false;
+}
+
+void Engine::queue_clear()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.queue.empty()) return;
+    slog("download queue: cleared (%zu were waiting)", g.queue.size());
+    g.queue.clear();
+    save_queue_locked();
+}
+
+std::string Engine::queue_pump()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase != Phase::Idle || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
+        !g.pending_delete.empty() || !g.pending_manage.empty() || !g.pending_mdeletes.empty() || g.pending_smpget || g.pending_store_dl)
+        return "";
+    g.queue_now.clear();
+    if (g.queue.empty()) return "";
+    const QueueItem it = g.queue.front();
+    g.queue.erase(g.queue.begin());
+    save_queue_locked();
+    /* As install() does. */
+    g.pending_install = it.id;
+    g.pending_version = it.version;
+    g.pending_root = it.root;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = "install";
+    g.job.app_id = it.id;
+    g.job.step = "Starting";
+    g.job.version = it.version;
+    g.job.root = it.root;
+    g.queue_now = it.id;
+    slog("download queue: starting %s (%zu still waiting)", it.id.c_str(), g.queue.size());
+    return it.id;
+}
+
+std::string Engine::queue_now() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.job.phase != Phase::Idle && g.job.app_id == g.queue_now ? g.queue_now : std::string();
+}
+
+bool Engine::cancel_job()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    const bool downloading = g.job.phase == Phase::Working && g.job.kind == "install" &&
+                             (g.job.step == "Starting" || g.job.step.rfind("Finding", 0) == 0 || g.job.step.rfind("Downloading", 0) == 0);
+    if (!downloading) return false;
+    g.cancel_wanted = true;
+    slog("install %s: the player cancelled it", g.job.app_id.c_str());
+    return true;
+}
+
+std::vector<std::string> Engine::auto_update_picks(const std::vector<std::string> &ids, bool all) const
+{
+    std::vector<App> apps;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        apps = g.catalog.apps;
+    }
+    std::vector<std::string> out;
+    for (const App &a : apps)
+    {
+        if (!all && std::find(ids.begin(), ids.end(), a.id) == ids.end()) continue;
+        const std::string v = installed(a.id);
+        if (v.empty() || v == "?" || store_too_old(a)) continue;
+        const std::string h = held(a.id);
+        if (!h.empty() && version_key(h) == version_key(v)) continue;  /* kept at an older one */
+        if (a.beta && a.sig.empty()) continue;                            /* a beta without a signature */
+        std::string want = newest_version(a);
+        if (want.empty() || (!a.version.empty() && version_newer(a.version, want))) want = a.version;
+        if (want.empty() || version_key(v) == version_key(want) || version_newer(v, want)) continue;
+        if (a.source == "github" && !a.beta && !a.custom && !a.repo.empty())
+        {
+            /* Where it downloads from moved: that's the player's to say, never done on its own. */
+            std::string text;
+            Json mk;
+            if (read_file(app_folder(a.id) + "/" + kMarker, text) && Json::parse(text, mk) && mk.is_object() && mk["app"].str() == a.id)
+            {
+                const std::string src = mk["source"].str();
+                if (src.rfind("github:", 0) == 0 && src.size() > 7 && lower_text(src.substr(7)) != lower_text(a.repo)) continue;
+            }
+        }
+        out.push_back(a.id);
+    }
+    return out;
+}
+
+/* ---- The drives ---- */
+namespace
+{
+void look_drives(bool smp_running)
+{
+    std::vector<DriveSpace> out;
+    std::vector<std::string> dests;
+    bool known = false;
+    const auto roots = homebrew_roots();
+    if (smp_running)
+    {
+        std::string reply;
+        bool answered = false;
+        Json j;
+        if (smp_api("/api/v1/storage", "{}", reply, &answered) && Json::parse(reply, j) && j["destinations"].is_array())
+        {
+            known = true;
+            for (std::size_t i = 0; i < j["destinations"].size() && i < 32; ++i)
+            {
+                const Json &d = j["destinations"][i];
+                std::string path = d["path"].str();
+                while (path.size() > 1 && path.back() == '/') path.pop_back();
+                /* A scanned drive root (/mnt/usb0) stands for its homebrew folder. */
+                if (std::find(roots.begin(), roots.end(), path) == roots.end() &&
+                    std::find(roots.begin(), roots.end(), path + "/homebrew") != roots.end())
+                    path += "/homebrew";
+                if (std::find(roots.begin(), roots.end(), path) == roots.end() || d["read_only"].boolean(false)) continue;
+                if (std::find(dests.begin(), dests.end(), path) != dests.end()) continue;
+                dests.push_back(path);
+                DriveSpace s;
+                s.label = place_name(path);
+                s.mount = d["mount_point"].str(drive_of(path));
+                s.homebrew = path;
+                s.total = std::uint64_t(std::max(0LL, d["total_bytes"].integer(0)));
+                s.free = std::uint64_t(std::max(0LL, d["available_bytes"].integer(d["free_bytes"].integer(0))));
+                s.from_smp = true;
+                out.push_back(s);
+            }
+        }
+        else if (answered)
+            slog("ShadowMountPlus didn't give its storage (an older one?): the store looks itself");
+    }
+    /* The rest: each drive that's there, as the store sees it. */
+    for (const std::string &root : roots)
+    {
+        bool have = false;
+        for (const DriveSpace &d : out) have = have || d.homebrew == root;
+        const std::string drive = drive_of(root);
+        if (have || (root != kHomebrew && !drive_ready(drive))) continue;
+        bool same_drive = false;
+        for (const DriveSpace &d : out) same_drive = same_drive || drive_of(d.homebrew) == drive;
+        if (same_drive) continue;
+        struct statvfs fs;
+        if (statvfs(drive.c_str(), &fs) != 0 || !fs.f_blocks) continue;
+        DriveSpace s;
+        s.label = place_name(root);
+        s.mount = drive;
+        s.homebrew = root;
+        s.total = std::uint64_t(fs.f_blocks) * fs.f_frsize;
+        s.free = std::uint64_t(fs.f_bavail) * fs.f_frsize;
+        std::uint64_t f = 0;
+        if (free_bytes(drive, f)) s.free = f;
+        out.push_back(s);
+    }
+    std::lock_guard<std::mutex> l(g.m);
+    g.drives = out;
+    g.smp_dests = dests;
+    g.smp_dests_known = known;
+    ++g.console_rev;
+}
+} // namespace
+
+unsigned Engine::checks_done() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.games_checks;
+}
+
+std::vector<DriveSpace> Engine::drives() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.drives;
+}
+
+/* ---- The download cache ---- */
+std::uint64_t Engine::cache_bytes(std::size_t *files) const
+{
+    std::string dir;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        dir = g.data + "/downloads";
+    }
+    std::uint64_t total = 0;
+    std::size_t n = 0;
+    if (DIR *d = opendir(dir.c_str()))
+    {
+        while (dirent *e = readdir(d))
+        {
+            if (e->d_name[0] == '.') continue;
+            struct stat st;
+            if (stat((dir + "/" + e->d_name).c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            {
+                total += std::uint64_t(st.st_size);
+                ++n;
+            }
+        }
+        closedir(d);
+    }
+    if (files) *files = n;
+    return total;
+}
+
+bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why)
+{
+    freed = 0;
+    files = 0;
+    why.clear();
+    /* What's in use: the job's app (an install's download, a clash's kept one), what the queue is
+     * waiting to install, the store's own update while it's downloaded or waiting for its
+     * installer, and ShadowMountPlus while it's fetched. */
+    std::set<std::string> busy;
+    bool store_busy = false, smp_busy = false;
+    std::string dir;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        dir = g.data + "/downloads";
+        if (g.job.phase != Phase::Idle && !g.job.app_id.empty()) busy.insert(g.job.app_id);
+        if (!g.pending_install.empty()) busy.insert(g.pending_install);
+        for (const QueueItem &q : g.queue) busy.insert(q.id);
+        store_busy = !g.store_zip.empty() || g.pending_store_dl || (g.job.phase == Phase::Working && g.job.kind == "storeupdate");
+        smp_busy = g.pending_smpget || (g.job.phase == Phase::Working && g.job.kind == "smpget");
+    }
+    std::vector<std::string> names;
+    if (DIR *d = opendir(dir.c_str()))
+    {
+        while (dirent *e = readdir(d))
+            if (e->d_name[0] != '.' && names.size() < 4000) names.push_back(e->d_name);
+        closedir(d);
+    }
+    std::size_t kept = 0, stuck = 0;
+    for (const std::string &n : names)
+    {
+        /* The app a file is for: its name up to the first dot ("PPSA64007.inner.zip"). */
+        const std::string id = n.substr(0, n.find('.'));
+        const bool smp_file = n.rfind("smp-", 0) == 0;
+        if (busy.count(id) || (id == "PPSA92000" && store_busy) || (smp_file && smp_busy) || n.find('/') != std::string::npos)
+        {
+            slog("download cache: kept %s (in use)", n.c_str());
+            ++kept;
+            continue;
+        }
+        const std::string path = dir + "/" + n;
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue; /* only its files, never a folder */
+        std::remove(path.c_str());
+        struct stat after;
+        if (stat(path.c_str(), &after) == 0)
+        {
+            slog("download cache: %s is still there afterwards", n.c_str());
+            ++stuck;
+            continue;
+        }
+        freed += std::uint64_t(st.st_size);
+        ++files;
+    }
+    slog("download cache: cleared %zu file(s), %llu bytes; %zu kept (in use); %zu couldn't be deleted", files, (unsigned long long)freed,
+         kept, stuck);
+    if (stuck) why = std::to_string(stuck) + (stuck == 1 ? " file couldn't be deleted." : " files couldn't be deleted.");
+    else if (!files && kept) why = "Everything in it is in use right now.";
+    return stuck == 0;
+}
+
+/* ---- Deleting several at once ---- */
+bool Engine::manage_many(const std::vector<std::string> &folders)
+{
+    std::vector<std::string> list;
+    for (const std::string &f : folders)
+    {
+        const std::string leaf = f.substr(f.find_last_of('/') + 1);
+        if (leaf == "PPSA92000") { slog("manage delete: %s refused: that's Recomp Store itself", f.c_str()); continue; }
+        if (std::find(list.begin(), list.end(), f) == list.end() && list.size() < 64) list.push_back(f);
+    }
+    if (list.empty()) return false;
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
+        !g.pending_delete.empty() || !g.pending_manage.empty() || !g.pending_mdeletes.empty())
+        return false;
+    g.pending_mdeletes = list;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = "mdeletes";
+    g.job.step = "Deleting";
+    g.job.total = list.size();
+    return true;
+}
+
+void run_manage_many(const std::vector<std::string> &folders)
+{
+    std::vector<std::pair<std::string, std::string>> installed;
+    {
+        std::vector<std::string> ids;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            for (const App &a : g.catalog.apps)
+                if (exists(g.data + "/installed/" + a.id + ".txt")) ids.push_back(a.id);
+        }
+        for (const std::string &id : ids) installed.push_back({id, app_folder(id)});
+    }
+    slog("manage delete: %zu folders at once", folders.size());
+    std::size_t ok = 0;
+    int home = 0;
+    std::string failed, first_why;
+    for (std::size_t i = 0; i < folders.size(); ++i)
+    {
+        const std::string &folder = folders[i];
+        std::string tid, name;
+        folder_app(folder, tid, name);
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.job.phase = Phase::Working;
+            g.job.error.clear();
+            g.job.step = "Deleting";
+            g.job.batch = std::to_string(i + 1) + " of " + std::to_string(folders.size()) + ": " + name;
+            g.job.done = i;
+            g.job.total = folders.size();
+        }
+        std::string root, leaf, why;
+        if (!manageable(folder, root, leaf, why))
+        {
+            slog("manage delete %s: refused: %s", folder.c_str(), why.c_str());
+            failed += (failed.empty() ? "" : ", ") + name;
+            if (first_why.empty()) first_why = why;
+            continue;
+        }
+        /* The store's own install goes as from its page (its records, its game files). */
+        const std::string app = store_app_of(folder, installed);
+        if (!app.empty() && app_folder(app) == folder) run_delete(app, false);
+        else run_manage_delete(folder);
+        std::lock_guard<std::mutex> l(g.m);
+        if (g.job.phase == Phase::Done)
+        {
+            ++ok;
+            home = std::max(home, g.job.home);
+        }
+        else
+        {
+            failed += (failed.empty() ? "" : ", ") + name;
+            if (first_why.empty()) first_why = g.job.error;
+        }
+    }
+    scan_homebrew();
+    slog("manage delete: %zu of %zu deleted%s%s", ok, folders.size(), failed.empty() ? "" : "; not: ", failed.c_str());
+    std::lock_guard<std::mutex> l(g.m);
+    g.console_again = true;
+    g.job.done = g.job.total = folders.size();
+    g.job.home = home;
+    if (ok == 0)
+    {
+        g.job.phase = Phase::Failed;
+        g.job.error = folders.size() == 1 ? first_why : "Nothing was deleted. " + first_why;
+        return;
+    }
+    g.job.phase = Phase::Done;
+    g.job.step = "Deleted";
+    if (failed.empty())
+        g.job.note = (ok == 1 ? std::string("Deleted 1 app.") : "Deleted " + std::to_string(ok) + " apps.") +
+                     (home == 3 ? " Their tiles come off your home screen once the store closes." : "");
+    else
+        g.job.note = "Deleted " + std::to_string(ok) + " of " + std::to_string(folders.size()) + ". Not deleted: " + failed + ". " + first_why;
+}
+
+/* ---- Get ShadowMountPlus ---- */
+bool Engine::get_smp()
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.catalog.smp_url.empty()) return false;
+    if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
+        !g.pending_delete.empty() || !g.pending_manage.empty() || !g.pending_mdeletes.empty() || g.pending_smpget)
+        return false;
+    g.pending_smpget = true;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = "smpget";
+    g.job.step = "Downloading ShadowMountPlus";
+    return true;
+}
+
+/* Only drakmor's own releases on GitHub: https://github.com/drakmor/ShadowMountPlus/releases/download/<tag>/<asset>. */
+static bool smp_url_ok(const std::string &url)
+{
+    const std::string pre = "https://github.com/drakmor/ShadowMountPlus/releases/download/";
+    if (url.rfind(pre, 0) != 0) return false;
+    const std::string rest = url.substr(pre.size());
+    const std::size_t slash = rest.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= rest.size() || rest.find('/', slash + 1) != std::string::npos) return false;
+    if (rest.find("..") != std::string::npos) return false;
+    for (const char c : rest)
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-' || c == '/')) return false;
+    return true;
+}
+
+void run_get_smp()
+{
+    std::string version, url, elf, want_sha, data;
+    std::uint64_t want_size = 0;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        version = g.catalog.smp_version;
+        url = g.catalog.smp_url;
+        elf = g.catalog.smp_elf;
+        want_sha = g.catalog.smp_sha256;
+        want_size = g.catalog.smp_size;
+        data = g.data;
+    }
+    for (char &c : want_sha) c = char(std::tolower(static_cast<unsigned char>(c)));
+    slog("ShadowMountPlus %s: getting %s%s%s", version.c_str(), url.c_str(), elf.empty() ? "" : ", payload ", elf.c_str());
+    if (!smp_url_ok(url))
+    {
+        slog("ShadowMountPlus: refused %s: only drakmor's GitHub releases", url.c_str());
+        return fail_job("That download isn't from ShadowMountPlus's own GitHub releases, so the store won't get it.");
+    }
+    if (want_sha.size() != 64 || want_size < 64 || want_size > (64ull << 20) || elf.find("..") != std::string::npos)
+        return fail_job("The store's listing for ShadowMountPlus isn't complete. Try again after the site is updated.");
+    porpoise::http::Session http("smp-get", "RecompStore/2.2");
+    if (!http.init()) return fail_job("Your PS5 isn't online.");
+    make_dirs(data + "/downloads");
+    make_dirs(data + "/payloads");
+    const std::string asset = url.substr(url.find_last_of('/') + 1);
+    const std::string dl = data + "/downloads/smp-" + asset;
+    struct Gone
+    {
+        std::string path;
+        ~Gone() { if (!path.empty()) std::remove(path.c_str()); }
+    } dl_gone{dl};
+    std::FILE *out = std::fopen(dl.c_str(), "wb");
+    if (!out) return fail_job("The store couldn't save the download on your PS5.");
+    std::uint64_t got = 0;
+    bool write_ok = true;
+    const std::uint64_t most = 64ull << 20;
+    set_job("Downloading ShadowMountPlus", 0, elf.empty() ? want_size : 0);
+    const int status = http.get_stream(url, [&](const std::uint8_t *p, std::size_t n) {
+        if (got + n > most) { write_ok = false; return false; }
+        if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
+        got += n;
+        set_job("Downloading ShadowMountPlus", got, elf.empty() ? want_size : 0);
+        return true;
+    });
+    std::fclose(out);
+    slog("ShadowMountPlus: HTTP %d, %llu bytes", status, (unsigned long long)got);
+    if (!write_ok || status != 200 || got == 0) return fail_job("The download didn't finish. Check your connection and try again.");
+    /* The payload: the download itself, or taken out of the release's zip. */
+    const std::string final_path = data + "/payloads/shadowmountplus.elf", fresh = final_path + ".new";
+    std::remove(fresh.c_str());
+    struct Gone fresh_gone{fresh};
+    if (elf.empty())
+    {
+        if (std::rename(dl.c_str(), fresh.c_str()) != 0) return fail_job("The store couldn't save ShadowMountPlus on your PS5.");
+    }
+    else
+    {
+        set_job("Taking out the payload", 0, 0);
+        std::string name, why;
+        const std::string want_name = lower_text(elf);
+        if (!zip::take_inner(dl, [&](const std::string &n) { return lower_text(n) == want_name; }, fresh,
+                             [](const char *, std::uint64_t, std::uint64_t) {}, name, why))
+        {
+            slog("ShadowMountPlus: taking %s out of %s failed: %s", elf.c_str(), asset.c_str(), why.c_str());
+            return fail_job("The release doesn't have " + elf + " where the store's listing says. Try again after the site is updated.");
+        }
+    }
+    /* Checked against the listing before it's kept: its size, its SHA-256, an ELF. */
+    std::string bytes;
+    set_job("Checking ShadowMountPlus", 0, 0);
+    if (!read_file(fresh, bytes) || bytes.size() != want_size)
+    {
+        slog("ShadowMountPlus: the payload is %zu bytes, the listing says %llu", bytes.size(), (unsigned long long)want_size);
+        return fail_job("ShadowMountPlus doesn't match the store's listing (its size), so it wasn't saved.");
+    }
+    const std::string got_sha = sha256_hex(bytes);
+    if (got_sha != want_sha || bytes.compare(0, 4, "\x7F" "ELF") != 0)
+    {
+        slog("ShadowMountPlus: SHA-256 %s, the listing says %s", got_sha.c_str(), want_sha.c_str());
+        return fail_job("ShadowMountPlus doesn't match the store's listing (its checksum), so it wasn't saved.");
+    }
+    if (std::rename(fresh.c_str(), final_path.c_str()) != 0) return fail_job("The store couldn't save ShadowMountPlus on your PS5.");
+    fresh_gone.path.clear();
+    std::string back;
+    if (!read_file(final_path, back) || sha256_hex(back) != want_sha)
+    {
+        slog("ShadowMountPlus: %s doesn't read back right", final_path.c_str());
+        return fail_job("ShadowMountPlus didn't save properly. Try again.");
+    }
+    set_smp_path(final_path);
+    slog("ShadowMountPlus %s saved as %s (%zu bytes, SHA-256 checked) and chosen", version.c_str(), final_path.c_str(), back.size());
+    std::lock_guard<std::mutex> l(g.m);
+    g.job.phase = Phase::Done;
+    g.job.step = "Saved";
+    g.job.installed_version = version;
+    g.job.note = "ShadowMountPlus " + version + " is saved and chosen.";
 }
 
 Engine &engine()

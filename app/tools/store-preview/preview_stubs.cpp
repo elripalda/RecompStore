@@ -65,7 +65,59 @@ unsigned Engine::revision() const { return 1; }
 bool Engine::online() const { return true; }
 std::string Engine::catalog_note() const { return ""; }
 bool Engine::loading() const { return false; }
-bool Engine::install(const std::string &, const std::string &) { return true; }
+bool Engine::install(const std::string &, const std::string &, const std::string &) { return true; }
+/* (2.2.2) The download queue, in memory; PREVIEW_QUEUE: "PPSA64008,PPSA94202" waiting at the start. */
+static std::vector<QueueItem> g_queue;
+static bool g_queue_read = false;
+static void queue_read()
+{
+    if (g_queue_read) return;
+    g_queue_read = true;
+    if (const char *e = std::getenv("PREVIEW_QUEUE"))
+    {
+        std::string s = std::string(e) + ",";
+        for (std::size_t at = 0, c; (c = s.find(',', at)) != std::string::npos; at = c + 1)
+            if (c > at) g_queue.push_back({s.substr(at, c - at), "", ""});
+    }
+}
+bool Engine::queue_add(const std::string &id, const std::string &v, const std::string &root)
+{
+    queue_read();
+    for (const QueueItem &q : g_queue) if (q.id == id) return false;
+    g_queue.push_back({id, v, root});
+    return true;
+}
+std::vector<QueueItem> Engine::queue() const { queue_read(); return g_queue; }
+bool Engine::queue_remove(const std::string &id)
+{
+    queue_read();
+    for (auto it = g_queue.begin(); it != g_queue.end(); ++it) if (it->id == id) { g_queue.erase(it); return true; }
+    return false;
+}
+void Engine::queue_clear() { g_queue.clear(); }
+std::string Engine::queue_pump() { return ""; } /* the screens stay as set up */
+bool Engine::cancel_job() { return true; }
+std::vector<std::string> Engine::auto_update_picks(const std::vector<std::string> &, bool) const { return {}; }
+unsigned Engine::checks_done() const { return 0; }
+std::vector<DriveSpace> Engine::drives() const
+{
+    std::vector<DriveSpace> d;
+    DriveSpace c{"Console storage", "/data", "/data/homebrew", 825ull << 30, 92ull << 30, true};
+    if (const char *f = std::getenv("PREVIEW_DATA_FREE_GB")) c.free = std::uint64_t(std::atoll(f)) << 30;
+    d.push_back(c);
+    d.push_back({"M.2 SSD", "/mnt/ext1", "/mnt/ext1/homebrew", 1863ull << 30, 1210ull << 30, true});
+    d.push_back({"USB drive 1", "/mnt/usb0", "/mnt/usb0/homebrew", 931ull << 30, 702ull << 30, true});
+    return d;
+}
+std::uint64_t Engine::cache_bytes(std::size_t *files) const
+{
+    const char *e = std::getenv("PREVIEW_CACHE_MB");
+    if (files) *files = e && std::atoi(e) == 0 ? 0 : 3;
+    return std::uint64_t(e ? std::atoll(e) : 1290) << 20;
+}
+bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why) { freed = 1290ull << 20; files = 3; why.clear(); return true; }
+bool Engine::manage_many(const std::vector<std::string> &) { return true; }
+bool Engine::get_smp() { return true; }
 /* (2.1) PREVIEW_HELD: apps kept at an older version, "PPSA92011=1.0.0,..." (as PREVIEW_INSTALLED). */
 std::string Engine::held(const std::string &id) const
 {
@@ -102,6 +154,7 @@ void preview_job(const char *kind, const char *app) { g_job_kind = kind ? kind :
 JobState Engine::job() const
 {
     JobState j;
+    if (g_job_kind == "smpget") { j.phase = Phase::Working; j.kind = "smpget"; j.step = "Downloading ShadowMountPlus"; j.done = 900ull << 10; j.total = 2440ull << 10; }
     if (g_job_kind == "install") { j.phase = Phase::Working; j.kind = "install"; j.app_id = g_job_app; j.step = "Downloading"; j.done = 312ull << 20; j.total = 476ull << 20; }
     if (g_job_kind == "fetch") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "update"; j.app_id = g_job_app; j.step = "Downloading the update"; j.done = 150ull << 10; j.total = 240ull << 10; }
     if (g_job_kind == "setup") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "game"; j.app_id = g_job_app; j.step = "Copying the game's files"; j.done = 2900ull << 20; j.total = 7300ull << 20; }
@@ -129,6 +182,7 @@ std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
         c.app = app;
         c.icon = icon;
         c.store = std::string(tid) == "PPSA92000";
+        c.mtime = 1760000000 + (long long)(v.size() * 7919 % 97) * 3600; /* (2.2.2) Newest */
         v.push_back(c);
     };
     auto icon_of = [&](const char *id) { for (const App &a : g_cat.apps) if (a.id == id) return a.icon_file; return std::string(); };
@@ -141,13 +195,23 @@ std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
     add("/mnt/usb0/homebrew/PPSA99251", "PPSA99251", "PS5SX2 (God of War)", "2.15", "", 47, true, real ? real : "");
     add("/data/homebrew/old-port-backup", "", "old-port-backup", "", "", 3210, false, "");
     add("/data/homebrew/PPSA64008", "PPSA64008", "GoldenEye 007", "2.0.0", "PPSA64008", -1, true, icon_of("PPSA64008"));
+    add("/mnt/ext1/homebrew/PPSA77003", "PPSA77003", "RetroArch", "1.19", "PPSA77003", 1290, true, icon_of("PPSA77003"));
+    add("/data/homebrew/PPSA94202", "PPSA94202", "Sonic Unleashed Recompiled", "0.1.4", "PPSA94202", 9120, true, icon_of("PPSA94202"));
+    add("/mnt/usb0/homebrew/PPSA99412", "PPSA99412", "ItemzFlow", "1.12", "", 38, true, "");
     return v;
 }
 unsigned Engine::console_revision() const { return 1; }
 void Engine::look_console() {}
 bool Engine::manage(const std::string &, const std::string &, const std::string &) { return true; }
 std::string Engine::free_title_id() const { return "PPSA97003"; }
-int Engine::smp_state(std::string &v) const { const char *e = std::getenv("PREVIEW_SMP_STATE"); const int st = e ? std::atoi(e) : 1; v = st == 1 ? "1.7" : ""; return st; }
+int Engine::smp_state(std::string &v) const
+{
+    const char *e = std::getenv("PREVIEW_SMP_STATE");
+    const char *ver = std::getenv("PREVIEW_SMP_VERSION");
+    const int st = e ? std::atoi(e) : 1;
+    v = st == 1 ? (ver ? ver : "1.7beta5") : "";
+    return st;
+}
 bool Engine::reload_smp(std::string &) { return true; }
 static bool g_lost = false;
 void preview_storage_lost(bool lost) { g_lost = lost; }
@@ -253,7 +317,7 @@ void Engine::acknowledge() {}
 /* (1.1.0) PREVIEW_REDEEM: the state a code is in (1 checking). */
 bool Engine::redeem(const std::string &) { return true; }
 /* (2.0) The title ID guard and Refresh. PREVIEW_MOVED: the ID SvR 2011 shows as moved to. */
-bool Engine::resolve_clash(const std::string &, int, const std::string &) { return true; }
+bool Engine::resolve_clash(const std::string &, int, const std::string &, const std::string &) { return true; }
 void Engine::refresh() {}
 std::string moved_id(const std::string &id) { const char *m = std::getenv("PREVIEW_MOVED"); return m && id == "PPSA92011" ? m : ""; }
 std::string installed_id(const std::string &id) { const std::string m = moved_id(id); return m.empty() ? id : m; }
@@ -380,6 +444,12 @@ Charts Engine::charts() const
         st.stars = kv.second["stars"].integer(-1);
         c.stats.push_back({kv.first, st});
     }
+    for (const auto &kv : j["also"].members()) /* (2.2.2) people also installed */
+    {
+        std::vector<std::string> v;
+        ids(kv.second, v);
+        if (!v.empty()) c.also.push_back({kv.first, v});
+    }
     c.have = true;
     return c;
 }
@@ -390,7 +460,11 @@ std::string own_id(const std::string &id) { return id; }
 static std::string g_root = "/data/homebrew";
 std::vector<Place> Engine::install_places() const
 {
-    return {{"Console storage", "/data/homebrew"}, {"M.2 SSD", "/mnt/ext1/homebrew"}, {"USB drive 1", "/mnt/usb0/homebrew"}};
+    /* PREVIEW_USB_FREE_MB: a nearly full USB drive. */
+    std::uint64_t usb_free = 702ull << 30;
+    if (const char *f = std::getenv("PREVIEW_USB_FREE_MB")) usb_free = std::uint64_t(std::atoll(f)) << 20;
+    return {{"Console storage", "/data/homebrew", 92ull << 30, 825ull << 30}, {"M.2 SSD", "/mnt/ext1/homebrew", 1210ull << 30, 1863ull << 30},
+            {"USB drive 1", "/mnt/usb0/homebrew", usb_free, 931ull << 30}};
 }
 std::string Engine::install_root() const { if (const char *r = std::getenv("PREVIEW_ROOT")) return r; return g_root; }
 void Engine::set_install_root(const std::string &r) { g_root = r; }

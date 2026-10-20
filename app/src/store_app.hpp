@@ -4,6 +4,7 @@
 
 #include "porpoise_pad.hpp"
 #include "store_engine.hpp"
+#include "store_prefs.hpp"
 #include "ui_gfx.hpp"
 
 #include <cstdint>
@@ -80,7 +81,7 @@ public:
     }
     void preview_customize(int row) { preview_settings(SecCustomize); in_section_ = true; cus_row_ = row; }
     void preview_pin(const std::string &id) { toggle_pin(id); }
-    void preview_queue(const std::vector<std::string> &ids, int done) { queue_ = ids; queue_total_ = int(ids.size()) + done; queue_done_ = done; }
+    void preview_queue(const std::vector<std::string> &ids, int done) { for (const std::string &i : ids) engine().queue_add(i); queue_total_ = int(ids.size()) + done; queue_done_ = done; }
     void preview_prefs(int lib_view, bool advanced) { prefs_.lib_view = lib_view; prefs_.advanced = advanced; }
     /* (2.0) Settings > Link a phone and Sources: the row focused; a sheet over the store (1 a
      * phone sent a source to add, 2 a source's choices); the keyboard in a mode (1 a source,
@@ -110,20 +111,22 @@ public:
      * part of the store (category_index) sorted another way. */
     void preview_header(const std::string &style, const std::vector<std::string> &games = {})
     {
-        catalog_.header_style = style; catalog_.header_games = games; slide_ = 0; slide_t_ = 0; slide_fade_ = 1;
+        catalog_.header_style = style; catalog_.header_games = games; slide_ = 0; slide_prev_ = -1; slide_t_ = 0; slide_fade_ = 1;
     }
+    /* (2.2.2) The header turning from the slide before cur to cur, fade of the way through (0..1). */
+    void preview_slide(int cur, float fade) { slide_ = cur; slide_prev_ = -2; slide_t_ = 0; slide_fade_ = fade; }
     void preview_sort(int category, const std::string &mode) { catalog_.cat_sort[std::clamp(category, 0, 3)] = mode; }
     /* (2.2) Library > On this PS5: the row focused, the sort, a note; the App manager's sheet over it
      * for the app in that row (stage as mng_stage_, its button focused). */
     void preview_console(int row, int sort = 0, const std::string &note = "", bool bad = false)
     {
-        preview_library(3, row); con_sort_ = sort; lib_note_ = note; lib_note_bad_ = bad; mng_ = false; console_rev_ = ~0u;
+        preview_library(3, row); prefs_.con_sort = sort; lib_note_ = note; lib_note_bad_ = bad; mng_ = false; console_rev_ = ~0u;
     }
     void preview_manage(int stage, int sel)
     {
         sync_console();
         const auto list = console_list();
-        const int i = col_ - 2;
+        const int i = col_;
         if (i < 0 || i >= int(list.size())) return;
         open_manage(*list[std::size_t(i)]);
         mng_t_ = 1;
@@ -134,35 +137,46 @@ public:
     }
     /* (2.2.1) The lost-storage box (or, box false, what's left once it's been seen). */
     void preview_lost(bool box) { lost_told_ = true; lost_ = box; lost_t_ = 1; }
+    /* (2.2.2) */
+    void preview_panel(int kind, int sel = 0) { open_panel(kind); panel_t_ = 1; panel_sel_ = sel; }
+    void preview_panel_close() { panel_ = 0; }
+    void preview_place(const std::string &id, int sel) { place_app_ = id; place_version_.clear(); open_panel(PanelPlace); panel_t_ = 1; panel_sel_ = sel; }
+    void preview_console2(int col, int view, int sort, const std::string &filter, int chip = -1)
+    {
+        preview_library(3, std::max(0, col)); prefs_.con_view = view; prefs_.con_sort = sort; prefs_.con_filter = filter;
+        con_on_row_ = chip >= 0; con_chip_ = std::max(0, chip); mng_ = false; console_rev_ = ~0u;
+    }
+    void preview_select(const std::vector<std::string> &folders) { con_select_ = true; con_marked_ = folders; }
+    void preview_select_off() { con_select_ = false; con_marked_.clear(); }
+    void preview_mine(int col, int filter, int view, bool on_row = false) { preview_library(0, col); prefs_.my_filter = filter; prefs_.lib_view = view; my_on_row_ = on_row; }
+    void preview_related(int row, int col) { page_rel_ = row; page_rel_col_ = col; page_scroll_ = page_scroll_to_ = -1; }
+    void preview_prefs2(int icon_colors, bool favs_on_discover) { prefs_.icon_colors = icon_colors; prefs_.pins_on_discover = favs_on_discover; }
+    void preview_auto(const std::vector<std::string> &ids, bool all) { prefs_.auto_ids = ids; prefs_.auto_all = all; }
+    void preview_finished(const std::string &id, int state, const std::string &text) { finished_.insert(finished_.begin(), Finished{id, state, text, JobState()}); }
+    void preview_tabs(const std::vector<std::string> &tabs, bool custom) { prefs_.tabs = tabs; prefs_.tabs_custom = custom; }
+    void preview_smp_row(int row) { preview_settings(SecSmp); in_section_ = row >= 0; smp_row_ = std::max(0, row); }
+    void preview_storage_row(int row) { preview_settings(SecStorage); in_section_ = row >= 0; sto_row_ = std::max(0, row); }
+    void preview_customize_top(int row) { preview_customize(row); }
 
 private:
     /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
      * are shown when the catalog has something in them). tab_ holds a kind; tab_order() the
      * kinds in the order the tab bar shows them. */
-    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, Games = 4, Emulators = 5, Apps = 6, Tools = 7 };
+    /* (2.2.2) kSourceTab + i: a source the player pinned as a tab (src_tabs_[i]). */
+    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, Games = 4, Emulators = 5, Apps = 6, Tools = 7, kSourceTab = 100 };
     /* Settings' sections, by kind; settings_order() lists them as shown. */
-    enum SetSec { SecGeneral = 0, SecAdding = 1, SecRedeem = 2, SecAbout = 3, SecCustomize = 4, SecLink = 5, SecSources = 6 };
+    enum SetSec { SecGeneral = 0, SecAdding = 1, SecRedeem = 2, SecAbout = 3, SecCustomize = 4, SecLink = 5, SecSources = 6,
+                  SecStorage = 7 /* (2.2.2) */, SecSmp = 8 /* (2.2.2) */ };
     std::vector<int> tab_order() const;
     std::vector<int> settings_order() const;
-    static const char *tab_name(int kind);
+    std::string tab_name(int kind) const;
     static const char *category_of(int kind); /* "games", "emulators", "apps", "tools"; "" for others */
-    static bool is_category(int kind) { return kind == Games || kind == Emulators || kind == Apps || kind == Tools; }
+    static bool is_category(int kind) { return kind == Games || kind == Emulators || kind == Apps || kind == Tools || kind >= kSourceTab; }
     void go_tab(int kind, int dir);
 
-    /* (2.0) What the player chose to keep: Settings > Customize, the pins, menu sounds.
-     * /data/recompstore/prefs.json. */
-    struct Prefs
-    {
-        int start_tab = Discover;
-        int lib_view = 0;     /* 0 grid, 1 list */
-        int lib_order = 0;    /* 0 name, 1 recently installed, 2 updates first */
-        bool pins_on_discover = true;
-        int backdrop = 0;     /* 0 the game's art, 1 calm (the gradient only) */
-        bool reduced_motion = false;
-        bool advanced = false;
-        bool sounds = true;
-        std::vector<std::string> pins; /* newest first */
-    };
+    /* (2.0) What the player chose to keep: Settings > Customize, the favorites, menu sounds, (2.2.2)
+     * the Library's views, the tabs, auto-update. /data/recompstore/prefs.json (store_prefs.cpp). */
+    using Prefs = StorePrefs;
     void load_prefs();
     void save_prefs();
     bool pinned(const std::string &id) const;
@@ -207,7 +221,7 @@ private:
     struct Control
     {
         enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */,
-                    Versions /* (2.1) */ } kind;
+                    Versions /* (2.1) */, Favorite /* (2.2.2) */, AutoUpdate /* (2.2.2) */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
@@ -248,7 +262,8 @@ private:
     const App *header_focus(const DLine &l, int col) const;
     void draw_header(porpoise::ui::Gfx &gfx, const DLine &l, int line, float sy, bool on);
     /* A game beside the split header's banner: its picture, its name, a line about it. */
-    void draw_header_card(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus, float fade);
+    void draw_header_card(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus, float fade,
+                          const App *prev = nullptr);
     /* One of the mosaic header's games: its art across the card, the words over it. */
     void draw_mosaic_card(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus, bool big);
     /* (2.1) Kept at an older version the player picked: that version ("" when it isn't); and a
@@ -281,7 +296,13 @@ private:
     void draw_wide(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus);
     /* The featured banner, and a spotlight (the same, standing still). */
     void draw_banner(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, const std::string &kicker,
-                     float fade, bool drift, float focus, bool big = false /* (2.1) the spotlight header's bigger words */);
+                     float fade, bool drift, float focus, bool big = false /* (2.1) the spotlight header's bigger words */,
+                     const App *prev = nullptr /* (2.2.2) the game it's turning from, drawn whole under it */);
+    /* (2.2.2) A banner's art and words at alpha, without its frame: gw the words' side. */
+    void banner_content(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float gw, float R,
+                        const std::string &kicker, float alpha, float words, bool drift, bool big);
+    void header_card_content(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float px, float py, float pw,
+                             float ph, float fade, float words);
     /* "There's more below": an arrow at the bottom of a list that scrolls. */
     void draw_more(porpoise::ui::Gfx &gfx);
     void draw_soon_page(porpoise::ui::Gfx &gfx, const App &a, float k);
@@ -368,6 +389,7 @@ private:
     float dscroll_ = 0, dscroll_to_ = 0, uscroll_ = 0, uscroll_to_ = 0, lscroll_ = 0, lscroll_to_ = 0;
     float focus_anim_[512] = {};
     int slide_ = 0;
+    int slide_prev_ = -1; /* (2.2.2) the slide it turned from (-1 none, -2 the one before slide_) */
     float slide_t_ = 0, slide_fade_ = 1;
     int section_ = 0;    /* Settings: 0 General, 1 Adding your game, 2 Redeem a code, 3 About */
     bool in_section_ = false;
@@ -519,8 +541,8 @@ private:
     int cat_chip_ = 0;
     bool cat_on_chips_ = false;
     float cscroll_ = 0, cscroll_to_ = 0;
-    /* Update All: the games still to update, how many in all, how many done, which failed. */
-    std::vector<std::string> queue_;
+    /* Update All: how many in all, how many done, which failed; (2.2.2) the waiting ones are the
+     * engine's queue (Engine::queue). */
     int queue_total_ = 0, queue_done_ = 0;
     std::string queue_now_;
     std::vector<std::string> queue_failed_;
@@ -575,13 +597,12 @@ private:
     bool queue_fresh_ = false; /* the queue has installs, not only updates (a phone sent them) */
     void draw_toast(porpoise::ui::Gfx &gfx);
     std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
-    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_ || lost_; }
+    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_ || lost_ || panel_; }
     /* (2.2) Library > On this PS5 (store_app_manager.cpp): every folder in the homebrew folders
-     * (Engine::console_apps), under ShadowMountPlus's two rows; con_sort_ 0 by name, 1 biggest first. */
+     * (Engine::console_apps); (2.2.2) as a grid or a list, sorted and filtered (Prefs::con_*). */
     std::vector<ConsoleApp> console_;
     unsigned console_rev_ = ~0u;
     bool console_looking_ = false, console_asked_ = false;
-    int con_sort_ = 0;
     std::map<std::string, std::pair<porpoise::ui::Texture *, bool>> con_icons_; /* icon0.png -> its texture, still loading */
     void sync_console();
     std::vector<const ConsoleApp *> console_list() const;
@@ -594,7 +615,7 @@ private:
     void start_refresh_home(bool from_lib);
     /* (2.2.1) Reload ShadowMountPlus (the Library's second row): through the launcher too, so the
      * store is closed when the new copy replaces the running one. */
-    void start_reload_smp();
+    void start_reload_smp(bool from_lib = true);
     /* (2.2.1) The store lost the console's storage mid-session (Engine::storage_lost): said once,
      * in a box over everything; after that, where it matters (the Library's On this PS5). */
     bool lost_ = false, lost_told_ = false;
@@ -620,5 +641,127 @@ private:
     bool refresh_checked_ = false; /* back from Refresh home screen: said once */
     /* A game page's line for an app from a custom source. */
     std::string source_line(const App &a) const;
+
+    /* ---- (2.2.2) store_app_more.cpp ---- */
+    /* Sheets over the store (panel_): the download queue, where to install, the storage view, What's
+     * new, the tabs, deleting what's selected. panel_sel_: the row or button focused. */
+    enum PanelKind { PanelNone = 0, PanelQueue, PanelPlace, PanelStorage, PanelNews, PanelTabs, PanelDelete };
+    int panel_ = 0;
+    float panel_t_ = 0;
+    int panel_sel_ = 0, panel_top_ = 0;
+    void open_panel(int kind);
+    bool update_panel(float dt);
+    std::string panel_cross_hint() const;
+    void draw_panel(porpoise::ui::Gfx &gfx);
+    /* The queue: Install, Update and Update all add to it (the engine's, kept between launches); what
+     * finished this session, newest first (state 0 done, 1 didn't finish, 2 needs the player's answer). */
+    struct Finished
+    {
+        std::string id;
+        int state = 0;
+        std::string text;
+        JobState job; /* state 2: the question it stopped on, asked again from Downloads */
+    };
+    std::vector<Finished> finished_;
+    void finished(const std::string &id, int state, const std::string &text);
+    /* Add an install to the queue (it starts at once when nothing else is going). false: it's there
+     * already, or couldn't be added (said with a toast unless quiet). */
+    bool enqueue(const App &a, const std::string &version, const std::string &root, bool quiet = false);
+    /* Where an app is in the queue: 0 not in it, 1 going now, 2 the next, ... */
+    int queue_place(const std::string &id) const;
+    static std::string ordinal(int n);
+    void draw_downloads(porpoise::ui::Gfx &gfx); /* the pill at the top right */
+    bool downloads_shown() const;
+    bool update_queue_panel(float dt);
+    void draw_queue_panel(porpoise::ui::Gfx &gfx, float k);
+    /* Where to install a new app: the places with their free space, the last one picked first. */
+    std::string place_app_, place_version_;
+    std::vector<Place> place_list_;
+    /* Install pressed on a new app: the chooser when there's more than one place, else straight in. */
+    void start_install(const App &a, const std::string &version);
+    bool update_place_panel(float dt);
+    void draw_place_panel(porpoise::ui::Gfx &gfx, float k);
+    /* The storage view: each drive, what's on it, the biggest folders, Clear download cache. */
+    bool update_storage_panel(float dt);
+    void draw_storage_panel(porpoise::ui::Gfx &gfx, float k);
+    void draw_drive_bars(porpoise::ui::Gfx &gfx, float x, float y, float w, bool compact);
+    std::uint64_t cache_now_ = 0;
+    std::size_t cache_files_ = 0;
+    float cache_t_ = -9;
+    void cache_look(bool now);
+    void clear_cache(std::string &note, bool &bad);
+    /* What's new: the site's notes for this version (else GitHub's), shown on their own once. */
+    bool news_checked_ = false, fresh_ = false;
+    void check_news();
+    std::vector<NewsPiece> news_now(std::string &title, int &state) const;
+    bool update_news_panel(float dt);
+    void draw_news_panel(porpoise::ui::Gfx &gfx, float k);
+    /* The tabs (Customize > Tabs): each one on or off, in order, and Back to the default. */
+    struct TabRow
+    {
+        std::string entry; /* "games", ... or "source:<value>" */
+        bool on = false;
+    };
+    std::vector<TabRow> tab_rows_;
+    void build_tab_rows();
+    void apply_tab_rows();
+    std::vector<std::string> shown_tab_entries() const;
+    mutable std::vector<std::string> src_tabs_; /* the sources pinned as tabs, as tab_order() last listed them */
+    bool side_tab_ = false; /* a category whose tab is hidden, opened from Discover's buttons */
+    std::string tab_entry_name(const std::string &entry) const;
+    bool source_pinned(const std::string &value) const;
+    void pin_source(const std::string &value, bool on);
+    bool update_tabs_panel(float dt);
+    void draw_tabs_panel(porpoise::ui::Gfx &gfx, float k);
+    /* On this PS5: its row of views and actions (con_on_row_, con_chip_ the one focused), and
+     * Select (the folders marked). */
+    bool con_on_row_ = false;
+    int con_chip_ = 0;
+    bool con_select_ = false;
+    std::vector<std::string> con_marked_;
+    std::vector<std::string> console_chips() const;
+    std::vector<std::string> console_filters() const;
+    std::string filter_label(const std::string &f) const;
+    bool console_match(const ConsoleApp &c) const;
+    void press_console_chip(const std::string &chip);
+    void draw_console_tile(porpoise::ui::Gfx &gfx, const ConsoleApp &c, float x, float y, float size, float focus);
+    void draw_chip_row(porpoise::ui::Gfx &gfx, const std::vector<std::string> &chips, int focused, bool on, float y,
+                       const std::string &right = "");
+    bool update_delete_panel(float dt);
+    void draw_delete_panel(porpoise::ui::Gfx &gfx, float k);
+    /* My Apps: its row (All, Favorites, Grid or List). */
+    bool my_on_row_ = false;
+    int my_chip_ = 0;
+    std::vector<std::string> my_chips() const;
+    /* Settings > ShadowMountPlus and Storage. */
+    int smp_row_ = 0, sto_row_ = 0;
+    bool smp_reload_after_get_ = false;
+    std::vector<std::string> smp_rows() const;
+    void draw_smp_section(porpoise::ui::Gfx &gfx, float cx, float top, float cw, float bottom);
+    bool update_smp_section(float dt, bool u, bool d);
+    void draw_storage_section(porpoise::ui::Gfx &gfx, float cx, float top, float cw, float bottom);
+    bool update_storage_section(float dt, bool u, bool d);
+    std::string smp_warning() const; /* what's wrong with the running ShadowMountPlus, "" nothing */
+    /* Auto-update: looked at each time the store has checked for updates. */
+    unsigned auto_checks_ = 0;
+    void tick_auto_update();
+    bool auto_on(const std::string &id) const;
+    void toggle_auto(const std::string &id);
+    /* The app page's rows under it: More like this, People also installed, More from <author>. */
+    struct RelRow
+    {
+        std::string title;
+        std::vector<const App *> apps;
+    };
+    std::vector<RelRow> related_rows(const App &a) const;
+    int page_rel_ = -1, page_rel_col_ = 0;
+    float page_scroll_ = 0, page_scroll_to_ = 0;
+    std::vector<std::string> page_back_; /* apps opened from those rows: Circle goes back to the one before */
+    float draw_related(porpoise::ui::Gfx &gfx, const App &a, float top);
+    bool update_related(float dt, const App &a, bool l, bool r, bool u, bool d);
+    std::map<int, float> rel_focus_;
+    mutable std::string rel_key_; /* related_rows' last answer, for this app and catalog */
+    mutable std::vector<RelRow> rel_cache_;
+    int cus_top_ = 0; /* Customize: the first row shown */
 };
 } // namespace recomp
