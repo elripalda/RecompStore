@@ -1,0 +1,1 @@
+paragonie/sodium_compat v2.5.2 (3246b36), ISC. Only used when the server's PHP has no sodium extension.

@@ -73,12 +73,25 @@ function rs_sig_parse(string $text): ?array {
 function rs_sig_ok(string $text, string $kind, string $sha256): ?array {
     $sig = rs_sig_parse($text);
     if ($sig === null || $sig['kind'] !== $kind || !hash_equals($sig['sha256'], strtolower($sha256))) return null;
-    if (!function_exists('sodium_crypto_sign_verify_detached')) throw new RuntimeException('This server\'s PHP has no sodium, so signatures can\'t be checked.');
     $msg = RS_SIG_HEADER . "\nkind: {$sig['kind']}\nsha256: {$sig['sha256']}\nsigned: {$sig['signed']}\n";
     foreach (rs_sign_keys() as $k) {
-        if ($k['id'] === $sig['key'] && sodium_crypto_sign_verify_detached((string)hex2bin($sig['sig']), $msg, (string)hex2bin($k['pub']))) return $sig;
+        if ($k['id'] === $sig['key'] && rs_ed25519_verify((string)hex2bin($sig['sig']), $msg, (string)hex2bin($k['pub']))) return $sig;
     }
     return null;
+}
+
+// Ed25519 with PHP's sodium extension, or, where the host leaves it out, sodium_compat (pure PHP,
+// in sodium_compat/ beside this file).
+function rs_ed25519_verify(string $sig, string $msg, string $pub): bool {
+    if (strlen($sig) !== 64 || strlen($pub) !== 32) return false;
+    if (function_exists('sodium_crypto_sign_verify_detached')) return sodium_crypto_sign_verify_detached($sig, $msg, $pub);
+    if (!class_exists('ParagonIE_Sodium_Compat', false)) require_once __DIR__ . '/sodium_compat/autoload.php';
+    ParagonIE_Sodium_Compat::$disableFallbackForUnitTests = true; // its own code, never a half-there extension
+    try {
+        return ParagonIE_Sodium_Compat::crypto_sign_verify_detached($sig, $msg, $pub);
+    } catch (Throwable $e) {
+        return false;
+    }
 }
 
 // ---- Catalogs waiting for a signature ---------------------------------------------------------
