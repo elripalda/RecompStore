@@ -83,3 +83,88 @@ The ShadowMountPlus rows: Refresh home screen (mode=refresh) and Reload ShadowMo
 (mode=reload_smp: the store closes, the launcher sends the player's chosen file again, which restarts
 a running one, and opens the store once it answers). Settings > General's Refresh row does the same
 as the first.
+
+## 2.2.2 (build 36)
+Everything below reads the 2.2 catalog fields in docs/site-2.2.md. A catalog without them (`tabs`,
+`smp`, `whats_new`, a chart section's `category`, the charts' `also`) behaves as 2.2.1 did.
+
+### Library
+- Views in this order: My Apps, On this PS5, Updates, Betas.
+- My Apps has a row under the views: All or Favorites, Grid or List.
+- On this PS5 is a grid by default (Square, or the row, switches to a list). The row has Sort (Name,
+  Biggest, Newest, Location), Show (All, From Recomp Store, Not from the store, then each drive),
+  Select, Storage, Refresh home screen and Reload ShadowMountPlus. ShadowMountPlus's state sits at its
+  right end. The view, sort and filter are kept in prefs.json (`consoleView`, `consoleSort`,
+  `consoleFilter`).
+- Select marks apps (never Recomp Store itself); Delete asks once, listing them and their total size.
+  `Engine::manage_many` is one job, kind `mdeletes`: each folder goes as Delete does, the store's own
+  installs through `run_delete` (their records go too), the rest through `run_manage_delete`. PPSA92000
+  is dropped before the job starts and `manageable()` refuses it again.
+
+### The download queue (Engine::queue_*)
+- Install, Update, Update all, Versions, phone installs and auto-update add to it; it's kept in
+  `/data/recompstore/queue.txt` (`id<TAB>version<TAB>root` a line) and carries on after a restart.
+- `queue_pump()` starts the next one only when nothing else is going and the last result has been
+  taken; the screens pump it each frame unless a question (title ID clash, download place moved,
+  Delete) is open, or the store is closing.
+- A clash or a moved download place on an app whose page isn't open stops only that app: it waits
+  in Downloads as "Needs your answer" with the download kept, and Cross there asks the question.
+- `cancel_job()` stops an install while it downloads (`JobState::cancelled`); the partial zip goes.
+- Downloads (Options, or the pill at the top right) lists what's going, what waits (Remove) and what
+  finished. App pages say "Queued (3rd)".
+
+### Where a new app goes
+- With more than one place, Install asks where. Places are ShadowMountPlus's `/api/v1/storage`
+  `destinations` that are homebrew folders (a scanned drive root stands for its homebrew folder), else
+  every connected drive's. Each shows its free space; the last one picked comes first.
+- `Engine::install(id, version, root)` (and `resolve_clash`, which gets the root back from the job):
+  root must be one of `homebrew_roots()`. It only applies to an app not on the console yet;
+  updates go where the app is.
+- Before downloading: room for the zip twice on a drive (three times plus 512 MB on the console's
+  storage, which holds the download), refused with the numbers.
+
+### Storage
+- `Engine::drives()`: looked at with the console's folders. ShadowMountPlus's storage when it answers
+  (`available_bytes` is what's free; read-only destinations are left out), else statvfs.
+- The storage view: a bar a drive (apps, the download cache, everything else, free) and the biggest
+  folders. Settings > Storage has Clear download cache and the same bars.
+- `Engine::clear_downloads()` deletes the files in `/data/recompstore/downloads`, never a folder, and
+  never what's in use: the job's app, anything queued, the store's own update while it's downloaded
+  or waiting for its installer, ShadowMountPlus while it's fetched. Each file is checked gone; what
+  stayed is logged.
+
+### ShadowMountPlus (Settings > ShadowMountPlus)
+- Shows the running version (`/api/v1/version`) beside the one the catalog offers, and warns when
+  it's older than `smp.min` (compared as docs/site-2.2.md says: `smp_version_cmp`) or doesn't answer.
+- Get ShadowMountPlus: job `smpget`. Only `https://github.com/drakmor/ShadowMountPlus/releases/download/`
+  (the parser and the job both check), at most 64 MB; the `elf` entry taken out of the zip; its size
+  and SHA-256 checked against the catalog; saved as `/data/recompstore/payloads/shadowmountplus.elf`,
+  read back and checked again, then made the chosen file. Then Reload hands it to the launcher
+  (mode=reload_smp). The store never sends it itself. A loader that starts ShadowMountPlus at boot
+  keeps its own copy: the player updates that one.
+
+### Tabs, Discover, What's new
+- Tabs: the player's (Customize > Tabs: on or off, hold Square to move, Back to the default), else
+  the catalog's `tabs`, else all four. A source can be pinned as a tab from its sheet in Settings >
+  Sources. A part of the store without a tab still opens from Discover's buttons.
+- Chart sections with `category` show only that part of the store's apps, in the chart's order.
+- Category icons are the logo's cyan unless Customize > Icon colors is Colorful.
+- What's new (`whats_new`) shows once, on the store version it names, not on a store installed for
+  the first time; seen versions are kept in prefs.json (`seenNews`). Settings > About opens it any
+  time, from GitHub's release notes when the catalog has none. The body is drawn as
+  docs/site-2.2.md section 5 says.
+
+### Favorites, auto-update, an app's page
+- Pins are favorites now: Square anywhere, or the star on an app's page. My Apps can show only
+  them; Discover has a Favorites row (Customize turns it off).
+- Auto-update: Settings > General's "Update everything automatically", or Auto-update on one app's
+  page. After each check (at start, every few hours, Refresh), `Engine::auto_update_picks` gives the
+  installed apps with a newer version that may update on their own (not kept at an older version, not
+  a beta without a signature, not one whose download place moved), and they join the queue.
+- Under an app's page: More like this (same part of the store, most labels in common), People also
+  installed (the charts' `also`, signed-catalog apps only) and More from its author.
+
+### The Discover header
+The picture fades in over the frosted art in thin slices on whole pixels, and the wash fades out over
+it, so the frost under both sides is the same and the join can't show, still or mid-turn. A turn
+crossfades from the slide before (not from midnight), its words out before the new ones come in.

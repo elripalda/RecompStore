@@ -135,4 +135,19 @@ inline std::uint32_t category_tint(int i)
     const std::uint32_t t[4] = {kCyan, 0x9B8CFF, kGreen, kAmber};
     return t[std::clamp(i, 0, 3)];
 }
+/* (2.2.2) A check mark, size across, centred on (cx, cy): two rounded bars (the fonts have no ✓). */
+inline void draw_check(porpoise::ui::Gfx &gfx, float cx, float cy, float size, Color c)
+{
+    const float t = size * 0.15f;
+    const float pts[3][2] = {{cx - 0.34f * size, cy + 0.02f * size}, {cx - 0.10f * size, cy + 0.26f * size}, {cx + 0.36f * size, cy - 0.24f * size}};
+    for (int b = 0; b < 2; ++b)
+    {
+        const float px = pts[b][0], py = pts[b][1], qx = pts[b + 1][0], qy = pts[b + 1][1];
+        const float len = std::sqrt((qx - px) * (qx - px) + (qy - py) * (qy - py));
+        const float dx = (qx - px) / len, dy = (qy - py) / len, nx = -dy * t / 2, ny = dx * t / 2, ex = dx * t / 2, ey = dy * t / 2;
+        const porpoise::ui::Corner k[4] = {{px - nx - ex, py - ny - ey, 1}, {qx - nx + ex, qy - ny + ey, 1},
+                                           {qx + nx + ex, qy + ny + ey, 1}, {px + nx - ex, py + ny - ey, 1}};
+        gfx.panel3d(k, len + t, t, 0, c, 1.f, t / 2, {}, 0, 0, 0);
+    }
+}
 } // namespace recomp::sui

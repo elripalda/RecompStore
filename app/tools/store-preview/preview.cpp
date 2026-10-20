@@ -505,6 +505,98 @@ int main(int argc, char **argv)
         store.preview_open("PPSA99764"); store.preview_focus(0); settle(60); frame("v2b-page-emulator");
         store.preview_open("PPSA97772"); store.preview_focus(0); settle(60); frame("v2b-page-app");
     }
+    /* (2.2.2) The header's join between its words and its picture, still and part way through a turn. */
+    if (want("seam"))
+    {
+        const std::vector<std::string> four = {"PPSA92011", "PPSA64007", "PPSA94202", "PPSA99314"};
+        for (const char *style : {"carousel", "split", "spotlight"})
+        {
+            store.preview_header(style, four); store.preview_tab(0); store.preview_row(1, 0); settle(60);
+            for (float f : {0.15f, 0.35f, 0.6f, 1.0f})
+            {
+                store.preview_slide(1, f);
+                char name[64];
+                std::snprintf(name, sizeof name, "seam-%s-%03d", style, int(f * 100));
+                frame(name);
+            }
+        }
+        store.preview_header("mosaic", four); store.preview_row(1, 0); settle(40); frame("seam-mosaic");
+        store.preview_header("carousel"); store.preview_slide(0, 1.f);
+    }
+    /* (2.2.2) The Library's views, Downloads, where to install, storage, the app page's rows,
+     * Customize and its tabs, Settings > ShadowMountPlus and Storage, What's new. With
+     * PREVIEW_CATALOG=site/catalog222.json and CHARTS=site/charts222.json. */
+    if (want("v222"))
+    {
+        store.preview_pin("PPSA64007"); store.preview_pin("PPSA99764"); store.preview_pin("PPSA97772"); store.preview_pin("PPSA92011");
+        store.preview_prefs2(0, true); store.preview_header("carousel"); store.preview_tab(0); store.preview_row(1, 0); settle(90);
+        frame("v222-discover-icons-blue");
+        store.preview_row(2, 1); settle(40); frame("v222-discover-favorites");
+        store.preview_row(5, 0); settle(40); frame("v222-discover-top-emulators");
+        store.preview_prefs2(1, true); store.preview_row(1, 0); settle(40); frame("v222-discover-icons-colorful");
+        store.preview_prefs2(0, true);
+        store.preview_mine(0, 0, 0, true); settle(60); frame("v222-mine-grid-row");
+        store.preview_mine(2, 0, 1); settle(60); frame("v222-mine-list");
+        store.preview_mine(0, 1, 0); settle(60); frame("v222-mine-favorites");
+        store.preview_mine(0, 0, 0);
+        store.preview_console2(0, 0, 0, "all"); settle(60); frame("v222-console-grid");
+        store.preview_console2(0, 0, 0, "all", 2); settle(30); frame("v222-console-row");
+        store.preview_console2(2, 1, 0, "all"); settle(60); frame("v222-console-list");
+        store.preview_console2(0, 0, 1, "all", 2); settle(60); frame("v222-console-biggest");
+        store.preview_console2(0, 0, 3, "/mnt/usb0/homebrew", 3); settle(60); frame("v222-console-usb");
+        store.preview_console2(3, 0, 0, "all");
+        store.preview_select({"/data/homebrew/PPSA99203", "/mnt/usb0/homebrew/PPSA99251", "/data/homebrew/old-port-backup"}); settle(60);
+        frame("v222-console-select");
+        store.preview_panel(6, 1); settle(10); frame("v222-delete-confirm");
+        store.preview_panel_close(); store.preview_select_off();
+        store.preview_console2(0, 0, 0, "all"); store.preview_panel(3, 0); settle(30); frame("v222-storage");
+        store.preview_panel_close();
+        store.preview_library(1, 0); settle(60); frame("v222-updates");
+        store.preview_library(2, 0); settle(60); frame("v222-betas");
+        /* Downloads: one going, two waiting, one done, one stopped on a question. */
+        recomp::preview_job("install", "PPSA64008");
+        store.preview_queue({"PPSA94202", "PPSA99764"}, 0);
+        store.preview_finished("PPSA92007", 0, "Installed 0.9.1");
+        store.preview_finished("PPSA99320", 2, "Needs your answer: another app has its title ID");
+        store.preview_tab(0); store.preview_row(1, 0); settle(40); frame("v222-discover-downloading");
+        store.preview_panel(1, 1); settle(10); frame("v222-queue");
+        store.preview_panel_close();
+        store.preview_open("PPSA94202"); settle(60); frame("v222-page-queued");
+        recomp::preview_job("", "");
+        /* Where to install a new app. */
+        store.preview_open("PPSA99314"); settle(60); frame("v222-page-new");
+        store.preview_place("PPSA99314", 0); settle(10); frame("v222-place");
+        setenv("PREVIEW_USB_FREE_MB", "150", 1); store.preview_place("PPSA99314", 2); settle(10); frame("v222-place-usb-full");
+        unsetenv("PREVIEW_USB_FREE_MB"); store.preview_panel_close();
+        /* An app's page: the star, Auto-update, and the rows under it. */
+        store.preview_auto({"PPSA64007"}, false);
+        store.preview_open("PPSA64007"); settle(60); frame("v222-page-top");
+        store.preview_related(0, 1); settle(60); frame("v222-page-related");
+        store.preview_related(2, 0); settle(60); frame("v222-page-related-author");
+        store.preview_open("PPSA92011"); settle(60); frame("v222-page-2011");
+        /* Customize, its tabs. */
+        store.preview_row(0, 0); store.preview_customize(1); settle(30); frame("v222-customize");
+        store.preview_customize(9); settle(30); frame("v222-customize-scrolled");
+        store.preview_panel(5, 1); settle(10); frame("v222-tabs");
+        store.preview_panel_close();
+        store.preview_tabs({"emulators", "games", "tools"}, true); store.preview_tab(0); settle(60); frame("v222-tabs-custom-bar");
+        store.preview_tabs({}, false);
+        /* Settings. */
+        store.preview_general(1); settle(30); frame("v222-settings-general");
+        setenv("PREVIEW_SMP_VERSION", "1.7beta4", 1); store.preview_smp_row(0); settle(30); frame("v222-settings-smp-old");
+        setenv("PREVIEW_SMP_VERSION", "1.7-beta5fix1", 1); store.preview_smp_row(1); settle(30); frame("v222-settings-smp-current");
+        setenv("PREVIEW_SMP_STATE", "0", 1); store.preview_smp_row(2); settle(30); frame("v222-settings-smp-off");
+        setenv("PREVIEW_SMP_STATE", "1", 1); unsetenv("PREVIEW_SMP_VERSION");
+        recomp::preview_job("smpget", ""); store.preview_settings_note("Getting ShadowMountPlus 1.7-beta5fix1 from GitHub\xE2\x80\xA6", false);
+        store.preview_smp_row(0); settle(10); frame("v222-settings-smp-getting");
+        recomp::preview_job("", ""); store.preview_settings_note("", false);
+        store.preview_storage_row(0); settle(30); frame("v222-settings-storage");
+        store.preview_settings_note("Cleared 1.3 GB from the download cache.", false); frame("v222-settings-storage-cleared");
+        store.preview_settings_note("", false);
+        store.preview_settings(3); settle(30); frame("v222-settings-about");
+        store.preview_panel(4, 0); settle(10); frame("v222-whats-new");
+        store.preview_panel_close();
+    }
     /* 2.1: Discover's header styles, a part of the store sorted, Versions (a GitHub app's and a
      * beta's), an app kept at an older version, a beta's notes, and where an app downloads from
      * changed. With PREVIEW_NOTES (releases with their files), PREVIEW_NEWEST and PREVIEW_HELD. */

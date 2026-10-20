@@ -112,6 +112,55 @@ bool parse_catalog(const std::string &text, Catalog &out)
     out.discord = site["discord"].str();
     out.kofi = site["kofi"].str();
     out.payload = site["payload"].str();
+    /* (2.2.2) The category tabs the store shows by default, in order ("tabs"; absent: all four). */
+    if (j["tabs"].is_array())
+    {
+        out.tabs_set = true;
+        for (std::size_t i = 0; i < j["tabs"].size() && out.tabs.size() < 4; ++i)
+        {
+            const std::string t = j["tabs"][i].str();
+            if ((t == "games" || t == "emulators" || t == "apps" || t == "tools") &&
+                std::find(out.tabs.begin(), out.tabs.end(), t) == out.tabs.end())
+                out.tabs.push_back(t);
+        }
+    }
+    /* (2.2.2) The ShadowMountPlus the store offers ("smp"): only from drakmor's own releases. */
+    {
+        const Json &m = j["smp"];
+        out.smp_min = m["min"].str();
+        const std::string url = m["url"].str(), sha = m["sha256"].str(), ver = m["version"].str(), elf = m["elf"].str();
+        const std::string pre = "https://github.com/drakmor/ShadowMountPlus/releases/download/";
+        auto plain = [](const std::string &v, bool slash) {
+            if (v.empty() || v.size() > 200 || v.find("..") != std::string::npos) return false;
+            for (const char c : v)
+                if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-' || (slash && c == '/'))) return false;
+            return true;
+        };
+        bool hex = sha.size() == 64;
+        for (const char c : sha) hex = hex && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+        const long long size = m["size"].integer(0);
+        if (url.rfind(pre, 0) == 0 && plain(url.substr(pre.size()), true) && std::count(url.begin() + long(pre.size()), url.end(), '/') == 1 &&
+            hex && size > 64 && size <= (64ll << 20) && plain(ver, false) && (elf.empty() || plain(elf, true)))
+        {
+            out.smp_version = ver;
+            out.smp_url = url;
+            out.smp_elf = elf;
+            out.smp_asset = url.substr(url.rfind('/') + 1);
+            out.smp_sha256 = sha;
+            out.smp_size = std::uint64_t(size);
+        }
+    }
+    /* (2.2.2) What's new, written on the site ("whats_new"): for players on that store version. */
+    {
+        const Json &w = j["whats_new"];
+        const std::string v = w["version"].str(), body = w["body"].str();
+        if (!v.empty() && v.size() <= 24 && !body.empty())
+        {
+            out.whats_new_version = v;
+            out.whats_new_title = w["title"].str("What's new in " + v);
+            out.whats_new_body = body.size() > 16000 ? body.substr(0, 16000) : body;
+        }
+    }
     /* (2.0) featuredV2: the admin's whole list, with apps 1.x stores don't get (v2Apps). */
     const Json &feat = j["featuredV2"].is_array() ? j["featuredV2"] : j["featured"];
     for (std::size_t i = 0; i < feat.size(); ++i) out.featured.push_back(feat[i].str());
@@ -401,7 +450,12 @@ bool parse_catalog(const std::string &text, Catalog &out)
         }
         else if (s.type == "games" && known_layout) out.sections.push_back(s);
         else if ((s.type == "top" || s.type == "trending" || s.type == "new" || s.type == "updated") && known_layout)
-            out.sections.push_back(s); /* (2.0) filled from the charts */
+        {
+            /* (2.0) filled from the charts; (2.2.2) only one part of the store's, when it says so */
+            const std::string c = x["category"].str();
+            if (c == "games" || c == "emulators" || c == "apps" || c == "tools") s.category = c;
+            out.sections.push_back(s);
+        }
         else if (s.type == "soon" && (s.layout == "row" || s.layout == "wide")) out.sections.push_back(s);
         else if (s.type == "spotlight" && !s.ids.empty())
         {
@@ -411,6 +465,67 @@ bool parse_catalog(const std::string &text, Catalog &out)
         }
     }
     return true;
+}
+
+/* (2.2.2) ShadowMountPlus's version strings (store_engine.hpp). */
+int smp_version_cmp(const std::string &a, const std::string &b)
+{
+    struct V
+    {
+        std::vector<long> nums;
+        long beta = -1; /* -1: no beta part (newer than any beta) */
+        long fix = 0;
+        bool ok = false;
+    };
+    auto parse = [](std::string s) {
+        V v;
+        for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+        std::size_t i = 0;
+        while (i < s.size() && (s[i] == 'v' || s[i] == ' ')) ++i;
+        if (i >= s.size() || !std::isdigit(static_cast<unsigned char>(s[i]))) return v;
+        while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])))
+        {
+            long n = 0;
+            while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])) && n < 100000) n = n * 10 + (s[i++] - '0');
+            v.nums.push_back(n);
+            if (i < s.size() && s[i] == '.' && i + 1 < s.size() && std::isdigit(static_cast<unsigned char>(s[i + 1]))) ++i;
+            else break;
+        }
+        const std::size_t bpos = s.find("beta", i);
+        const std::size_t git = s.find("-g", i); /* "1.7beta5-3-gabc123": a build after it */
+        if (bpos != std::string::npos && (git == std::string::npos || bpos < git))
+        {
+            std::size_t k = bpos + 4;
+            long n = 0;
+            while (k < s.size() && std::isdigit(static_cast<unsigned char>(s[k])) && n < 100000) n = n * 10 + (s[k++] - '0');
+            v.beta = n;
+            const std::size_t f = s.find("fix", k);
+            if (f != std::string::npos && (git == std::string::npos || f < git))
+            {
+                std::size_t m = f + 3;
+                long x = 0;
+                while (m < s.size() && std::isdigit(static_cast<unsigned char>(s[m])) && x < 100000) x = x * 10 + (s[m++] - '0');
+                v.fix = x;
+            }
+        }
+        v.ok = !v.nums.empty();
+        return v;
+    };
+    const V x = parse(a), y = parse(b);
+    if (!x.ok || !y.ok) return 2;
+    for (std::size_t i = 0; i < std::max(x.nums.size(), y.nums.size()); ++i)
+    {
+        const long p = i < x.nums.size() ? x.nums[i] : 0, q = i < y.nums.size() ? y.nums[i] : 0;
+        if (p != q) return p < q ? -1 : 1;
+    }
+    if (x.beta != y.beta)
+    {
+        if (x.beta < 0) return 1;
+        if (y.beta < 0) return -1;
+        return x.beta < y.beta ? -1 : 1;
+    }
+    if (x.fix != y.fix) return x.fix < y.fix ? -1 : 1;
+    return 0;
 }
 
 } // namespace recomp

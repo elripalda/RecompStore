@@ -1731,6 +1731,7 @@ void Gfx::begin(unsigned slot, float target_w, float target_h, float time, float
     batches_.clear();
     overflowed_ = false;
     clip_ = VkRect2D{};
+    clip_depth_ = 0;
 }
 
 void Gfx::clip(float x, float y, float w, float h)
@@ -1755,6 +1756,47 @@ void Gfx::clip(float x, float y, float w, float h)
 }
 
 void Gfx::unclip() { clip_ = VkRect2D{}; }
+
+float Gfx::snap_x(float x) const
+{
+    const float scale = look_.content_scale;
+    const float p = (kDesignW / 2 + (x - kDesignW / 2) * scale + layer_dx_) / kDesignW * target_w_;
+    const float q = float(std::lround(p));
+    return ((q * kDesignW / target_w_) - layer_dx_ - kDesignW / 2) / scale + kDesignW / 2;
+}
+
+void Gfx::push_clip(float x, float y, float w, float h)
+{
+    const VkRect2D outer = clip_;
+    if (clip_depth_ < 4)
+        clip_saved_[clip_depth_] = outer;
+    ++clip_depth_;
+    /* As clip(), but each side to its nearest pixel (snap_x()'s), not outward. */
+    const float dy = layer_dy_ + intro_dy_, scale = look_.content_scale;
+    auto px = [&](float d, float v, float design, float target) {
+        return float(std::lround((design / 2 + (v - design / 2) * scale + d) / design * target));
+    };
+    float x0 = std::clamp(px(layer_dx_, x, kDesignW, target_w_), 0.f, target_w_);
+    float x1 = std::clamp(px(layer_dx_, x + w, kDesignW, target_w_), 0.f, target_w_);
+    float y0 = std::clamp(px(dy, y, kDesignH, target_h_), 0.f, target_h_);
+    float y1 = std::clamp(px(dy, y + h, kDesignH, target_h_), 0.f, target_h_);
+    if (outer.extent.width != 0 && outer.extent.height != 0)
+    {
+        x0 = std::max(x0, float(outer.offset.x));
+        y0 = std::max(y0, float(outer.offset.y));
+        x1 = std::min(x1, float(outer.offset.x + std::int32_t(outer.extent.width)));
+        y1 = std::min(y1, float(outer.offset.y + std::int32_t(outer.extent.height)));
+    }
+    const std::int32_t ix = std::int32_t(x0), iy = std::int32_t(y0);
+    clip_ = VkRect2D{{ix, iy}, {std::uint32_t(std::max<std::int32_t>(1, std::int32_t(x1) - ix)),
+                                std::uint32_t(std::max<std::int32_t>(1, std::int32_t(y1) - iy))}};
+}
+
+void Gfx::pop_clip()
+{
+    if (clip_depth_ > 0 && --clip_depth_ < 4)
+        clip_ = clip_saved_[clip_depth_];
+}
 
 void Gfx::to_clip(const Corner &c, float out[4]) const
 {

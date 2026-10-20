@@ -255,6 +255,18 @@ struct Catalog
     std::string store_version, store_url, store_sha256;
     int store_build = 0;
     std::string updated;
+    /* (2.2.2) The category tabs to show by default ("tabs"), in order: tabs_set false when the
+     * catalog doesn't say (then all of them, as before). */
+    std::vector<std::string> tabs;
+    bool tabs_set = false;
+    /* (2.2.2) The ShadowMountPlus the store offers ("smp"): its version, its release's download
+     * (always github.com/drakmor/ShadowMountPlus/releases/download/...), the payload's path in that
+     * zip ("" when it's the payload itself), and the payload's SHA-256 and size; smp_url "" when
+     * none is offered. smp_min: the oldest that works well with the store ("" not said). */
+    std::string smp_version, smp_url, smp_asset, smp_elf, smp_sha256, smp_min;
+    std::uint64_t smp_size = 0;
+    /* (2.2.2) What's new, written on the site ("whats_new"), for the store version it names. */
+    std::string whats_new_version, whats_new_title, whats_new_body;
 };
 
 bool parse_catalog(const std::string &text, Catalog &out);
@@ -282,6 +294,7 @@ struct ConsoleApp
     std::string icon;         /* its sce_sys/icon0.png, "" when it has none */
     std::string store_id;     /* the store's app it is, "" when it was put there some other way */
     long long size = -1;      /* bytes in its folder, -1 while it's still being worked out */
+    long long mtime = 0;      /* (2.2.2) when its folder last changed (On this PS5's Newest) */
     bool app = false;         /* eboot.bin and sce_sys/param.json: a PS5 app (else a folder left behind) */
     bool store = false;       /* Recomp Store itself: listed, never moved, renamed or deleted */
 };
@@ -295,7 +308,15 @@ struct Charts
 {
     std::vector<std::string> top, trending, fresh /* "new" */, updated;
     std::vector<std::pair<std::string, ChartStat>> stats;
+    /* (2.2.2) People also installed ("also"): for an app, other apps' IDs, most telling first. */
+    std::vector<std::pair<std::string, std::vector<std::string>>> also;
     bool have = false;
+    const std::vector<std::string> *also_for(const std::string &id) const
+    {
+        for (const auto &kv : also)
+            if (kv.first == id) return &kv.second;
+        return nullptr;
+    }
     /* The ids of a Discover section of one of the charts' types ("top", "trending", "new", "updated"). */
     const std::vector<std::string> *list(const std::string &type) const
     {
@@ -357,7 +378,35 @@ struct JobState
     /* (2.1) The version the player picked (Versions on its page), "" for the newest: a question
      * the install stopped on hands it back to resolve_clash, so the same one is installed. */
     std::string version;
+    /* (2.2.2) The homebrew folder the player picked for a new app ("" the usual one), handed back
+     * to resolve_clash as version is; and an install the player cancelled while it downloaded. */
+    std::string root;
+    bool cancelled = false;
+    /* (2.2.2) Deleting several at once ("mdeletes"): which one it's on, "2 of 5: PS5SX2". */
+    std::string batch;
 };
+
+/* (2.2.2) An install waiting its turn (the download queue): the app, the version picked ("" the
+ * newest) and the homebrew folder picked for it ("" the usual one). */
+struct QueueItem
+{
+    std::string id, version, root;
+};
+
+/* (2.2.2) A drive as the store sees it: its name, where it's mounted, its homebrew folder, and how
+ * big it is and how much is free (ShadowMountPlus's /api/v1/storage when it answered, else the
+ * store's own look). */
+struct DriveSpace
+{
+    std::string label, mount, homebrew;
+    std::uint64_t total = 0, free = 0;
+    bool from_smp = false;
+};
+
+/* (2.2.2) ShadowMountPlus's version strings, compared loosely (drakmor's tags aren't uniform):
+ * numbers in order, then the beta number (none is newer than any beta), then fix. -1 a is older,
+ * 0 the same, 1 a is newer, 2 one of them can't be compared ("unknown", ""). */
+int smp_version_cmp(const std::string &a, const std::string &b);
 
 class Engine
 {
@@ -378,13 +427,49 @@ public:
      * (2.1) version: one the player picked instead, a GitHub release's tag or a beta's earlier
      * build (BetaBuild::file, else its version). Installed older than the newest, the app is kept
      * at it (held) until a newer one is installed. */
-    bool install(const std::string &app_id, const std::string &version = "");
+    bool install(const std::string &app_id, const std::string &version = "", const std::string &root = "");
     /* (2.0) After an install stopped on a clash (JobState::clash): 1 install it under its own
      * new title ID (clash_new; its updates go there from then on), 2 install it over the
      * other app's folder (an older copy of the same app), 0 neither (the kept download goes).
      * (2.1) 3: after JobState::source_moved, update it from the new place this once. version:
      * the job's (JobState::version), so the same one is installed. */
-    bool resolve_clash(const std::string &app_id, int choice, const std::string &version = "");
+    bool resolve_clash(const std::string &app_id, int choice, const std::string &version = "", const std::string &root = "");
+    /* (2.2.2) Stop the install that's downloading (JobState::cancelled then); false when nothing can
+     * be stopped now (it's past the download, or it isn't an install). */
+    bool cancel_job();
+    /* (2.2.2) The download queue: Install, Update and Update all add to it, and the store starts
+     * the next one whenever nothing else is going (queue_pump, after each result is taken). Kept in
+     * /data/recompstore/queue.txt, so it carries on after the store opens again. queue_add: false
+     * when it's there already (or is the one going). queue_now: the app the queue started, "" none. */
+    bool queue_add(const std::string &app_id, const std::string &version = "", const std::string &root = "");
+    std::vector<QueueItem> queue() const;
+    bool queue_remove(const std::string &app_id);
+    void queue_clear();
+    std::string queue_pump();
+    std::string queue_now() const;
+    /* (2.2.2) Auto-update: the installed apps among ids (every installed one when all) with a newer
+     * version out that can update on their own: not kept at an older version, not a beta without a
+     * signature, not one whose download place moved, not one this store is too old for. */
+    std::vector<std::string> auto_update_picks(const std::vector<std::string> &ids, bool all) const;
+    /* (2.2.2) How many times the installed apps' updates have been looked for (at start, then every
+     * few hours, and each Refresh): auto-update looks when it rises. */
+    unsigned checks_done() const;
+    /* (2.2.2) The drives, as last looked (look_console looks): name, size, free. */
+    std::vector<DriveSpace> drives() const;
+    /* (2.2.2) The download cache (/data/recompstore/downloads): what it holds now. clear_downloads
+     * deletes it but for what an install, the queue or the store's own update is using; freed and
+     * files: what went; false (and why) when nothing could go. */
+    std::uint64_t cache_bytes(std::size_t *files = nullptr) const;
+    bool clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why);
+    /* (2.2.2) Delete several folders at once (On this PS5's Select): a job, kind "mdeletes", that
+     * takes each as Delete does, one after another (the store's own installs as from their page),
+     * and never the store itself. Done's note says how it went. */
+    bool manage_many(const std::vector<std::string> &folders);
+    /* (2.2.2) Get ShadowMountPlus: the version the catalog offers (Catalog::smp_*), downloaded from
+     * drakmor's own GitHub releases only, the payload taken out and checked (SHA-256 and size),
+     * saved as /data/recompstore/payloads/shadowmountplus.elf and made the chosen file. A job, kind
+     * "smpget". It isn't sent: Reload ShadowMountPlus (reload_smp) hands it to the launcher. */
+    bool get_smp();
     /* (2.1) The version an app is kept at (the player installed an older one), "" when it isn't:
      * Update All and the Updates list leave it. Installing the newest lets it go. */
     std::string held(const std::string &app_id) const;
@@ -547,6 +632,7 @@ std::vector<LogFile> game_log_files(const App &a);
 struct Place
 {
     std::string label, path;
+    std::uint64_t free = 0, total = 0; /* (2.2.2) install_places: its drive's, 0 when not known */
 };
 struct FsEntry
 {

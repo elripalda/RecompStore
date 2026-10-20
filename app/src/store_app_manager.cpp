@@ -24,17 +24,15 @@ namespace
 {
 const float kContent = 316, kBottom = 1000;
 const float kRowH = 120, kRowPitch = 136;
-const int kTopRows = 2; /* Refresh home screen, Reload ShadowMountPlus */
+/* (2.2.2) The grid: tiles as My Apps' (seven a row), two lines under each. */
+const float kTileS = 216, kTileGap = 32, kConPitch = 216 + 108;
+const int kPerRow = 7;
+const float kRowTop = 62; /* the list starts this far under the row of views */
 
 std::string lower_name(std::string s)
 {
     for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
     return s;
-}
-
-std::string count_words(std::size_t n, const char *one, const char *many)
-{
-    return std::to_string(n) + " " + (n == 1 ? one : many);
 }
 
 void keep_shown(float &scroll, float &to, float y0, float y1, float view_h, float total)
@@ -62,15 +60,151 @@ void Store::sync_console()
     console_ = engine().console_apps(&console_looking_);
 }
 
+/* (2.2.2) Where a homebrew folder comes in the list of drives: the console's, the M.2 SSD's, extended
+ * storage's, then the USB drives'. */
+static int root_rank(const std::string &root)
+{
+    if (root == "/data/homebrew") return 0;
+    if (root.rfind("/mnt/ext1", 0) == 0) return 1;
+    if (root.rfind("/mnt/ext0", 0) == 0) return 2;
+    if (root.rfind("/mnt/usb", 0) == 0 && root.size() > 8) return 3 + (root[8] - '0');
+    return 20;
+}
+
 std::vector<const ConsoleApp *> Store::console_list() const
 {
     std::vector<const ConsoleApp *> out;
-    for (const ConsoleApp &c : console_) out.push_back(&c);
-    if (con_sort_ == 1)
+    for (const ConsoleApp &c : console_)
+        if (console_match(c)) out.push_back(&c);
+    auto by_name = [](const ConsoleApp *a, const ConsoleApp *b) { return lower_name(a->name) < lower_name(b->name); };
+    std::stable_sort(out.begin(), out.end(), by_name);
+    if (prefs_.con_sort == 1)
         std::stable_sort(out.begin(), out.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return a->size > b->size; });
-    else
-        std::stable_sort(out.begin(), out.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return lower_name(a->name) < lower_name(b->name); });
+    else if (prefs_.con_sort == 2)
+        std::stable_sort(out.begin(), out.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return a->mtime > b->mtime; });
+    else if (prefs_.con_sort == 3)
+        std::stable_sort(out.begin(), out.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return root_rank(a->root) < root_rank(b->root); });
     return out;
+}
+
+bool Store::console_match(const ConsoleApp &c) const
+{
+    const std::string &f = prefs_.con_filter;
+    if (f == "store") return c.store || !c.store_id.empty();
+    if (f == "other") return !c.store && c.store_id.empty();
+    if (f.rfind("/", 0) == 0) return c.root == f;
+    return true;
+}
+
+std::vector<std::string> Store::console_filters() const
+{
+    std::vector<std::string> out{"all", "store", "other"};
+    std::vector<std::string> roots;
+    for (const ConsoleApp &c : console_)
+        if (std::find(roots.begin(), roots.end(), c.root) == roots.end()) roots.push_back(c.root);
+    std::stable_sort(roots.begin(), roots.end(), [](const std::string &a, const std::string &b) { return root_rank(a) < root_rank(b); });
+    if (roots.size() > 1 || (prefs_.con_filter.rfind("/", 0) == 0))
+        for (const std::string &r : roots) out.push_back(r);
+    if (prefs_.con_filter.rfind("/", 0) == 0 && std::find(out.begin(), out.end(), prefs_.con_filter) == out.end())
+        out.push_back(prefs_.con_filter); /* a drive that's gone since: still there to move off */
+    return out;
+}
+
+std::string Store::filter_label(const std::string &f) const
+{
+    if (f == "store") return "From Recomp Store";
+    if (f == "other") return "Not from the store";
+    if (f.rfind("/", 0) == 0)
+    {
+        for (const ConsoleApp &c : console_)
+            if (c.root == f) return c.place;
+        return f.rfind("/mnt/usb", 0) == 0 && f.size() > 8 ? std::string("USB drive ") + char(f[8] + 1) : f;
+    }
+    return "All";
+}
+
+/* The row over the list: \x01 marks the view that's on, \x02 a button that deletes. */
+std::vector<std::string> Store::console_chips() const
+{
+    if (con_select_)
+    {
+        long long all = 0;
+        for (const ConsoleApp &c : console_)
+            if (std::find(con_marked_.begin(), con_marked_.end(), c.folder) != con_marked_.end() && c.size > 0) all += c.size;
+        std::size_t can = 0;
+        for (const ConsoleApp *c : console_list()) can += c->store ? 0 : 1;
+        const std::string del = con_marked_.empty() ? std::string("Delete")
+                                                    : "Delete " + std::to_string(con_marked_.size()) + "  \xC2\xB7  " + size_text(std::uint64_t(all));
+        return {"\x02" + del, con_marked_.size() >= can && can > 0 ? "Select none" : "Select all", "Done"};
+    }
+    const char *sorts[4] = {"Name", "Biggest", "Newest", "Location"};
+    return {std::string(prefs_.con_view == 0 ? "\x01" : "") + "Grid", std::string(prefs_.con_view == 1 ? "\x01" : "") + "List",
+            std::string("Sort: ") + sorts[std::clamp(prefs_.con_sort, 0, 3)], "Show: " + filter_label(prefs_.con_filter), "Select", "Storage",
+            "Refresh home screen", "Reload ShadowMountPlus"};
+}
+
+void Store::press_console_chip(const std::string &chip0)
+{
+    const std::string chip = !chip0.empty() && (chip0[0] == '\x01' || chip0[0] == '\x02') ? chip0.substr(1) : chip0;
+    if (chip == "Grid" || chip == "List")
+    {
+        prefs_.con_view = chip == "Grid" ? 0 : 1;
+        save_prefs();
+        play(int(Sfx::Select));
+    }
+    else if (chip.rfind("Sort: ", 0) == 0)
+    {
+        prefs_.con_sort = (prefs_.con_sort + 1) % 4;
+        col_ = 0;
+        lscroll_ = lscroll_to_ = 0;
+        save_prefs();
+        play(int(Sfx::Select));
+    }
+    else if (chip.rfind("Show: ", 0) == 0)
+    {
+        const auto fs = console_filters();
+        const auto at = std::find(fs.begin(), fs.end(), prefs_.con_filter);
+        prefs_.con_filter = at == fs.end() || at + 1 == fs.end() ? fs.front() : *(at + 1);
+        col_ = 0;
+        lscroll_ = lscroll_to_ = 0;
+        save_prefs();
+        play(int(Sfx::Select));
+    }
+    else if (chip == "Select")
+    {
+        con_select_ = true;
+        con_marked_.clear();
+        con_chip_ = 2; /* Done, while nothing's marked */
+        lib_note_.clear();
+        play(int(Sfx::Select));
+    }
+    else if (chip == "Storage")
+        open_panel(PanelStorage);
+    else if (chip == "Refresh home screen")
+        start_refresh_home(true);
+    else if (chip == "Reload ShadowMountPlus")
+        start_reload_smp();
+    else if (chip.rfind("Delete", 0) == 0)
+    {
+        if (con_marked_.empty()) { toast("Mark the apps to delete first"); play(int(Sfx::Error)); return; }
+        if (engine().job().phase == Phase::Working) { lib_note_ = "Wait for the current job to finish first."; lib_note_bad_ = true; play(int(Sfx::Error)); return; }
+        open_panel(PanelDelete);
+    }
+    else if (chip == "Select all" || chip == "Select none")
+    {
+        con_marked_.clear();
+        if (chip == "Select all")
+            for (const ConsoleApp *c : console_list())
+                if (!c->store) con_marked_.push_back(c->folder);
+        play(int(Sfx::Select));
+    }
+    else if (chip == "Done")
+    {
+        con_select_ = false;
+        con_marked_.clear();
+        con_chip_ = 4;
+        play(int(Sfx::Back));
+    }
 }
 
 Texture *Store::console_icon(const ConsoleApp &c)
@@ -138,26 +272,28 @@ void Store::start_refresh_home(bool from_lib)
     play(int(Sfx::Select));
 }
 
-void Store::start_reload_smp()
+void Store::start_reload_smp(bool from_lib)
 {
+    std::string &note = from_lib ? lib_note_ : settings_note_;
+    bool &bad = from_lib ? lib_note_bad_ : settings_note_bad_;
     if (engine().storage_lost())
     {
-        lib_note_ = kStorageLost;
-        lib_note_bad_ = true;
+        note = kStorageLost;
+        bad = true;
         play(int(Sfx::Error));
         return;
     }
     if (smp_path().empty())
     {
-        lib_note_ = "Choose your ShadowMountPlus file in Settings > General first.";
-        lib_note_bad_ = true;
+        note = "Choose your ShadowMountPlus file in Settings > ShadowMountPlus first.";
+        bad = true;
         play(int(Sfx::Error));
         return;
     }
     if (engine().job().phase == Phase::Working)
     {
-        lib_note_ = "Wait for the current job to finish first.";
-        lib_note_bad_ = true;
+        note = "Wait for the current job to finish first.";
+        bad = true;
         play(int(Sfx::Error));
         return;
     }
@@ -166,66 +302,90 @@ void Store::start_reload_smp()
     std::string why;
     if (!engine().reload_smp(why))
     {
-        lib_note_ = "Couldn't reload ShadowMountPlus. " + why;
-        lib_note_bad_ = true;
+        note = "Couldn't reload ShadowMountPlus. " + why;
+        bad = true;
         play(int(Sfx::Error));
         return;
     }
     opening_ = true;
-    opening_lib_ = true;
+    opening_lib_ = from_lib;
     opening_t_ = 0;
     opening_poll_ = 0;
-    lib_note_ = "Closing the store for a moment\xE2\x80\xA6";
-    lib_note_bad_ = false;
+    note = "Closing the store for a moment\xE2\x80\xA6";
+    bad = false;
     play(int(Sfx::Select));
 }
 
 bool Store::update_console(float dt, int moves, bool u, bool d)
 {
     (void)dt;
-    (void)moves;
     if (engine().storage_lost())
     {
         /* (2.2.1) Nothing here can be done now: only up, to the views. */
         col_ = 0;
+        con_on_row_ = false;
         if (u) { lib_bar_ = true; play(int(Sfx::Move)); }
         return true;
     }
     sync_console();
     const auto list = console_list();
-    const int n = kTopRows + int(list.size());
-    col_ = std::clamp(col_, 0, n - 1);
-    if (u && col_ == 0) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
-    const int to = std::clamp(col_ + (d ? 1 : 0) - (u ? 1 : 0), 0, n - 1);
-    if (to != col_) { col_ = to; play(int(Sfx::Move)); }
-    if (pressed(pad::BtnSquare))
+    const int n = int(list.size());
+    if (con_select_ && pressed(pad::BtnCircle))
     {
-        con_sort_ = 1 - con_sort_;
-        col_ = std::min(col_, kTopRows - 1 + (list.empty() ? 0 : 1));
-        lscroll_to_ = 0;
-        toast(con_sort_ ? "Biggest first" : "By name");
+        press_console_chip("Done");
+        return true;
+    }
+    if (con_on_row_)
+    {
+        /* (2.2.2) The row: views, sort, filter, Select, Storage, ShadowMountPlus's two. */
+        const auto chips = console_chips();
+        const int c = std::clamp(con_chip_ + moves, 0, int(chips.size()) - 1);
+        if (c != con_chip_) { con_chip_ = c; play(int(Sfx::Move)); }
+        if (u) { con_on_row_ = false; lib_bar_ = true; play(int(Sfx::Move)); return true; }
+        if (d && n > 0) { con_on_row_ = false; col_ = std::clamp(col_, 0, n - 1); play(int(Sfx::Move)); return true; }
+        if (pressed(pad::BtnCross)) press_console_chip(chips[std::size_t(con_chip_)]);
+        else if (pressed(pad::BtnSquare) && !con_select_) press_console_chip(prefs_.con_view == 0 ? "List" : "Grid");
+        return true;
+    }
+    if (n == 0)
+    {
+        if (u) { con_on_row_ = true; play(int(Sfx::Move)); }
+        return true;
+    }
+    const bool grid = prefs_.con_view == 0;
+    const int per = grid ? kPerRow : 1;
+    col_ = std::clamp(col_, 0, n - 1);
+    int to = col_;
+    if (grid && moves) to = std::clamp(col_ + moves, 0, n - 1);
+    if (d) to = std::min(n - 1, col_ + per);
+    if (u)
+    {
+        if (col_ < per) { con_on_row_ = true; play(int(Sfx::Move)); return true; }
+        to = col_ - per;
+    }
+    if (to != col_) { col_ = to; play(int(Sfx::Move)); }
+    if (pressed(pad::BtnSquare) && !con_select_)
+    {
+        prefs_.con_view = 1 - prefs_.con_view; /* Square: grid or list */
+        save_prefs();
+        toast(prefs_.con_view == 0 ? "Grid view" : "List view");
         play(int(Sfx::Select));
         return true;
     }
     if (!pressed(pad::BtnCross)) return true;
-    if (col_ == 0)
+    const ConsoleApp &c = *list[std::size_t(col_)];
+    if (con_select_)
     {
-        start_refresh_home(true);
+        /* Marked to delete together; never the store itself. */
+        if (c.store) { toast("Recomp Store can't be deleted from here"); play(int(Sfx::Error)); return true; }
+        auto at = std::find(con_marked_.begin(), con_marked_.end(), c.folder);
+        if (at != con_marked_.end()) con_marked_.erase(at);
+        else con_marked_.push_back(c.folder);
+        con_chip_ = 0; /* Delete, up there */
+        play(int(Sfx::Select));
         return true;
     }
-    if (col_ == 1)
-    {
-        start_reload_smp();
-        return true;
-    }
-    if (engine().storage_lost())
-    {
-        lib_note_ = kStorageLost; /* (2.2.1) the list is what it was before: nothing can be done to it */
-        lib_note_bad_ = true;
-        play(int(Sfx::Error));
-        return true;
-    }
-    open_manage(*list[std::size_t(col_ - kTopRows)]);
+    open_manage(c);
     return true;
 }
 
@@ -294,6 +454,66 @@ void Store::draw_console_row(Gfx &gfx, const ConsoleApp &c, float x0, float y0, 
     }
 }
 
+void Store::draw_console_tile(Gfx &gfx, const ConsoleApp &c, float x, float y, float size, float focus)
+{
+    /* (2.2.2) As a Discover tile: the icon, lifted when focused; its name, title ID and size under it. */
+    const float s = 1 + 0.06f * focus;
+    const float w = size * s;
+    const float tx = x + size / 2 - w / 2, ty = y + size / 2 - w / 2 - 10 * focus;
+    const float R = 28 * s;
+    gfx.panel(tx + 8, ty + 22 + 8 * focus, w - 16, w - 16, {0, 0, 0, 0}, 1.f, R, {0, 0, 0, 0.25f + 0.25f * focus}, 0, 24 + 12 * focus);
+    if (Texture *t = console_icon(c))
+        gfx.image(t, tx, ty, w, w, {}, R);
+    else
+    {
+        gfx.panel(tx, ty, w, w, C(0x15223A), 1.f, R, kRim, 1.25f);
+        if (c.app)
+        {
+            std::string first = c.name.substr(0, 1);
+            for (char &ch : first)
+                if (ch >= 'a' && ch <= 'z') ch = char(ch - 'a' + 'A'); /* (not toupper: one more import) */
+            gfx.text_mid(Font::ExtraBold, 72 * s, tx + w / 2, ty + w / 2, C(kCyan, 0.9f), Align::Center, first);
+        }
+        else if (folder_icon_)
+            gfx.image(folder_icon_, tx + w * 0.3f, ty + w * 0.3f, w * 0.4f, w * 0.4f, C(kMuted));
+    }
+    ring(gfx, tx, ty, w, w, R, focus);
+    if (c.store || !c.store_id.empty())
+    {
+        const char *tag = c.store ? "THIS STORE" : "RECOMP STORE";
+        const float bw = gfx.measure(Font::Bold, 12, tag, 1) + 18;
+        gfx.panel(tx + 12, ty + 12, bw, 24, C(kMidnight, 0.82f), 1.f, 12, C(kCyan, 0.6f), 1.f);
+        gfx.text_mid(Font::Bold, 12, tx + 12 + bw / 2, ty + 24, C(kCyan), Align::Center, tag, 1);
+    }
+    if (c.root != "/data/homebrew")
+    {
+        /* Where it is, when it isn't the console's own storage. */
+        const std::string where = c.place;
+        const float bw = gfx.measure(Font::Bold, 13, where) + 20;
+        gfx.panel(tx + 12, ty + w - 12 - 26, bw, 26, C(kMidnight, 0.82f), 1.f, 13, kRim, 1.f);
+        gfx.text_mid(Font::Bold, 13, tx + 12 + bw / 2, ty + w - 12 - 13, C(kFrost), Align::Center, where);
+    }
+    if (con_select_ && !c.store)
+    {
+        const bool marked = std::find(con_marked_.begin(), con_marked_.end(), c.folder) != con_marked_.end();
+        const float r = 17, cx = tx + w - 14 - r, cy = ty + 14 + r;
+        gfx.panel(cx - r, cy - r, r * 2, r * 2, marked ? C(0xE5484D) : C(kMidnight, 0.7f), 1.f, r, marked ? C(0xFFFFFF, 0.9f) : C(kFrost, 0.8f), 2.f);
+        if (marked) draw_check(gfx, cx, cy, 20, C(0xFFFFFF));
+    }
+    const JobState job = engine().job();
+    const bool busy = job.phase == Phase::Working &&
+                      (job.app_id == c.folder || (!c.store_id.empty() && job.kind == "delete" && job.app_id == c.store_id));
+    if (busy)
+    {
+        gfx.panel(tx, ty, w, w, C(kMidnight, 0.6f), 1.f, R);
+        gfx.text_mid(Font::Bold, 18, tx + w / 2, ty + w / 2, C(kFrost), Align::Center, "Working\xE2\x80\xA6");
+    }
+    gfx.text_mid(Font::SemiBold, 21, x, y + size + 14 + 13, C(kFrost), Align::Left, fit(gfx, Font::SemiBold, 21, size + 20, c.name));
+    std::string line = c.app ? (c.title_id.empty() ? std::string("No title ID") : c.title_id) : std::string("Not an app");
+    line += "  \xC2\xB7  " + (c.size >= 0 ? size_text(std::uint64_t(c.size)) : std::string("\xE2\x80\xA6"));
+    gfx.text_mid(Font::Regular, 17, x, y + size + 14 + 26 + 4 + 11, C(kMuted), Align::Left, fit(gfx, Font::Regular, 17, size + 20, line));
+}
+
 void Store::draw_console(Gfx &gfx, float slide)
 {
     if (engine().storage_lost())
@@ -307,7 +527,17 @@ void Store::draw_console(Gfx &gfx, float slide)
     }
     sync_console();
     const auto list = console_list();
-    float top = kContent;
+    /* (2.2.2) The row: views and actions, and ShadowMountPlus as last asked on its right. */
+    {
+        std::string ver;
+        const int smp = engine().smp_state(ver);
+        std::string right;
+        if (con_select_) right = con_marked_.empty() ? "Cross marks an app" : std::to_string(con_marked_.size()) + " marked";
+        else if (smp == 1) right = "\x03ShadowMountPlus " + (ver.empty() ? std::string() : ver + " ") + "is running";
+        else if (smp == 0) right = "\x04ShadowMountPlus isn't running";
+        draw_chip_row(gfx, console_chips(), con_chip_, con_on_row_ && !lib_bar_, kContent + slide, right);
+    }
+    float top = kContent + kRowTop;
     if (!lib_note_.empty())
     {
         /* What the last thing done here did, in full (the bar only has room for a line of it). */
@@ -317,83 +547,46 @@ void Store::draw_console(Gfx &gfx, float slide)
         draw_lines(gfx, Font::SemiBold, 19, 126, top + slide + 13, 28, lib_note_bad_ ? C(0xFFB4A8) : C(0x9FF0C6), lines);
         top += nh + 14;
     }
-    const int n = kTopRows + int(list.size());
+    const int n = int(list.size());
+    const bool grid = prefs_.con_view == 0;
+    const float pitch = grid ? kConPitch : kRowPitch;
+    const int rows = grid ? (n + kPerRow - 1) / kPerRow : n;
+    const int fr = grid ? std::clamp(col_, 0, std::max(0, n - 1)) / kPerRow : col_;
     const float view_h = kBottom - top;
-    float total_h = float(n) * kRowPitch;
-    keep_shown(lscroll_, lscroll_to_, float(col_) * kRowPitch, float(col_) * kRowPitch + kRowH + 8, view_h, total_h);
+    const float total_h = float(rows) * pitch;
+    keep_shown(lscroll_, lscroll_to_, float(fr) * pitch, float(fr) * pitch + (grid ? pitch - 30 : kRowH + 8), view_h, total_h);
     /* Room above the first row for its focus ring, unless the list is scrolled (then a sliver of
      * the row above would show under the note). */
     const float above = lscroll_ > 0.5f ? 0.f : 12.f;
     gfx.clip(0, top - above, gfx.design_w(), kBottom - top + above);
-    std::string ver;
-    const int smp = engine().smp_state(ver);
-    const int waiting = engine().home_waiting();
-    const JobState job = engine().job();
+    const bool lit = !lib_bar_ && !con_on_row_;
     for (int i = 0; i < n; ++i)
     {
         float &f = focus_anim_[std::min(i, 511)];
-        f = approach(f, i == col_ && !lib_bar_ ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
-        const float y = top + 8 + float(i) * kRowPitch - lscroll_ + slide;
-        if (y > kBottom || y + kRowH < top - 20) continue;
-        if (i >= kTopRows)
-        {
-            draw_console_row(gfx, *list[std::size_t(i - kTopRows)], 96, y, 1728, f);
-            continue;
-        }
-        /* ShadowMountPlus's rows. */
-        const float k = ease_out(f), s = 1 + 0.012f * k;
-        const float w = 1728 * s, h = kRowH * s, x = 96 + (1728 - w) / 2, yy = y + (kRowH - h) / 2;
-        glass(gfx, x, yy, w, h, 26, i == 0 ? Color{0.21f, 0.84f, 0.96f, 0.10f + 0.05f * k} : Color{1, 1, 1, 0.07f + 0.05f * k}, true);
-        ring(gfx, x, yy, w, h, 26, k);
-        const float is = 84 * s, ix = x + 20, iy = yy + (h - is) / 2;
-        gfx.panel(ix, iy, is, is, i == 0 ? C(kCyan, 0.16f) : C(kFrost, 0.08f), 1.f, 20, i == 0 ? C(kCyan, 0.5f) : kRim, 1.25f);
-        if (Texture *ic = cat_icon_[i == 0 ? 2 : 3]) /* the home screen's apps; a tool */
-            gfx.image(ic, ix + is * 0.22f, iy + is * 0.22f, is * 0.56f, is * 0.56f, i == 0 ? C(kCyan) : C(kFrost, 0.85f));
-        std::string title, line, button;
-        if (i == 0)
-        {
-            title = "Refresh home screen";
-            if (smp == 1)
-                line = "The store closes for a moment while ShadowMountPlus " + (ver.empty() ? std::string() : ver + " ") +
-                       "adds new apps" + (waiting ? " and makes " + count_words(std::size_t(waiting), "change", "changes") + " waiting for it" : std::string()) +
-                       ", then opens again.";
-            else if (smp == 0)
-                line = smp_path().empty() ? "ShadowMountPlus isn't running. Choose its file in Settings > General, and Refresh starts it."
-                                          : "ShadowMountPlus isn't running. The store closes for a moment while it starts and adds new apps, then opens again.";
-            else
-                line = "Looking for ShadowMountPlus\xE2\x80\xA6";
-            button = opening_ ? "Closing\xE2\x80\xA6" : "Refresh";
-        }
+        f = approach(f, i == col_ && lit ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+        const float y = top + (grid ? 14 : 8) + float(grid ? i / kPerRow : i) * pitch - lscroll_ + slide;
+        if (y > kBottom || y + pitch < top - 20) continue;
+        if (grid)
+            draw_console_tile(gfx, *list[std::size_t(i)], 96 + float(i % kPerRow) * (kTileS + kTileGap), y, kTileS, ease_out(f));
         else
         {
-            title = "Reload ShadowMountPlus";
-            const std::string file = smp_path();
-            line = file.empty() ? std::string("Choose your ShadowMountPlus file in Settings > General first.")
-                                : "Sends " + base_name(file) + " again. The store closes for a moment while ShadowMountPlus restarts.";
-            button = opening_ ? "Closing\xE2\x80\xA6" : "Reload";
+            draw_console_row(gfx, *list[std::size_t(i)], 96, y, 1728, f);
+            const ConsoleApp &c = *list[std::size_t(i)];
+            if (con_select_ && !c.store)
+            {
+                /* Marked or not, on the icon's corner. */
+                const bool marked = std::find(con_marked_.begin(), con_marked_.end(), c.folder) != con_marked_.end();
+                const float r = 15, cx = 96 + 20 + 84 - 6, cy = y + (kRowH - 84) / 2 + 6;
+                gfx.panel(cx - r, cy - r, r * 2, r * 2, marked ? C(0xE5484D) : C(kMidnight, 0.75f), 1.f, r,
+                          marked ? C(0xFFFFFF, 0.9f) : C(kFrost, 0.8f), 2.f);
+                if (marked) draw_check(gfx, cx, cy, 18, C(0xFFFFFF));
+            }
         }
-        const float tx = ix + is + 24;
-        const float bw = gfx.measure(Font::Bold, 19, button) + 52;
-        gfx.text_mid(Font::ExtraBold, 24, tx, yy + h / 2 - 16, C(kFrost), Align::Left, title);
-        if (i == 0 && smp >= 0)
-        {
-            /* Running or not, as a dot after the title. */
-            const float dx = tx + gfx.measure(Font::ExtraBold, 24, title) + 16;
-            gfx.panel(dx, yy + h / 2 - 22, 12, 12, smp == 1 ? C(kGreen) : C(0xFF8A80), 1.f, 6);
-            gfx.text_mid(Font::SemiBold, 16, dx + 20, yy + h / 2 - 16, smp == 1 ? C(0x9FF0C6) : C(0xFFB4A8), Align::Left,
-                         smp == 1 ? "Running" : "Not running");
-        }
-        gfx.text_mid(Font::Regular, 18, tx, yy + h / 2 + 18, C(kSoft), Align::Left, fit(gfx, Font::Regular, 18, w - (tx - x) - bw - 70, line));
-        const bool dim = (opening_ || job.phase == Phase::Working) || (i == 1 && smp_path().empty());
-        gfx.panel(x + w - 28 - bw, yy + h / 2 - 26, bw, 52, dim ? C(kFrost, 0.08f) : i == 0 ? C(kCyan) : C(kFrost, 0.14f), 1.f, 17);
-        gfx.text_mid(Font::Bold, 19, x + w - 28 - bw / 2, yy + h / 2, dim ? C(kMuted) : i == 0 ? C(kMidnight) : C(kFrost), Align::Center, button);
     }
     if (list.empty())
-    {
-        const float y = top + 8 + float(kTopRows) * kRowPitch - lscroll_ + slide;
-        gfx.text_mid(Font::Regular, 20, 126, y + 30, C(kMuted), Align::Left,
-                     console_looking_ ? "Looking in your homebrew folders\xE2\x80\xA6" : "Nothing in your homebrew folders.");
-    }
+        gfx.text_mid(Font::Regular, 20, 126, top + 30 + slide, C(kMuted), Align::Left,
+                     console_looking_ ? "Looking in your homebrew folders\xE2\x80\xA6"
+                     : console_.empty() ? "Nothing in your homebrew folders." : "Nothing here. Show: All lists everything.");
     gfx.unclip();
     if (total_h - lscroll_ > view_h + 8) draw_more(gfx);
 }
@@ -657,9 +850,16 @@ void Store::draw_manage(Gfx &gfx)
 /* A job the App manager started, done: what it did, in the Library. */
 bool Store::take_manage_result(const JobState &job)
 {
-    const bool mine = job.kind == "mdelete" || job.kind == "mmove" || job.kind == "mretitle" || (mng_job_ && job.kind == "delete");
+    const bool mine = job.kind == "mdelete" || job.kind == "mmove" || job.kind == "mretitle" || job.kind == "mdeletes" /* (2.2.2) */ ||
+                      (mng_job_ && job.kind == "delete");
     if (!mine || (job.phase != Phase::Done && job.phase != Phase::Failed)) return false;
     mng_job_ = false;
+    if (job.kind == "mdeletes")
+    {
+        /* (2.2.2) Several at once: Select ends, and the note says how it went. */
+        con_select_ = false;
+        con_marked_.clear();
+    }
     if (job.phase == Phase::Done)
     {
         if (!job.note.empty() && job.kind != "delete")

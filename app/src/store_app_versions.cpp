@@ -184,12 +184,11 @@ bool Store::update_versions(float dt)
                 notice_bad_ = true;
                 play(int(Sfx::Error));
             }
-            else if (engine().install(a->id, vers_pick_.key))
+            else if (engine().queue_remove(a->id), enqueue(*a, vers_pick_.key, "", true)) /* (2.2.2) after whatever is going */
             {
                 vers_ = vers_ask_ = false;
                 notice_.clear();
                 page_focus_ = 0; /* back on the button, which shows it going */
-                play(int(Sfx::Install));
             }
             else
                 play(int(Sfx::Error)); /* something else is going */
@@ -370,7 +369,7 @@ bool Store::update_moved(float dt)
     {
         moved_ = false;
         /* This once: the install after it writes the new place in the app's folder. */
-        if (engine().resolve_clash(a->id, 3, moved_job_.version))
+        if (engine().resolve_clash(a->id, 3, moved_job_.version, moved_job_.root))
         {
             notice_.clear();
             page_focus_ = 0;

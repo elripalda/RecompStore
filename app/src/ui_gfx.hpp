@@ -227,6 +227,13 @@ public:
      * it; begin() does too. */
     void clip(float x, float y, float w, float h);
     void unclip();
+    /* (2.2.2) A box inside the clip there is now (both apply), its sides on whole framebuffer
+     * pixels: for drawing part of a rounded shape. pop_clip() puts the one before back. */
+    void push_clip(float x, float y, float w, float h);
+    void pop_clip();
+    /* (2.2.2) x (design pixels) moved to the nearest whole framebuffer pixel, as the layer and the
+     * content scale place it: shapes that meet there neither overlap nor leave a gap. */
+    float snap_x(float x) const;
 
     /* The light look (Revolution): colours given to the drawing calls below
      * are turned light for dark and dark for light, keeping their hue, so
@@ -449,6 +456,8 @@ private:
     std::vector<Batch> batches_;
     bool overflowed_ = false;
     VkRect2D clip_{}; /* clip(): in framebuffer pixels; {0,0,0,0} none */
+    VkRect2D clip_saved_[4]{}; /* (2.2.2) push_clip()'s, to put back */
+    int clip_depth_ = 0;
 
 #define PORPOISE_UI_VK_FUNCS(X)                                                                  \
     X(vkCreateBuffer) X(vkDestroyBuffer) X(vkGetBufferMemoryRequirements) X(vkAllocateMemory)    \
