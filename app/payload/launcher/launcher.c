@@ -26,6 +26,18 @@
  * a wait for it, then the store opens again (phase=refreshed smp=1|0
  * changes=<how many were made>).
  *
+ * (2.2.1) ShadowMountPlus is only ever sent from here, once the store has
+ * closed. A second copy of it stops the running one, and the running one's exit
+ * takes /data and the USB drives away from every app that's open (its sandbox
+ * aliases, removed in sm_fakelib_game_shutdown); the new copy only gives them
+ * to apps started after it. Sent while the store was open, the store lost its
+ * own folder until it was opened again. So the job may carry path=, the
+ * player's ShadowMountPlus file: mode=reload_smp sends it whether or not one
+ * is running, waits for the running one to stop answering and the new one to
+ * answer on 10101 (45 s at most), asks it to look for apps, then opens the
+ * store again (phase=refreshed reload=1 smp=1|0 restarted=1|0). In the other
+ * modes it's sent only when nothing answers on 10101 (started=1).
+ *
  * A file called "cancel" there stops it before it opens anything. What
  * happened goes to the store's log, as "launcher:" lines.
  *
@@ -341,6 +353,111 @@ static int make_changes(const char *job, bool *asked)
     }
     return made;
 }
+/* (2.2.1) Whether ShadowMountPlus answers on 10101 (its version). */
+static bool smp_up(void)
+{
+    char reply[512];
+    return smp_post("/api/v1/version", "{}", reply, sizeof reply) == 200;
+}
+
+/* (2.2.1) The player's ShadowMountPlus file, sent to the payload loader on port 9021 as the store
+ * sends this launcher: an ELF of 64 bytes to 64 MB, read whole, then written to the socket. */
+static bool send_elf(const char *path)
+{
+    struct stat st;
+    if (path[0] != '/' || stat(path, &st) != 0 || st.st_size < 64 || st.st_size > 64 * 1024 * 1024)
+    {
+        log_line("ShadowMountPlus: %s isn't there, or isn't a payload", path);
+        return false;
+    }
+    const size_t size = (size_t)st.st_size;
+    unsigned char *elf = malloc(size);
+    if (!elf)
+        return false;
+    FILE *f = fopen(path, "rb");
+    size_t got = 0;
+    if (f)
+    {
+        got = fread(elf, 1, size, f);
+        fclose(f);
+    }
+    if (got != size || elf[0] != 0x7F || elf[1] != 'E' || elf[2] != 'L' || elf[3] != 'F')
+    {
+        log_line("ShadowMountPlus: %s couldn't be read as a payload", path);
+        free(elf);
+        return false;
+    }
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    bool sent = false;
+    if (fd >= 0)
+    {
+        struct timeval limit = {10, 0};
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof limit);
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(9021);
+        sa.sin_addr.s_addr = htonl(0x7F000001);
+        if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0)
+        {
+            size_t at = 0;
+            while (at < size)
+            {
+                const ssize_t w = send(fd, elf + at, size - at, 0);
+                if (w < 0 && errno == EINTR)
+                    continue;
+                if (w <= 0)
+                    break;
+                at += (size_t)w;
+            }
+            sent = at == size;
+        }
+        close(fd);
+    }
+    free(elf);
+    log_line(sent ? "ShadowMountPlus: sent %s (%u KB) to the payload loader" : "ShadowMountPlus: no payload loader took %s on port 9021",
+             path, (unsigned)(size / 1024));
+    return sent;
+}
+
+/* (2.2.1) Sends ShadowMountPlus and waits for it: 2 a new copy answers (the old one, if one was
+ * answering, stopped first), 1 the old one never stopped (it still answers, so nothing changed),
+ * 0 nothing answers 45 seconds on, -1 it couldn't be sent. */
+static int smp_start(const char *path, bool was_up)
+{
+    if (!send_elf(path))
+        return -1;
+    const time_t sent = time(NULL);
+    if (was_up)
+    {
+        /* The running copy answers until it has stopped (the new one asks it to). */
+        bool down = false;
+        while (time(NULL) - sent < 20 && !down)
+        {
+            down = !smp_up();
+            if (!down)
+                usleep(250 * 1000);
+        }
+        if (!down)
+        {
+            log_line("ShadowMountPlus: the running copy still answers 20 s on; it wasn't replaced");
+            return 1;
+        }
+        log_line("ShadowMountPlus: the running copy stopped after %ld s", (long)(time(NULL) - sent));
+    }
+    while (time(NULL) - sent < 45)
+    {
+        if (smp_up())
+        {
+            log_line("ShadowMountPlus: answering again %ld s after it was sent", (long)(time(NULL) - sent));
+            return 2;
+        }
+        usleep(500 * 1000);
+    }
+    log_line("ShadowMountPlus: nothing answered on port 10101 in 45 s");
+    return 0;
+}
+
 /* The system's answer: 0 or more, it opened. Tries for a few seconds, as the
  * store may still be closing. */
 static int open_title(const char *title, int attempts)
@@ -366,7 +483,7 @@ static int open_title(const char *title, int attempts)
 
 int main(void)
 {
-    char job[2048] = {0};
+    char job[4096] = {0};
     FILE *f = fopen(JOB_DIR "/job.txt", "r");
     if (!f)
         return 1;
@@ -375,13 +492,15 @@ int main(void)
     job[n] = '\0';
     unlink(JOB_DIR "/job.txt"); /* done once: a second copy of this finds nothing */
 
-    char token[64], title[32], name[96], mode[16];
+    char token[64], title[32], name[96], mode[16], path[512];
     field(job, "token", token, sizeof token);
     field(job, "title", title, sizeof title);
     field(job, "name", name, sizeof name);
     field(job, "mode", mode, sizeof mode);
-    const bool refresh = strcmp(mode, "refresh") == 0;
-    if (!token[0] || !title_ok(title))
+    field(job, "path", path, sizeof path); /* (2.2.1) the player's ShadowMountPlus file */
+    const bool reload = strcmp(mode, "reload_smp") == 0;
+    const bool refresh = strcmp(mode, "refresh") == 0 || reload;
+    if (!token[0] || !title_ok(title) || (reload && (path[0] != '/' || strcmp(title, STORE_TITLE) != 0)))
     {
         log_line("the job was not a game to open; nothing done");
         return 1;
@@ -411,13 +530,69 @@ int main(void)
         else
             usleep(100 * 1000);
     }
-    log_line("%s; the store %s", refresh ? "refreshing the home screen" : "opening the app", gone ? "has closed" : "is still open after 10 s");
+    if (!gone && path[0])
+    {
+        /* (2.2.1) ShadowMountPlus may be sent below: never while the store is still open. */
+        for (int i = 0; i < 200 && !gone && !cancelled(); ++i)
+        {
+            const int now = sceSystemServiceGetAppIdOfRunningBigApp();
+            if (now != store || now < 0)
+                gone = 1;
+            else
+                usleep(100 * 1000);
+        }
+    }
+    log_line("%s; the store %s", reload ? "reloading ShadowMountPlus" : refresh ? "refreshing the home screen" : "opening the app",
+             gone ? "has closed" : "is still open");
     usleep(300 * 1000);
     sceUserServiceInitialize(0);
+
+    /* (2.2.1) ShadowMountPlus: sent again (Reload), or started when nothing answers and the
+     * store gave its file. Only once the store is gone: its exit already let go of the store's
+     * aliases, so the old copy's teardown takes nothing away from it. */
+    const bool was_up = smp_up();
+    int sent = -2; /* -2 not sent; else smp_start()'s answer */
+    if (path[0] && gone && (reload || !was_up))
+    {
+        log_line("ShadowMountPlus %s; sending %s", was_up ? "is running" : "doesn't answer on port 10101", path);
+        if (!reload)
+            toast("Starting ShadowMountPlus\xE2\x80\xA6");
+        sent = smp_start(path, was_up);
+    }
+    else if (reload)
+        log_line("the store is still open, so ShadowMountPlus wasn't sent (it would take the store's storage away)");
 
     /* (2.2) What ShadowMountPlus couldn't do while the store was open. */
     bool asked = false;
     const int changes = make_changes(job, &asked);
+
+    if (reload)
+    {
+        /* (2.2.1) Reload ShadowMountPlus: a look for apps with the new copy, then the store again. */
+        const bool back = (sent == 2 || smp_up()) && smp_scan();
+        if (sent == 2)
+            toast("ShadowMountPlus reloaded.");
+        else if (sent == 1)
+            toast("ShadowMountPlus didn't restart. The copy that was running still is.");
+        else if (sent == -2)
+            toast("Recomp Store didn't close, so ShadowMountPlus wasn't reloaded.");
+        else if (sent == -1)
+            toast("ShadowMountPlus couldn't be sent to your payload loader.");
+        else
+            toast("ShadowMountPlus didn't come back. Start it from your payload loader, then open Recomp Store.");
+        FILE *st = fopen(JOB_DIR "/status.tmp", "w");
+        if (st)
+        {
+            fprintf(st, "token=%s\ntitle=%s\nphase=refreshed\nreload=1\nsmp=%d\nrestarted=%d\nchanges=%d\nresult=0\n", token, g_title,
+                    back ? 1 : 0, sent == 2 ? 1 : 0, changes);
+            fclose(st);
+            rename(JOB_DIR "/status.tmp", JOB_DIR "/status.txt");
+        }
+        /* Its tile is mounted again once ShadowMountPlus answers (it starts its API last). */
+        const int again = open_title(STORE_TITLE, 10);
+        log_line("store opened again: 0x%08x", (unsigned)again);
+        return 0;
+    }
 
     if (refresh)
     {
@@ -446,7 +621,8 @@ int main(void)
         FILE *st = fopen(JOB_DIR "/status.tmp", "w");
         if (st)
         {
-            fprintf(st, "token=%s\ntitle=%s\nphase=refreshed\nsmp=%d\nchanges=%d\nresult=0\n", token, g_title, smp ? 1 : 0, changes);
+            fprintf(st, "token=%s\ntitle=%s\nphase=refreshed\nsmp=%d\nstarted=%d\nchanges=%d\nresult=0\n", token, g_title, smp ? 1 : 0,
+                    sent == 2 ? 1 : 0, changes);
             fclose(st);
             rename(JOB_DIR "/status.tmp", JOB_DIR "/status.txt");
         }

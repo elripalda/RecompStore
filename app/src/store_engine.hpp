@@ -507,10 +507,16 @@ public:
     bool manage(const std::string &kind, const std::string &folder, const std::string &dest = "");
     std::string free_title_id() const;
     /* (2.2) ShadowMountPlus as last asked (look_console asks): 1 running (version: its own, "1.7"),
-     * 0 it didn't answer, -1 not asked yet. reload_smp sends the player's copy (Settings) to the
-     * loader again, which restarts a running one. */
+     * 0 it didn't answer, -1 not asked yet. (2.2.1) reload_smp hands the player's copy (Settings)
+     * to the launcher with mode=reload_smp, as refresh_home does: the store closes, the launcher
+     * sends it (which restarts a running one), waits for it and opens the store again. The store
+     * never sends it itself (see refresh_smp). open_game_state and refresh_result as for Refresh. */
     int smp_state(std::string &version) const;
     bool reload_smp(std::string &why);
+    /* (2.2.1) The store's own folder (data_dir) worked when it started and can't be opened now:
+     * ShadowMountPlus restarted while the store was open, which takes /data away from it until
+     * it's opened again. Looked at again every 2 seconds at most; once lost, it stays lost. */
+    bool storage_lost() const;
     /* (2.2) Home screen changes ShadowMountPlus can't make while the store is open (it takes no
      * changes while an app runs): how many are waiting for the launcher (Open, or Refresh home
      * screen), which makes them once the store has closed. */
@@ -590,13 +596,18 @@ long long installed_time(const std::string &app_id);
  * title ID it's under and where it came from, so the guard knows its own installs. */
 constexpr const char *kMarker = "recompstore-install.json";
 
-/* ShadowMountPlus: the player's own copy of its payload, sent to the loader on port 9021
- * after each install and setup so the game shows up on the home screen. */
+/* ShadowMountPlus: the player's own copy of its payload. (2.2.1) Only the launcher sends it to
+ * the loader, once the store has closed: a second copy replaces the running one, whose exit takes
+ * /data away from every app that's open, the store included. */
 std::string smp_path();
 void set_smp_path(const std::string &path);
-/* 2: it was running (its API on 127.0.0.1:10101 answered) and is looking for new games
- * now; 1: it wasn't, so the player's copy was sent to the loader; 0: neither (why). */
+/* 2: it's running (its API on 127.0.0.1:10101 answered) and is looking for new games now;
+ * 1: nothing answered, and the player's copy is there for the launcher to start (Open, Refresh
+ * home screen); 0: neither (why). Never sends anything to the loader. */
 int refresh_smp(std::string &why);
+/* (2.2.1) What the store says once it has lost its folder (Engine::storage_lost). */
+constexpr const char *kStorageLost =
+    "Recomp Store lost access to the console's storage (ShadowMountPlus restarted). Close Recomp Store and open it again.";
 /* (2.0) ShadowMountPlus passes over a folder changed in the last 10 seconds (a copy may still
  * be going on), and a folder just installed always has been: it's asked again 12 and 30
  * seconds from now, by the store's worker. */

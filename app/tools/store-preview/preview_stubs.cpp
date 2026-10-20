@@ -133,7 +133,7 @@ std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
     };
     auto icon_of = [&](const char *id) { for (const App &a : g_cat.apps) if (a.id == id) return a.icon_file; return std::string(); };
     const char *real = std::getenv("PREVIEW_CONSOLE_ICON");
-    add("/data/homebrew/PPSA92000", "PPSA92000", "Recomp Store", "2.2.0", "", 52, true, "/home/claude/recompstore/app/assets/brand/logo-512.png");
+    add("/data/homebrew/PPSA92000", "PPSA92000", "Recomp Store", "2.2.1", "", 52, true, "/home/claude/recompstore/app/assets/brand/logo-512.png");
     add("/data/homebrew/PPSA92011", "PPSA92011", "WWE SmackDown vs. Raw 2011", "1.0.0", "PPSA92011", 7420, true, icon_of("PPSA92011"));
     add("/data/homebrew/PPSA99203", "PPSA99203", "PS5SX2", "2.15", "", 61, true, real ? real : "");
     add("/data/homebrew/PPSA64007", "PPSA64007", "Perfect Dark", "2.0.0", "PPSA64007", 214, true, icon_of("PPSA64007"));
@@ -149,6 +149,9 @@ bool Engine::manage(const std::string &, const std::string &, const std::string 
 std::string Engine::free_title_id() const { return "PPSA97003"; }
 int Engine::smp_state(std::string &v) const { const char *e = std::getenv("PREVIEW_SMP_STATE"); const int st = e ? std::atoi(e) : 1; v = st == 1 ? "1.7" : ""; return st; }
 bool Engine::reload_smp(std::string &) { return true; }
+static bool g_lost = false;
+void preview_storage_lost(bool lost) { g_lost = lost; }
+bool Engine::storage_lost() const { return g_lost; }
 int Engine::home_waiting() const { const char *e = std::getenv("PREVIEW_HOME_WAITING"); return e ? std::atoi(e) : 0; }
 bool refresh_home(std::string &) { return true; }
 bool refresh_result(std::string &) { return false; }

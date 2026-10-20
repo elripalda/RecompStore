@@ -18,7 +18,7 @@ using namespace porpoise::ui;
 #define GI(name) auto name = reinterpret_cast<PFN_##name>(vkGetInstanceProcAddr(instance, #name))
 #define GD(name) auto name = reinterpret_cast<PFN_##name>(gdpa(device, #name))
 
-namespace recomp { void preview_job(const char *kind, const char *app); }
+namespace recomp { void preview_job(const char *kind, const char *app); void preview_storage_lost(bool lost); }
 int main(int argc, char **argv)
 {
     if (argc < 3) { std::fprintf(stderr, "usage: store-preview <assets> <out>\n"); return 2; }
@@ -294,6 +294,19 @@ int main(int argc, char **argv)
         recomp::preview_job("mmove", "/data/homebrew/PPSA99203"); store.preview_console(4); settle(30); frame("v22-console-moving");
         recomp::preview_job("", "");
         store.preview_general(2); settle(30); frame("v22-settings-refresh");
+    }
+    /* (2.2.1) Reload ShadowMountPlus through the launcher; the console's storage lost mid-session. */
+    if (want("v221"))
+    {
+        store.preview_console(1); settle(60); frame("v221-console-reload");
+        store.preview_console(1, 0, "Closing the store for a moment\xE2\x80\xA6"); settle(60); frame("v221-console-closing");
+        setenv("PREVIEW_SMP_STATE", "0", 1); store.preview_console(0); settle(60); frame("v221-console-smp-off");
+        setenv("PREVIEW_SMP_STATE", "1", 1);
+        recomp::preview_storage_lost(true);
+        store.preview_console(0); store.preview_lost(true); settle(30); frame("v221-lost-box");
+        store.preview_lost(false); settle(30); frame("v221-lost-console");
+        recomp::preview_storage_lost(false);
+        store.preview_general(1); settle(30); frame("v221-settings-smp");
     }
     if (const char *id = std::getenv("PREVIEW_PAGE")) { store.preview_open(id); settle(60); if (want("custom")) frame("page-custom"); }
     store.preview_open("PPSA92011"); settle(60); if (want("page")) frame("page-2011");

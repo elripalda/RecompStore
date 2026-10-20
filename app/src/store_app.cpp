@@ -796,7 +796,7 @@ bool Store::update_picker(float dt)
             {
                 set_smp_path(e.path);
                 picker_ = false;
-                settings_note_ = "ShadowMountPlus set. The store starts it after each install and game setup.";
+                settings_note_ = "ShadowMountPlus set. When it isn't running, the store starts it as it closes to open a game or refresh your home screen.";
                 settings_note_bad_ = false;
                 play(int(Sfx::Select));
             }
@@ -996,8 +996,8 @@ bool Store::update(const pad::State &p, float dt)
             /* (2.0) Most often it isn't on the home screen yet: ShadowMountPlus is asked to add it
              * now (and again in a moment), rather than the player going to Settings for it. */
             std::string why;
-            const int home = refresh_smp(why);
-            if (home > 0) smp_scan_later();
+            const int home = refresh_smp(why); /* (2.2.1) asks a running one; never starts one */
+            if (home == 2) smp_scan_later();
             char t[300];
             if (home > 0)
                 std::snprintf(t, sizeof t,
@@ -1006,9 +1006,10 @@ bool Store::update(const pad::State &p, float dt)
                               find(id)->name.c_str(), result, home == 2 ? "didn't add" : "wasn't running to add");
             else
                 std::snprintf(t, sizeof t,
-                              "%s didn't open (0x%08X). If it isn't on your home screen yet, start ShadowMountPlus "
-                              "(Settings > General), give it a few seconds, then try again.",
-                              find(id)->name.c_str(), result);
+                              "%s didn't open (0x%08X). %s", find(id)->name.c_str(), result,
+                              why.find("no file is chosen") != std::string::npos
+                                  ? "ShadowMountPlus isn't running. Choose its file in Settings > General, and the store starts it when you press Open."
+                                  : why.c_str());
             notice_ = t;
             notice_bad_ = true;
         }
@@ -1081,7 +1082,7 @@ bool Store::update(const pad::State &p, float dt)
         else if (job.home == 2 || job.home == 1)
             notice_ = done + "Press Open: the store closes, ShadowMountPlus puts it on your home screen, and it opens.";
         else
-            notice_ = done + "Start ShadowMountPlus to see it on your home screen, or let the store do it: Settings > General.";
+            notice_ = done + "Start ShadowMountPlus to see it on your home screen, or choose its file in Settings > General and the store starts it.";
         notice_bad_ = false;
         if (job.kind == "setup")
             chosen_.erase(job.app_id + "/" + job.slot);
@@ -1154,7 +1155,7 @@ bool Store::update(const pad::State &p, float dt)
     else if (job.phase == Phase::Failed)
     {
         play(int(Sfx::Error));
-        notice_ = job.error;
+        notice_ = engine().storage_lost() ? kStorageLost : job.error; /* (2.2.1) not each file it couldn't write */
         notice_bad_ = true;
         if (!queue_now_.empty() && job.app_id == queue_now_) queue_failed_.push_back(job.app_id); /* (2.0) Update All */
         engine().acknowledge();
@@ -1222,6 +1223,18 @@ bool Store::update(const pad::State &p, float dt)
     }
     /* (2.0) The Link screen asks the site every few seconds only while it's on screen. */
     engine().link_screen(booted_ && tab_ == Settings && section_ == SecLink && !page_open_);
+
+    /* (2.2.1) The console's storage gone mid-session (ShadowMountPlus restarted while the store was
+     * open): said once, over everything. */
+    if (booted_ && !lost_told_ && engine().storage_lost())
+    {
+        lost_told_ = true;
+        lost_ = true;
+        lost_t_ = 0;
+        play(int(Sfx::Error));
+    }
+    if (lost_)
+        return update_lost(dt);
 
     if (picker_)
         return update_picker(dt);
@@ -2359,7 +2372,7 @@ void Store::draw_settings(Gfx &gfx)
         }
         ry += 104;
         const std::string smp = smp_path();
-        option(1, "ShadowMountPlus", "After each install and setup, the store has it add the game to your home screen, starting it if needed.");
+        option(1, "ShadowMountPlus", "When ShadowMountPlus isn't running, the store starts this file as it closes to open a game or refresh your home screen.");
         gfx.text_mid(Font::Regular, 19, cx + cw - 8, ry + 52, smp.empty() ? C(kCyan) : C(kFrost), Align::Right,
                      smp.empty() ? std::string("Choose its file\xE2\x80\xA6") : fit(gfx, Font::Regular, 19, 380, base_name(smp)));
         ry += 104;
@@ -4062,6 +4075,39 @@ void Store::draw_keyboard(Gfx &gfx)
     gfx.set_layer();
 }
 
+/* ---- (2.2.1) The console's storage, gone ------------------------------------------------------ */
+bool Store::update_lost(float dt)
+{
+    lost_t_ = std::min(1.f, lost_t_ + dt * 4.f);
+    if (pressed(pad::BtnCross) || pressed(pad::BtnCircle))
+    {
+        lost_ = false;
+        play(int(Sfx::Back));
+    }
+    return true;
+}
+
+void Store::draw_lost(Gfx &gfx)
+{
+    if (!lost_)
+        return;
+    const float k = ease_out(lost_t_);
+    const float W = gfx.design_w(), H = gfx.design_h();
+    gfx.panel(0, 0, W, H, C(kMidnight, 0.72f * k), 1.f, 0);
+    gfx.set_layer(0, (1 - k) * 20, k);
+    const float bw = 820, bx = (W - bw) / 2, pad = 48, iw = bw - pad * 2;
+    const auto lines = wrap(gfx, Font::Bold, 26, iw, kStorageLost, 5);
+    const float bh = pad + 38 * float(lines.size()) + 36 + 64 + pad;
+    const float by = (H - bh) / 2;
+    glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
+    float y = by + pad;
+    y += draw_lines(gfx, Font::Bold, 26, bx + pad, y, 38, C(kFrost), lines) + 36;
+    gfx.panel(bx + pad, y, iw, 64, C(kFrost), 1.f, 20);
+    ring(gfx, bx + pad, y, iw, 64, 20, 1.f, true);
+    gfx.text_mid(Font::Bold, 22, bx + pad + iw / 2, y + 32, C(kMidnight), Align::Center, "OK");
+    gfx.set_layer();
+}
+
 void Store::draw_confirm(Gfx &gfx)
 {
     if (!confirm_)
@@ -4287,6 +4333,11 @@ void Store::draw_hints(Gfx &gfx)
         x -= 34;
     };
     const bool deeper = page_open_ || picker_;
+    if (lost_)
+    {
+        hint(hint_cross_, "OK"); /* (2.2.1) */
+        return;
+    }
     if (kb_)
     {
         hint(hint_circle_, kb_mode_ == 0 ? "Done" : "Back"); /* (2.0) a source or a report: Done is on the keyboard */
@@ -4471,6 +4522,7 @@ void Store::draw(Gfx &gfx)
     draw_keypad(gfx);
     draw_logs(gfx);
     draw_keyboard(gfx);
+    draw_lost(gfx); /* (2.2.1) */
     draw_hints(gfx);
     draw_toast(gfx); /* (2.0) */
 }
