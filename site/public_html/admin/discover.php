@@ -17,6 +17,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_array($in)) throw new RuntimeException('The sections didn\'t arrive. Reload the page and try again.');
             $clean = rs_clean_sections($in);
             rs_set_setting('discover_sections', json_encode($clean, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            // (2.1) The header: its style, its games and how often it turns.
+            $hd = json_decode((string)($_POST['header'] ?? ''), true);
+            if (is_array($hd)) {
+                rs_set_setting('discover_header', json_encode([
+                    'style' => isset(RS_HEADER_STYLES[$hd['style'] ?? '']) ? $hd['style'] : 'carousel',
+                    'games' => array_slice(array_values(array_filter(array_map('strval', (array)($hd['games'] ?? [])), fn($id) => (bool)preg_match('/^[A-Za-z0-9_-]{1,64}$/', $id))), 0, 12),
+                    'interval' => max(4, min(30, (int)($hd['interval'] ?? 8))),
+                ]));
+            }
             $n = count($clean);
             rs_flash("Saved Discover ($n " . ($n === 1 ? 'section' : 'sections') . '). Press Publish to send it to the store and the site.');
         }
@@ -39,7 +48,8 @@ foreach (rs_games() as $g) {
         'category' => rs_category((string)$g['category']), 'testers' => !empty($g['testers']),
     ];
 }
-$state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null, 'categories' => RS_CATEGORIES];
+$state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null, 'categories' => RS_CATEGORIES,
+    'header' => rs_discover_header(), 'headerStyles' => RS_HEADER_STYLES];
 rs_head('Discover');
 ?>
 <section class="head-row">
@@ -55,6 +65,13 @@ rs_head('Discover');
 
 <div class="disc">
   <div class="disc-edit">
+    <section class="d-header-edit" data-header aria-labelledby="hdr-title">
+      <h2 id="hdr-title">Header</h2>
+      <p class="muted">How the featured games show at the top of Discover. Recomp Store 2.1 and newer; older stores keep the carousel.</p>
+      <div class="hstyles" role="radiogroup" aria-label="Header style" data-hstyles></div>
+      <div class="hgames" data-hgames></div>
+      <label class="hint" data-hinterval>Changes every <input type="range" min="4" max="30" step="1" data-interval> <output data-interval-out></output> seconds</label>
+    </section>
     <div class="sections" data-sections></div>
     <div class="add-row">
       <span class="muted">Add</span>
@@ -78,6 +95,7 @@ rs_head('Discover');
 <form method="post" class="sticky-save" data-save>
   <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>">
   <input type="hidden" name="sections" value="">
+  <input type="hidden" name="header" value="">
   <button class="primary">Save</button>
   <span class="muted" data-save-note>Saving doesn't publish. Press Publish when you're done.</span>
 </form>

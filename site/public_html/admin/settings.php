@@ -3,7 +3,9 @@
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
+require __DIR__ . '/inc/totp.php';
 rs_require_login();
+rs_users_2fa();
 
 $fields = [
     'site_url' => ['Site address', 'https://recompstore.com', 'Used to build full links to images in the catalog.'],
@@ -19,12 +21,72 @@ $fields = [
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
+    $act = (string)($_POST['action'] ?? '');
+    if ($act === 'sign_token') {
+        // (2.1) The token Recomp Store Signer uses here. Shown once; only its hash is kept.
+        $t = bin2hex(random_bytes(32));
+        rs_set_setting('signer_token_hash', hash('sha256', $t));
+        $_SESSION['signer_token_once'] = $t;
+        rs_log('signer', 'token', 'made a new token (the old one stops working)');
+        rs_flash('A new signer token is below. Paste it into Recomp Store Signer on your PC.');
+        header('Location: settings.php#signer');
+        exit;
+    } elseif ($act === 'sign_reset') {
+        if (empty($_POST['sure'])) rs_flash('Tick the box to forget the keys.', 'err');
+        else {
+            rs_set_setting('sign_keys', '[]');
+            rs_set_setting('signer_token_hash', '');
+            rs_log('signer', 'keys', 'forgotten: Publish goes out unsigned again');
+            rs_flash('The site forgot the signer\'s keys. Publish goes out unsigned again, which stores from 2.1 won\'t take.');
+        }
+        header('Location: settings.php#signer');
+        exit;
+    } elseif ($act === 'totp_start') {
+        $_SESSION['totp_new'] = rs_new_totp_secret();
+        header('Location: settings.php#twostep');
+        exit;
+    } elseif ($act === 'totp_confirm') {
+        $secret = (string)($_SESSION['totp_new'] ?? '');
+        $step = $secret !== '' ? rs_totp_check($secret, (string)($_POST['code'] ?? ''), 0) : 0;
+        if (!$step) rs_flash('That code didn\'t match. Type the newest code your app shows for Recomp Store admin.', 'err');
+        else {
+            $codes = rs_new_recovery_codes();
+            rs_db()->prepare('UPDATE users SET totp_secret = ?, totp_last = ?, totp_codes = ? WHERE id = ?')
+                ->execute([$secret, $step, json_encode(array_map(fn($c) => password_hash(str_replace('-', '', $c), PASSWORD_DEFAULT), $codes)), $_SESSION['uid']]);
+            unset($_SESSION['totp_new']);
+            $_SESSION['recovery_once'] = $codes;
+            rs_log('two-step', 'on', '');
+            rs_flash('Two-step login is on. Save your recovery codes below.');
+        }
+        header('Location: settings.php#twostep');
+        exit;
+    } elseif ($act === 'totp_off') {
+        $st = rs_db()->prepare('SELECT pass_hash, totp_secret, totp_last FROM users WHERE id = ?');
+        $st->execute([$_SESSION['uid']]);
+        $u = $st->fetch();
+        $code = (string)($_POST['code'] ?? '');
+        $ok = $u && password_verify((string)($_POST['password'] ?? ''), $u['pass_hash'])
+            && (rs_totp_check((string)$u['totp_secret'], $code, (int)$u['totp_last']) || rs_use_recovery_code((int)$_SESSION['uid'], $code));
+        if (!$ok) rs_flash('The password or the code didn\'t match, so two-step login stays on.', 'err');
+        else {
+            rs_db()->prepare("UPDATE users SET totp_secret = '', totp_codes = NULL, totp_last = 0 WHERE id = ?")->execute([$_SESSION['uid']]);
+            rs_log('two-step', 'off', '');
+            rs_flash('Two-step login is off.');
+        }
+        header('Location: settings.php#twostep');
+        exit;
+    } elseif ($act === 'totp_cancel') {
+        unset($_SESSION['totp_new']);
+        header('Location: settings.php#twostep');
+        exit;
+    }
     if (($_POST['action'] ?? '') === 'password') {
         $p = (string)($_POST['password'] ?? '');
         if (strlen($p) < 10) rs_flash('Make the new password at least 10 characters.', 'err');
         elseif ($p !== (string)($_POST['password2'] ?? '')) rs_flash('The two passwords don\'t match.', 'err');
         else {
             rs_db()->prepare('UPDATE users SET pass_hash = ? WHERE id = ?')->execute([password_hash($p, PASSWORD_DEFAULT), $_SESSION['uid']]);
+            rs_log('password', 'changed', '');
             rs_flash('Password changed.');
         }
     } elseif (($_POST['action'] ?? '') === 'github') {
@@ -120,15 +182,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_flash('Saved. The admin won\'t give a game one of these, and recompstore.com/#/ids lists them.');
     } else {
         foreach ($fields as $k => $_) rs_set_setting($k, trim((string)($_POST[$k] ?? '')));
+        rs_log('settings', 'site', '');
         rs_flash('Saved. Press Publish on the Games page to send store release changes to the PS5.');
     }
+    if (in_array($act, ['github', 'r2', 'blocked', 'site_v2', 'taken'], true)) rs_log('settings', $act, '');
     header('Location: settings.php');
     exit;
 }
 
 rs_head('Settings');
 ?>
-<section class="head-row"><div><h1>Settings</h1></div></section>
+<section class="head-row"><div><h1>Settings</h1></div><a class="btn" href="log.php">Change log</a></section>
+<?php
+// (2.1) Security: the signer on the owner's PC, and two-step login.
+$keys = rs_sign_keys();
+$tokenOnce = (string)($_SESSION['signer_token_once'] ?? '');
+unset($_SESSION['signer_token_once']);
+$hasToken = rs_setting('signer_token_hash', '') !== '';
+$waiting = rs_sign_waiting();
+$me = rs_db()->prepare('SELECT username, totp_secret, totp_codes FROM users WHERE id = ?');
+$me->execute([$_SESSION['uid']]);
+$me = $me->fetch() ?: ['username' => '', 'totp_secret' => '', 'totp_codes' => null];
+$twoOn = (string)$me['totp_secret'] !== '';
+$codesLeft = count((array)json_decode((string)($me['totp_codes'] ?? '[]'), true));
+$newSecret = (string)($_SESSION['totp_new'] ?? '');
+$recovery = (array)($_SESSION['recovery_once'] ?? []);
+unset($_SESSION['recovery_once']);
+?>
+<section class="card" id="signer">
+  <h2>Signer <?= $keys ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <?php if ($keys): ?>
+  <p class="muted">Publish waits for Recomp Store Signer on your PC: it shows what changed, and only what you sign goes out. Beta zips need its signature too. Stores from 2.1 check every signature against your keys, so a break-in here can't push anything to them.</p>
+  <p>Keys: <?php foreach ($keys as $k): ?><code><?= h($k['name']) ?> <?= h($k['id']) ?></code> <?php endforeach; ?></p>
+  <?php if ($waiting): ?><p class="warn"><?= $waiting === 1 ? '1 thing is' : $waiting . ' things are' ?> waiting for your signature. Open Recomp Store Signer on your PC.</p><?php endif; ?>
+  <?php else: ?>
+  <p class="muted">Recomp Store Signer runs on your PC and keeps the signing key there. Make a token here, paste it into the signer (step 3), and from then on Publish waits for your signature.</p>
+  <?php endif; ?>
+  <?php if ($tokenOnce !== ''): ?>
+  <div class="once">
+    <strong>Your signer token</strong> <span class="muted">(shown once)</span>
+    <div class="copyrow"><input readonly value="<?= h($tokenOnce) ?>" class="mono" id="signer-token" spellcheck="false"><button type="button" class="btn" data-copy="signer-token">Copy</button></div>
+  </div>
+  <?php endif; ?>
+  <form method="post" class="actions">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sign_token">
+    <button class="btn"><?= $hasToken ? 'Make a new signer token' : 'Make a signer token' ?></button>
+    <?php if ($hasToken): ?><small class="muted">The old one stops working.</small><?php endif; ?>
+  </form>
+  <?php if ($keys): ?>
+  <details class="danger"><summary>Forget the keys</summary>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sign_reset">
+    <p class="muted">Only for new keys (the store has to be updated with them first). Until a signer connects again, Publish goes out unsigned, and stores from 2.1 won't take it.</p>
+    <label class="check"><input type="checkbox" name="sure" value="1"> Forget the signer's keys and token</label>
+    <button class="btn">Forget them</button>
+  </form>
+  </details>
+  <?php endif; ?>
+</section>
+<section class="card" id="twostep">
+  <h2>Two-step login <?= $twoOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <?php if ($recovery): ?>
+  <div class="once">
+    <strong>Recovery codes</strong> <span class="muted">(shown once: save them somewhere safe, like a password manager or on paper)</span>
+    <pre class="mono codes" id="recovery-codes"><?= h(implode("\n", $recovery)) ?></pre>
+    <button type="button" class="btn" data-copy="recovery-codes">Copy</button>
+    <p class="muted">Each one logs you in once if your phone is lost.</p>
+  </div>
+  <?php endif; ?>
+  <?php if ($twoOn): ?>
+  <p class="muted">Logging in asks for your password and then the 6-digit code from your authenticator app. <?= $codesLeft ?> recovery code<?= $codesLeft === 1 ? '' : 's' ?> left.</p>
+  <details><summary>Turn two-step login off</summary>
+  <form method="post" class="grid2">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_off">
+    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <label>Code from the app (or a recovery code)<input name="code" required autocomplete="one-time-code" class="mono"></label>
+    <div><button class="btn">Turn it off</button></div>
+  </form>
+  </details>
+  <?php elseif ($newSecret !== ''): ?>
+  <ol class="steps">
+    <li>Open an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, 1Password, Authy) and add an account by scanning this:
+      <div class="qr" id="totp-qr" data-uri="<?= h(rs_totp_uri($newSecret, (string)$me['username'])) ?>"></div>
+      <small class="muted">Can't scan? Type this key instead: <code><?= h(trim(chunk_split($newSecret, 4, ' '))) ?></code></small></li>
+    <li>Type the 6-digit code the app shows:
+      <form method="post" class="inline">
+        <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_confirm">
+        <input name="code" required autocomplete="one-time-code" inputmode="numeric" maxlength="7" class="mono" placeholder="123456" aria-label="Code">
+        <button class="btn primary">Turn it on</button>
+      </form>
+      <form method="post" class="inline"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_cancel"><button class="link">Cancel</button></form></li>
+  </ol>
+  <?php else: ?>
+  <p class="muted">With it on, your password alone isn't enough to log in: a code from your phone is needed too. Strongly recommended, since this admin decides what every PS5 installs.</p>
+  <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_start"><button class="btn primary">Set up two-step login</button></form>
+  <?php endif; ?>
+</section>
 <section class="card">
   <form method="post">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>">
@@ -169,7 +318,7 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
 ?>
 <section class="card" id="testers">
   <h2>Testers <?php if ($testerCount): ?><span class="count"><?= $testerCount ?></span><?php endif; ?></h2>
-  <p class="muted">A tester's store reads the test catalog: every app as you save it here, without Publish, including the ones set to Testers only (marked as testing). Everyone else gets the published catalog. Ask a tester for the Console ID in Recomp Store's Settings, under About.</p>
+  <p class="muted">A tester's store reads the test catalog: every app <?= rs_sign_on() ? 'as of your last signed Publish' : 'as you save it here, without Publish' ?>, including the ones set to Testers only (marked as testing). Everyone else gets the published catalog. Ask a tester for the Console ID in Recomp Store's Settings, under About.</p>
   <form method="get" class="find-row" action="settings.php#testers">
     <input name="console" value="<?= h($find) ?>" maxlength="16" placeholder="Find a Console ID" autocomplete="off" spellcheck="false" class="mono">
     <button class="btn">Find</button><?php if ($find !== ''): ?> <a href="settings.php#testers">Show all</a><?php endif; ?>
@@ -245,4 +394,4 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <div><button class="btn">Change password</button></div>
   </form>
 </section>
-<?php rs_foot();
+<?php rs_foot(['assets/qrcode.js', 'assets/security.js']);

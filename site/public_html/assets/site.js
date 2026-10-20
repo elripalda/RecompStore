@@ -110,7 +110,7 @@
       const soon = sec.type === 'soon';
       if (sec.type === 'category' && !v2on()) return '';
       // (2.0) A category section: every game in one part of the store (Games, Emulators, Apps, Tools).
-      const items = soon ? (cat.soon || []) : sec.type === 'category' ? cat.apps.filter((a) => (a.category || 'games') === sec.category)
+      const items = soon ? (cat.soon || []) : sec.type === 'category' ? inCat(sec.category)
         : sec.all ? cat.apps : (sec.games || []).map(byId).filter(Boolean);
       if (sec.type !== 'games' && sec.type !== 'category' && !soon) return '';
       if (!items.length) return '';
@@ -168,7 +168,23 @@
     { key: 'tools', route: '/tools', name: 'Tools', icon: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>' },
   ];
   const catIcon = (c) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${c.icon}</svg>`;
-  const inCat = (key) => cat.apps.filter((a) => (a.category || 'games') === key);
+  // (2.1) A category's apps in the order the admin chose for it (catalog categories[key].sort).
+  const sortCat = (key, list) => {
+    const mode = (cat.categories && cat.categories[key] && cat.categories[key].sort) || 'manual';
+    const name = (a) => String(a.name || a.id).toLowerCase();
+    const at = (ids) => { const m = {}; (ids || []).forEach((x, i) => { m[typeof x === 'string' ? x : x && x.id] = i; }); return (a) => (a.id in m ? m[a.id] : 1e9); };
+    const out = list.slice();
+    if (mode === 'az') out.sort((x, y) => name(x).localeCompare(name(y)));
+    else if (mode === 'installs' && charts && charts.stats) {
+      const n = (a) => (charts.stats[a.id] && charts.stats[a.id].installs) || 0;
+      out.sort((x, y) => n(y) - n(x) || name(x).localeCompare(name(y)));
+    } else if ((mode === 'new' || mode === 'updated') && charts) {
+      const pos = at(charts[mode]);
+      out.sort((x, y) => pos(x) - pos(y) || (x.order ?? 1e9) - (y.order ?? 1e9));
+    }
+    return out;
+  };
+  const inCat = (key) => sortCat(key, cat.apps.filter((a) => (a.category || 'games') === key));
   // Only parts that have something get a button, and the row shows when at least two do.
   function catRowHTML() {
     if (!v2on()) return '';
@@ -239,9 +255,9 @@
           <span>Pick the game and tell us what happened. It goes straight to the developer.</span>
         </a>
         <a class="glass help-card" href="#/submit">
-          <span class="kicker">Made a recomp?</span>
-          <strong>Submit your port</strong>
-          <span>Send us your PS5 port of a recompiled game and we'll get in touch about listing it.</span>
+          <span class="kicker">Made something for PS5?</span>
+          <strong>Submit to Recomp Store</strong>
+          <span>A game port, an emulator, an app or a tool: send its GitHub, details and pictures, and it can go straight onto its own page.</span>
         </a>
       </section>
       ${howHTML()}`;
@@ -531,6 +547,97 @@
       bug ? ['Thanks, the report is in.', 'It went straight to the developer.'] : ['Thanks, it\'s on its way.', 'We\'ll be in touch at the email you gave.']);
   }
 
+  // (2.1) Submit a game port, emulator, app or tool: its repo, the details for its page and, if the
+  // developer wants, its pictures. Lands in the admin's Inbox, ready to add to the store as a draft.
+  function submitPage() {
+    const kinds = [['games', 'Game port', 'A recompiled or ported game'], ['emulators', 'Emulator', 'Plays other consoles\' games'],
+      ['apps', 'App', 'Media, streaming, anything else'], ['tools', 'Tool', 'For the PS5 itself: files, payloads, mods']];
+    view.innerHTML = `
+      <article class="form-page submit-page">
+        <a class="back" href="#/contact">← Contact</a>
+        <h1>Submit to Recomp Store</h1>
+        <p class="lead">Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the Recomp Store developer sees this form.</p>
+        <form class="glass form" novalidate enctype="multipart/form-data">
+          <fieldset class="kinds"><legend>What is it?</legend>
+            ${kinds.map(([k, n, d], i) => `<label class="kind"><input type="radio" name="kind" value="${k}"${i === 0 ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
+          </fieldset>
+          <h2>The basics</h2>
+          <div class="two">
+            <label>Name<input name="name" maxlength="120" required placeholder="What players will see"></label>
+            <label>Made by<input name="author" maxlength="80" required autocomplete="nickname" placeholder="Your name or handle"></label>
+            <label>How can we reach you?<input name="contact" maxlength="200" required placeholder="Email or Discord name"></label>
+            <label>GitHub repository<input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
+            <label>Release file <span class="opt">optional</span><input name="asset" maxlength="160" placeholder="MyApp-*.zip" spellcheck="false"><small>The .zip or .7z on your GitHub release the store should install. Put * for the part that changes with each version.</small></label>
+            <label>Version <span class="opt">optional</span><input name="version" maxlength="40" placeholder="1.0.0"></label>
+            <label>Title ID <span class="opt">optional</span><input name="title_id" maxlength="9" placeholder="PPSA12345" spellcheck="false" class="mono"><small>Already have one? Check it doesn't clash on the <a href="#/ids" target="_blank">Title IDs page</a>. No? We'll pick one with you.</small></label>
+          </div>
+          <h2>Its page in the store</h2>
+          <label>One-line summary<input name="blurb" maxlength="160" placeholder="Shown under its name on Discover"></label>
+          <label>Description<textarea name="description" rows="7" maxlength="6000" required placeholder="What it is, what works, what players should know."></textarea></label>
+          <label data-needs>What players need <span class="opt">optional</span><input name="needs" maxlength="160" placeholder="For example: your own Xbox 360 disc image"></label>
+          <label>Credits <span class="opt">optional</span><textarea name="credits" rows="2" maxlength="1000" placeholder="Who made what, and what it builds on"></textarea></label>
+          <div class="three">
+            <label>Link <span class="opt">optional</span><input name="link1" maxlength="300" placeholder="https://discord.gg/..." inputmode="url"></label>
+            <label>Link <span class="opt">optional</span><input name="link2" maxlength="300" placeholder="https://ko-fi.com/..." inputmode="url"></label>
+            <label>Link <span class="opt">optional</span><input name="link3" maxlength="300" placeholder="https://your.site" inputmode="url"></label>
+          </div>
+          <h2>Pictures <span class="opt">optional</span></h2>
+          <p class="form-note">PNG, JPEG or WebP, 8 MB each. No pictures? They can be added later.</p>
+          <div class="pics">
+            <label class="pic">Icon<input type="file" name="icon" accept="image/png,image/jpeg,image/webp" data-pic="icon"><small>Square, 512×512 or bigger.</small><span class="pv icon" data-pv="icon" aria-hidden="true"></span></label>
+            <label class="pic">Backdrop<input type="file" name="hero" accept="image/png,image/jpeg,image/webp" data-pic="hero"><small>16:9, ideally 3840×2160. Behind its page and on Discover.</small><span class="pv hero" data-pv="hero" aria-hidden="true"><span class="pv-logo" data-pv="logo"></span></span></label>
+            <label class="pic">Logo<input type="file" name="logo" accept="image/png,image/webp" data-pic="logo"><small>Its title as a picture, on a transparent background. Shown over the backdrop.</small></label>
+            <label class="pic">Screenshots<input type="file" name="shots[]" accept="image/png,image/jpeg,image/webp" multiple data-pic="shots"><small>Up to 4, from the PS5.</small><span class="pv shots" data-pv="shots" aria-hidden="true"></span></label>
+          </div>
+          <label>Anything else? <span class="opt">optional</span><textarea name="notes" rows="3" maxlength="2000" placeholder="Anything the developer of Recomp Store should know"></textarea></label>
+          <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
+          <label class="check"><input type="checkbox" name="rights" value="1" required> I made this, or I'm allowed to submit it. It doesn't include game files or anything else copyrighted.</label>
+          <div class="form-row"><button class="btn primary" type="submit">Send it</button><span class="status" role="status"></span></div>
+        </form>
+      </article>`;
+    setBackdrop(null);
+    const form = view.querySelector('form');
+    const status = form.querySelector('.status');
+    const needs = form.querySelector('[data-needs]');
+    const kindNow = () => (form.querySelector('input[name="kind"]:checked') || {}).value;
+    form.addEventListener('change', (e) => {
+      if (e.target.name === 'kind') needs.hidden = kindNow() !== 'games';
+      const pic = e.target.dataset && e.target.dataset.pic;
+      if (!pic) return;
+      const files = [...e.target.files];
+      const url = (f) => URL.createObjectURL(f);
+      if (pic === 'shots') {
+        const box = form.querySelector('[data-pv="shots"]');
+        box.innerHTML = files.slice(0, 4).map((f) => `<img src="${url(f)}" alt="">`).join('');
+        if (files.length > 4) { status.textContent = 'Four screenshots at most: only the first four go.'; status.className = 'status bad'; }
+        return;
+      }
+      const pv = form.querySelector(`[data-pv="${pic}"]`);
+      if (pv) pv.style.backgroundImage = files[0] ? `url("${url(files[0])}")` : '';
+    });
+    const need = [['name', 'Give it a name.'], ['author', 'Say who made it.'], ['contact', 'Leave an email or a Discord name.'],
+      ['repo', 'Add the GitHub repository.'], ['description', 'Add a description.']];
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      for (const [k, msg] of need) if (!String(fd.get(k) || '').trim()) { status.textContent = msg; status.className = 'status bad'; form.querySelector(`[name="${k}"]`).focus(); return; }
+      if (!fd.get('rights')) { status.textContent = 'Tick the box to confirm you made it or may submit it.'; status.className = 'status bad'; return; }
+      const shots = fd.getAll('shots[]').filter((f) => f && f.size);
+      fd.delete('shots[]');
+      shots.slice(0, 4).forEach((f) => fd.append('shots[]', f));
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      status.textContent = 'Sending…'; status.className = 'status';
+      fetch('/api/submit.php', { method: 'POST', body: fd })
+        .then((r) => r.json().catch(() => ({ ok: false })))
+        .then((res) => {
+          if (res.ok) form.innerHTML = `<div class="sent"><strong>Thanks, it's in.</strong><p>${esc(res.message || '')}</p><a class="btn" href="#/">Back to the store</a></div>`;
+          else { status.textContent = res.error || 'That didn\'t send. Try again in a moment.'; status.className = 'status bad'; btn.disabled = false; }
+        })
+        .catch(() => { status.textContent = 'That didn\'t send. Check your connection and try again.'; status.className = 'status bad'; btn.disabled = false; });
+    });
+  }
+
   // Sends a form to the Inbox: the fields in need must be filled; sent is the thank-you.
   function wireForm(form, kind, need, sent) {
     const status = form.querySelector('.status');
@@ -570,9 +677,9 @@
             <span>Pick the game and tell us what happened. It goes straight to the developer.</span>
           </a>
           <a class="glass help-card" href="#/submit">
-            <span class="kicker">Made a recomp?</span>
-            <strong>Submit your port</strong>
-            <span>Send us your PS5 port and we'll get in touch about listing it.</span>
+            <span class="kicker">Made something for PS5?</span>
+            <strong>Submit to Recomp Store</strong>
+            <span>A game port, an emulator, an app or a tool, with its details and pictures.</span>
           </a>
           <a class="glass help-card" href="mailto:${CONTACT_EMAIL}">
             <span class="kicker">Email us</span>
@@ -673,6 +780,7 @@
     cat.apps = (raw.apps || []).concat(raw.newerStoreApps || [], on ? raw.v2Apps || [] : []);
     cat.apps.sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9)); // the admin's order, all lists together
     cat.soon = (raw.comingSoon || []).concat(on ? raw.comingSoonV2 || [] : []).sort((x, y) => (x.order ?? 1e9) - (y.order ?? 1e9));
+    cat.categories = raw.categories || {}; // (2.1) each category's sort
     const ids = document.querySelector('[data-foot-ids]');
     if (ids) ids.hidden = !on;
   }
@@ -1067,10 +1175,22 @@
     return p ? `/${p[1]}/${p[2]}` : q ? `/${q[1]}/${q[2]}` : '/';
   }
   let routed = '';
+  // (2.1) Each page shown counts once on the admin's Analytics page (no cookies; see api/hit.php).
+  let firstHit = true;
+  function countVisit(h) {
+    try {
+      const ref = firstHit ? document.referrer : '';
+      firstHit = false;
+      const body = JSON.stringify({ p: h || '/', r: ref });
+      if (navigator.sendBeacon) navigator.sendBeacon('/api/hit.php', new Blob([body], { type: 'application/json' }));
+      else fetch('/api/hit.php', { method: 'POST', body, keepalive: true, headers: { 'Content-Type': 'application/json' } }).catch(() => {});
+    } catch (e) { /* counting never gets in the way */ }
+  }
   function route() {
     clearInterval(slideTimer);
     stopPageTimers();
     const h = current();
+    countVisit(h);
     if (h === '/get') { if (!dlg.open) dlg.showModal(); if (!view.innerHTML) home(); routed = location.href; return; }
     if (dlg.open) dlg.close();
     const m = h.match(/^\/game\/(.+)$/);
@@ -1084,7 +1204,7 @@
     else if (ms) soonPage(decodeURIComponent(ms[1]));
     else if (h === '/about') about();
     else if (h === '/report') formPage('bug');
-    else if (h === '/submit') formPage('submit');
+    else if (h === '/submit') submitPage();
     else if (h === '/contact') contactPage();
     else if (h === '/ids' && v2on()) idsPage();
     else if (coded && coded[1] === 'l') linkClaimPage(coded[2]);
@@ -1143,7 +1263,7 @@
         s.kofi ? `<a href="${esc(s.kofi)}" target="_blank" rel="noopener">Ko-fi</a>` : '',
         '<a href="https://github.com/elripalda/RecompStore" target="_blank" rel="noopener">GitHub</a>',
         '<a href="#/report">Report a bug</a>',
-        '<a href="#/submit">Submit your recomp</a>',
+        '<a href="#/submit">Submit to the store</a>',
         '<a href="#/ids" data-foot-ids>Title IDs</a>',
         '<a href="#/contact">Contact</a>',
         '<a href="#/about">About</a>',

@@ -69,6 +69,12 @@ function rs_check_csrf(): void {
         http_response_code(400);
         exit('This form expired. Go back, reload the page and try again.');
     }
+    // (2.1) Every change made in the admin goes in the change log (Settings and logging in say more themselves).
+    $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (!in_array($page, ['login.php', 'settings.php'], true)) {
+        $id = (string)($_GET['id'] ?? $_POST['id'] ?? $_POST['game'] ?? '');
+        rs_log('change', $page . ($id !== '' ? ' ' . mb_substr($id, 0, 40) : ''), 'action: ' . mb_substr((string)($_POST['action'] ?? 'save'), 0, 40));
+    }
 }
 
 function h(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
@@ -125,6 +131,9 @@ function rs_game_defaults(): array {
         // Beta: left out of the public catalog; only consoles that redeemed one of its codes see it,
         // and they download beta_file (a zip in RS_BETA_DIR) from this site, not from GitHub.
         'beta' => false, 'beta_file' => '', 'beta_sha256' => '', 'beta_size' => 0, 'beta_version' => '',
+        // (2.1) The current build's notes for testers and when it went up, and the builds before it
+        // ([{file, version, sha256, size, notes, at}], newest first) testers can go back to.
+        'beta_notes' => '', 'beta_at' => '', 'beta_history' => [],
     ];
 }
 
@@ -215,6 +224,14 @@ function rs_move_block(string $id): bool {
 const RS_CATEGORIES = ['games' => 'Games', 'emulators' => 'Emulators', 'apps' => 'Apps', 'tools' => 'Tools'];
 function rs_category(string $c): string {
     return array_key_exists($c, RS_CATEGORIES) ? $c : 'games';
+}
+// (2.1) How each category's page is sorted in the store and on the site.
+const RS_SORTS = ['manual' => 'Your order', 'az' => 'A to Z', 'installs' => 'Most installed', 'new' => 'Newest first', 'updated' => 'Recently updated'];
+function rs_category_sorts(): array {
+    $s = json_decode(rs_setting('category_sort', '{}'), true);
+    $out = [];
+    foreach (RS_CATEGORIES as $k => $_) $out[$k] = is_array($s) && isset(RS_SORTS[$s[$k] ?? '']) ? $s[$k] : 'manual';
+    return $out;
 }
 // (2.0) Short labels for a game's page: comma-separated, each 1-24 characters, at most 6.
 function rs_tags_list(string $text): array {
@@ -631,8 +648,28 @@ function rs_build_catalog(bool $testing = false): array {
         'featuredV2' => $featuredV2,
         'v2Apps' => $v2,
         'comingSoonV2' => $soonV2,
-        'discover' => ['sections' => $sections],
+        // (2.1) How each category's page is sorted, and Discover's header; older stores skip them.
+        'categories' => array_map(fn($m) => ['sort' => $m], rs_category_sorts()),
+        'discover' => ['sections' => $sections, 'header' => rs_discover_header($listed)],
     ];
+}
+
+// (2.1) Discover's header: how the featured games show at the top of the store's Discover.
+const RS_HEADER_STYLES = [
+    'carousel' => ['Carousel', 'One featured game at a time, changing every few seconds, with dots. What the store had before 2.1.'],
+    'spotlight' => ['Spotlight', 'One game, bigger and taller, staying put. For a big launch.'],
+    'split' => ['Split', 'The carousel on the left and the next three featured games stacked on the right.'],
+    'mosaic' => ['Mosaic', 'Three featured games at once: one large, two stacked beside it.'],
+    'none' => ['No header', 'Discover starts straight with its sections.'],
+];
+function rs_discover_header(?array $listed = null): array {
+    $h = json_decode(rs_setting('discover_header', '{}'), true);
+    $h = is_array($h) ? $h : [];
+    $style = isset(RS_HEADER_STYLES[$h['style'] ?? '']) ? $h['style'] : 'carousel';
+    $games = array_values(array_filter(array_map('strval', (array)($h['games'] ?? [])), fn($id) => preg_match('/^[A-Za-z0-9_-]{1,64}$/', $id) && ($listed === null || in_array($id, $listed, true))));
+    $out = ['style' => $style, 'interval' => max(4, min(30, (int)($h['interval'] ?? 8)))];
+    if ($games !== []) $out['games'] = array_slice($games, 0, 12);
+    return $out;
 }
 
 // (2.0) The website's 2.0 side: 'all' shows it to everyone; anything else ('me', the default) only
@@ -644,6 +681,8 @@ function rs_site_v2(): bool {
 // (2.0) Writes catalog.json as it is now with only site.v2 changed: switching the website's 2.0
 // side doesn't publish anything else that's waiting.
 function rs_catalog_set_site_v2(bool $on): void {
+    // (2.1) Signed catalogs: nothing changes catalog.json without the signer.
+    if (rs_sign_on()) { rs_publish(); return; }
     $cat = json_decode((string)@file_get_contents(RS_CATALOG), true);
     if (!is_array($cat)) { rs_publish(); return; }
     $cat['site'] = (is_array($cat['site'] ?? null) ? $cat['site'] : []);
@@ -661,21 +700,23 @@ function rs_write_catalog(array $cat): void {
 
 function rs_publish(): int {
     $cat = rs_build_catalog();
-    rs_write_catalog($cat);
-    rs_set_setting('published_at', gmdate('c'));
-    // (2.0) When each app first went out, for the charts' New.
-    try {
-        rs_stats_tables();
-        $mark = rs_db()->prepare('INSERT IGNORE INTO app_published (app_id, first_at) VALUES (?, NOW())');
-        foreach (array_merge($cat['apps'], $cat['newerStoreApps'], $cat['v2Apps']) as $a) $mark->execute([(string)$a['id']]);
-    } catch (Throwable $e) {
+    if (rs_sign_on()) {
+        // (2.1) Waits for the signer on the owner's PC (admin/inc/sign.php); the testers' too.
+        rs_write_pending('catalog', $cat);
+        rs_write_pending('catalog-test', rs_build_catalog(true));
+        rs_log('publish', 'catalog', 'waiting for the signer');
+    } else {
+        rs_write_catalog($cat);
+        rs_after_publish($cat);
+        rs_log('publish', 'catalog', 'unsigned (no signer set up)');
     }
     return count($cat['apps']) + count($cat['newerStoreApps']) + count($cat['v2Apps']);
 }
 
 // How many Coming soon entries the last build listed (for Publish's message).
 function rs_soon_count(): int {
-    $c = json_decode((string)@file_get_contents(RS_CATALOG), true);
+    $f = rs_sign_on() && is_file(rs_pending_file('catalog')) ? rs_pending_file('catalog') : RS_CATALOG;
+    $c = json_decode((string)@file_get_contents($f), true);
     return is_array($c) && is_array($c['comingSoon'] ?? null) ? count($c['comingSoon']) : 0;
 }
 
@@ -707,6 +748,19 @@ function rs_inbox_table(): void {
         body MEDIUMTEXT NOT NULL,
         INDEX (inbox_id)
     ) CHARACTER SET utf8mb4');
+    $done = true;
+}
+
+// (2.1) Submissions keep their details (inbox.data, JSON) and say what each picture is for
+// (inbox_pictures.role: icon, hero, logo or shot).
+function rs_submission_columns(): void {
+    static $done = false;
+    if ($done) return;
+    rs_inbox_table();
+    rs_report_tables();
+    $db = rs_db();
+    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'data'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN data MEDIUMTEXT NULL');
+    if (!$db->query("SHOW COLUMNS FROM inbox_pictures LIKE 'role'")->fetch()) $db->exec("ALTER TABLE inbox_pictures ADD COLUMN role VARCHAR(8) NOT NULL DEFAULT ''");
     $done = true;
 }
 
@@ -976,6 +1030,24 @@ function rs_beta_entry(array $g, string $install, int $order): array {
     $app['beta'] = true;
     $min = $app['minStore'] ?? '';
     if ($min === '' || version_compare($min, RS_BETA_FROM, '<')) $app['minStore'] = RS_BETA_FROM;
+    // (2.1) Its signature from the owner's PC (a 2.1 store installs a beta only with one), the
+    // build's notes, and the earlier builds a tester can go back to.
+    $sig = rs_sig_for('beta', $app['sha256']);
+    if ($sig !== '') $app['sig'] = $sig;
+    if (trim((string)$g['beta_notes']) !== '') $app['betaNotes'] = trim((string)$g['beta_notes']);
+    $versions = [];
+    foreach (rs_beta_builds($g) as $b) {
+        if ($b['current'] || !preg_match('/^[0-9a-f]{64}$/', $b['sha256'])) continue;
+        $v = ['version' => $b['version'], 'file' => $b['file'],
+            'url' => rs_abs('/api/beta.php') . '?a=file&id=' . rawurlencode($g['id']) . '&file=' . rawurlencode($b['file']) . '&install=' . $install
+                . '&sig=' . rs_beta_sig($install, $g['id'] . '|' . $b['file']),
+            'sha256' => $b['sha256'], 'bytes' => $b['size'], 'size' => rs_human_size(max(1, $b['size'])), 'notes' => $b['notes'], 'date' => $b['at']];
+        $vs = rs_sig_for('beta', $b['sha256']);
+        if ($vs !== '') $v['sig'] = $vs;
+        $versions[] = $v;
+        if (count($versions) >= 10) break;
+    }
+    if ($versions !== []) $app['versions'] = $versions;
     return $app;
 }
 
@@ -987,3 +1059,7 @@ function rs_human_size(int $b): string {
 
 // (2.0) The store and the site talking: consoles, linked phones, reports, GitHub, sources, charts.
 require __DIR__ . '/connect.php';
+// (2.1) Signing with Recomp Store Signer, and the admin's change log.
+require __DIR__ . '/sign.php';
+// (2.1) The Analytics page's day-by-day counts.
+require __DIR__ . '/analytics.php';

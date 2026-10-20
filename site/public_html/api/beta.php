@@ -2,7 +2,8 @@
 // Recomp Store website: beta codes for the PS5 store (Recomp Store 1.1.0 and newer).
 //   POST a=redeem   code, [install, token], store  -> unlocks the code's game for this store install
 //   POST a=list     install, token, store          -> the beta games this install has
-//   GET  a=file     id, install, sig               -> a beta game's zip, for an install that has it
+//   GET  a=file     id, install, sig [file]        -> a beta game's zip, for an install that has it
+//                                                   (2.1: file= one of its earlier builds, from versions[])
 // A store install is known by an ID and a secret token the server makes on its first redeem;
 // the store keeps both in its data folder. Answers are JSON, except the zip.
 declare(strict_types=1);
@@ -133,12 +134,15 @@ if ($a === 'file') {
     $id = $s('id', 32);
     $install = $s('install', 16);
     $sig = $s('sig', 32);
-    if (!preg_match('/^[0-9a-f]{16}$/', $install) || !hash_equals(rs_beta_sig($install, $id), $sig)) rs_out(403, ['ok' => false, 'error' => 'Not allowed.']);
+    // (2.1) An earlier build (file=): its own link, and only one of this game's kept builds.
+    $file = basename($s('file', 190));
+    if (!preg_match('/^[0-9a-f]{16}$/', $install) || !hash_equals(rs_beta_sig($install, $file === '' ? $id : $id . '|' . $file), $sig)) rs_out(403, ['ok' => false, 'error' => 'Not allowed.']);
     $st = $db->prepare('SELECT COUNT(*) FROM beta_codes WHERE install_id = ? AND game_id = ? AND revoked = 0');
     $st->execute([$install, $id]);
     $g = rs_game($id);
     if ((int)$st->fetchColumn() === 0 || !$g || !$g['beta'] || $g['beta_file'] === '') rs_out(403, ['ok' => false, 'error' => 'Not allowed.']);
-    $path = rs_beta_dir() . '/' . basename((string)$g['beta_file']);
+    if ($file !== '' && !in_array($file, array_column(rs_beta_builds($g), 'file'), true)) rs_out(404, ['ok' => false, 'error' => 'That build isn\'t kept anymore.']);
+    $path = rs_beta_dir() . '/' . ($file !== '' ? $file : basename((string)$g['beta_file']));
     if (!is_file($path)) rs_out(404, ['ok' => false, 'error' => 'The beta file is missing.']);
 
     // The zip, whole or from a byte range (a resumed download).
@@ -152,6 +156,7 @@ if ($a === 'file') {
         header("Content-Range: bytes $from-$to/$size");
     }
     rs_seen($db, $install, '');
+    if ($from === 0) rs_count_beta_download($db, $id, $install); // (2.1) Analytics
     @set_time_limit(0);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/zip');

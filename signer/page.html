@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recomp Store Signer</title>
+<style>
+:root{--mid:#0B1220;--card:#111A2B;--line:rgba(244,248,252,.12);--frost:#F4F8FC;--soft:#CDD6E2;--muted:#AAB6C6;--dim:#95A2B4;--cyan:#35D6F4;--green:#5FE3A1;--amber:#FFC857;--red:#FF8A80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--mid);color:var(--frost);font:16px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:36px 20px 80px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:28px}
+header svg{flex-shrink:0}
+h1{font:700 24px/1.2 "Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;margin:0}
+header small{color:var(--dim);display:block;font-size:13px}
+h2{font:700 20px/1.25 "Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;margin:0 0 6px}
+h3{font-size:15px;margin:18px 0 6px;color:var(--soft)}
+p{margin:0 0 12px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px;margin-bottom:18px}
+.step{display:inline-block;font-size:12px;font-weight:700;letter-spacing:1.4px;color:var(--cyan);margin-bottom:8px}
+button,.btn{font:700 15px/1 inherit;font-family:inherit;border:0;border-radius:12px;padding:13px 20px;cursor:pointer;background:var(--cyan);color:var(--mid);text-decoration:none;display:inline-block}
+button.ghost,.btn.ghost{background:rgba(244,248,252,.08);color:var(--frost);border:1px solid var(--line)}
+button.go{background:var(--green)}
+button:disabled{opacity:.45;cursor:default}
+input[type=text],input[type=password],textarea{width:100%;font:15px/1.4 Consolas,"Cascadia Mono",monospace;background:var(--mid);color:var(--frost);border:1px solid rgba(244,248,252,.22);border-radius:12px;padding:12px 14px}
+textarea{min-height:120px}
+label{display:block;font-size:14px;font-weight:600;color:var(--soft);margin:12px 0 6px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.flash{border-radius:14px;padding:14px 16px;margin-bottom:18px;background:rgba(95,227,161,.12);border:1px solid rgba(95,227,161,.45);color:var(--frost)}
+.flash.bad{background:rgba(255,138,128,.12);border-color:rgba(255,138,128,.5)}
+.warn{color:var(--amber)}
+.tag{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;margin-left:6px;vertical-align:2px}
+.tag.dl{background:rgba(255,200,87,.16);color:var(--amber);border:1px solid rgba(255,200,87,.5)}
+.tag.ok{background:rgba(95,227,161,.12);color:var(--green)}
+.mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;color:var(--soft);word-break:break-all}
+ul{margin:6px 0 12px;padding-left:20px;color:var(--soft)}
+li{margin:4px 0}
+.change{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:8px 0}
+.change.dl{border-color:rgba(255,200,87,.55);background:rgba(255,200,87,.05)}
+.was{color:var(--red);text-decoration:line-through}
+.now{color:var(--green)}
+details summary{cursor:pointer;color:var(--soft);font-weight:600;margin:8px 0}
+.drop{border:2px dashed rgba(244,248,252,.25);border-radius:16px;padding:26px;text-align:center;color:var(--muted)}
+.drop.over{border-color:var(--cyan);background:rgba(53,214,244,.06)}
+.kinds{display:flex;gap:16px;justify-content:center;margin:12px 0;flex-wrap:wrap}
+.kinds label{display:inline-flex;gap:8px;align-items:center;margin:0;color:var(--frost)}
+footer{color:var(--dim);font-size:13px}
+.big{font-size:18px;color:var(--frost)}
+</style>
+</head>
+<body>
+<main>
+<header>
+<svg width="44" height="44" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" rx="58" fill="#35D6F4"></rect><g transform="translate(38 36) scale(0.7)" fill="#1E1E1E"><path d="M40 40H88V168H116L64 220L12 168H40Z"></path><path d="M104 40H172L216 84V116L180 152H104V116H164L180 100V92L164 76H104Z"></path><path d="M132 168H184L236 220H184Z"></path></g></svg>
+<div><h1>Recomp Store Signer</h1><small>Version {{.Version}} · only this PC can open this page</small></div>
+</header>
+
+{{if .Flash}}<div class="flash{{if .FlashBad}} bad{{end}}" role="status">{{.Flash}}</div>{{end}}
+
+{{if eq .State "error"}}
+<section class="card">
+<h2>The key on this PC couldn't be opened</h2>
+<p class="warn">{{.KeysErr}}</p>
+<p>If this PC was reset or this is another Windows account, put your backup key on it instead.</p>
+<form method="post" action="{{.Base}}restore">
+<label for="backup">Paste the whole backup key file</label>
+<textarea id="backup" name="backup" required></textarea>
+<div class="row"><button type="submit">Use the backup key</button></div>
+</form>
+</section>
+
+{{else if eq .State "makekeys"}}
+<section class="card">
+<span class="step">STEP 1 OF 3</span>
+<h2>Make your signing keys</h2>
+<p>This makes two keys. The main one stays on this PC, locked to your Windows account. The backup one is handed to you once, for a USB drive, in case this PC is ever lost.</p>
+<p>Recomp Store will only accept a catalog, a store update or a beta zip signed by one of these keys.</p>
+<form method="post" action="{{.Base}}make-keys"><div class="row"><button type="submit">Make my keys</button></div></form>
+<details><summary>I already have a backup key file</summary>
+<form method="post" action="{{.Base}}restore">
+<label for="backup2">Paste the whole backup key file</label>
+<textarea id="backup2" name="backup" required></textarea>
+<div class="row"><button type="submit" class="ghost">Use the backup key</button></div>
+</form>
+</details>
+</section>
+
+{{else if eq .State "backup"}}
+<section class="card">
+<span class="step">STEP 2 OF 3</span>
+<h2>Save the backup key on a USB drive</h2>
+{{if .BackupReady}}
+<p>Download it, then move it to a USB drive and keep the drive somewhere safe. Don't put it in the cloud, an email or a chat. This is the only time it's shown.</p>
+<div class="row"><a class="btn" href="{{.Base}}backup-key" download>Download the backup key</a></div>
+{{else}}
+<p class="warn">The backup key was only kept until the signer closed. If you didn't save it, close the signer, delete the folder %APPDATA%\RecompStoreSigner and make your keys again (before your keys are built into the store).</p>
+{{end}}
+<form method="post" action="{{.Base}}backup-saved">
+<label style="display:flex;gap:10px;align-items:center;margin-top:18px"><input type="checkbox" name="sure" value="1"> The backup key is on a USB drive</label>
+<div class="row"><button type="submit">Done</button></div>
+</form>
+</section>
+
+{{else if eq .State "connect"}}
+<section class="card">
+<span class="step">STEP 3 OF 3</span>
+<h2>Connect to recompstore.com</h2>
+<p>In your admin, open <b>Settings › Signer</b> and click <b>Make a signer token</b>. Paste it here. The token only lets this signer see what's waiting and hand signatures over.</p>
+<form method="post" action="{{.Base}}connect">
+<label for="site">Site</label>
+<input type="text" id="site" name="site" value="{{.Site}}">
+<label for="token">Signer token</label>
+<input type="password" id="token" name="token" autocomplete="off" required>
+<div class="row"><button type="submit">Connect</button></div>
+</form>
+</section>
+<section class="card">
+<h2>Your public keys</h2>
+<p>These go into the store's build. They're safe to share.</p>
+<div class="mono" style="white-space:pre-wrap">{{.PubText}}</div>
+<p style="margin-top:12px">Saved to <span class="mono">{{.ExportDir}}\public-keys.txt</span></p>
+</section>
+
+{{else}}
+{{if .UsingBackup}}<div class="flash bad">This PC is signing with your backup key. Make a new main key when you can, and ask Claude to put it in the next store update.</div>{{end}}
+
+<section class="card">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+<h2 style="margin:0">Waiting for your signature</h2>
+<form method="post" action="{{.Base}}refresh"><button type="submit" class="ghost">Check now</button></form>
+</div>
+<p style="margin-top:6px">Checked {{ago .Checked}} · {{.Site}}</p>
+{{if .PendingErr}}<p class="warn">{{.PendingErr}}</p>{{end}}
+{{if not .Pending}}{{if not .PendingErr}}<p class="big">Nothing right now. You'll get a Windows notification when something needs you.</p>{{end}}{{end}}
+</section>
+
+{{range .Pending}}
+<section class="card">
+<h2>{{.Title}}</h2>
+{{if eq .P.Kind "beta"}}
+<p>{{.P.File}} · {{size .P.Size}}{{if .P.When}} · uploaded {{.P.When}}{{end}}</p>
+<p class="mono">SHA-256 {{.P.SHA256}}</p>
+{{if .P.Note}}<p>{{.P.Note}}</p>{{end}}
+<p>Only sign this if you uploaded this zip. If it's a surprise, don't sign it, and change your admin password.</p>
+<form method="post" action="{{$.Base}}sign"><input type="hidden" name="key" value="{{.Key}}"><div class="row"><button type="submit" class="go">Sign this beta zip</button></div></form>
+{{else}}
+{{if not .Review}}
+<p>{{size .P.Size}}{{if .P.When}} · published {{.P.When}}{{end}}</p>
+<form method="post" action="{{$.Base}}review"><input type="hidden" name="key" value="{{.Key}}"><div class="row"><button type="submit">See what changed</button></div></form>
+{{else if .Review.Error}}
+<p class="warn">{{.Review.Error}}</p>
+<form method="post" action="{{$.Base}}review"><input type="hidden" name="key" value="{{.Key}}"><div class="row"><button type="submit" class="ghost">Try again</button></div></form>
+{{else if .Review.Diff.Bad}}
+<p class="warn">{{.Review.Diff.Bad}}</p>
+{{else}}
+{{with .Review.Diff}}
+{{if .First}}
+<p class="big">First signature: {{.Count}} apps. Look the list over once.</p>
+<details><summary>Every app and where it downloads from</summary><ul>{{range .Added}}<li>{{.Name}} <span class="mono">{{.ID}}</span><br><span class="mono">{{.From}}</span></li>{{end}}</ul></details>
+{{else if .Empty}}
+<p class="big">Nothing in it changed since your last signature (only its date).</p>
+{{else}}
+{{if .Added}}<h3>Added</h3>{{range .Added}}<div class="change dl"><b>{{.Name}}</b> <span class="tag dl">new download</span><br><span class="mono">{{.ID}} · {{.From}}</span></div>{{end}}{{end}}
+{{if .Removed}}<h3>Removed</h3><ul>{{range .Removed}}<li>{{.Name}} <span class="mono">{{.ID}}</span></li>{{end}}</ul>{{end}}
+{{if .Changed}}<h3>Changed</h3>
+{{range .Changed}}<div class="change{{if .Download}} dl{{end}}"><b>{{.Name}}</b>{{if .Download}} <span class="tag dl">where it downloads from</span>{{end}}
+{{range .Download}}<div class="mono" style="margin-top:6px">{{.Path}}: <span class="was">{{empty .Before}}</span> → <span class="now">{{empty .After}}</span></div>{{end}}
+{{if .Pictures}}<div style="margin-top:6px;color:var(--muted)">Pictures: {{join .Pictures ", "}}</div>{{end}}
+{{if .Text}}<div style="margin-top:6px;color:var(--muted)">Text and settings: {{join .Text ", "}}</div>{{end}}
+</div>{{end}}{{end}}
+{{if .Settings}}<h3>Store-wide</h3>{{range .Settings}}<div class="change{{if isdl .Path}} dl{{end}}"><span class="mono">{{.Path}}: <span class="was">{{empty .Before}}</span> → <span class="now">{{empty .After}}</span></span></div>{{end}}{{end}}
+{{end}}
+{{end}}
+<p style="margin-top:14px">Only sign if every change above is yours. Yellow ones change where something downloads from.</p>
+<form method="post" action="{{$.Base}}sign"><input type="hidden" name="key" value="{{.Key}}"><div class="row"><button type="submit" class="go">Sign and publish</button></div></form>
+{{end}}
+{{end}}
+</section>
+{{end}}
+
+<section class="card">
+<h2>Sign a file</h2>
+<p>For a store update (PPSA92000.zip) before it goes on GitHub, or a beta zip you made on this PC.</p>
+<div class="kinds" role="radiogroup" aria-label="What it is">
+<label><input type="radio" name="kind" value="store" checked> Store update</label>
+<label><input type="radio" name="kind" value="beta"> Beta zip</label>
+</div>
+<div class="drop" id="drop">Drop the zip here, or <label for="file" style="display:inline;color:var(--cyan);cursor:pointer;margin:0">choose it</label><input type="file" id="file" hidden></div>
+<p id="fileout" style="margin-top:12px"></p>
+</section>
+
+<section class="card">
+<h2>This PC</h2>
+<p>Main key <span class="mono">{{.MainID}}</span> · backup key <span class="mono">{{.BackupID}}</span></p>
+<p>Signatures and public-keys.txt go to <span class="mono">{{.ExportDir}}</span></p>
+<div class="row">
+<form method="post" action="{{.Base}}startup"><input type="hidden" name="on" value="{{if .Startup}}0{{else}}1{{end}}"><button type="submit" class="ghost">{{if .Startup}}Don't start with Windows{{else}}Start with Windows{{end}}</button></form>
+<form method="post" action="{{.Base}}disconnect"><button type="submit" class="ghost">Disconnect from the site</button></form>
+</div>
+</section>
+{{end}}
+
+<footer>Closing this tab doesn't stop the signer. It keeps checking every minute{{if .Startup}} and starts with Windows{{end}}.</footer>
+</main>
+<script>
+(function(){
+  var rev = {{.Rev}};
+  setInterval(function(){
+    if (document.querySelector('input:focus,textarea:focus')) return;
+    fetch('{{.Base}}rev',{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){ if (+t !== rev) location.reload(); }).catch(function(){});
+  }, 5000);
+  var drop = document.getElementById('drop'), input = document.getElementById('file'), out = document.getElementById('fileout');
+  if (!drop) return;
+  function send(f){
+    var kind = (document.querySelector('input[name=kind]:checked')||{}).value || 'store';
+    out.textContent = 'Signing ' + f.name + '…';
+    fetch('{{.Base}}signfile?kind=' + encodeURIComponent(kind) + '&name=' + encodeURIComponent(f.name), {method:'POST', body:f, headers:{'X-Signer-UI':'1'}})
+      .then(function(r){return r.json()}).then(function(j){ out.textContent = j.ok ? j.message + ' SHA-256 ' + j.sha256 : (j.error || 'That didn’t work.'); })
+      .catch(function(){ out.textContent = 'That didn’t work.'; });
+  }
+  ['dragenter','dragover'].forEach(function(e){ drop.addEventListener(e,function(ev){ev.preventDefault(); drop.classList.add('over');}); });
+  ['dragleave','drop'].forEach(function(e){ drop.addEventListener(e,function(ev){ev.preventDefault(); drop.classList.remove('over');}); });
+  drop.addEventListener('drop', function(ev){ var f = ev.dataTransfer.files[0]; if (f) send(f); });
+  input.addEventListener('change', function(){ if (input.files[0]) send(input.files[0]); });
+})();
+</script>
+</body>
+</html>

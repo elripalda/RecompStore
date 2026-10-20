@@ -155,3 +155,21 @@
     });
   sync();
 })();
+
+// (2.1) Find: shows only the games whose name, ID or author has what's typed. The order isn't
+// touched (Save order still sends every game, hidden or not).
+(function () {
+  const box = document.querySelector('[data-find]');
+  const none = document.querySelector('[data-find-none]');
+  if (!box) return;
+  box.addEventListener('input', () => {
+    const q = box.value.trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('article[data-find-text]').forEach((r) => {
+      const hit = q === '' || r.dataset.findText.includes(q);
+      r.hidden = !hit;
+      if (hit) shown++;
+    });
+    if (none) none.hidden = shown > 0;
+  });
+})();

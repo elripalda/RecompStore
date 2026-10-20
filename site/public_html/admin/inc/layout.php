@@ -21,14 +21,15 @@ function rs_head(string $title, bool $nav = true): void {
   <a class="brand" href="index.php"><img src="/assets/logo-512.png" alt=""><span>Recomp Store</span><em>admin</em></a>
   <?php if ($nav): ?>
   <nav>
-    <a href="index.php">Games</a>
-    <a href="discover.php">Discover</a>
-    <a href="beta.php">Beta</a>
-    <a href="import.php">Import</a>
-    <?php $inboxNew = rs_inbox_new_count(); ?>
-    <a href="inbox.php">Inbox<?= $inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : '' ?></a>
-    <a href="stats.php">Stats</a>
-    <a href="settings.php">Settings</a>
+    <?php
+    $here = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    $inboxNew = rs_inbox_new_count();
+    $links = [['index.php', 'Games', ['edit.php']], ['discover.php', 'Discover', []], ['beta.php', 'Beta', []], ['import.php', 'Import', []],
+        ['inbox.php', 'Inbox' . ($inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : ''), []], ['analytics.php', 'Analytics', ['stats.php']],
+        ['settings.php', 'Settings', ['log.php']]];
+    foreach ($links as [$href, $label, $also]): ?>
+    <a href="<?= h($href) ?>"<?= $here === $href || in_array($here, $also, true) ? ' class="on" aria-current="page"' : '' ?>><?= $label ?></a>
+    <?php endforeach; ?>
     <a href="/" target="_blank" rel="noopener">View site</a>
     <a href="logout.php">Log out</a>
   </nav>
@@ -36,6 +37,9 @@ function rs_head(string $title, bool $nav = true): void {
 </header>
 <main>
 <?php if ($flash): ?><div class="flash <?= h($flash['kind']) ?>"><?= h($flash['msg']) ?></div><?php endif; ?>
+<?php if ($nav && ($waiting = rs_sign_waiting()) > 0): ?>
+<div class="signbar" role="status"><strong>Waiting for your signature</strong><span><?= $waiting === 1 ? '1 thing' : $waiting . ' things' ?> you published or uploaded won't reach anyone until you sign <?= $waiting === 1 ? 'it' : 'them' ?> in Recomp Store Signer on your PC.</span></div>
+<?php endif; ?>
 <?php
 }
 

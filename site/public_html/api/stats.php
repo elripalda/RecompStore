@@ -30,10 +30,18 @@ try {
     rs_stats_tables();
     $version = preg_replace('/[\x00-\x1F\x7F]/', '', $s('version', 64)) ?? '';
     if ($a === 'installed') {
+        // (2.1) Analytics: a first install on this console, or a new version over one.
+        $was = $db->prepare('SELECT version, removed_at FROM app_installs WHERE install_id = ? AND app_id = ?');
+        $was->execute([$install, $app]);
+        $old = $was->fetch();
+        if (!$old || $old['removed_at'] !== null) rs_count_app($db, $app, 'install');
+        elseif ((string)$old['version'] !== $version) rs_count_app($db, $app, 'update');
         $db->prepare('INSERT INTO app_installs (install_id, app_id, version, first_at, last_at, removed_at) VALUES (?, ?, ?, NOW(), NOW(), NULL)
                       ON DUPLICATE KEY UPDATE version = VALUES(version), last_at = NOW(), removed_at = NULL')->execute([$install, $app, $version]);
     } else {
-        $db->prepare('UPDATE app_installs SET removed_at = NOW(), last_at = NOW() WHERE install_id = ? AND app_id = ?')->execute([$install, $app]);
+        $up = $db->prepare('UPDATE app_installs SET removed_at = NOW(), last_at = NOW() WHERE install_id = ? AND app_id = ? AND removed_at IS NULL');
+        $up->execute([$install, $app]);
+        if ($up->rowCount() > 0) rs_count_app($db, $app, 'remove');
     }
 } catch (Throwable $e) {
     rs_out(503, ['ok' => false, 'error' => 'Not counted right now.']);

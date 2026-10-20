@@ -19,6 +19,70 @@
   const soonGames = games.filter((g) => !g.hidden && g.soon);
   let sections = JSON.parse(JSON.stringify(S.sections || []));
   let dirty = false;
+  // (2.1) The header: carousel, spotlight, split, mosaic or none, its games and its turn time.
+  const HS = S.headerStyles || {};
+  let header = Object.assign({ style: 'carousel', interval: 8, games: [] }, S.header || {});
+  header.games = (header.games || []).slice();
+  const HCOUNT = { carousel: 6, spotlight: 1, split: 6, mosaic: 3, none: 0 };
+  const headerGames = () => {
+    const picked = (header.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
+    if (picked.length) return picked;
+    const feat = listed.filter((g) => g.featured);
+    return feat.length ? feat : listed.filter((g) => g.hero).slice(0, 3);
+  };
+  const THUMB = {
+    carousel: '<rect x="2" y="4" width="56" height="26" rx="4"/><circle cx="25" cy="34" r="1.6"/><circle cx="30" cy="34" r="1.6"/><circle cx="35" cy="34" r="1.6"/>',
+    spotlight: '<rect x="2" y="2" width="56" height="34" rx="4"/>',
+    split: '<rect x="2" y="4" width="36" height="30" rx="4"/><rect x="41" y="4" width="17" height="9" rx="2"/><rect x="41" y="14.5" width="17" height="9" rx="2"/><rect x="41" y="25" width="17" height="9" rx="2"/>',
+    mosaic: '<rect x="2" y="4" width="36" height="30" rx="4"/><rect x="41" y="4" width="17" height="14" rx="3"/><rect x="41" y="20" width="17" height="14" rx="3"/>',
+    none: '<path d="M8 10h44M8 19h30M8 28h38" stroke-linecap="round"/>',
+  };
+  const hstylesEl = document.querySelector('[data-hstyles]');
+  const hgamesEl = document.querySelector('[data-hgames]');
+  const hint = document.querySelector('[data-hinterval]');
+  function renderHeader() {
+    if (!hstylesEl) return;
+    hstylesEl.innerHTML = Object.entries(HS).map(([k, [name, help]]) => `<button type="button" role="radio" aria-checked="${header.style === k}" class="hstyle${header.style === k ? ' on' : ''}" data-hstyle="${esc(k)}">
+        <svg viewBox="0 0 60 38" width="60" height="38" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">${THUMB[k] || ''}</svg>
+        <strong>${esc(name)}</strong><small>${esc(help)}</small></button>`).join('');
+    const most = HCOUNT[header.style] || 0;
+    // A carousel or split lists as many as you pick: one empty picker more each time, up to six.
+    const n = header.style === 'carousel' || header.style === 'split' ? Math.min(most, header.games.filter(Boolean).length + 1) : most;
+    if (!n) { hgamesEl.innerHTML = ''; }
+    else {
+      const opts = (sel) => `<option value="">${header.style === 'spotlight' ? 'The first featured game' : header.games.length ? 'Add a game' : 'The games marked Featured'}</option>` + listed.map((g) => `<option value="${esc(g.id)}"${sel === g.id ? ' selected' : ''}>${esc(optName(g))}</option>`).join('');
+      const label = header.style === 'spotlight' ? 'Game' : header.style === 'mosaic' ? 'Games (three)' : 'Games, in order (leave empty for the ones marked Featured)';
+      hgamesEl.innerHTML = `<span class="lbl">${esc(label)}</span><div class="hpicks">${Array.from({ length: n }, (_, i) => `<select data-hpick="${i}" aria-label="Header game ${i + 1}">${opts(header.games[i] || '')}</select>`).join('')}</div>`;
+    }
+    const turns = header.style === 'carousel' || header.style === 'split';
+    hint.hidden = !turns;
+    const r = hint.querySelector('[data-interval]');
+    r.value = header.interval;
+    hint.querySelector('[data-interval-out]').textContent = header.interval;
+  }
+  if (hstylesEl) {
+    hstylesEl.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-hstyle]');
+      if (!b) return;
+      header.style = b.dataset.hstyle;
+      header.games = header.games.slice(0, HCOUNT[header.style] || 0);
+      dirty = true; note.textContent = 'Not saved yet.';
+      renderHeader(); renderPreview();
+    });
+    hgamesEl.addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-hpick]');
+      if (!sel) return;
+      header.games[+sel.dataset.hpick] = sel.value;
+      header.games = header.games.filter(Boolean);
+      dirty = true; note.textContent = 'Not saved yet.';
+      renderHeader(); renderPreview();
+    });
+    hint.querySelector('[data-interval]').addEventListener('input', (e) => {
+      header.interval = +e.target.value;
+      hint.querySelector('[data-interval-out]').textContent = header.interval;
+      dirty = true; note.textContent = 'Not saved yet.';
+    });
+  }
 
   const NAMES = { games: 'Games', soon: 'Coming soon', spotlight: 'Spotlight', category: 'Category',
     top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated' };
@@ -174,9 +238,29 @@
     let html = `<img class="d-logo" src="/assets/logo-512.png" alt="" style="${pos(96, 50, 52, 52)}"><span class="d-brand" style="${pos(164, 56)}">Recomp Store</span>
       <div class="d-tabs" style="${pos(640, 46)}"><span class="on">Discover</span><span>Library</span><span>Latest Updates</span><span>Settings</span></div>`;
     let y = 136;
-    const feat = listed.filter((g) => g.featured);
-    const slides = feat.length ? feat : listed.filter((g) => g.hero).slice(0, 3);
-    if (slides.length) { html += banner(slides[0], y, 'FEATURED', slides.length); y += BANNER_H + SEC_GAP; }
+    const slides = headerGames();
+    // (2.1) The header, in the style picked (store 2.1 sizes: spotlight 520 tall; split and mosaic
+    // a 1150-wide main card with the rest beside it).
+    const card = (g, x, yy, w, h, big) => `<div class="d-card" style="${pos(x, yy, w, h)}">${pic(g)}<div class="d-card-words"><strong${big ? ' class="big"' : ''}>${esc(g.name)}</strong>${big ? `<span>${esc(g.blurb || '')}</span>` : ''}</div></div>`;
+    if (slides.length && header.style !== 'none') {
+      if (header.style === 'spotlight') {
+        html += banner(slides[0], y, 'SPOTLIGHT', 0).replace(`height:${BANNER_H}px`, 'height:520px').replace('class="d-banner"', 'class="d-banner tall"');
+        y += 520 + SEC_GAP;
+      } else if (header.style === 'split') {
+        html += banner(slides[0], y, 'FEATURED', Math.min(slides.length, 6)).replace('width:1728px', 'width:1150px').replace('class="d-banner"', 'class="d-banner narrow"');
+        const rest = slides.slice(1, 4), ch = (BANNER_H - 2 * 16) / 3;
+        rest.forEach((g, k) => (html += card(g, 96 + 1150 + 24, y + k * (ch + 16), 1728 - 1150 - 24, ch, false)));
+        y += BANNER_H + SEC_GAP;
+      } else if (header.style === 'mosaic') {
+        const m = slides.slice(0, 3), sh = (BANNER_H - 16) / 2;
+        if (m[0]) html += card(m[0], 96, y, 1150, BANNER_H, true);
+        m.slice(1).forEach((g, k) => (html += card(g, 96 + 1150 + 24, y + k * (sh + 16), 1728 - 1150 - 24, sh, false)));
+        y += BANNER_H + SEC_GAP;
+      } else {
+        html += banner(slides[0], y, 'FEATURED', slides.length);
+        y += BANNER_H + SEC_GAP;
+      }
+    }
     // (2.0) The category buttons: the parts of the store that have apps, when two or more do.
     const cats = Object.entries(CATS).filter(([c]) => inCat(c).length);
     if (cats.length >= 2) {
@@ -230,6 +314,7 @@
 
   saveForm.addEventListener('submit', () => {
     saveForm.querySelector('[name="sections"]').value = JSON.stringify(sections);
+    saveForm.querySelector('[name="header"]').value = JSON.stringify({ style: header.style, interval: header.interval, games: header.games.filter(Boolean) });
     dirty = false;
   });
   if (publishForm) publishForm.addEventListener('submit', (e) => {
@@ -238,6 +323,7 @@
   window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('resize', renderPreview);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderPreview);
+  renderHeader();
   renderList();
   renderPreview();
 })();

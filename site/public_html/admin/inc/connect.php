@@ -18,6 +18,7 @@ function rs_console(PDO $db, string $install, string $token): ?string {
 }
 
 function rs_console_seen(PDO $db, string $install, string $store): void {
+    rs_count_console($db, $install); // (2.1) Analytics: consoles a day
     $store = preg_replace('/[^0-9A-Za-z.\-]/', '', $store) ?? '';
     if ($store !== '') {
         $db->prepare('UPDATE beta_installs SET last_seen = NOW(), store_version = ? WHERE install_id = ?')->execute([substr($store, 0, 32), $install]);

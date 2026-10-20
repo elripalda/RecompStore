@@ -10,6 +10,9 @@ $g = $oldId !== null ? rs_game($oldId) : null;
 if ($oldId !== null && !$g) { rs_flash('That game isn\'t in the admin.', 'err'); header('Location: index.php'); exit; }
 $isNew = !$g;
 $g = $g ?: rs_game_defaults();
+$orig = $g; // (2.1) as saved: the beta build a new zip replaces goes into its history
+// (2.1) "Add to Emulators" etc. from a category's list starts in that category.
+if ($oldId === null && isset($_GET['category'], RS_CATEGORIES[(string)$_GET['category']])) $g['category'] = (string)$_GET['category'];
 $error = '';
 
 $slotTemplate = json_encode([
@@ -64,10 +67,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Beta: only testers with a code get it; its zip is kept on this site.
     $g['beta'] = !empty($_POST['beta']);
     $g['beta_version'] = trim((string)($_POST['beta_version'] ?? ''));
+    // (2.1) What's new in this build, for testers (shown on the game's page in the store).
+    $g['beta_notes'] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST['beta_notes'] ?? ''))), 0, 4000);
     $pickedBeta = basename(trim((string)($_POST['beta_existing'] ?? '')));
     if ($pickedBeta !== '' && isset(rs_beta_files()[$pickedBeta]) && $pickedBeta !== $g['beta_file']) {
         $g['beta_file'] = $pickedBeta; $g['beta_sha256'] = ''; $g['beta_size'] = 0;
     }
+    // (2.1) Earlier builds the admin no longer offers to testers (the zips stay in the folder).
+    $forget = array_map('basename', array_map('strval', (array)($_POST['beta_forget'] ?? [])));
+    $g['beta_history'] = array_values(array_filter((array)$g['beta_history'], fn($h) => is_array($h) && !in_array((string)($h['file'] ?? ''), $forget, true)));
 
     if (!preg_match('/^[A-Za-z0-9_-]{3,32}$/', $g['id'])) $error = 'The title ID must be 3 to 32 letters, numbers, - or _ (for example PPSA92011).';
     elseif ($g['name'] === '') $error = 'Give the game a name.';
@@ -114,6 +122,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!is_file($p)) throw new RuntimeException('The beta zip ' . $g['beta_file'] . ' isn\'t in the beta folder anymore.');
                 $g['beta_sha256'] = rs_beta_hash($p);
                 $g['beta_size'] = filesize($p);
+            }
+            // (2.1) A new build: the one it replaces is kept for testers to go back to (up to 10),
+            // and a build picked back from the history leaves it.
+            if ($g['beta_file'] !== $orig['beta_file']) {
+                $hist = array_values(array_filter((array)$g['beta_history'], fn($h) => is_array($h) && ($h['file'] ?? '') !== $g['beta_file'] && ($h['file'] ?? '') !== $orig['beta_file']));
+                if ($orig['beta_file'] !== '' && preg_match('/^[0-9a-f]{64}$/', (string)$orig['beta_sha256'])) {
+                    array_unshift($hist, ['file' => $orig['beta_file'], 'version' => (string)($orig['beta_version'] ?: $orig['version']), 'sha256' => (string)$orig['beta_sha256'],
+                        'size' => (int)$orig['beta_size'], 'notes' => (string)$orig['beta_notes'], 'at' => (string)$orig['beta_at']]);
+                }
+                $g['beta_history'] = array_slice($hist, 0, 10);
+                $g['beta_at'] = gmdate('M j, Y');
+                if ($g['beta_notes'] === (string)$orig['beta_notes']) $g['beta_notes'] = ''; // a new build starts with fresh notes unless they were typed in this save
             }
             rs_save_game($g, $isNew ? null : $oldId);
             rs_flash('Saved ' . $g['name'] . '. Press Publish to send it to the store and the site.');
@@ -232,7 +252,29 @@ if (!$isNew) {
         <strong><?= h($g['beta_file']) ?></strong>
         <span class="muted"><?= $g['beta_size'] ? h(rs_human_size((int)$g['beta_size'])) : '' ?><?= $g['beta_sha256'] ? ' · SHA-256 ' . h(substr($g['beta_sha256'], 0, 12)) . '…' : '' ?><?= isset($betaFiles[$g['beta_file']]) ? '' : ' · missing from the beta folder' ?></span>
       <?php else: ?><span class="muted">None yet.</span><?php endif; ?>
+      <?php if ($g['beta_file'] !== '' && rs_sign_on()): $signed = preg_match('/^[0-9a-f]{64}$/', (string)$g['beta_sha256']) && rs_sig_for('beta', (string)$g['beta_sha256']) !== ''; ?>
+        <span class="pill<?= $signed ? ' ok' : '' ?>"><?= $signed ? 'Signed' : 'Waiting for your signature' ?></span>
+      <?php endif; ?>
     </div>
+    <label class="span2">What's new in this build <span class="muted">(optional)</span>
+      <textarea name="beta_notes" rows="4" maxlength="4000" placeholder="What changed, what to test, known problems"><?= h((string)$g['beta_notes']) ?></textarea>
+      <small>Testers see this on the game's page in the store. A new zip starts with empty notes unless you type new ones in the same save.</small></label>
+    <?php $builds = array_values(array_filter(rs_beta_builds($g), fn($b) => !$b['current'])); if (!$isNew && $builds): ?>
+    <div class="span2 beta-history">
+      <span class="lbl">Earlier builds testers can go back to</span>
+      <table class="stats">
+        <thead><tr><th>Version</th><th>Zip</th><th>Up since</th><th>Signed</th><th>Stop offering</th></tr></thead>
+        <tbody>
+        <?php foreach ($builds as $b): $bs = rs_sig_for('beta', $b['sha256']) !== ''; ?>
+          <tr><td><?= h($b['version']) ?></td><td><code><?= h($b['file']) ?></code> <span class="muted"><?= h(rs_human_size(max(1, $b['size']))) ?></span></td><td><?= h($b['at'] ?: '?') ?></td>
+            <td><?= $bs ? 'Yes' : '<span class="warn">Not yet</span>' ?></td>
+            <td><input type="checkbox" name="beta_forget[]" value="<?= h($b['file']) ?>" aria-label="Stop offering <?= h($b['version']) ?>"></td></tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <small class="muted">In Recomp Store 2.1 a tester picks one under Versions on the game's page, if the newest build gives them trouble. Ticked ones stop being offered when you save (their zips stay in the beta folder).</small>
+    </div>
+    <?php endif; ?>
     <?php if (!$isNew && $g['beta_file'] !== '' && rs_r2()): $r2copy = rs_r2_beta_copy($g); ?>
     <div class="beta-file">
       <span class="lbl">Cloudflare R2</span>
