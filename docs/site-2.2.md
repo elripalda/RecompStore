@@ -4,8 +4,9 @@ Everything in docs/api-2.0.md and docs/api-2.1.md still holds. These fields are 
 skip them, and the rest of the catalog is unchanged (checked: with none of them set, the only
 difference from a 2.1 site's catalog is `smp.min`).
 
-All three are set in the admin and go out with Publish, so they're inside the signed catalog
-(`catalog.json` + `catalog.sig`, and the testers' catalog). Each change is in the change log.
+The catalog's new fields (sections 1, 2, 3 and 5) are set in the admin and go out with Publish, so
+they're inside the signed catalog (`catalog.json` + `catalog.sig`, and the testers' catalog). Section 4
+is in the charts (`/api/charts.php`), which aren't signed. Every admin change is in the change log.
 
 ## 1. `tabs`: the store's default category tabs
 
