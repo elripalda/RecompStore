@@ -238,6 +238,15 @@ struct Shared
     /* (2.0) The custom sources' apps in the catalog now, and each one's repo: whose installs
      * they can call theirs (Engine::installed). */
     std::map<std::string, std::string> custom_repos;
+    /* (2.2) Library > On this PS5: every folder in the homebrew folders as last looked, whether
+     * a look is going (and another asked for while it went), and ShadowMountPlus as last asked. */
+    std::vector<ConsoleApp> console;
+    unsigned console_rev = 0;
+    bool console_looking = false, console_again = false;
+    int smp_state = -1;
+    std::string smp_version;
+    /* (2.2) An App manager job asked for (Engine::manage), not yet started. */
+    std::string pending_manage, pending_manage_folder, pending_manage_dest;
 };
 Shared g;
 
@@ -295,6 +304,8 @@ void set_stat(const std::string &key, const std::string &value)
 
 std::string any_case_path(const std::string &dir, const std::string &rel);
 bool at_size_any_case(const std::string &dir, const std::string &rel, std::uint64_t size);
+/* (2.2) The App manager's jobs (Engine::manage), run by the worker; defined with it below. */
+void run_manage(const std::string &kind, const std::string &folder, const std::string &dest);
 
 namespace
 {
@@ -1402,7 +1413,8 @@ bool job_waiting()
 {
     std::lock_guard<std::mutex> l(g.m);
     return !g.pending_install.empty() || !g.pending_setup_app.empty() || !g.pending_delete.empty() || g.pending_store_dl ||
-           g.pending_bench || !g.pending_redeem.empty() || g.pending_logs || !g.sources_due.empty() || g.pending_src_report;
+           g.pending_bench || !g.pending_redeem.empty() || g.pending_logs || !g.sources_due.empty() || g.pending_src_report ||
+           !g.pending_manage.empty() /* (2.2) */;
 }
 
 /* (2.0) Pictures on recompstore.com/media, up to 24 in one request (api/art.php). On a PS5
@@ -1689,6 +1701,7 @@ void remember_own(const std::string &app_id, const std::string &tid);
 std::string lower_text(std::string s);
 std::string tid_folder(const std::string &tid);
 std::vector<std::string> homebrew_roots();
+int forget_tile(const std::string &tid); /* (2.2) with the App manager */
 
 /* (2.0) The drive a folder is on: "/mnt/usb0", "/mnt/ext1", or "/data" for the console's own. */
 std::string drive_of(const std::string &path)
@@ -2106,6 +2119,8 @@ void run_install(const std::string &id, int answer, const std::string &version)
     const std::string under = moved_id(a.id).empty() ? own : moved_id(a.id);
     const std::string root = tid_folder(under);
     const std::string record = g.data + "/installed/" + a.id + ".txt";
+    /* (2.1.1) Already on the console: an update, which ShadowMountPlus doesn't need to add. */
+    const bool was_there = !fs::gone(root + "/eboot.bin");
     make_dirs(root.substr(0, root.find_last_of('/'))); /* (2.0) a drive's homebrew folder, the first time */
     undo.armed = false; /* writing starts: a move made for it stays, so trying again goes to the same place */
     std::size_t nfiles = 0;
@@ -2217,6 +2232,11 @@ void run_install(const std::string &id, int answer, const std::string &version)
     g.job.step = "Installed";
     g.job.installed_version = ver;
     g.job.done = g.job.total;
+    /* (2.1.1) An app left open in the background keeps running the old version: Open only
+     * brings it back. */
+    if (was_there)
+        g.job.note = "Updated to " + ver + ". If " + a.name + " is still open in the background, close it first "
+                     "(Options > Close Application on its tile), or Open brings back the old version.";
 }
 
 /* ---- How files are written: the speed test (Settings > Diagnostics) tries each of
@@ -2408,8 +2428,8 @@ bool send_to_loader(const std::string &elf, int &err)
 Copier run_copier(const std::string &kind, const std::string &image, const std::string &target, bool *changed,
                   const std::string &extra)
 {
-    const bool unzip = kind == "unzip", del = kind == "delete";
-    const char *what = unzip ? "install" : del ? "delete" : "setup";
+    const bool unzip = kind == "unzip", del = kind == "delete", tree = kind == "tree" /* (2.2) Move */;
+    const char *what = unzip ? "install" : del ? "delete" : tree ? "move" : "setup";
     const char *fallback = unzip ? "installing in the store" : del ? "deleting in the store" : "copying in the store";
     if (changed) *changed = false;
     const std::string elf_path = std::string(PORPOISE_APP) + "/assets/payloads/recompstore-copier.elf";
@@ -2481,7 +2501,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
             const std::uint64_t done = std::strtoull(field_of(st, "done").c_str(), nullptr, 10);
             const std::uint64_t total = std::strtoull(field_of(st, "total").c_str(), nullptr, 10);
             if (phase == "copying")
-                set_job("Copying the game's files", done, total);
+                set_job(tree ? "Copying" : "Copying the game's files", done, total);
             else if (phase == "installing")
                 set_job("Installing", done, total);
             else if (phase == "deleting")
@@ -2491,7 +2511,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
             else if (phase == "done")
             {
                 const double secs = std::strtod(field_of(st, "seconds").c_str(), nullptr);
-                if (unzip || del)
+                if (unzip || del || tree)
                     slog("%s: the copier finished: %s files in %.1f s", what, field_of(st, "files").c_str(), secs);
                 else
                 {
@@ -2510,7 +2530,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                 fail_job(why.empty() ? std::string("The copier stopped with an error.") : why);
                 return Copier::Failed;
             }
-            else if (!unzip && !del)
+            else if (!unzip && !del && !tree)
                 set_job("Reading the disc image", 0, 0);
         }
         if (!started && mono_s() - sent > 15)
@@ -2525,6 +2545,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
         {
             if (changed) *changed = true; /* can't tell how far it got */
             fail_job(unzip ? "The copier stopped answering. Install the game again."
+                     : tree ? "The copier stopped answering. Check both places before trying again."
                      : del ? "The copier stopped answering. Press Delete again to finish."
                            : "The copier stopped answering. Set up again to carry on where it stopped.");
             return Copier::Failed;
@@ -3887,14 +3908,16 @@ void run_delete(const std::string &id, bool keep_saves)
     const std::string other = app_folder(id);
     const bool another = other != folder && exists(other + "/eboot.bin");
     if (another) slog("delete %s: another copy is still at %s", id.c_str(), other.c_str());
-    const bool tile_gone = !another && forget_smp(tid); /* the folder first, so a scan can't add it back */
+    /* the folder first, so a scan can't add it back; (2.2) ShadowMountPlus takes no changes while the
+     * store is open, so the tile usually goes once it has closed (the launcher sees to it) */
+    const int tile = another ? 0 : forget_tile(tid);
     /* (2.0) Gone from its new title ID: installed again, it's checked for a clash afresh. */
     if (!another && !moved_id(id).empty()) forget_move(id);
     if (!another && own_id(id) != id) remember_own(id, id); /* (2.0) a custom app's title ID is read again on its next install */
     std::lock_guard<std::mutex> l(g.m);
     if (!another) g.stats_due.push_back("-" + id); /* (2.0) for the charts */
     g.job.phase = Phase::Done;
-    g.job.home = tile_gone ? 2 : 0;
+    g.job.home = tile;
     g.job.step = "Deleted";
     if (!keep.empty() || !whole.empty())
     {
@@ -4330,8 +4353,12 @@ void *worker(void *)
         std::string del;
         bool store_dl = false, del_keep = false;
         int answer = 0;
+        std::string mkind, mfolder, mdest; /* (2.2) */
         {
             std::lock_guard<std::mutex> l(g.m);
+            mkind.swap(g.pending_manage);
+            mfolder.swap(g.pending_manage_folder);
+            mdest.swap(g.pending_manage_dest);
             answer = g.pending_resolve;
             g.pending_resolve = 0;
             picked.swap(g.pending_version); /* (2.1) */
@@ -4356,6 +4383,8 @@ void *worker(void *)
             run_bench();
         else if (!del.empty())
             run_delete(del, del_keep);
+        else if (!mkind.empty())
+            run_manage(mkind, mfolder, mdest); /* (2.2) */
         else if (store_dl)
             run_store_download();
         else
@@ -5653,7 +5682,7 @@ bool Engine::remove(const std::string &app_id, bool keep_saves)
 {
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
-        !g.pending_delete.empty())
+        !g.pending_delete.empty() || !g.pending_manage.empty())
         return false;
     g.pending_delete = app_id;
     g.pending_delete_keep = keep_saves;
@@ -5890,14 +5919,617 @@ bool forget_smp(const std::string &title_id)
     return ok;
 }
 
+/* ---- (2.2) Library > On this PS5: every app in the homebrew folders, and the App manager --------
+ * The list is looked for on its own thread (folders first, then each one's size), so the screens
+ * never wait for it. Delete, Move and New title ID are jobs on the worker, as Delete on a game's
+ * page is. Each acts only on a folder directly inside a homebrew folder the store knows, never on
+ * Recomp Store's own, and checks afterwards that it did what it says. */
+namespace
+{
+std::mutex g_home_m; /* home-todo.txt */
+
+/* A homebrew folder by name, as Customize's "Install new apps to" says it. */
+std::string place_name(const std::string &root)
+{
+    if (root == kHomebrew) return "Console storage";
+    if (root == "/mnt/ext1/homebrew") return "M.2 SSD";
+    if (root == "/mnt/ext0/homebrew") return "Extended storage";
+    if (root.rfind("/mnt/usb", 0) == 0 && root.size() > 8 && root[8] >= '0' && root[8] <= '7')
+        return std::string("USB drive ") + char('1' + (root[8] - '0'));
+    return root;
+}
+
+/* A folder the App manager may change: directly in a homebrew folder the store knows, named
+ * plainly, never Recomp Store's own (by its name or its param.json), and one fs::deletable allows. */
+bool manageable(const std::string &folder, std::string &root, std::string &leaf, std::string &why)
+{
+    const std::size_t slash = folder.find_last_of('/');
+    root = slash == std::string::npos ? std::string() : folder.substr(0, slash);
+    leaf = slash == std::string::npos ? std::string() : folder.substr(slash + 1);
+    const auto roots = homebrew_roots();
+    bool plain = !leaf.empty() && leaf[0] != '.' && leaf != ".." && std::find(roots.begin(), roots.end(), root) != roots.end();
+    for (const char c : leaf)
+        plain = plain && static_cast<unsigned char>(c) >= 0x20 && c != 0x7F && c != '\\';
+    if (!plain)
+    {
+        why = "That isn't a folder in a homebrew folder.";
+        return false;
+    }
+    std::string text;
+    Json pj;
+    const bool has_param = read_file(folder + "/sce_sys/param.json", text) && Json::parse(text, pj) && pj.is_object();
+    if (leaf == "PPSA92000" || (has_param && pj["titleId"].str() == "PPSA92000"))
+    {
+        why = "That's Recomp Store itself.";
+        return false;
+    }
+    if (!fs::deletable(folder, g.data))
+    {
+        why = "The store won't change that folder.";
+        return false;
+    }
+    return true;
+}
+
+/* The store's own install of this folder: its marker and install record say so, or a catalog
+ * app the store installed lives here. "" when it was put there some other way. */
+std::string store_app_of(const std::string &folder, const std::vector<std::pair<std::string, std::string>> &installed)
+{
+    std::string text;
+    Json mk;
+    if (read_file(folder + "/" + kMarker, text) && Json::parse(text, mk) && mk.is_object())
+    {
+        const std::string app = mk["app"].str();
+        if (!app.empty() && app.size() <= 64 && app.find('/') == std::string::npos && exists(g.data + "/installed/" + app + ".txt"))
+            return app;
+    }
+    for (const auto &kv : installed)
+        if (kv.second == folder) return kv.first;
+    return "";
+}
+
+/* Every folder in the homebrew folders, by name. */
+std::vector<ConsoleApp> list_console()
+{
+    /* The catalog's installed apps and where each is (app_folder: the folder scan_homebrew found). */
+    std::vector<std::pair<std::string, std::string>> installed;
+    {
+        std::vector<std::string> ids;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            for (const App &a : g.catalog.apps)
+                if (exists(g.data + "/installed/" + a.id + ".txt")) ids.push_back(a.id);
+        }
+        for (const std::string &id : ids) installed.push_back({id, app_folder(id)});
+    }
+    std::vector<ConsoleApp> out;
+    for (const std::string &root : homebrew_roots())
+    {
+        DIR *d = opendir(root.c_str());
+        if (!d) continue;
+        std::vector<std::string> names;
+        while (dirent *e = readdir(d))
+            if (e->d_name[0] != '.' && names.size() < 1000) names.push_back(e->d_name);
+        closedir(d);
+        for (const std::string &n : names)
+        {
+            const std::string dir = root + "/" + n;
+            struct stat st;
+            if (stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+            ConsoleApp c;
+            c.folder = dir;
+            c.root = root;
+            c.place = place_name(root);
+            std::string text;
+            Json pj;
+            if (read_file(dir + "/sce_sys/param.json", text) && Json::parse(text, pj) && pj.is_object())
+            {
+                c.title_id = pj["titleId"].str();
+                c.name = param_name(pj);
+                std::string v = pj["contentVersion"].str();
+                if (v.empty()) v = pj["appVer"].str();
+                c.version = v.empty() ? std::string() : tidy_version(v);
+                c.app = exists(dir + "/eboot.bin");
+            }
+            if (!title_id_ok(c.title_id)) c.title_id = title_id_ok(n) && c.app ? n : c.title_id;
+            if (c.name.empty()) c.name = n;
+            if (exists(dir + "/sce_sys/icon0.png")) c.icon = dir + "/sce_sys/icon0.png";
+            c.store = n == "PPSA92000" || c.title_id == "PPSA92000";
+            if (!c.store) c.store_id = store_app_of(dir, installed);
+            out.push_back(c);
+        }
+    }
+    std::stable_sort(out.begin(), out.end(), [](const ConsoleApp &a, const ConsoleApp &b) {
+        const std::string x = lower_text(a.name), y = lower_text(b.name);
+        return x != y ? x < y : a.folder < b.folder;
+    });
+    return out;
+}
+
+/* ShadowMountPlus's API, asked what it is (read only: it answers while an app runs). */
+int ask_smp_version(std::string &version);
+
+void *console_main(void *)
+{
+    for (;;)
+    {
+        bool look = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            look = g.console_again;
+            g.console_again = false;
+            g.console_looking = look;
+        }
+        if (!look)
+        {
+            usleep(150000);
+            continue;
+        }
+        std::vector<ConsoleApp> list = list_console();
+        {
+            /* Sizes already known stay while they're worked out again. */
+            std::lock_guard<std::mutex> l(g.m);
+            for (ConsoleApp &c : list)
+                for (const ConsoleApp &o : g.console)
+                    if (o.folder == c.folder) c.size = o.size;
+            g.console = list;
+            ++g.console_rev;
+        }
+        std::string ver;
+        const int smp = ask_smp_version(ver);
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.smp_state = smp;
+            g.smp_version = ver;
+            ++g.console_rev;
+        }
+        for (const ConsoleApp &c : list)
+        {
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                if (g.console_again) break; /* asked again: start over */
+            }
+            std::uint64_t bytes = 0;
+            std::size_t files = 0;
+            fs::tree_size(c.folder, bytes, files);
+            std::lock_guard<std::mutex> l(g.m);
+            for (ConsoleApp &o : g.console)
+                if (o.folder == c.folder) o.size = (long long)bytes;
+            ++g.console_rev;
+        }
+    }
+    return nullptr;
+}
+
+/* ---- Home screen changes for later ------------------------------------------------------------
+ * ShadowMountPlus takes no changes while an app runs, and the store is one: a tile to take off
+ * ("forget" an app's ID) or to point somewhere new ("unmount" it, so the next look finds it where
+ * it is now) waits in home-todo.txt for the launcher, which makes it once the store has closed. */
+std::vector<std::string> home_todo()
+{
+    std::lock_guard<std::mutex> l(g_home_m);
+    std::string text;
+    std::vector<std::string> out;
+    if (!read_file(g.data + "/home-todo.txt", text)) return out;
+    std::size_t at = 0;
+    while (at < text.size() && out.size() < 16)
+    {
+        std::size_t end = text.find('\n', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = text.substr(at, end - at);
+        const std::size_t sp = line.find(' ');
+        if (sp != std::string::npos && (line.compare(0, sp, "forget") == 0 || line.compare(0, sp, "unmount") == 0) &&
+            title_id_ok(line.substr(sp + 1)))
+            out.push_back(line);
+        at = end + 1;
+    }
+    return out;
+}
+
+void save_home_todo(const std::vector<std::string> &todo)
+{
+    std::string text;
+    for (const std::string &t : todo) text += t + "\n";
+    const std::string path = g.data + "/home-todo.txt";
+    if (text.empty()) std::remove(path.c_str());
+    else if (!write_file(path, text.data(), text.size())) slog("home screen: couldn't save home-todo.txt");
+}
+
+void queue_home(const std::string &what, const std::string &tid)
+{
+    if (!title_id_ok(tid) || tid == "PPSA92000") return;
+    std::vector<std::string> todo = home_todo();
+    const std::string line = what + " " + tid;
+    std::lock_guard<std::mutex> l(g_home_m);
+    if (std::find(todo.begin(), todo.end(), line) != todo.end()) return;
+    if (todo.size() >= 16) todo.erase(todo.begin());
+    todo.push_back(line);
+    save_home_todo(todo);
+    slog("home screen: %s %s waits until the store closes (ShadowMountPlus takes no changes while it's open)", what.c_str(), tid.c_str());
+}
+
+/* Handed to the launcher, which has started: they're its to make now. */
+void home_handed(const std::vector<std::string> &given)
+{
+    if (given.empty()) return;
+    std::vector<std::string> todo = home_todo();
+    std::lock_guard<std::mutex> l(g_home_m);
+    std::vector<std::string> left;
+    for (const std::string &t : todo)
+        if (std::find(given.begin(), given.end(), t) == given.end()) left.push_back(t);
+    save_home_todo(left);
+}
+
+/* A tile off the home screen now if ShadowMountPlus will (it won't while the store is open), else
+ * when the store closes: 2 now, 3 later. */
+int forget_tile(const std::string &tid)
+{
+    if (forget_smp(tid)) return 2;
+    queue_home("forget", tid);
+    return 3;
+}
+
+void manage_done(int home, const std::string &note)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    g.job.phase = Phase::Done;
+    g.job.home = home;
+    g.job.step = "Done";
+    g.job.note = note;
+    g.console_again = true;
+}
+
+std::string size_words(std::uint64_t b)
+{
+    char t[32];
+    if (b >= (1ull << 30)) std::snprintf(t, sizeof t, "%.1f GB", double(b) / 1073741824.0);
+    else if (b >= (1ull << 20)) std::snprintf(t, sizeof t, "%.0f MB", double(b) / 1048576.0);
+    else std::snprintf(t, sizeof t, "%.0f KB", double(b) / 1024.0);
+    return t;
+}
+
+/* The folder's app, by its param.json: its title ID and name ("" when it has none). */
+void folder_app(const std::string &folder, std::string &tid, std::string &name)
+{
+    std::string text;
+    Json pj;
+    tid.clear();
+    name.clear();
+    if (read_file(folder + "/sce_sys/param.json", text) && Json::parse(text, pj) && pj.is_object())
+    {
+        tid = pj["titleId"].str();
+        name = param_name(pj);
+    }
+    if (name.empty()) name = folder.substr(folder.find_last_of('/') + 1);
+}
+
+/* Delete: one folder, everything in it, by the copier payload (it can act as a game's own user
+ * for the folders a game made for itself), or here without a loader. */
+void run_manage_delete(const std::string &folder)
+{
+    std::string root, leaf, why;
+    if (!manageable(folder, root, leaf, why)) { slog("manage delete %s: refused: %s", folder.c_str(), why.c_str()); return fail_job(why); }
+    std::string tid, name;
+    folder_app(folder, tid, name);
+    {
+        std::vector<std::pair<std::string, std::string>> none;
+        const std::string app = store_app_of(folder, none);
+        if (!app.empty())
+        {
+            slog("manage delete %s: refused: the store installed it as %s", folder.c_str(), app.c_str());
+            return fail_job("The store installed " + name + ": delete it from its page, so its game files and saves go with it as they should.");
+        }
+    }
+    const double t0 = mono_s();
+    slog("manage delete %s (%s, %s)", folder.c_str(), name.c_str(), tid.c_str());
+    if (title_id_ok(tid)) unmount_smp(tid);
+    std::size_t files = 0;
+    const Copier c = run_copier("delete", "", folder, nullptr, "path0=" + folder + "\n");
+    if (c == Copier::Failed)
+    {
+        scan_homebrew();
+        std::lock_guard<std::mutex> l(g.m);
+        g.console_again = true;
+        return; /* run_copier said why */
+    }
+    if (c == Copier::Unavailable)
+    {
+        std::string bad;
+        int e = 0;
+        if (!fs::remove_tree(folder, files, bad, e, [&](std::size_t n) { set_job("Deleting", n, 0); }, {},
+                             [&](const std::string &line) { slog("manage delete: %s", line.c_str()); }))
+        {
+            slog("manage delete %s: stopped at %s (errno %d) after %zu files", folder.c_str(), bad.c_str(), e, files);
+            scan_homebrew();
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                g.console_again = true;
+            }
+            if (e == EACCES)
+                return fail_job(bad + " couldn't be deleted: the app made it for itself, and only the store's helper payload "
+                                      "can remove it. Make sure your payload loader is running (port 9021), then try again.");
+            return fail_job(bad + " couldn't be deleted (error " + std::to_string(e) + "). Close the app if it's running, then try again.");
+        }
+    }
+    if (!fs::gone(folder))
+    {
+        slog("manage delete %s: still there afterwards", folder.c_str());
+        scan_homebrew();
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.console_again = true;
+        }
+        return fail_job(folder + " is still there. Close the app if it's running, then try again.");
+    }
+    slog("manage delete %s: gone, in %.1f s", folder.c_str(), mono_s() - t0);
+    scan_homebrew();
+    /* Its tile, unless another copy of it is still on the console. */
+    int home = 0;
+    const bool another = title_id_ok(tid) && !title_folder(tid).empty();
+    if (title_id_ok(tid) && !another) home = forget_tile(tid);
+    std::string note = "Deleted " + name + ".";
+    if (another) note += " Another copy is still at " + title_folder(tid) + ".";
+    else if (home == 3) note += " Its tile comes off your home screen once the store closes.";
+    else if (home == 2) note += " ShadowMountPlus took its tile off your home screen.";
+    manage_done(home, note);
+}
+
+/* Move: the whole folder copied to another homebrew folder (the copier, at the drive's full
+ * speed, or here), every file checked there, then the old folder deleted. The app is only ever
+ * whole in one place: a copy that fails goes again, and the old one is deleted only after. */
+void run_manage_move(const std::string &folder, const std::string &dest_root)
+{
+    std::string root, leaf, why;
+    if (!manageable(folder, root, leaf, why)) { slog("manage move %s: refused: %s", folder.c_str(), why.c_str()); return fail_job(why); }
+    const auto roots = homebrew_roots();
+    if (std::find(roots.begin(), roots.end(), dest_root) == roots.end() || dest_root == root)
+        return fail_job("Pick another place to move it to.");
+    if (!exists(folder + "/eboot.bin")) return fail_job("Only an app can be moved (this folder has no eboot.bin).");
+    if (!drive_ready(drive_of(dest_root))) return fail_job(place_name(dest_root) + " isn't connected.");
+    const std::string target = dest_root + "/" + leaf;
+    if (exists(target)) return fail_job(place_name(dest_root) + " already has a folder called " + leaf + ".");
+    std::string tid, name;
+    folder_app(folder, tid, name);
+    set_job("Working out its size", 0, 0);
+    std::uint64_t bytes = 0;
+    std::size_t nfiles = 0;
+    fs::tree_size(folder, bytes, nfiles);
+    {
+        struct statvfs fsv;
+        const std::string drive = drive_of(dest_root);
+        if (statvfs(drive.c_str(), &fsv) == 0 && fsv.f_blocks)
+        {
+            const std::uint64_t free_b = std::uint64_t(fsv.f_bavail) * std::uint64_t(fsv.f_frsize);
+            if (free_b < bytes + (64ull << 20))
+                return fail_job(place_name(dest_root) + " has " + size_words(free_b) + " free, and " + name + " needs " + size_words(bytes) + ".");
+        }
+        else
+            slog("manage move: couldn't read the free space on %s; trying anyway", drive.c_str());
+    }
+    make_dirs(dest_root);
+    const double t0 = mono_s();
+    slog("manage move %s -> %s (%s, %s, %zu files)", folder.c_str(), target.c_str(), name.c_str(), size_words(bytes).c_str(), nfiles);
+    if (title_id_ok(tid)) unmount_smp(tid);
+    const Copier c = run_copier("tree", folder, target);
+    if (c == Copier::Failed)
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        g.console_again = true;
+        return; /* run_copier said why; the copier took its half copy away */
+    }
+    if (c == Copier::Unavailable)
+    {
+        std::uint64_t done = 0;
+        std::size_t files = 0;
+        std::string bad;
+        int e = 0;
+        set_job("Copying", 0, bytes);
+        const bool ok = fs::copy_tree(folder, target, done, files, bad, e, [&](std::uint64_t so_far) { set_job("Copying", so_far, bytes); return true; }, {},
+                                      [&](const std::string &line) { slog("manage move: %s", line.c_str()); });
+        std::string bad2;
+        if (!ok || !fs::same_tree(folder, target, bad2))
+        {
+            std::size_t n = 0;
+            std::string b;
+            int e2 = 0;
+            fs::remove_tree(target, n, b, e2);
+            slog("manage move %s: the copy stopped at %s (errno %d)%s", folder.c_str(), ok ? bad2.c_str() : bad.c_str(), e,
+                 fs::gone(target) ? "; the half copy is gone" : "; the half copy couldn't be removed");
+            std::lock_guard<std::mutex> l(g.m);
+            g.console_again = true;
+            fail_job(ok ? bad2 + " didn't copy whole. Nothing was moved."
+                        : e == ENOSPC ? place_name(dest_root) + " is full. Nothing was moved."
+                                      : (ok ? bad2 : bad) + " couldn't be copied (error " + std::to_string(e) + "). Nothing was moved.");
+            return;
+        }
+        slog("manage move: copied %zu files in the store, all checked", files);
+    }
+    /* Whole in the new place: the old folder goes. */
+    set_job("Deleting the old copy", 0, 0);
+    std::size_t files = 0;
+    const Copier d = run_copier("delete", "", folder, nullptr, "path0=" + folder + "\n");
+    bool old_gone = d == Copier::Done;
+    if (d == Copier::Unavailable)
+    {
+        std::string bad;
+        int e = 0;
+        old_gone = fs::remove_tree(folder, files, bad, e);
+    }
+    old_gone = old_gone && fs::gone(folder);
+    if (d == Copier::Failed || !old_gone)
+    {
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            g.job = JobState();
+            g.job.kind = "mmove";
+            g.job.app_id = folder;
+        }
+        slog("manage move %s: copied to %s, but the old folder couldn't be deleted", folder.c_str(), target.c_str());
+        scan_homebrew();
+        std::lock_guard<std::mutex> l(g.m);
+        g.console_again = true;
+        g.job.phase = Phase::Failed;
+        g.job.error = name + " is copied to " + place_name(dest_root) + ", but the old copy in " + place_name(root) +
+                      " couldn't be deleted. Close the app if it's running, then delete the old one here.";
+        return;
+    }
+    slog("manage move %s: done in %.1f s", folder.c_str(), mono_s() - t0);
+    scan_homebrew();
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        apply_moves(g.catalog); /* a store app's data folders follow it */
+        ++g.revision;
+    }
+    if (title_id_ok(tid)) queue_home("unmount", tid);
+    manage_done(title_id_ok(tid) ? 3 : 0, "Moved " + name + " to " + place_name(dest_root) + "." +
+                                             (title_id_ok(tid) ? " Its tile opens it from there once the store closes." : ""));
+}
+
+/* New title ID: the next one free in the block the title ID guard uses, in its param.json, and
+ * its folder renamed to it. A store app keeps getting its updates (moves.json, as a moved app). */
+void run_manage_retitle(const std::string &folder)
+{
+    std::string root, leaf, why;
+    if (!manageable(folder, root, leaf, why)) { slog("manage retitle %s: refused: %s", folder.c_str(), why.c_str()); return fail_job(why); }
+    std::string old, name;
+    folder_app(folder, old, name);
+    if (!exists(folder + "/eboot.bin") || !title_id_ok(old)) return fail_job("Only an app with a title ID in its param.json can get a new one.");
+    const std::string fresh = free_move_id();
+    if (fresh.empty()) return fail_job("There's no free title ID left in the store's block.");
+    const std::string target = root + "/" + fresh;
+    if (exists(target)) return fail_job(place_name(root) + " already has a folder called " + fresh + ".");
+    std::vector<std::pair<std::string, std::string>> none;
+    const std::string app = store_app_of(folder, none);
+    slog("manage retitle %s: %s -> %s (%s)%s", folder.c_str(), old.c_str(), fresh.c_str(), name.c_str(),
+         app.empty() ? "" : (", the store's " + app).c_str());
+    unmount_smp(old);
+    if (!retitle(folder, old, fresh, why))
+    {
+        slog("manage retitle %s: %s", folder.c_str(), why.c_str());
+        return fail_job("Its param.json couldn't be changed (" + why + "). Nothing changed.");
+    }
+    if (std::rename(folder.c_str(), target.c_str()) != 0)
+    {
+        const int e = errno;
+        std::string back;
+        if (!retitle(folder, fresh, old, back)) slog("manage retitle %s: couldn't put its param.json back: %s", folder.c_str(), back.c_str());
+        slog("manage retitle %s: rename to %s failed (errno %d)", folder.c_str(), target.c_str(), e);
+        return fail_job("Its folder couldn't be renamed (error " + std::to_string(e) + "). Close the app if it's running. Nothing changed.");
+    }
+    if (!app.empty())
+    {
+        /* The store's own install: its updates go to the new ID from now on, and its marker says it. */
+        std::string text;
+        if (read_file(target + "/" + kMarker, text) && set_string(text, "titleId", [&](const std::string &) { return fresh; }))
+            write_file(target + "/" + kMarker, text.data(), text.size());
+        scan_homebrew();
+        remember_move(app, fresh);
+    }
+    else
+        scan_homebrew();
+    const int home = forget_tile(old);
+    manage_done(3, name + " is " + fresh + " now. Its new tile shows up once the store closes" +
+                       (home == 3 ? ", and the old one goes." : ".") + " Saves it made as " + old + " stay with " + old + ".");
+}
+} // namespace
+
+void run_manage(const std::string &kind, const std::string &folder, const std::string &dest)
+{
+    if (kind == "mdelete") run_manage_delete(folder);
+    else if (kind == "mmove") run_manage_move(folder, dest);
+    else if (kind == "mretitle") run_manage_retitle(folder);
+    else fail_job("The store doesn't know that.");
+}
+
+std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    if (looking) *looking = g.console_looking || g.console_again;
+    return g.console;
+}
+
+unsigned Engine::console_revision() const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    return g.console_rev;
+}
+
+void Engine::look_console()
+{
+    static bool started = false;
+    std::lock_guard<std::mutex> l(g.m);
+    if (!started)
+    {
+        pthread_t t;
+        started = create_title_thread(&t, console_main, nullptr) == 0;
+        if (started) pthread_detach(t);
+    }
+    g.console_again = true;
+}
+
+bool Engine::manage(const std::string &kind, const std::string &folder, const std::string &dest)
+{
+    if (kind != "mdelete" && kind != "mmove" && kind != "mretitle") return false;
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench ||
+        !g.pending_delete.empty() || !g.pending_manage.empty())
+        return false;
+    g.pending_manage = kind;
+    g.pending_manage_folder = folder;
+    g.pending_manage_dest = dest;
+    g.job = JobState();
+    g.job.phase = Phase::Working;
+    g.job.kind = kind;
+    g.job.app_id = folder;
+    g.job.step = kind == "mdelete" ? "Deleting" : kind == "mmove" ? "Moving" : "Changing its title ID";
+    return true;
+}
+
+std::string Engine::free_title_id() const { return free_move_id(); }
+
+int Engine::smp_state(std::string &version) const
+{
+    std::lock_guard<std::mutex> l(g.m);
+    version = g.smp_version;
+    return g.smp_state;
+}
+
+bool Engine::reload_smp(std::string &why)
+{
+    const bool ok = start_smp(why);
+    std::lock_guard<std::mutex> l(g.m);
+    g.console_again = true; /* asked again in a moment, with the list */
+    return ok;
+}
+
+int Engine::home_waiting() const { return int(home_todo().size()); }
+
+namespace
+{
+int ask_smp_version(std::string &version)
+{
+    version.clear();
+    std::string reply;
+    bool answered = false;
+    smp_api("/api/v1/version", "{}", reply, &answered);
+    if (!answered) return 0;
+    Json j;
+    if (Json::parse(reply, j) && j.is_object()) version = j["shadowmount_version"].str();
+    return 1;
+}
+} // namespace
+
 /* Opening a game. An app may not start another app (the system answers "not
  * allowed"), so the launcher payload does it, as Porpoise's home screen tiles do:
  * the store leaves it the title ID, hands it to the payload loader on port 9021 and
  * closes once it has started; it opens the game when the store has gone, or opens
  * the store again if the game won't open. */
 static std::string g_open_token, g_open_title;
+static std::vector<std::string> g_open_home; /* (2.2) the home screen changes handed to it */
 
-bool open_game(const std::string &title_id, std::string &why)
+/* (2.2) mode "" opens title_id; "refresh" (title_id the store's) refreshes the home screen and
+ * opens the store again. Either way the launcher first makes the home screen changes waiting. */
+static bool send_launcher(const std::string &title_id, const std::string &mode, std::string &why)
 {
     if (!title_id_ok(title_id))
     {
@@ -5920,7 +6552,26 @@ bool open_game(const std::string &title_id, std::string &why)
     std::remove((jd + "/status.txt").c_str());
     char token[48];
     std::snprintf(token, sizeof token, "%lld-%d", (long long)std::time(nullptr), int(mono_s() * 1000) % 100000);
-    const std::string job = std::string("token=") + token + "\ntitle=" + title_id + "\n";
+    /* (2.1.1) Its name, for the launcher's "Adding ... to your home screen" toast: printable
+     * characters only, on one line. */
+    std::string name;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        for (const App &x : g.catalog.apps)
+            if (x.id == title_id || moved_id(x.id) == title_id) { name = x.name; break; }
+        if (name.empty()) /* (2.2) an app the store didn't install: its param.json's */
+            for (const ConsoleApp &c : g.console)
+                if (c.title_id == title_id && c.app) { name = c.name; break; }
+    }
+    std::string clean;
+    for (const char c : name)
+        if (static_cast<unsigned char>(c) >= 0x20 && c != 0x7F && clean.size() < 80) clean += c;
+    std::string job = std::string("token=") + token + "\ntitle=" + title_id + "\n";
+    if (!clean.empty()) job += "name=" + clean + "\n";
+    if (!mode.empty()) job += "mode=" + mode + "\n";
+    /* (2.2) Home screen changes ShadowMountPlus couldn't make while the store was open. */
+    const std::vector<std::string> todo = home_todo();
+    for (std::size_t i = 0; i < todo.size(); ++i) job += "do" + std::to_string(i) + "=" + todo[i] + "\n";
     if (!write_file(jd + "/job.txt", job.data(), job.size()))
     {
         slog("open %s: couldn't write the launcher's job in %s", title_id.c_str(), jd.c_str());
@@ -5942,7 +6593,29 @@ bool open_game(const std::string &title_id, std::string &why)
     }
     g_open_token = token;
     g_open_title = title_id;
-    slog("open %s: sent the launcher (%zu KB) to the payload loader", title_id.c_str(), elf.size() / 1024);
+    g_open_home = todo;
+    slog("%s: sent the launcher (%zu KB) to the payload loader%s", mode == "refresh" ? "refresh home screen" : ("open " + title_id).c_str(),
+         elf.size() / 1024, todo.empty() ? "" : (" with " + std::to_string(todo.size()) + " home screen change(s)").c_str());
+    return true;
+}
+
+bool open_game(const std::string &title_id, std::string &why) { return send_launcher(title_id, "", why); }
+
+bool refresh_home(std::string &why) { return send_launcher("PPSA92000", "refresh", why); }
+
+bool refresh_result(std::string &what)
+{
+    const std::string path = g.data + "/launch/status.txt";
+    std::string st;
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0 || !read_file(path, st) || field_of(st, "phase") != "refreshed")
+        return false;
+    std::rename(path.c_str(), (g.data + "/launch/status.seen.txt").c_str()); /* said once */
+    if (std::time(nullptr) - info.st_mtime > 300) return false;
+    const bool smp = field_of(st, "smp") == "1";
+    const int changes = std::atoi(field_of(st, "changes").c_str());
+    slog("refresh home screen: back (ShadowMountPlus %s, %d change(s) made)", smp ? "answered" : "didn't answer", changes);
+    what = smp ? "Your home screen is up to date" : "ShadowMountPlus didn't answer, so your home screen didn't change";
     return true;
 }
 
@@ -5994,7 +6667,8 @@ bool Engine::take_auto_update(std::string &version)
     std::lock_guard<std::mutex> l(g.m);
     /* Only with nothing else going on, and no result the app hasn't shown yet. */
     if (!g.auto_update || g.store_update.empty() || g.job.phase != Phase::Idle || g.pending_store_dl ||
-        !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench || !g.pending_delete.empty())
+        !g.pending_install.empty() || !g.pending_setup_app.empty() || g.pending_bench || !g.pending_delete.empty() ||
+        !g.pending_manage.empty())
         return false;
     g.auto_update = false; /* once: if it doesn't work out, Latest Updates still offers it */
     std::remove((g.data + "/selfupdate/autoupdate").c_str());
@@ -6102,6 +6776,8 @@ int open_game_state()
     {
         slog("open %s: the launcher is running; the store closes so it can open the game", g_open_title.c_str());
         g_open_token.clear();
+        home_handed(g_open_home); /* (2.2) the launcher makes them now */
+        g_open_home.clear();
         return 1;
     }
     if (phase == "failed")

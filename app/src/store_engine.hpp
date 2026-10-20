@@ -272,6 +272,20 @@ struct Source
     std::vector<std::string> problems; /* repos in it that couldn't be used: "owner/name: why" */
 };
 
+/* (2.2) Library > On this PS5: a folder in one of the homebrew folders (the console's, the M.2
+ * SSD's, extended storage's, a USB drive's), whether the store put it there or not. */
+struct ConsoleApp
+{
+    std::string folder, root; /* its folder, and the homebrew folder it's in */
+    std::string place;        /* that homebrew folder by name: "Console storage", "M.2 SSD", "USB drive 1" */
+    std::string title_id, name, version; /* its param.json's ("" when it has none) */
+    std::string icon;         /* its sce_sys/icon0.png, "" when it has none */
+    std::string store_id;     /* the store's app it is, "" when it was put there some other way */
+    long long size = -1;      /* bytes in its folder, -1 while it's still being worked out */
+    bool app = false;         /* eboot.bin and sce_sys/param.json: a PS5 app (else a folder left behind) */
+    bool store = false;       /* Recomp Store itself: listed, never moved, renamed or deleted */
+};
+
 /* (2.0) The charts (recompstore.com/api/charts.php): app IDs in order, and each app's numbers. */
 struct ChartStat
 {
@@ -479,6 +493,29 @@ public:
     std::string install_root() const;
     void set_install_root(const std::string &homebrew_folder);
 
+    /* (2.2) Library > On this PS5. console_apps: every folder in the homebrew folders, as last
+     * looked (look_console looks again, in the background: the list first, then each one's size;
+     * console_revision rises each time it changes; looking: still at it). */
+    std::vector<ConsoleApp> console_apps(bool *looking = nullptr) const;
+    unsigned console_revision() const;
+    void look_console();
+    /* (2.2) The App manager's jobs, as remove(): "mdelete" deletes the folder (one the store didn't
+     * install: those go through remove()), "mmove" copies it to the homebrew folder dest, checks
+     * it and deletes the old one, "mretitle" gives it the next free title ID (free_title_id) and
+     * renames its folder to it. Recomp Store itself, and anything that isn't a folder directly in
+     * a homebrew folder, is refused. */
+    bool manage(const std::string &kind, const std::string &folder, const std::string &dest = "");
+    std::string free_title_id() const;
+    /* (2.2) ShadowMountPlus as last asked (look_console asks): 1 running (version: its own, "1.7"),
+     * 0 it didn't answer, -1 not asked yet. reload_smp sends the player's copy (Settings) to the
+     * loader again, which restarts a running one. */
+    int smp_state(std::string &version) const;
+    bool reload_smp(std::string &why);
+    /* (2.2) Home screen changes ShadowMountPlus can't make while the store is open (it takes no
+     * changes while an app runs): how many are waiting for the launcher (Open, or Refresh home
+     * screen), which makes them once the store has closed. */
+    int home_waiting() const;
+
     /* The version installed: "" when it isn't installed, "?" when it's on the console but
      * the store didn't install it. */
     std::string installed(const std::string &app_id) const;
@@ -578,6 +615,12 @@ bool unmount_smp(const std::string &title_id);
  * open_game_cancel: it took too long; it does nothing if it starts later.
  * open_game_failure: when the store opens again because a game wouldn't (once). */
 bool open_game(const std::string &title_id, std::string &why);
+/* (2.2) Refresh home screen: the launcher, once the store has closed, makes the home screen
+ * changes waiting (Engine::home_waiting), has ShadowMountPlus look for apps, waits for it, and
+ * opens the store again. open_game_state as for Open. refresh_result, once when the store is
+ * back from one: true (what it did, for a toast). */
+bool refresh_home(std::string &why);
+bool refresh_result(std::string &what);
 /* Updating the store itself, once download_store_update() is done: its installer payload
  * (assets/payloads) is handed to the loader with the checked download, waits for the store
  * to close, installs it, and opens the store again. update_store_state, as open_game_state: 1 close now, 0 not yet, -1 it gave up. */

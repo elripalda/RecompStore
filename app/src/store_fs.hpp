@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -52,4 +53,21 @@ bool deletable(const std::string &path, const std::string &store_data, const std
 /* After a folder outside the homebrew folder went: its parent folders while they're
  * empty, at most two (rmdir refuses a folder that isn't empty, so saves stay). */
 void remove_empty_parents(const std::string &path, const std::function<void(const std::string &)> &log = {});
+
+/* (2.2) What's in a folder: its files' sizes added up (bytes) and how many (files); false when
+ * part of it couldn't be read (what could be is counted). Links aren't followed. */
+bool tree_size(const std::string &path, std::uint64_t &bytes, std::size_t &files, const ActAs &act_as = {});
+
+/* (2.2) A folder and everything in it copied to to, which mustn't be there yet (the App
+ * manager's Move). Folders are made 0777 and files written 0777, as the store's installs are.
+ * progress hears the bytes copied so far now and then; it returns false to stop. On failure,
+ * bad is the path it stopped at and err its errno; what was copied stays for the caller to
+ * remove. Links are left out (a homebrew app's folder has none). */
+bool copy_tree(const std::string &from, const std::string &to, std::uint64_t &bytes, std::size_t &files, std::string &bad,
+               int &err, const std::function<bool(std::uint64_t)> &progress = {}, const ActAs &act_as = {},
+               const std::function<void(const std::string &)> &log = {});
+
+/* (2.2) Every file under from is under to, at the same size (after copy_tree); bad: the first
+ * that isn't. */
+bool same_tree(const std::string &from, const std::string &to, std::string &bad, const ActAs &act_as = {});
 } // namespace recomp::fs

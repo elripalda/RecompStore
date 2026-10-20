@@ -13,7 +13,8 @@
  *     token=  phase=copying|done|failed  done=  total=  error=  seconds=
  * kind=delete (path0=, path1=, ...) deletes a game's folder and the game files set up
  * for it instead; kind=copy copies one file (a disc image the game reads as it is) into
- * the target folder.
+ * the target folder; (2.2) kind=tree copies an app's whole folder (image=) to a new folder
+ * in another homebrew folder (target=), for the App manager's Move.
  * A file called "cancel" in that folder stops it. Files already in place at
  * their full size are kept, so a stopped setup carries on. It writes only
  * inside the target folder, never the port's own eboot.bin, sce_sys or
@@ -587,6 +588,94 @@ int delete_job(const std::string &job)
     return 0;
 }
 
+
+/* (2.2) A folder directly inside a homebrew folder the store knows (the console's, the M.2
+ * SSD's, extended storage's, a USB drive's), never Recomp Store's own: what kind "tree" copies
+ * from and to. */
+bool homebrew_child(const std::string &p)
+{
+#ifdef RECOMP_TEST_ROOT
+    std::vector<std::string> roots{std::string(RECOMP_TEST_ROOT) + "homebrew", std::string(RECOMP_TEST_ROOT) + "usb0/homebrew"};
+#else
+    std::vector<std::string> roots{"/data/homebrew", "/mnt/ext0/homebrew", "/mnt/ext1/homebrew"};
+    for (int i = 0; i < 8; ++i) roots.push_back("/mnt/usb" + std::to_string(i) + "/homebrew");
+#endif
+    const std::size_t slash = p.find_last_of('/');
+    if (slash == std::string::npos) return false;
+    const std::string root = p.substr(0, slash), leaf = p.substr(slash + 1);
+    if (std::find(roots.begin(), roots.end(), root) == roots.end()) return false;
+    if (leaf.empty() || leaf[0] == '.' || leaf == "PPSA92000") return false;
+    for (const char ch : leaf)
+        if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7F || ch == '\\') return false;
+    return true;
+}
+
+/* kind "tree" (2.2): an app's folder copied whole to a new folder in another homebrew folder,
+ * then checked (every file there at its size). What was copied goes again if it fails, so the
+ * app is only ever whole in one place or the other. The store deletes the old folder after. */
+int tree_job(const std::string &from, const std::string &to)
+{
+    if (!homebrew_child(from) || !homebrew_child(to) || from == to)
+        return fail("The copier only moves an app's folder from one homebrew folder to another.");
+    if (exists(to))
+        return fail(to + " is there already.");
+    if (!exists(from + "/eboot.bin"))
+        return fail(from + " isn't an app's folder (it has no eboot.bin).");
+    log_line("move started (pid %d): %s -> %s", int(getpid()), from.c_str(), to.c_str());
+    const double t0 = now_s();
+    std::uint64_t total = 0;
+    std::size_t nfiles = 0;
+    recomp::fs::tree_size(from, total, nfiles, act_as);
+    g_status.phase = "copying";
+    g_status.total = total;
+    write_status(true);
+    std::uint64_t bytes = 0;
+    std::size_t files = 0;
+    std::string bad;
+    int err = 0;
+    double last_log = t0;
+    const bool ok = recomp::fs::copy_tree(
+        from, to, bytes, files, bad, err,
+        [&](std::uint64_t so_far) {
+            g_status.done = so_far;
+            g_status.seconds = now_s() - t0;
+            write_status();
+            if (now_s() - last_log > 5)
+            {
+                last_log = now_s();
+                log_line("%llu MB of %llu MB in %.0f s", (unsigned long long)(so_far >> 20), (unsigned long long)(total >> 20), now_s() - t0);
+            }
+            return !cancelled();
+        },
+        act_as, [](const std::string &line) { log_line("%s", line.c_str()); });
+    auto undo = [&](const std::string &why) {
+        std::size_t n = 0;
+        std::string b;
+        int e = 0;
+        if (!recomp::fs::remove_tree(to, n, b, e, {}, act_as) || !recomp::fs::gone(to))
+            log_line("the half copy at %s couldn't be removed (%s, error %d)", to.c_str(), b.c_str(), e);
+        return fail(why);
+    };
+    if (!ok)
+    {
+        const char *why = err == ENOSPC ? "the drive is full" : err == ECANCELED ? "stopped" : err == EACCES || err == EPERM ? "the console refused" : "error";
+        return undo(bad + " couldn't be copied (" + why + ", error " + std::to_string(err) + "). Nothing was moved.");
+    }
+    g_status.phase = "checking";
+    g_status.done = total;
+    write_status(true);
+    sync();
+    if (!recomp::fs::same_tree(from, to, bad, act_as))
+        return undo(bad + " didn't copy whole. Nothing was moved.");
+    g_status.files = files;
+    g_status.seconds = now_s() - t0;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("move: copied %zu files, %llu MB in %.1f s, all checked", files, (unsigned long long)(bytes >> 20), now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
 int main()
 {
     make_dirs(kDir + "/logs");
@@ -646,6 +735,8 @@ int main()
         return delete_job(job);
     if (kind == "copy")
         return copy_job(image, target);
+    if (kind == "tree")
+        return tree_job(image, target);
     if (kind != "setup")
         return fail("The copier doesn't know the job \"" + kind + "\".");
     log_line("started (pid %d): %s -> %s", int(getpid()), image.c_str(), target.c_str());

@@ -105,8 +105,53 @@ JobState Engine::job() const
     if (g_job_kind == "install") { j.phase = Phase::Working; j.kind = "install"; j.app_id = g_job_app; j.step = "Downloading"; j.done = 312ull << 20; j.total = 476ull << 20; }
     if (g_job_kind == "fetch") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "update"; j.app_id = g_job_app; j.step = "Downloading the update"; j.done = 150ull << 10; j.total = 240ull << 10; }
     if (g_job_kind == "setup") { j.phase = Phase::Working; j.kind = "setup"; j.slot = "game"; j.app_id = g_job_app; j.step = "Copying the game's files"; j.done = 2900ull << 20; j.total = 7300ull << 20; }
+    if (g_job_kind == "mmove") { j.phase = Phase::Working; j.kind = "mmove"; j.app_id = g_job_app; j.step = "Copying"; j.done = 640ull << 20; j.total = 1810ull << 20; }
     return j;
 }
+/* (2.2) Library > On this PS5: a console with the store's apps, others, and a folder left behind.
+ * PREVIEW_CONSOLE_ICON: a real param.json's icon0.png for the PS5SX2 row. */
+std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
+{
+    load();
+    if (looking) *looking = false;
+    std::vector<ConsoleApp> v;
+    auto add = [&](const char *folder, const char *tid, const char *name, const char *ver, const char *store_id, long long mb, bool app,
+                   const std::string &icon) {
+        ConsoleApp c;
+        c.folder = folder;
+        c.root = c.folder.substr(0, c.folder.find_last_of('/'));
+        c.place = c.root == "/data/homebrew" ? "Console storage" : c.root == "/mnt/ext1/homebrew" ? "M.2 SSD" : "USB drive 1";
+        c.title_id = tid;
+        c.name = name;
+        c.version = ver;
+        c.store_id = store_id;
+        c.size = mb < 0 ? -1 : mb << 20;
+        c.app = app;
+        c.icon = icon;
+        c.store = std::string(tid) == "PPSA92000";
+        v.push_back(c);
+    };
+    auto icon_of = [&](const char *id) { for (const App &a : g_cat.apps) if (a.id == id) return a.icon_file; return std::string(); };
+    const char *real = std::getenv("PREVIEW_CONSOLE_ICON");
+    add("/data/homebrew/PPSA92000", "PPSA92000", "Recomp Store", "2.2.0", "", 52, true, "/home/claude/recompstore/app/assets/brand/logo-512.png");
+    add("/data/homebrew/PPSA92011", "PPSA92011", "WWE SmackDown vs. Raw 2011", "1.0.0", "PPSA92011", 7420, true, icon_of("PPSA92011"));
+    add("/data/homebrew/PPSA99203", "PPSA99203", "PS5SX2", "2.15", "", 61, true, real ? real : "");
+    add("/data/homebrew/PPSA64007", "PPSA64007", "Perfect Dark", "2.0.0", "PPSA64007", 214, true, icon_of("PPSA64007"));
+    add("/mnt/ext1/homebrew/PPSA99008", "PPSA99008", "ProsperoEden", "1.5", "", 43, true, "");
+    add("/mnt/usb0/homebrew/PPSA99251", "PPSA99251", "PS5SX2 (God of War)", "2.15", "", 47, true, real ? real : "");
+    add("/data/homebrew/old-port-backup", "", "old-port-backup", "", "", 3210, false, "");
+    add("/data/homebrew/PPSA64008", "PPSA64008", "GoldenEye 007", "2.0.0", "PPSA64008", -1, true, icon_of("PPSA64008"));
+    return v;
+}
+unsigned Engine::console_revision() const { return 1; }
+void Engine::look_console() {}
+bool Engine::manage(const std::string &, const std::string &, const std::string &) { return true; }
+std::string Engine::free_title_id() const { return "PPSA97003"; }
+int Engine::smp_state(std::string &v) const { const char *e = std::getenv("PREVIEW_SMP_STATE"); const int st = e ? std::atoi(e) : 1; v = st == 1 ? "1.7" : ""; return st; }
+bool Engine::reload_smp(std::string &) { return true; }
+int Engine::home_waiting() const { const char *e = std::getenv("PREVIEW_HOME_WAITING"); return e ? std::atoi(e) : 0; }
+bool refresh_home(std::string &) { return true; }
+bool refresh_result(std::string &) { return false; }
 std::vector<Place> places()
 {
     std::vector<Place> out;

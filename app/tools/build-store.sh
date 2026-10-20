@@ -35,7 +35,7 @@ cp "$root/payload/copier/recompstore-copier.elf" "$root/assets/payloads/recompst
 # The launcher payload (payload/launcher): Open hands it the game, as an app may not
 # start another app; built as Porpoise's home launcher is.
 PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-clang" -Wall -Werror -O2 \
-    -o "$root/payload/launcher/recompstore-launcher.elf" "$root/payload/launcher/launcher.c" -lSceSystemService -lSceUserService
+    -o "$root/payload/launcher/recompstore-launcher.elf" "$root/payload/launcher/launcher.c" -lSceSystemService -lSceUserService -lSceNotification
 PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-strip" "$root/payload/launcher/recompstore-launcher.elf"
 cp "$root/payload/launcher/recompstore-launcher.elf" "$root/assets/payloads/recompstore-launcher.elf"
 # The installer payload (payload/installer): installs the store from its GitHub release,
