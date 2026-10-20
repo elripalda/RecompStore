@@ -12,6 +12,7 @@
 #include "store_stfs.hpp"
 #include "store_sha1.hpp"
 #include "store_sha256.hpp"
+#include "rs_sig.h"
 #include "title_threads.hpp"
 #include "ui_app_common.hpp"
 #include "porpoise_paths.hpp"
@@ -160,10 +161,15 @@ struct Shared
     std::string data;
     Catalog catalog;
     bool have_catalog = false, online = false, loading = true;
+    /* (2.1) Why the last catalog from the site wasn't taken (its signature), "" when it was. */
+    std::string catalog_note;
     unsigned revision = 0;
     JobState job;
     std::string pending_install; /* asked for, not yet started */
     int pending_resolve = 0;     /* (2.0) with it: the answer to a title ID clash (resolve_clash) */
+    std::string pending_version; /* (2.1) with it: the version the player picked, "" the newest */
+    /* (2.1) Apps kept at an older version the player picked (installed/<id>.hold): that version. */
+    std::map<std::string, std::string> holds;
     std::string pending_setup_app, pending_setup_slot, pending_setup_image;
     bool pending_setup_fetch = false; /* (1.0.8) the slot's Title Update, downloaded first */
     bool pending_bench = false;
@@ -390,6 +396,74 @@ void use_cached_catalog(bool test)
     ++g.revision;
 }
 
+/* ---- (2.1) Signatures from Recomp Store Signer (rs_sig.h) ------------------------------ */
+std::string sha256_hex(const std::string &bytes)
+{
+    Sha256 h;
+    h.update(reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size());
+    return h.hex();
+}
+
+/* "" when sigtext is a good signature of the given kind for bytes with this SHA-256, made with
+ * one of the keys built into the store; otherwise what's wrong, in words. */
+std::string sig_problem(const std::string &sigtext, const char *kind, const std::string &sha_hex, std::int64_t *signed_at = nullptr)
+{
+    if (sigtext.empty()) return "it isn't signed";
+    rs_sig s;
+    if (!rs_sig_parse(sigtext.data(), sigtext.size(), &s)) return "its signature is damaged";
+    if (!rs_sig_check(&s, kind, sha_hex.c_str())) return "its signature doesn't match it";
+    if (signed_at) *signed_at = s.signed_unix;
+    return "";
+}
+
+/* When a saved signature was made (0: none). */
+std::int64_t saved_sig_time(const std::string &path)
+{
+    std::string text;
+    rs_sig s;
+    if (!read_file(path, text) || !rs_sig_parse(text.data(), text.size(), &s)) return 0;
+    return s.signed_unix;
+}
+
+/* (2.1) A catalog and its signature from the site. "" when they check out and aren't older than
+ * the one this console already has; the reason otherwise. The catalog changes between the two
+ * requests now and then (a publish), so a mismatch is asked again once. */
+std::string fetch_signed_catalog(porpoise::http::Session &http, bool test, std::vector<std::uint8_t> &body, std::string &sigtext, int &status)
+{
+    std::string why;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        body.clear();
+        std::vector<std::uint8_t> sb;
+        int sst = 0;
+        if (test)
+        {
+            const std::string form = beta_form("test", "");
+            status = http.request(kTestCatalogUrl, &form, body, 4u << 20);
+            if (status != 200) return "HTTP " + std::to_string(status);
+            const std::string sform = beta_form("testsig", "");
+            sst = http.request(kTestCatalogUrl, &sform, sb, 64u << 10);
+        }
+        else
+        {
+            status = http.get(kCatalogUrl, body, {}, 4u << 20);
+            if (status != 200) return "HTTP " + std::to_string(status);
+            sst = http.get(kCatalogSigUrl, sb, {}, 64u << 10);
+        }
+        sigtext.assign(sb.begin(), sb.end());
+        if (sst != 200) sigtext.clear();
+        std::int64_t when = 0;
+        why = sig_problem(sigtext, test ? "catalog-test" : "catalog", sha256_hex(std::string(body.begin(), body.end())), &when);
+        if (why.empty())
+        {
+            const std::int64_t had = saved_sig_time(g.data + (test ? "/catalog-test.json.sig" : "/catalog.json.sig"));
+            if (when < had) return "it's older than the one this PS5 already has";
+            return "";
+        }
+    }
+    return why;
+}
+
 void refresh_catalog(porpoise::http::Session &http)
 {
     bool test = false;
@@ -398,17 +472,17 @@ void refresh_catalog(porpoise::http::Session &http)
         test = g.tester && g.test_view && !g.beta_install.empty();
     }
     std::vector<std::uint8_t> body;
+    std::string sigtext, why;
     Catalog c;
     int status = 0;
     bool from_test = false;
     if (test)
     {
         /* (2.0) A tester's console: the catalog with the testers-only apps in it. If the site
-         * won't give it (no longer a tester), the one everyone gets. */
-        const std::string form = beta_form("test", "");
-        status = http.request(kTestCatalogUrl, &form, body, 4u << 20);
-        from_test = status == 200 && parse_catalog(std::string(body.begin(), body.end()), c);
-        if (!from_test) slog("catalog: the test catalog didn't come (HTTP %d); reading the public one", status);
+         * won't give it (no longer a tester), the one everyone gets. (2.1) Signed, like it. */
+        why = fetch_signed_catalog(http, true, body, sigtext, status);
+        from_test = why.empty() && parse_catalog(std::string(body.begin(), body.end()), c);
+        if (!from_test) slog("catalog: the test catalog didn't come (%s); reading the public one", why.empty() ? "unreadable" : why.c_str());
         if (status == 403)
         {
             /* Not a tester any more: everyone's catalog from here on, the saved one first. */
@@ -421,24 +495,34 @@ void refresh_catalog(porpoise::http::Session &http)
             use_cached_catalog(false);
         }
     }
-    if (!from_test)
-    {
-        body.clear();
-        status = http.get(kCatalogUrl, body, {}, 4u << 20);
-    }
+    if (!from_test) why = fetch_signed_catalog(http, false, body, sigtext, status);
     const std::string text(body.begin(), body.end());
-    if (status == 200 && (from_test || parse_catalog(text, c)))
+    if (status == 200 && why.empty() && (from_test || parse_catalog(text, c)))
     {
-        write_file(g.data + (from_test ? "/catalog-test.json" : "/catalog.json"), text.data(), text.size());
+        const std::string base = g.data + (from_test ? "/catalog-test.json" : "/catalog.json");
+        write_file(base, text.data(), text.size());
+        write_file(base + ".sig", sigtext.data(), sigtext.size());
         std::lock_guard<std::mutex> l(g.m);
         g.catalog = c;
         merge_beta(g.catalog);
         attach_art(g.catalog);
         g.have_catalog = true;
         g.online = true;
+        g.catalog_note.clear();
         ++g.revision;
     }
-    slog("catalog%s: HTTP %d, %zu bytes, %zu games\n", from_test ? " (test)" : "", status, body.size(), c.apps.size());
+    else if (status == 200)
+    {
+        /* (2.1) The site answered, but not with a catalog signed on the owner's PC: the one this
+         * console trusted last stays. */
+        std::lock_guard<std::mutex> l(g.m);
+        g.online = true;
+        g.catalog_note = "The store's list from recompstore.com couldn't be checked (" + (why.empty() ? std::string("it couldn't be read") : why) +
+                         "), so the last one it trusted is shown.";
+        ++g.revision;
+    }
+    slog("catalog%s: HTTP %d, %zu bytes, %zu games%s%s\n", from_test ? " (test)" : "", status, body.size(), c.apps.size(),
+         why.empty() ? "" : ", not taken: ", why.c_str());
 }
 
 /* ---- Beta games (1.1.0) ------------------------------------------------------------- */
@@ -1443,6 +1527,7 @@ struct Target
 {
     std::string url, sha256, version;
     std::uint64_t size = 0;
+    std::string newest; /* (2.1) the newest release's tag with the app's file, whichever was picked */
 };
 
 void remember_releases(const std::string &repo, const std::string &text);
@@ -1461,7 +1546,20 @@ int github_releases(porpoise::http::Session &http, const std::string &repo, std:
     return http.get("https://api.github.com/repos/" + repo + "/releases?per_page=30", body, {}, 8u << 20);
 }
 
-bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string &err)
+std::string lower_ascii(std::string s);
+
+/* (2.1) A GitHub app's file only comes from its own repo's releases, whatever the release list
+ * (from recompstore.com or GitHub) says. GitHub's own redirect to its file host follows. */
+bool from_own_repo(const std::string &url, const std::string &repo)
+{
+    const std::string want = "https://github.com/" + lower_ascii(repo) + "/releases/download/";
+    if (repo.empty() || repo.find("..") != std::string::npos || url.size() <= want.size()) return false;
+    if (lower_ascii(url.substr(0, want.size())) != want) return false;
+    return url.find("..", want.size()) == std::string::npos && url.find_first_of("?#\\", want.size()) == std::string::npos;
+}
+
+/* (2.1) want: a release's tag the player picked (Versions), "" for the newest. */
+bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string &err, const std::string &want = "")
 {
     if (a.source != "github")
     {
@@ -1470,6 +1568,10 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
         t.version = a.version;
         t.size = a.bytes; /* (1.1.2) a beta's, from the site; 0 when it isn't said */
         if (t.url.empty()) { err = "This game has no download link yet."; return false; }
+        /* (2.1) A beta needs its signature from the owner's PC; a fixed link, its checksum in
+         * the signed catalog. */
+        if (a.beta && a.sig.empty()) { err = "This beta isn't signed yet, so it can't be installed. Try again later."; return false; }
+        if (!a.beta && t.sha256.empty()) { err = "This download has no checksum in the store's list, so it can't be checked."; return false; }
         return true;
     }
     /* The newest release that has the game's zip. Pre-releases count: many ports ship as
@@ -1491,6 +1593,10 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
         for (std::size_t i = 0; i < assets.size(); ++i)
             if (asset_matches(a.asset, assets[i]["name"].str()))
             {
+                /* (2.1) The newest release with the app's file is noted; a version picked takes
+                 * only the release with that tag. */
+                if (t.newest.empty()) t.newest = list[r]["tag_name"].str();
+                if (!want.empty() && list[r]["tag_name"].str() != want) break;
                 pick = &list[r];
                 t.url = assets[i]["browser_download_url"].str();
                 t.size = static_cast<std::uint64_t>(assets[i]["size"].integer());
@@ -1499,10 +1605,21 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
                 break;
             }
     }
+    if (!pick && !want.empty() && !t.newest.empty())
+    {
+        err = "Version " + want + " isn't on GitHub any more, so nothing was installed. Pick another one.";
+        return false;
+    }
     if (!pick)
     {
         err = list.size() == 0 ? "This game has no release on GitHub yet."
                                : "None of this game's GitHub releases has " + a.asset + ".";
+        return false;
+    }
+    if (!from_own_repo(t.url, a.repo))
+    {
+        slog("resolve %s: refused %s (not github.com/%s's releases)", a.id.c_str(), t.url.c_str(), a.repo.c_str());
+        err = "This download isn't on " + a.repo + "'s own GitHub releases, so it wasn't installed.";
         return false;
     }
     remember_releases(a.repo, std::string(body.begin(), body.end()));
@@ -1682,8 +1799,9 @@ void scan_homebrew();
 std::string field_of(const std::string &text, const char *key);
 
 /* answer (2.0): 0 a plain install; after a title ID clash, 1 under its own new title ID,
- * 2 over the other app's folder. */
-void run_install(const std::string &id, int answer)
+ * 2 over the other app's folder; (2.1) 3 from its new GitHub repo (JobState::source_moved).
+ * version (2.1): the one the player picked (Engine::install), "" for the newest. */
+void run_install(const std::string &id, int answer, const std::string &version)
 {
     porpoise::http::Session http("store-install", "RecompStore/0.1");
     App a;
@@ -1697,10 +1815,36 @@ void run_install(const std::string &id, int answer)
         g.job.kind = "install";
         g.job.app_id = id;
         g.job.step = "Finding the newest release";
+        g.job.version = version; /* (2.1) */
     }
     if (!found) return fail_job("That game isn't in the catalog.");
     if (store_too_old(a))
         return fail_job(a.name + " needs Recomp Store " + a.min_store + " or newer. Update the store from the Library first (Updates).");
+    /* (2.1) Where it downloads from changed: an app the store installed from one GitHub repo
+     * whose catalog entry names another now. Nothing is downloaded until the player says the new
+     * place is fine (resolve_clash 3, this once). Not asked for a beta, a fixed link or an app
+     * from a source the player added. */
+    if (answer != 3 && a.source == "github" && !a.beta && !a.custom && !a.repo.empty())
+    {
+        std::string text;
+        Json mk;
+        if (read_file(app_folder(a.id) + "/" + kMarker, text) && Json::parse(text, mk) && mk.is_object() && mk["app"].str() == a.id)
+        {
+            const std::string src = mk["source"].str();
+            if (src.rfind("github:", 0) == 0 && src.size() > 7 && lower_text(src.substr(7)) != lower_text(a.repo))
+            {
+                slog("install %s: stopped before downloading: it came from github.com/%s, the catalog says github.com/%s now",
+                     a.id.c_str(), src.c_str() + 7, a.repo.c_str());
+                std::lock_guard<std::mutex> l(g.m);
+                g.job.phase = Phase::Failed;
+                g.job.source_moved = true;
+                g.job.source_old = src.substr(7);
+                g.job.source_new = a.repo;
+                g.job.error = "Where " + a.name + " downloads from changed, so it wasn't updated.";
+                return;
+            }
+        }
+    }
     /* (2.0) Keep both: the game gets its own new title ID before anything is fetched, so the
      * install below goes to that ID's folder (and every update after it). */
     /* The move made here is taken back if the install stops before writing anything (a
@@ -1722,11 +1866,35 @@ void run_install(const std::string &id, int answer)
         for (App &x : g.catalog.apps)
             if (x.id == a.id) a = x; /* its data folder now under the new ID */
     }
+    /* (2.1) An earlier beta build the player picked: its own download, checksum, size and
+     * signature, checked below as the current build's are. */
+    bool older = false;
+    if (!version.empty() && a.beta)
+    {
+        const BetaBuild *b = nullptr;
+        for (const BetaBuild &x : a.beta_builds)
+            if (x.file.empty() ? x.version == version : x.file == version) { b = &x; break; }
+        if (!b) return fail_job("That build of " + a.name + " isn't there any more. Pick another one.");
+        const BetaBuild pick = *b;
+        a.url = pick.url;
+        a.sha256 = pick.sha256;
+        a.bytes = pick.bytes;
+        a.sig = pick.sig;
+        a.version = pick.version;
+        older = true;
+        slog("install %s: the earlier beta build %s (%s)", a.id.c_str(), pick.version.c_str(), pick.file.c_str());
+    }
     if (!http.init()) return fail_job("Your PS5 isn't online.");
 
     Target t;
     std::string err;
-    if (!resolve(http, a, t, err)) return fail_job(err);
+    if (!resolve(http, a, t, err, a.source == "github" ? version : std::string())) return fail_job(err);
+    if (!version.empty() && a.source == "github")
+    {
+        /* (2.1) A release the player picked: older than the newest, the app is kept at it. */
+        older = !t.newest.empty() && t.version != t.newest;
+        slog("install %s: version %s picked (the newest is %s)", a.id.c_str(), t.version.c_str(), t.newest.c_str());
+    }
 
     /* (2.0) The download kept from an install that stopped on a title ID clash: taken as it
      * is when it's the same file, rather than downloaded twice. */
@@ -1818,11 +1986,22 @@ void run_install(const std::string &id, int answer)
         return fail_job("The download didn't finish. Check your connection and try again.");
 
     set_job("Checking the download", got, got);
+    const std::string got_hex = reused ? std::string() : sha.hex(); /* (finishes the hash: once) */
     if (!reused && !t.sha256.empty())
     {
         std::string want = t.sha256;
         for (char &c : want) c = char(std::tolower(static_cast<unsigned char>(c)));
-        if (sha.hex() != want) return fail_job("The download doesn't match its checksum, so it wasn't installed.");
+        if (got_hex != want) return fail_job("The download doesn't match its checksum, so it wasn't installed.");
+    }
+    if (!reused && a.beta)
+    {
+        /* (2.1) Signed on the owner's PC: a beta zip swapped on the website or R2 fails here. */
+        const std::string why = sig_problem(a.sig, "beta", got_hex);
+        if (!why.empty())
+        {
+            slog("download %s: beta refused, %s", a.id.c_str(), why.c_str());
+            return fail_job("This beta zip couldn't be checked (" + why + "), so it wasn't installed.");
+        }
     }
     /* A release that only has a bigger zip (a source archive): the game's own zip is taken
      * out of it, the big one deleted, and the game's zip installed as any other. */
@@ -2004,6 +2183,16 @@ void run_install(const std::string &id, int answer)
     write_marker(a, root, tid, ver);
     make_dirs(g.data + "/installed");
     write_file(g.data + "/installed/" + a.id + ".txt", ver.data(), ver.size());
+    {
+        /* (2.1) An older version the player picked: kept at it (Update All leaves it) until a
+         * newer one is installed, which lets it go. */
+        const std::string hold = g.data + "/installed/" + a.id + ".hold";
+        if (older) write_file(hold, ver.data(), ver.size());
+        else std::remove(hold.c_str());
+        std::lock_guard<std::mutex> l(g.m);
+        if (older) g.holds[a.id] = ver;
+        else g.holds.erase(a.id);
+    }
     slog("installed %s %s: %zu files in %s%s", a.id.c_str(), ver.c_str(), nfiles, root.c_str(),
          tid != a.id ? (" as " + tid).c_str() : "");
     {
@@ -3676,6 +3865,11 @@ void run_delete(const std::string &id, bool keep_saves)
             return fail_job(p + " is still there. Close the game if it's running, then press Delete again.");
         }
     std::remove((g.data + "/installed/" + id + ".txt").c_str());
+    std::remove((g.data + "/installed/" + id + ".hold").c_str()); /* (2.1) */
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        g.holds.erase(id);
+    }
     if (DIR *d = opendir((g.data + "/setup").c_str()))
     {
         std::vector<std::string> mine;
@@ -3733,8 +3927,14 @@ int check_store_update(porpoise::http::Session &http)
         {
             const Json &r = j[i];
             if (r["draft"].boolean(false) || r["prerelease"].boolean(false)) continue;
+            /* (2.1) Only a release whose zip comes with its signature from the owner's PC. */
+            bool zip = false, sig = false;
             for (std::size_t k = 0; k < r["assets"].size(); ++k)
-                if (r["assets"][k]["name"].str() == "PPSA92000.zip") { newest = r["tag_name"].str(); break; }
+            {
+                zip = zip || r["assets"][k]["name"].str() == "PPSA92000.zip";
+                sig = sig || r["assets"][k]["name"].str() == "PPSA92000.zip.sig";
+            }
+            if (zip && sig) newest = r["tag_name"].str();
         }
     const bool newer = !newest.empty() && version_newer(newest, kVersion);
     slog("store: newest release on GitHub: %s (HTTP %d; this is %s)%s", newest.empty() ? "none" : newest.c_str(), status, kVersion,
@@ -3770,25 +3970,37 @@ void run_store_download()
     std::vector<std::uint8_t> body;
     const int status = http.get(std::string("https://api.github.com/repos/") + kStoreRepo + "/releases?per_page=10", body, {}, 4u << 20);
     Json j;
-    std::string url, digest, tag;
+    std::string url, digest, tag, sig_url;
     std::uint64_t size = 0;
     if (status == 200 && Json::parse(std::string(body.begin(), body.end()), j) && j.is_array())
         for (std::size_t i = 0; i < j.size() && url.empty(); ++i)
         {
             const Json &r = j[i];
             if (r["draft"].boolean(false) || r["prerelease"].boolean(false)) continue;
+            std::string u, su, dg;
+            std::uint64_t sz = 0;
             for (std::size_t k = 0; k < r["assets"].size(); ++k)
-                if (r["assets"][k]["name"].str() == "PPSA92000.zip")
+            {
+                const Json &as = r["assets"][k];
+                if (as["name"].str() == "PPSA92000.zip")
                 {
-                    url = r["assets"][k]["browser_download_url"].str();
-                    size = std::uint64_t(r["assets"][k]["size"].integer());
-                    digest = r["assets"][k]["digest"].str();
-                    tag = r["tag_name"].str();
-                    break;
+                    u = as["browser_download_url"].str();
+                    sz = std::uint64_t(as["size"].integer());
+                    dg = as["digest"].str();
                 }
+                else if (as["name"].str() == "PPSA92000.zip.sig")
+                    su = as["browser_download_url"].str();
+            }
+            if (u.empty() || su.empty()) continue; /* (2.1) a release without its signature doesn't count */
+            url = u, sig_url = su, size = sz, digest = dg, tag = r["tag_name"].str();
         }
-    if (url.rfind("https://", 0) != 0)
-        return fail_job(status == 200 ? "There's no Recomp Store release to update to." : "GitHub didn't answer. Try again in a moment.");
+    /* (2.1) Only from the store's own GitHub releases. */
+    if (!from_own_repo(url, kStoreRepo) || !from_own_repo(sig_url, kStoreRepo))
+        return fail_job(status == 200 ? "There's no signed Recomp Store release to update to." : "GitHub didn't answer. Try again in a moment.");
+    std::vector<std::uint8_t> sigb;
+    const int sst = http.get(sig_url, sigb, {}, 64u << 10);
+    const std::string sigtext(sigb.begin(), sigb.end());
+    if (sst != 200) return fail_job("The update's signature didn't download. Try again in a moment.");
     make_dirs(g.data + "/downloads");
     const std::string zip = g.data + "/downloads/PPSA92000.zip", part = zip + ".part";
     std::FILE *out = std::fopen(part.c_str(), "wb");
@@ -3816,6 +4028,21 @@ void run_store_download()
     {
         std::remove(part.c_str());
         return fail_job("The download doesn't match its checksum, so nothing changed.");
+    }
+    {
+        /* (2.1) Signed on the owner's PC: an update put on GitHub by anyone else stops here. */
+        const std::string why = sig_problem(sigtext, "store", hash);
+        if (!why.empty())
+        {
+            slog("store update: refused, %s", why.c_str());
+            std::remove(part.c_str());
+            return fail_job("This update couldn't be checked (" + why + "), so nothing changed.");
+        }
+        if (!write_file(zip + ".sig", sigtext.data(), sigtext.size()))
+        {
+            std::remove(part.c_str());
+            return fail_job("The store couldn't save the download on your PS5.");
+        }
     }
     if (std::rename(part.c_str(), zip.c_str()) != 0)
     {
@@ -4098,7 +4325,7 @@ void *worker(void *)
                 continue;
             }
         }
-        std::string id, sapp, sslot, simage;
+        std::string id, sapp, sslot, simage, picked;
         bool bench = false, sfetch = false;
         std::string del;
         bool store_dl = false, del_keep = false;
@@ -4107,6 +4334,7 @@ void *worker(void *)
             std::lock_guard<std::mutex> l(g.m);
             answer = g.pending_resolve;
             g.pending_resolve = 0;
+            picked.swap(g.pending_version); /* (2.1) */
             del_keep = g.pending_delete_keep;
             store_dl = g.pending_store_dl;
             g.pending_store_dl = false;
@@ -4121,7 +4349,7 @@ void *worker(void *)
             g.pending_setup_fetch = false;
         }
         if (!id.empty())
-            run_install(id, answer);
+            run_install(id, answer, picked);
         else if (!sapp.empty())
             run_setup(sapp, sslot, simage, sfetch);
         else if (bench)
@@ -4947,6 +5175,27 @@ void Engine::start(const std::string &data_dir)
         }
     }
     {
+        /* (2.1) The apps kept at an older version the player picked (installed/<id>.hold). */
+        std::map<std::string, std::string> holds;
+        if (DIR *d = opendir((data_dir + "/installed").c_str()))
+        {
+            while (dirent *e = readdir(d))
+            {
+                const std::string n = e->d_name;
+                if (n.size() > 5 && n.compare(n.size() - 5, 5, ".hold") == 0 && holds.size() < 500) holds[n.substr(0, n.size() - 5)] = "";
+            }
+            closedir(d);
+        }
+        for (auto it = holds.begin(); it != holds.end();)
+            if (!read_file(data_dir + "/installed/" + it->first + ".hold", it->second) || it->second.empty() || it->second.size() > 64)
+                it = holds.erase(it);
+            else
+                ++it;
+        if (!holds.empty()) slog("kept at an older version: %zu app(s)", holds.size());
+        std::lock_guard<std::mutex> l(g.m);
+        g.holds.swap(holds);
+    }
+    {
         /* (2.0) A tester's console, as the site last said (before the threads start, so the
          * link thread's answer can't be overwritten by this). */
         std::lock_guard<std::mutex> l(g.m);
@@ -4989,24 +5238,35 @@ bool Engine::catalog(Catalog &out) const
 
 unsigned Engine::revision() const { std::lock_guard<std::mutex> l(g.m); return g.revision; }
 bool Engine::online() const { std::lock_guard<std::mutex> l(g.m); return g.online; }
+std::string Engine::catalog_note() const { std::lock_guard<std::mutex> l(g.m); return g.catalog_note; }
 bool Engine::loading() const { std::lock_guard<std::mutex> l(g.m); return g.loading; }
 
-bool Engine::install(const std::string &app_id)
+bool Engine::install(const std::string &app_id, const std::string &version)
 {
     std::lock_guard<std::mutex> l(g.m);
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
     g.pending_install = app_id;
+    g.pending_version = version; /* (2.1) */
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "install";
     g.job.app_id = app_id;
     g.job.step = "Starting";
+    g.job.version = version;
+    if (!version.empty()) slog("install %s: version %s asked for", app_id.c_str(), version.c_str());
     return true;
 }
 
-bool Engine::resolve_clash(const std::string &app_id, int choice)
+std::string Engine::held(const std::string &app_id) const
 {
-    if (choice != 1 && choice != 2)
+    std::lock_guard<std::mutex> l(g.m);
+    auto it = g.holds.find(app_id);
+    return it == g.holds.end() ? std::string() : it->second;
+}
+
+bool Engine::resolve_clash(const std::string &app_id, int choice, const std::string &version)
+{
+    if (choice != 1 && choice != 2 && choice != 3)
     {
         /* Neither: the download kept for it goes. */
         std::string data;
@@ -5024,12 +5284,15 @@ bool Engine::resolve_clash(const std::string &app_id, int choice)
     if (g.job.phase == Phase::Working || !g.pending_install.empty() || !g.pending_setup_app.empty()) return false;
     g.pending_install = app_id;
     g.pending_resolve = choice;
+    g.pending_version = version; /* (2.1) the one the player picked, again */
     g.job = JobState();
     g.job.phase = Phase::Working;
     g.job.kind = "install";
     g.job.app_id = app_id;
     g.job.step = "Starting";
-    slog("title ID guard: %s %s", app_id.c_str(), choice == 1 ? "goes under its own new title ID" : "goes over the other app");
+    g.job.version = version;
+    if (choice == 3) slog("install %s: updating from its new GitHub repo, as the player said", app_id.c_str());
+    else slog("title ID guard: %s %s", app_id.c_str(), choice == 1 ? "goes under its own new title ID" : "goes over the other app");
     return true;
 }
 

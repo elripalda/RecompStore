@@ -94,6 +94,25 @@ public:
         kb_mode_ = mode; kb_text() = text; kb_ = true; kb_t_ = 1; kb_row_ = row; kb_col_ = col; kb_caps_ = false;
     }
     void preview_src_note(const std::string &t, bool bad) { src_note_ = t; src_note_bad_ = bad; }
+    /* (2.1) Versions on the open app's page: the row focused, and the question before it
+     * installs (ask; its button 0 Cancel, 1 Install). */
+    void preview_versions(int sel, bool ask = false, int ask_sel = 1);
+    void preview_versions_close() { vers_ = vers_ask_ = false; }
+    /* (2.1) Where the open app downloads from changed: the question, its button focused. */
+    void preview_moved(const std::string &from, const std::string &to, int sel = 1)
+    {
+        moved_ = true; moved_t_ = 1; moved_sel_ = sel;
+        moved_job_ = JobState(); moved_job_.app_id = page_id_; moved_job_.source_moved = true;
+        moved_job_.source_old = from; moved_job_.source_new = to;
+    }
+    void preview_moved_close() { moved_ = false; }
+    /* (2.1) Discover's header in another style (its games: the featured ones when empty), and a
+     * part of the store (category_index) sorted another way. */
+    void preview_header(const std::string &style, const std::vector<std::string> &games = {})
+    {
+        catalog_.header_style = style; catalog_.header_games = games; slide_ = 0; slide_t_ = 0; slide_fade_ = 1;
+    }
+    void preview_sort(int category, const std::string &mode) { catalog_.cat_sort[std::clamp(category, 0, 3)] = mode; }
 
 private:
     /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
@@ -133,6 +152,8 @@ private:
     std::vector<const App *> update_apps() const;   /* installed, with an update ready */
     std::vector<const App *> beta_apps() const;
     std::vector<const App *> category_apps(int kind) const; /* with the chip's label applied */
+    /* (2.1) Apps of one part of the store in the order the catalog says for it (Catalog::cat_sort). */
+    void sort_apps(const std::string &category, std::vector<const App *> &apps) const;
     std::vector<std::string> category_chips(int kind) const; /* "All" then the labels used */
     std::vector<int> library_views() const;          /* 0 My Apps, 1 Updates, 2 Betas (when there are some) */
     bool update_library(float dt, int moves, bool u, bool d);
@@ -164,7 +185,8 @@ private:
     /* The game page's controls, top to bottom: what the D-pad moves between. */
     struct Control
     {
-        enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */ } kind;
+        enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */,
+                    Versions /* (2.1) */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
@@ -173,6 +195,7 @@ private:
     {
         int kind = 0;        /* 0 the featured banner, 1 a row of tiles, 2 a line of a grid, 3 wide tiles, 4 a spotlight,
                                 (2.0) 5 the category buttons */
+        int style = 0;       /* (2.1) kind 0: the header's style (header_style()) */
         float y = 0, h = 0;  /* in Discover's own space: 0 is its top */
         float head = 0;      /* the section's title above it: its height (0 none) */
         std::string title;   /* the title; a spotlight's names it */
@@ -194,6 +217,23 @@ private:
     std::string state_of(const App &a, bool *update_ready) const;
     std::string version_of(const App &a) const;
     std::vector<const App *> featured_apps() const;
+    /* (2.1) Discover's header: its style (0 carousel, 1 spotlight, 2 split, 3 mosaic, 4 none) and
+     * its games (the catalog's, else the featured ones; spotlight one, mosaic three). */
+    int header_style() const;
+    std::vector<const App *> header_apps() const;
+    bool has_header() const { return header_style() != 4 && !header_apps().empty(); }
+    bool had_header_ = true; /* Discover had the header last frame (row_ follows it coming or going) */
+    /* The app the header shows where col is focused (0 the banner or the big card). */
+    const App *header_focus(const DLine &l, int col) const;
+    void draw_header(porpoise::ui::Gfx &gfx, const DLine &l, int line, float sy, bool on);
+    /* A game beside the split header's banner: its picture, its name, a line about it. */
+    void draw_header_card(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus, float fade);
+    /* One of the mosaic header's games: its art across the card, the words over it. */
+    void draw_mosaic_card(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus, bool big);
+    /* (2.1) Kept at an older version the player picked: that version ("" when it isn't); and a
+     * newer version than the one installed is out. */
+    std::string kept_at(const App &a) const;
+    bool newer_out(const App &a) const;
     void open(const std::string &id);
     void close();
     void press_primary();
@@ -220,7 +260,7 @@ private:
     void draw_wide(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float focus);
     /* The featured banner, and a spotlight (the same, standing still). */
     void draw_banner(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, const std::string &kicker,
-                     float fade, bool drift, float focus);
+                     float fade, bool drift, float focus, bool big = false /* (2.1) the spotlight header's bigger words */);
     /* "There's more below": an arrow at the bottom of a list that scrolls. */
     void draw_more(porpoise::ui::Gfx &gfx);
     void draw_soon_page(porpoise::ui::Gfx &gfx, const App &a, float k);
@@ -238,8 +278,15 @@ private:
      * the height it takes, or -1 when there's no logo (yet) and the name is drawn. */
     float draw_logo(porpoise::ui::Gfx &gfx, const App &a, const LogoPlace &place, float x, float y, float box_w,
                     float box_h, float alpha);
-    /* The game page's What's new box opens into every release's notes from GitHub. */
-    bool has_notes_box(const App &a) const { return !a.news.empty() || (a.source == "github" && !a.repo.empty()); }
+    /* The game page's What's new box opens into every release's notes from GitHub. (2.1) A
+     * beta's: what's new in each of its builds. */
+    bool has_notes_box(const App &a) const
+    {
+        return !a.news.empty() || (a.source == "github" && !a.repo.empty()) || (a.beta && !a.beta_notes.empty());
+    }
+    /* (2.1) The releases the page's notes show, as Engine::notes says (1, 0 coming, -1 none): a
+     * GitHub app's, or a beta's builds. */
+    int page_notes(const App &a, std::vector<Release> &out) const;
     void reset_notes() { notes_focus_ = notes_open_ = false; notes_t_ = 0; notes_top_ = 0; notes_key_.clear(); }
     void draw_notes(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float h, float alpha);
     void layout_notes(porpoise::ui::Gfx &gfx, const std::string &key, const std::vector<Release> &rel, float width);
@@ -279,6 +326,7 @@ private:
     porpoise::ui::Texture *hint_triangle_ = nullptr, *hint_square_ = nullptr; /* (2.0) Refresh, Pin */
     porpoise::ui::Texture *cat_icon_[4] = {}; /* (2.0) Games, Emulators, Apps, Tools */
     porpoise::ui::Texture *hfade_ = nullptr;  /* (2.0) white fading out to the right */
+    porpoise::ui::Texture *vfade_ = nullptr;  /* (2.1) clear at the top to white at the bottom: a shade under words on art */
     void draw_cat_button(porpoise::ui::Gfx &gfx, int kind, float x, float y, float w, float h, float focus);
     /* (2.0) An app with no icon yet: its category's colour and icon, in a rounded square. */
     void draw_no_icon(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float size, float radius);
@@ -403,6 +451,33 @@ private:
     float clash_t_ = 0;
     int clash_sel_ = 0;
     JobState clash_job_;
+    /* (2.1) Versions, on an app's page: each version it can install, newest first, and the
+     * question before one installs (vers_ask_: Cancel 0, Install 1). */
+    struct VersionRow
+    {
+        std::string key;               /* what install() is given: a release's tag, a beta build's file ("" its current build) */
+        std::string label, date, size; /* as shown */
+        bool pre = false, installed = false, newest = false;
+    };
+    bool has_versions(const App &a) const;
+    /* state as Engine::notes: 1 here they are, 0 still coming, -1 none to show. */
+    std::vector<VersionRow> version_rows(const App &a, int &state) const;
+    void open_versions(const App &a);
+    bool update_versions(float dt);
+    void draw_versions(porpoise::ui::Gfx &gfx);
+    bool vers_ = false, vers_ask_ = false;
+    float vers_t_ = 0, vers_ask_t_ = 0;
+    int vers_sel_ = 0, vers_top_ = 0, vers_ask_sel_ = 1;
+    std::string vers_app_;
+    VersionRow vers_pick_;
+    /* (2.1) Where an app downloads from changed (JobState::source_moved): the question over its
+     * page; moved_sel_ 0 Update from the new place, 1 Cancel. */
+    bool moved_ = false;
+    float moved_t_ = 0;
+    int moved_sel_ = 1;
+    JobState moved_job_;
+    bool update_moved(float dt);
+    void draw_moved(porpoise::ui::Gfx &gfx);
     /* (2.0) Refresh (Triangle, or Settings > General): the pill at the top right while it
      * reads the catalog, then how it went for a moment. */
     bool refresh_shown_ = false;
@@ -479,7 +554,7 @@ private:
     bool queue_fresh_ = false; /* the queue has installs, not only updates (a phone sent them) */
     void draw_toast(porpoise::ui::Gfx &gfx);
     std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
-    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_; }
+    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_; }
     /* A game page's line for an app from a custom source. */
     std::string source_line(const App &a) const;
 };

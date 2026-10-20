@@ -60,6 +60,11 @@ echo "==> [store] dist/PPSA92000 ready"
 version=$(sed -n 's/.*kVersion = "\([^"]*\)".*/\1/p' "$root/src/ui_app_common.hpp")
 content=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['contentVersion'])" "$root/dist/PPSA92000/sce_sys/param.json")
 mkdir -p "$root/release"
+# (2.1) Never a release with the throwaway signer's keys in it (src/rs_sig_keys.h).
+if grep -q 'RS_SIG_TEST_KEYS' "$root/src/rs_sig_keys.h" && [ "${ALLOW_TEST_KEYS:-0}" != 1 ]; then
+    echo "==> [store] src/rs_sig_keys.h has TEST keys: run tools/make-sig-keys.py with the owner's public-keys.txt first" >&2
+    exit 1
+fi
 rm -f "$root/release/PPSA92000.zip"
 (cd "$root/dist" && zip -qr -X "$root/release/PPSA92000.zip" PPSA92000)
 make -s -C "$root/payload/installer" PS5_PAYLOAD_SDK="$sdk" ELF=RecompStore-Installer-full.elf \

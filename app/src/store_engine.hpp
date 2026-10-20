@@ -16,6 +16,8 @@
 namespace recomp
 {
 constexpr const char *kCatalogUrl = "https://recompstore.com/catalog.json";
+/* (2.1) Its signature from Recomp Store Signer, made on the owner's PC (rs_sig.h). */
+constexpr const char *kCatalogSigUrl = "https://recompstore.com/catalog.sig";
 constexpr const char *kHomebrew = "/data/homebrew";
 /* (1.1.0) Beta codes: redeeming one, and the beta games this console has. */
 constexpr const char *kBetaUrl = "https://recompstore.com/api/beta.php";
@@ -133,6 +135,15 @@ struct Release
  * release's "WindWaker-PS5-v1.0.3.zip". */
 bool asset_matches(const std::string &pattern, const std::string &name);
 
+/* (2.1) An earlier build of a beta game, from the beta list's "versions": a tester can go back to
+ * it. It installs as the current build does, with its own download, checksum and signature. */
+struct BetaBuild
+{
+    std::string version, file, url, sha256, sig;
+    std::string size, notes, date; /* as the site says them ("412 MB", "Oct 19, 2026") */
+    std::uint64_t bytes = 0;
+};
+
 struct App
 {
     std::string id, name, kind /* original, community */, author;
@@ -140,6 +151,9 @@ struct App
     std::string version, released, size, needs;
     int build = 0;
     std::string source /* github, url */, repo, asset /* may hold * and ? */, url, sha256;
+    /* (2.1) A beta zip's signature from Recomp Store Signer (rs_sig.h): a beta installs only
+     * with one that checks out. */
+    std::string sig;
     /* Where the game's own zip is inside that download, when the release only has a bigger
      * zip (a source archive), its whole name in that zip: The Simpsons Game's is a star then
      * /prospero/builder/Assets/payload.zip (the star stands for the source folder's
@@ -180,6 +194,10 @@ struct App
     /* (1.1.2) A download from a fixed link (a beta game's, from the site): its exact size,
      * so its progress shows and a cut-off download is caught. 0: not known. */
     std::uint64_t bytes = 0;
+    /* (2.1) A beta game: what's new in its current build ("betaNotes"), and its earlier builds,
+     * newest first ("versions"). */
+    std::string beta_notes;
+    std::vector<BetaBuild> beta_builds;
     /* (2.0) Which part of the store it's in: "games", "emulators", "apps" or "tools",
      * and up to 6 short labels shown on its page ("Recomp", "Port", "Homebrew"). */
     std::string category = "games";
@@ -225,6 +243,14 @@ struct Catalog
     std::vector<App> soon; /* Coming soon */
     std::vector<Section> sections; /* empty: the store's own (Latest games, Coming soon) */
     std::vector<std::string> featured;
+    /* (2.1) How each part of the store is sorted ("categories"), by category_index: "manual" (the
+     * admin's order), "az", "installs", "new" or "updated" (the charts' lists first). */
+    std::string cat_sort[4] = {"manual", "manual", "manual", "manual"};
+    /* (2.1) Discover's header ("discover.header"): "carousel", "spotlight", "split", "mosaic" or
+     * "none"; its games (empty: the featured ones), and the seconds between turns. */
+    std::string header_style = "carousel";
+    std::vector<std::string> header_games;
+    int header_interval = 8;
     std::string tagline, discord, kofi, payload;
     std::string store_version, store_url, store_sha256;
     int store_build = 0;
@@ -309,6 +335,14 @@ struct JobState
     bool clash = false, clash_pkg = false;
     std::string clash_with, clash_new;
     std::string clash_tid; /* (2.0) the title ID that clashed (a custom app's, as its release says) */
+    /* (2.1) An update that stopped before downloading: the app's catalog entry names another
+     * GitHub repo (source_new) than the one it was installed from (source_old, its marker's).
+     * resolve_clash(id, 3) updates it from the new one. */
+    bool source_moved = false;
+    std::string source_old, source_new;
+    /* (2.1) The version the player picked (Versions on its page), "" for the newest: a question
+     * the install stopped on hands it back to resolve_clash, so the same one is installed. */
+    std::string version;
 };
 
 class Engine
@@ -322,14 +356,24 @@ public:
     /* Bumped each time the catalog or a piece of art changes, so the screens know to refresh. */
     unsigned revision() const;
     bool online() const;
+    /* (2.1) Why the site's newest catalog wasn't taken (its signature didn't check out), "" if it was. */
+    std::string catalog_note() const;
     bool loading() const;
 
-    /* Download and install a game's newest release (or the catalog's link). One job at a time. */
-    bool install(const std::string &app_id);
+    /* Download and install a game's newest release (or the catalog's link). One job at a time.
+     * (2.1) version: one the player picked instead, a GitHub release's tag or a beta's earlier
+     * build (BetaBuild::file, else its version). Installed older than the newest, the app is kept
+     * at it (held) until a newer one is installed. */
+    bool install(const std::string &app_id, const std::string &version = "");
     /* (2.0) After an install stopped on a clash (JobState::clash): 1 install it under its own
      * new title ID (clash_new; its updates go there from then on), 2 install it over the
-     * other app's folder (an older copy of the same app), 0 neither (the kept download goes). */
-    bool resolve_clash(const std::string &app_id, int choice);
+     * other app's folder (an older copy of the same app), 0 neither (the kept download goes).
+     * (2.1) 3: after JobState::source_moved, update it from the new place this once. version:
+     * the job's (JobState::version), so the same one is installed. */
+    bool resolve_clash(const std::string &app_id, int choice, const std::string &version = "");
+    /* (2.1) The version an app is kept at (the player installed an older one), "" when it isn't:
+     * Update All and the Updates list leave it. Installing the newest lets it go. */
+    std::string held(const std::string &app_id) const;
     /* (2.0) Refresh: the catalog and this console's beta games read again, every installed
      * game's updates looked for, and the apps on the console found again (one installed
      * while the store was open shows up), without closing the store. */

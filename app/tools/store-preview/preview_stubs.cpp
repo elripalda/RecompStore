@@ -63,8 +63,20 @@ void Engine::start(const std::string &) { load(); }
 bool Engine::catalog(Catalog &out) const { load(); out = g_cat; return true; }
 unsigned Engine::revision() const { return 1; }
 bool Engine::online() const { return true; }
+std::string Engine::catalog_note() const { return ""; }
 bool Engine::loading() const { return false; }
-bool Engine::install(const std::string &) { return true; }
+bool Engine::install(const std::string &, const std::string &) { return true; }
+/* (2.1) PREVIEW_HELD: apps kept at an older version, "PPSA92011=1.0.0,..." (as PREVIEW_INSTALLED). */
+std::string Engine::held(const std::string &id) const
+{
+    const char *e = std::getenv("PREVIEW_HELD");
+    if (!e) return "";
+    const std::string list = std::string(",") + e + ",";
+    const std::size_t at = list.find("," + id + "=");
+    if (at == std::string::npos) return "";
+    const std::size_t v = at + id.size() + 2;
+    return list.substr(v, list.find(',', v) - v);
+}
 bool Engine::bench() { return true; }
 bool Engine::remove(const std::string &, bool) { return true; }
 static std::string g_smp;
@@ -176,6 +188,7 @@ int Engine::notes(const std::string &, std::vector<Release> &out) const
         Release r;
         r.tag = j[i]["tag_name"].str(); r.name = j[i]["name"].str(); r.date = j[i]["published_at"].str().substr(0, 10);
         r.body = j[i]["body"].str(); r.prerelease = j[i]["prerelease"].boolean(false);
+        for (std::size_t k = 0; k < j[i]["assets"].size(); ++k) r.assets.push_back(j[i]["assets"][k]["name"].str()); /* (2.1) Versions */
         out.push_back(r);
     }
     return out.empty() ? -1 : 1;
@@ -192,7 +205,7 @@ void Engine::acknowledge() {}
 /* (1.1.0) PREVIEW_REDEEM: the state a code is in (1 checking). */
 bool Engine::redeem(const std::string &) { return true; }
 /* (2.0) The title ID guard and Refresh. PREVIEW_MOVED: the ID SvR 2011 shows as moved to. */
-bool Engine::resolve_clash(const std::string &, int) { return true; }
+bool Engine::resolve_clash(const std::string &, int, const std::string &) { return true; }
 void Engine::refresh() {}
 std::string moved_id(const std::string &id) { const char *m = std::getenv("PREVIEW_MOVED"); return m && id == "PPSA92011" ? m : ""; }
 std::string installed_id(const std::string &id) { const std::string m = moved_id(id); return m.empty() ? id : m; }
@@ -312,6 +325,13 @@ Charts Engine::charts() const
         for (std::size_t i = 0; i < a.size(); ++i) v.push_back(a[i].is_object() ? a[i]["id"].str() : a[i].str());
     };
     ids(j["top"], c.top); ids(j["trending"], c.trending); ids(j["new"], c.fresh); ids(j["updated"], c.updated);
+    for (const auto &kv : j["stats"].members()) /* (2.1) a part of the store sorted by installs */
+    {
+        ChartStat st;
+        st.installs = kv.second["installs"].integer(0);
+        st.stars = kv.second["stars"].integer(-1);
+        c.stats.push_back({kv.first, st});
+    }
     c.have = true;
     return c;
 }

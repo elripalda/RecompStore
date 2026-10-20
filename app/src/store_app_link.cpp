@@ -604,7 +604,10 @@ void Store::take_link_actions()
         const std::string v = engine().installed(app->id);
         if (!v.empty() && v != "?" && !update)
         {
-            toast(app->name + " is already installed");
+            /* (2.1) Kept at an older version the player picked: updated only from its page. */
+            const std::string kept = kept_at(*app);
+            toast(!kept.empty() && newer_out(*app) ? app->name + " is kept at " + kept.substr(version_start(kept)) + ". Update it from its page."
+                                                   : app->name + " is already installed");
             return;
         }
         if (std::find(queue_.begin(), queue_.end(), app->id) != queue_.end() || queue_now_ == app->id) return;

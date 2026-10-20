@@ -115,7 +115,7 @@ void Store::go_tab(int kind, int dir)
     tab_ = kind;
     tab_t_ = 0;
     col_ = 0;
-    row_ = kind == Discover && !featured_apps().empty() ? 1 : 0;
+    row_ = kind == Discover && has_header() ? 1 : 0; /* (2.1) under the header, in whichever style */
     dscroll_ = dscroll_to_ = uscroll_ = uscroll_to_ = lscroll_ = lscroll_to_ = cscroll_ = cscroll_to_ = 0;
     in_section_ = false;
     lib_bar_ = false;
@@ -293,11 +293,52 @@ std::vector<const App *> Store::category_apps(int kind) const
     const auto chips = category_chips(kind);
     const std::string tag = cat_chip_ > 0 && cat_chip_ < int(chips.size()) ? chips[std::size_t(cat_chip_)] : "";
     std::vector<const App *> out;
+    bool sorted = false;
     for (const std::vector<App> *list : {&catalog_.apps, &catalog_.soon})
+    {
+        if (list == &catalog_.soon && !sorted)
+        {
+            sort_apps(cat, out); /* (2.1) the apps as the catalog sorts this part of the store; Coming soon after them */
+            sorted = true;
+        }
         for (const App &a : *list)
             if (!a.beta && a.category == cat && (tag.empty() || std::find(a.tags.begin(), a.tags.end(), tag) != a.tags.end()))
                 out.push_back(&a);
+    }
     return out;
+}
+
+void Store::sort_apps(const std::string &category, std::vector<const App *> &v) const
+{
+    /* (2.1) "manual" leaves the admin's order (the catalog's, as the apps come). The others keep
+     * it for what they can't tell apart. */
+    const std::string &mode = catalog_.cat_sort[std::clamp(category_index(category), 0, 3)];
+    if (mode == "manual" || v.size() < 2)
+        return;
+    std::map<const App *, std::string> names;
+    for (const App *a : v) names[a] = lower(a->name);
+    if (mode == "az")
+    {
+        std::stable_sort(v.begin(), v.end(), [&](const App *x, const App *y) { return names[x] < names[y]; });
+        return;
+    }
+    if (mode == "installs")
+    {
+        /* Most installed first (the charts' count of consoles), then by name. */
+        std::map<const App *, long long> n;
+        for (const App *a : v)
+        {
+            const ChartStat *st = charts_.stat(a->id);
+            n[a] = st ? st->installs : 0;
+        }
+        std::stable_sort(v.begin(), v.end(), [&](const App *x, const App *y) { return n[x] != n[y] ? n[x] > n[y] : names[x] < names[y]; });
+        return;
+    }
+    /* "new", "updated": the charts' list in its order first, the rest after in the admin's. */
+    const std::vector<std::string> &list = mode == "new" ? charts_.fresh : charts_.updated;
+    std::map<const App *, std::size_t> at;
+    for (const App *a : v) at[a] = std::size_t(std::find(list.begin(), list.end(), a->id) - list.begin());
+    std::stable_sort(v.begin(), v.end(), [&](const App *x, const App *y) { return at[x] < at[y]; });
 }
 
 /* ---- Update All --------------------------------------------------------------------- */
@@ -342,7 +383,7 @@ void Store::tick_queue()
         ++queue_done_;
         queue_now_.clear();
     }
-    if (clash_ || confirm_ || picker_ || keypad_ || logs_ || sheet_)
+    if (clash_ || confirm_ || picker_ || keypad_ || logs_ || sheet_ || vers_ || moved_ /* (2.1) */)
         return; /* a question on screen: the rest waits for it */
     if (queue_.empty())
     {

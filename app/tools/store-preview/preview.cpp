@@ -472,5 +472,86 @@ int main(int argc, char **argv)
         store.preview_open("PPSA99764"); store.preview_focus(0); settle(60); frame("v2b-page-emulator");
         store.preview_open("PPSA97772"); store.preview_focus(0); settle(60); frame("v2b-page-app");
     }
+    /* 2.1: Discover's header styles, a part of the store sorted, Versions (a GitHub app's and a
+     * beta's), an app kept at an older version, a beta's notes, and where an app downloads from
+     * changed. With PREVIEW_NOTES (releases with their files), PREVIEW_NEWEST and PREVIEW_HELD. */
+    if (want("s21"))
+    {
+        store.preview_tab(0); store.preview_row(0, 0); settle(90); frame("v21-carousel");
+        store.preview_header("spotlight"); store.preview_row(0, 0); settle(30); frame("v21-spotlight");
+        store.preview_row(1, 1); settle(40); frame("v21-spotlight-below");
+        store.preview_header("split", {"PPSA92011", "PPSA64007", "PPSA94202", "PPSA99314"}); store.preview_row(0, 0); settle(30); frame("v21-split");
+        store.preview_row(0, 2); settle(40); frame("v21-split-card");
+        store.preview_header("split", {"PPSA92011", "PPSA64007"}); store.preview_row(0, 0); settle(30); frame("v21-split-two");
+        {
+            /* With the controller: Up from Tools into the split header's bottom card, Up, Left onto the
+             * banner, Right, then Down along the cards and out to the buttons. */
+            using namespace porpoise::pad;
+            store.preview_header("split", {"PPSA92011", "PPSA64007", "PPSA94202", "PPSA99314"});
+            store.preview_row(1, 3); settle(10); press(BtnUp); settle(30); frame("v21-split-up-from-tools");
+            press(BtnUp); press(BtnLeft); settle(30); frame("v21-split-left-to-banner");
+            press(BtnRight); press(BtnDown); press(BtnDown); press(BtnDown); settle(30); frame("v21-split-down-out");
+            store.preview_header("mosaic"); store.preview_row(1, 3); settle(10); press(BtnUp); settle(30); frame("v21-mosaic-up-from-tools");
+            press(BtnUp); settle(20); press(BtnLeft); settle(30); frame("v21-mosaic-up-left");
+        }
+        store.preview_header("mosaic"); store.preview_row(0, 0); settle(40); frame("v21-mosaic");
+        store.preview_row(0, 2); settle(40); frame("v21-mosaic-small");
+        store.preview_header("none"); store.preview_tab(0); store.preview_row(0, 0); settle(40); frame("v21-none");
+        store.preview_header("carousel");
+        store.preview_sort(0, "az"); store.preview_category(4, 0, 0); settle(60); frame("v21-games-az");
+        store.preview_sort(0, "installs"); store.preview_category(4, 0, 0); settle(30); frame("v21-games-installs");
+        store.preview_sort(0, "new"); store.preview_category(4, 0, 0); settle(30); frame("v21-games-new");
+        store.preview_sort(0, "az"); store.preview_tab(0); store.preview_row(3, 0); settle(40); frame("v21-discover-category-az");
+        store.preview_sort(0, "manual");
+        /* Versions on SvR 2011's page (installed: Open, Delete, Send logs, Versions). */
+        store.preview_open("PPSA92011"); settle(60); store.preview_focus(3); frame("v21-page-versions-focus");
+        store.preview_versions(6); settle(5); frame("v21-versions");
+        store.preview_versions(8); settle(5); frame("v21-versions-scrolled");
+        store.preview_versions(3, true); settle(5); frame("v21-versions-ask");
+        store.preview_versions(0, true); settle(5); frame("v21-versions-ask-newest");
+        store.preview_versions_close();
+        const char *notes = std::getenv("PREVIEW_NOTES");
+        const std::string keep_notes = notes ? notes : "";
+        unsetenv("PREVIEW_NOTES"); store.preview_versions(0); settle(5); frame("v21-versions-offline");
+        store.preview_versions_close();
+        if (!keep_notes.empty()) setenv("PREVIEW_NOTES", keep_notes.c_str(), 1);
+        /* Not installed: Versions beside Send logs; the newest picked. */
+        store.preview_open("PPSA94002"); settle(60); store.preview_focus(2); frame("v21-page-not-installed-versions");
+        store.preview_versions(0, true); settle(5); frame("v21-versions-ask-not-installed");
+        store.preview_versions_close();
+        /* Kept at 1.0.0: its page still offers the newest; the Library says it's kept. */
+        setenv("PREVIEW_HELD", "PPSA92011=1.0.0", 1);
+        store.preview_open("PPSA92011"); settle(60); store.preview_focus(0); frame("v21-page-kept");
+        store.preview_row(0, 0); store.preview_prefs(1, false); store.preview_library(0, 5); settle(60); frame("v21-library-kept");
+        store.preview_library(1, 0); settle(60); frame("v21-updates-kept");
+        store.preview_prefs(0, false); store.preview_library(0, 0); settle(60); frame("v21-library-kept-tiles");
+        unsetenv("PREVIEW_HELD");
+        /* A beta: its notes for this build, its builds as Versions. */
+        store.preview_open("PPSA69424"); settle(60); store.preview_focus(0); frame("v21-beta-page");
+        store.preview_focus(3); frame("v21-beta-page-versions-focus");
+        store.preview_versions(0); settle(5); frame("v21-beta-versions");
+        store.preview_versions(1, true); settle(5); frame("v21-beta-versions-ask");
+        store.preview_versions_close();
+        store.preview_notes(2); frame("v21-beta-notes");
+        store.preview_notes(0);
+        {
+            const char *inst = std::getenv("PREVIEW_INSTALLED");
+            const std::string keep_inst = inst ? inst : "";
+            setenv("PREVIEW_INSTALLED", "PPSA69424=0.9.2", 1);
+            setenv("PREVIEW_HELD", "PPSA69424=0.9.2", 1);
+            store.preview_open("PPSA69424"); settle(60); store.preview_focus(0); frame("v21-beta-kept");
+            store.preview_versions(1); settle(5); frame("v21-beta-kept-versions");
+            store.preview_versions(0, true); settle(5); frame("v21-beta-kept-ask-newest");
+            store.preview_versions_close();
+            store.preview_row(0, 0); store.preview_library(2, 0); settle(60); frame("v21-betas-kept");
+            unsetenv("PREVIEW_HELD");
+            if (!keep_inst.empty()) setenv("PREVIEW_INSTALLED", keep_inst.c_str(), 1);
+        }
+        /* Where SvR 2011 downloads from changed. */
+        store.preview_open("PPSA92011"); settle(60); store.preview_moved("someone/SvR2011-PS5", "elripalda/SvR2011-Recomp-PS5"); settle(5);
+        frame("v21-moved");
+        store.preview_moved("someone/SvR2011-PS5", "elripalda/SvR2011-Recomp-PS5", 0); frame("v21-moved-update");
+        store.preview_moved_close();
+    }
     return 0;
 }
