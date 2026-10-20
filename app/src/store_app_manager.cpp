@@ -103,16 +103,17 @@ void Store::start_refresh_home(bool from_lib)
         play(int(Sfx::Error));
         return;
     }
-    std::string why;
-    const int r = refresh_smp(why); /* running: it has a look queued for when the store closes; else started */
-    if (r == 1)
+    if (engine().storage_lost())
     {
-        note = "Started ShadowMountPlus. Give it a few seconds, then refresh again.";
-        bad = false;
-        play(int(Sfx::Complete));
-        engine().look_console();
+        note = kStorageLost;
+        bad = true;
+        play(int(Sfx::Error));
         return;
     }
+    std::string why;
+    /* 2 running: it has a look queued for when the store closes; 1 not running: the launcher
+     * starts it once the store has closed (2.2.1: never from here); 0 neither. */
+    const int r = refresh_smp(why);
     if (r == 0)
     {
         note = why;
@@ -137,10 +138,59 @@ void Store::start_refresh_home(bool from_lib)
     play(int(Sfx::Select));
 }
 
+void Store::start_reload_smp()
+{
+    if (engine().storage_lost())
+    {
+        lib_note_ = kStorageLost;
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    if (smp_path().empty())
+    {
+        lib_note_ = "Choose your ShadowMountPlus file in Settings > General first.";
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    if (engine().job().phase == Phase::Working)
+    {
+        lib_note_ = "Wait for the current job to finish first.";
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    /* (2.2.1) A new copy replaces the running one, whose exit takes /data away from every app
+     * that's open: the launcher sends it once the store has closed, then opens the store again. */
+    std::string why;
+    if (!engine().reload_smp(why))
+    {
+        lib_note_ = "Couldn't reload ShadowMountPlus. " + why;
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
+        return;
+    }
+    opening_ = true;
+    opening_lib_ = true;
+    opening_t_ = 0;
+    opening_poll_ = 0;
+    lib_note_ = "Closing the store for a moment\xE2\x80\xA6";
+    lib_note_bad_ = false;
+    play(int(Sfx::Select));
+}
+
 bool Store::update_console(float dt, int moves, bool u, bool d)
 {
     (void)dt;
     (void)moves;
+    if (engine().storage_lost())
+    {
+        /* (2.2.1) Nothing here can be done now: only up, to the views. */
+        col_ = 0;
+        if (u) { lib_bar_ = true; play(int(Sfx::Move)); }
+        return true;
+    }
     sync_console();
     const auto list = console_list();
     const int n = kTopRows + int(list.size());
@@ -165,25 +215,14 @@ bool Store::update_console(float dt, int moves, bool u, bool d)
     }
     if (col_ == 1)
     {
-        std::string why;
-        if (smp_path().empty())
-        {
-            lib_note_ = "Choose your ShadowMountPlus file in Settings > General first.";
-            lib_note_bad_ = true;
-            play(int(Sfx::Error));
-        }
-        else if (engine().reload_smp(why))
-        {
-            lib_note_ = "Sent " + base_name(smp_path()) + " to your payload loader. It's back in a few seconds.";
-            lib_note_bad_ = false;
-            play(int(Sfx::Complete));
-        }
-        else
-        {
-            lib_note_ = why;
-            lib_note_bad_ = true;
-            play(int(Sfx::Error));
-        }
+        start_reload_smp();
+        return true;
+    }
+    if (engine().storage_lost())
+    {
+        lib_note_ = kStorageLost; /* (2.2.1) the list is what it was before: nothing can be done to it */
+        lib_note_bad_ = true;
+        play(int(Sfx::Error));
         return true;
     }
     open_manage(*list[std::size_t(col_ - kTopRows)]);
@@ -257,6 +296,15 @@ void Store::draw_console_row(Gfx &gfx, const ConsoleApp &c, float x0, float y0, 
 
 void Store::draw_console(Gfx &gfx, float slide)
 {
+    if (engine().storage_lost())
+    {
+        /* (2.2.1) Not "nothing here": the store can't see the console's storage any more. */
+        const auto lines = wrap(gfx, Font::SemiBold, 22, 1728 - 80, kStorageLost, 3);
+        const float nh = 44 + 32 * float(lines.size());
+        glass(gfx, 96, kContent + slide, 1728, nh, 24, C(0xE5484D, 0.14f), false);
+        draw_lines(gfx, Font::SemiBold, 22, 136, kContent + slide + 22, 32, C(0xFFB4A8), lines);
+        return;
+    }
     sync_console();
     const auto list = console_list();
     float top = kContent;
@@ -310,7 +358,8 @@ void Store::draw_console(Gfx &gfx, float slide)
                        "adds new apps" + (waiting ? " and makes " + count_words(std::size_t(waiting), "change", "changes") + " waiting for it" : std::string()) +
                        ", then opens again.";
             else if (smp == 0)
-                line = "ShadowMountPlus isn't running. Refresh starts it, or reload it below.";
+                line = smp_path().empty() ? "ShadowMountPlus isn't running. Choose its file in Settings > General, and Refresh starts it."
+                                          : "ShadowMountPlus isn't running. The store closes for a moment while it starts and adds new apps, then opens again.";
             else
                 line = "Looking for ShadowMountPlus\xE2\x80\xA6";
             button = opening_ ? "Closing\xE2\x80\xA6" : "Refresh";
@@ -320,8 +369,8 @@ void Store::draw_console(Gfx &gfx, float slide)
             title = "Reload ShadowMountPlus";
             const std::string file = smp_path();
             line = file.empty() ? std::string("Choose your ShadowMountPlus file in Settings > General first.")
-                                : "Sends " + base_name(file) + " to your payload loader again. A running one restarts with it.";
-            button = "Reload";
+                                : "Sends " + base_name(file) + " again. The store closes for a moment while ShadowMountPlus restarts.";
+            button = opening_ ? "Closing\xE2\x80\xA6" : "Reload";
         }
         const float tx = ix + is + 24;
         const float bw = gfx.measure(Font::Bold, 19, button) + 52;
@@ -335,7 +384,7 @@ void Store::draw_console(Gfx &gfx, float slide)
                          smp == 1 ? "Running" : "Not running");
         }
         gfx.text_mid(Font::Regular, 18, tx, yy + h / 2 + 18, C(kSoft), Align::Left, fit(gfx, Font::Regular, 18, w - (tx - x) - bw - 70, line));
-        const bool dim = (i == 0 && (opening_ || job.phase == Phase::Working)) || (i == 1 && smp_path().empty());
+        const bool dim = (opening_ || job.phase == Phase::Working) || (i == 1 && smp_path().empty());
         gfx.panel(x + w - 28 - bw, yy + h / 2 - 26, bw, 52, dim ? C(kFrost, 0.08f) : i == 0 ? C(kCyan) : C(kFrost, 0.14f), 1.f, 17);
         gfx.text_mid(Font::Bold, 19, x + w - 28 - bw / 2, yy + h / 2, dim ? C(kMuted) : i == 0 ? C(kMidnight) : C(kFrost), Align::Center, button);
     }
@@ -628,7 +677,7 @@ bool Store::take_manage_result(const JobState &job)
     }
     else
     {
-        lib_note_ = job.error;
+        lib_note_ = engine().storage_lost() ? kStorageLost : job.error; /* (2.2.1) */
         lib_note_bad_ = true;
         play(int(Sfx::Error));
     }

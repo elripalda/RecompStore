@@ -615,6 +615,7 @@ void Store::draw_library2(Gfx &gfx)
         }
         std::string count = console_.size() == 1 ? "1 folder on this PS5" : std::to_string(console_.size()) + " folders on this PS5";
         if (!console_.empty()) count += "  \xC2\xB7  " + std::string(sized ? "" : "at least ") + size_text(std::uint64_t(all));
+        if (engine().storage_lost()) count = "Can't see the console's storage"; /* (2.2.1) not "0 folders" */
         draw_tab_header(gfx, "Library", count);
     }
     else
@@ -1098,7 +1099,7 @@ std::string Store::square_hint() const
     else if (tab_ == Library && !lib_bar_ && lib_view_ == 1 && !update_apps().empty())
         return "What's new";
     else if (tab_ == Library && !lib_bar_ && lib_view_ == 3)
-        return con_sort_ ? "By name" : "Biggest first"; /* (2.2) */
+        return engine().storage_lost() ? "" : con_sort_ ? "By name" : "Biggest first"; /* (2.2) */
     const App *a = id.empty() ? nullptr : find(id);
     if (!a || a->soon) return "";
     return pinned(id) ? "Unpin" : "Pin";
@@ -1107,7 +1108,8 @@ std::string Store::square_hint() const
 std::string Store::cross_hint() const
 {
     if (tab_ == Library && lib_bar_) return "";
-    if (tab_ == Library && lib_view_ == 3) return col_ == 0 ? "Refresh home screen" : col_ == 1 ? "Reload" : "Manage"; /* (2.2) */
+    if (tab_ == Library && lib_view_ == 3) /* (2.2) */
+        return engine().storage_lost() ? "" : col_ == 0 ? "Refresh home screen" : col_ == 1 ? "Reload" : "Manage";
     if (tab_ == Library && lib_view_ == 1) return update_apps().empty() && engine().store_update().empty() ? "" : "Update";
     if (tab_ == Library && lib_view_ == 0 && library_apps().empty()) return "";
     if (is_category(tab_) && cat_on_chips_) return "";

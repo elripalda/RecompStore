@@ -132,6 +132,8 @@ public:
         mng_stage_ = stage;
         mng_sel_ = sel;
     }
+    /* (2.2.1) The lost-storage box (or, box false, what's left once it's been seen). */
+    void preview_lost(bool box) { lost_told_ = true; lost_ = box; lost_t_ = 1; }
 
 private:
     /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
@@ -573,7 +575,7 @@ private:
     bool queue_fresh_ = false; /* the queue has installs, not only updates (a phone sent them) */
     void draw_toast(porpoise::ui::Gfx &gfx);
     std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
-    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_; }
+    bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_ || lost_; }
     /* (2.2) Library > On this PS5 (store_app_manager.cpp): every folder in the homebrew folders
      * (Engine::console_apps), under ShadowMountPlus's two rows; con_sort_ 0 by name, 1 biggest first. */
     std::vector<ConsoleApp> console_;
@@ -590,6 +592,15 @@ private:
     /* Refresh home screen (the Library's row, Settings > General): the launcher does it once the
      * store has closed, then opens the store again. Its words go in the Library or in Settings. */
     void start_refresh_home(bool from_lib);
+    /* (2.2.1) Reload ShadowMountPlus (the Library's second row): through the launcher too, so the
+     * store is closed when the new copy replaces the running one. */
+    void start_reload_smp();
+    /* (2.2.1) The store lost the console's storage mid-session (Engine::storage_lost): said once,
+     * in a box over everything; after that, where it matters (the Library's On this PS5). */
+    bool lost_ = false, lost_told_ = false;
+    float lost_t_ = 0;
+    bool update_lost(float dt);
+    void draw_lost(porpoise::ui::Gfx &gfx);
     /* The App manager's sheet over it: mng_stage_ 0 what to do (Open, Move, New ID, Delete), 1 where
      * to move it, 2 the new title ID's question, 3 Delete's. mng_job_: a job it started is going
      * (its result goes in the Library); mng_delete_name_: the app a store delete is for. */

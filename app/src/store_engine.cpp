@@ -46,6 +46,8 @@
 namespace recomp
 {
 void slog(const char *fmt, ...);
+bool data_lost(int err);
+void data_trouble(const std::string &path, int err);
 static bool title_id_ok(const std::string &id);
 static bool custom_owns(const std::string &dir, const std::string &repo);
 namespace
@@ -87,7 +89,11 @@ bool write_file(const std::string &path, const void *data, std::size_t n)
     static std::atomic<unsigned> serial{0};
     const std::string tmp = path + ".part" + std::to_string(++serial);
     std::FILE *f = std::fopen(tmp.c_str(), "wb");
-    if (!f) return false;
+    if (!f)
+    {
+        data_trouble(path, errno); /* (2.2.1) the store's own folder gone? */
+        return false;
+    }
     const bool ok = std::fwrite(data, 1, n, f) == n;
     std::fflush(f);
     fsync(fileno(f));
@@ -294,6 +300,85 @@ void slog(const char *fmt, ...)
             std::fclose(f);
         }
 }
+
+/* ---- (2.2.1) The store's own folder, gone mid-session ---------------------------------
+ * On a console where ShadowMountPlus gives the store /data (a writable nullfs alias in its
+ * sandbox), a second ShadowMountPlus started while the store is open stops the first, whose exit
+ * removes the aliases of every app that's open; the new one only makes them for apps started
+ * after it. The store then can't open its own folder until it's opened again. Nothing it does
+ * from here can work, so it says so once, rather than "0 folders" or "couldn't write". */
+namespace
+{
+std::atomic<int> g_data_state{0}; /* 0 not known to work, 1 worked when the store started, 2 lost since */
+std::atomic<long long> g_data_look_ms{0};
+
+bool data_gone_now()
+{
+    DIR *d = opendir(g.data.c_str());
+    if (d)
+    {
+        closedir(d);
+        return false;
+    }
+    return errno == EACCES || errno == ENOENT || errno == EPERM;
+}
+
+/* At the start: the folder opens, and a file can be written there. */
+void data_works_now(const std::string &dir)
+{
+    const std::string probe = dir + "/.write-test";
+    std::FILE *f = std::fopen(probe.c_str(), "wb");
+    if (!f) return;
+    std::fclose(f);
+    std::remove(probe.c_str());
+    if (DIR *d = opendir(dir.c_str()))
+    {
+        closedir(d);
+        g_data_state = 1;
+    }
+}
+} // namespace
+
+/* err 0: a look, every 2 seconds at most; -1: a look now; else the errno of something the store
+ * just failed to write or open in its folder (only EACCES, ENOENT, EPERM count). */
+bool data_lost(int err)
+{
+    const int st = g_data_state.load();
+    if (st != 1) return st == 2;
+    if (err > 0 && err != EACCES && err != ENOENT && err != EPERM) return false;
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const long long now = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    if (err == 0 && now - g_data_look_ms.load() < 2000) return false;
+    g_data_look_ms = now;
+    bool gone = data_gone_now();
+    const int why = errno;
+    if (!gone && err > 0)
+    {
+        /* It opens, but nothing can be written there either. */
+        const std::string probe = g.data + "/.write-test";
+        std::FILE *f = std::fopen(probe.c_str(), "wb");
+        if (f)
+        {
+            std::fclose(f);
+            std::remove(probe.c_str());
+        }
+        else
+            gone = errno == EACCES || errno == ENOENT || errno == EPERM;
+    }
+    int was = 1;
+    if (gone && g_data_state.compare_exchange_strong(was, 2))
+        slog("the store can't open its folder %s any more (errno %d): ShadowMountPlus restarted while it was open? "
+             "It needs to be closed and opened again", g.data.c_str(), why);
+    return gone;
+}
+
+void data_trouble(const std::string &path, int err)
+{
+    if (g_data_state.load() == 1 && !g.data.empty() && path.compare(0, g.data.size(), g.data) == 0) data_lost(err > 0 ? err : -1);
+}
+
+bool Engine::storage_lost() const { return data_lost(0); }
 
 void set_stat(const std::string &key, const std::string &value)
 {
@@ -4485,6 +4570,12 @@ void scan_homebrew()
     std::string list;
     for (const auto &f : found)
         list += " " + f.first + "=" + (f.second.rfind(std::string(kHomebrew) + "/", 0) == 0 ? f.second.substr(f.second.find_last_of('/') + 1) : f.second);
+    if (data_lost(-1))
+    {
+        /* (2.2.1) Not "nothing installed": the store can't see the console's storage any more. */
+        slog("homebrew on this console: not looked at again (the store lost its storage)");
+        return;
+    }
     slog("homebrew on this console:%s", list.empty() ? " none" : list.c_str());
     std::lock_guard<std::mutex> l(g_fold_m);
     g_folders.swap(found);
@@ -5164,6 +5255,7 @@ void Engine::start(const std::string &data_dir)
         std::lock_guard<std::mutex> lk(L.m);
         L.file = f;
     }
+    data_works_now(data_dir); /* (2.2.1) so losing it later can be told apart from never having it */
     slog("Recomp Store %s (build %d) started; data in %s; copier payload %s", kVersion, kBuild, data_dir.c_str(),
          exists(std::string(PORPOISE_APP) + "/assets/payloads/recompstore-copier.elf") ? "included" : "MISSING");
     for (const char *where : {"/data", "/mnt/usb0", "/mnt/usb1", "/mnt/ext0", "/mnt/ext1"})
@@ -5763,25 +5855,32 @@ void set_smp_path(const std::string &path)
     slog("ShadowMountPlus payload set to %s", path.c_str());
 }
 
-static bool start_smp(std::string &why)
+/* (2.2.1) The player's ShadowMountPlus file, checked (an ELF the store can read, on a path the
+ * launcher can be given) but not sent: only the launcher sends it, once the store has closed.
+ * A second ShadowMountPlus stops the running one, and the running one's exit removes /data and the
+ * USB drives from every app that's open (its sandbox aliases: sm_fakelib_game_shutdown in its
+ * source); the new one gives them only to apps started after it, so the store would lose its
+ * own folder until it's opened again. ShadowMountPlus answering on 10101 doesn't prove it isn't
+ * running either: it opens its API last, after mounting everything, and the API can be off. */
+static bool smp_file_ok(std::string &path, std::string &why)
 {
-    const std::string path = smp_path();
-    std::string elf;
-    if (path.empty()) { why = "Choose your ShadowMountPlus file in Settings first."; return false; }
-    if (!read_file(path, elf) || elf.size() < 64 || elf.compare(0, 4, "\x7F" "ELF") != 0)
+    path = smp_path();
+    if (path.empty())
+    {
+        why = "Choose your ShadowMountPlus file in Settings first.";
+        return false;
+    }
+    char head[4] = {0};
+    struct stat st;
+    std::FILE *f = path[0] == '/' && path.size() < 400 && path.find('\n') == std::string::npos ? std::fopen(path.c_str(), "rb") : nullptr;
+    const bool got = f && std::fread(head, 1, sizeof head, f) == sizeof head;
+    if (f) std::fclose(f);
+    if (!got || std::memcmp(head, "\x7F" "ELF", 4) != 0 || stat(path.c_str(), &st) != 0 || st.st_size < 64)
     {
         why = "That ShadowMountPlus file couldn't be read.";
         slog("ShadowMountPlus: can't read %s", path.c_str());
         return false;
     }
-    int err = 0;
-    if (!send_to_loader(elf, err))
-    {
-        why = "No payload loader answered on port 9021.";
-        slog("ShadowMountPlus: no payload loader answered on port 9021 (errno %d)", err);
-        return false;
-    }
-    slog("ShadowMountPlus: sent %s (%zu KB) to the payload loader", path.c_str(), elf.size() / 1024);
     return true;
 }
 
@@ -5860,19 +5959,23 @@ int refresh_smp(std::string &why)
         return 2;
     }
     if (answered)
+    {
+        /* Running, but not taking requests (busy). */
         slog("ShadowMountPlus answered but didn't take the rescan: %s", reply.c_str());
-    if (smp_path().empty())
-    {
-        why = answered ? "ShadowMountPlus didn't take the request." : "ShadowMountPlus isn't running, and no file is chosen to start it.";
-        return 0;
-    }
-    if (answered)
-    {
-        /* Running, but not taking requests (busy): starting a second copy would only restart it. */
         why = "ShadowMountPlus is busy; it finds the game on its next look (every 15 seconds or so).";
         return 0;
     }
-    return start_smp(why) ? 1 : 0;
+    std::string path;
+    if (!smp_file_ok(path, why))
+    {
+        if (smp_path().empty()) why = "ShadowMountPlus isn't running, and no file is chosen to start it.";
+        return 0;
+    }
+    /* (2.2.1) Not sent from here (see smp_file_ok): the launcher starts it once the store has
+     * closed, for Open and Refresh home screen. */
+    slog("ShadowMountPlus didn't answer on port 10101; the launcher starts it once the store closes");
+    why = "ShadowMountPlus isn't running. The store starts it as it closes: press Open, or Refresh home screen.";
+    return 1;
 }
 
 void smp_scan_later()
@@ -6066,6 +6169,15 @@ void *console_main(void *)
             continue;
         }
         std::vector<ConsoleApp> list = list_console();
+        if (data_lost(-1))
+        {
+            /* (2.2.1) The store lost the console's storage: what it listed before stays, and the
+             * Library says why instead of "0 folders". */
+            std::lock_guard<std::mutex> l(g.m);
+            g.console_looking = false;
+            ++g.console_rev;
+            continue;
+        }
         {
             /* Sizes already known stay while they're worked out again. */
             std::lock_guard<std::mutex> l(g.m);
@@ -6494,13 +6606,10 @@ int Engine::smp_state(std::string &version) const
     return g.smp_state;
 }
 
-bool Engine::reload_smp(std::string &why)
-{
-    const bool ok = start_smp(why);
-    std::lock_guard<std::mutex> l(g.m);
-    g.console_again = true; /* asked again in a moment, with the list */
-    return ok;
-}
+static bool send_launcher(const std::string &title_id, const std::string &mode, std::string &why);
+
+/* (2.2.1) Through the launcher, with the store closed (smp_file_ok says why). */
+bool Engine::reload_smp(std::string &why) { return send_launcher("PPSA92000", "reload_smp", why); }
 
 int Engine::home_waiting() const { return int(home_todo().size()); }
 
@@ -6528,12 +6637,27 @@ static std::string g_open_token, g_open_title;
 static std::vector<std::string> g_open_home; /* (2.2) the home screen changes handed to it */
 
 /* (2.2) mode "" opens title_id; "refresh" (title_id the store's) refreshes the home screen and
- * opens the store again. Either way the launcher first makes the home screen changes waiting. */
+ * opens the store again. Either way the launcher first makes the home screen changes waiting.
+ * (2.2.1) "reload_smp" (title_id the store's) sends ShadowMountPlus again, then as "refresh".
+ * Every job carries the player's ShadowMountPlus file (path=) when there is one: the launcher
+ * starts it if nothing answers, the store being closed by then. */
 static bool send_launcher(const std::string &title_id, const std::string &mode, std::string &why)
 {
     if (!title_id_ok(title_id))
     {
         why = "Its title ID isn't one the PS5 can open.";
+        return false;
+    }
+    if (data_lost(-1))
+    {
+        why = kStorageLost;
+        return false;
+    }
+    std::string smp_file, smp_why;
+    const bool smp_ok = smp_file_ok(smp_file, smp_why);
+    if (mode == "reload_smp" && !smp_ok)
+    {
+        why = smp_why;
         return false;
     }
     if (!payloads_can_reach(why))
@@ -6569,13 +6693,14 @@ static bool send_launcher(const std::string &title_id, const std::string &mode, 
     std::string job = std::string("token=") + token + "\ntitle=" + title_id + "\n";
     if (!clean.empty()) job += "name=" + clean + "\n";
     if (!mode.empty()) job += "mode=" + mode + "\n";
+    if (smp_ok) job += "path=" + smp_file + "\n"; /* (2.2.1) */
     /* (2.2) Home screen changes ShadowMountPlus couldn't make while the store was open. */
     const std::vector<std::string> todo = home_todo();
     for (std::size_t i = 0; i < todo.size(); ++i) job += "do" + std::to_string(i) + "=" + todo[i] + "\n";
     if (!write_file(jd + "/job.txt", job.data(), job.size()))
     {
         slog("open %s: couldn't write the launcher's job in %s", title_id.c_str(), jd.c_str());
-        why = "The store couldn't write to its folder.";
+        why = data_lost(-1) ? kStorageLost : "The store couldn't write to its folder.";
         return false;
     }
     {
@@ -6594,8 +6719,12 @@ static bool send_launcher(const std::string &title_id, const std::string &mode, 
     g_open_token = token;
     g_open_title = title_id;
     g_open_home = todo;
-    slog("%s: sent the launcher (%zu KB) to the payload loader%s", mode == "refresh" ? "refresh home screen" : ("open " + title_id).c_str(),
-         elf.size() / 1024, todo.empty() ? "" : (" with " + std::to_string(todo.size()) + " home screen change(s)").c_str());
+    const std::string what = mode == "refresh" ? "refresh home screen" : mode == "reload_smp" ? "reload ShadowMountPlus" : "open " + title_id;
+    slog("%s: sent the launcher (%zu KB) to the payload loader%s%s", what.c_str(), elf.size() / 1024,
+         todo.empty() ? "" : (" with " + std::to_string(todo.size()) + " home screen change(s)").c_str(),
+         smp_ok ? (mode == "reload_smp" ? ("; it sends " + smp_file + " once the store has closed").c_str()
+                                        : ("; it starts " + smp_file + " if nothing answers").c_str())
+                : "");
     return true;
 }
 
@@ -6614,8 +6743,18 @@ bool refresh_result(std::string &what)
     if (std::time(nullptr) - info.st_mtime > 300) return false;
     const bool smp = field_of(st, "smp") == "1";
     const int changes = std::atoi(field_of(st, "changes").c_str());
-    slog("refresh home screen: back (ShadowMountPlus %s, %d change(s) made)", smp ? "answered" : "didn't answer", changes);
-    what = smp ? "Your home screen is up to date" : "ShadowMountPlus didn't answer, so your home screen didn't change";
+    if (field_of(st, "reload") == "1")
+    {
+        /* (2.2.1) Back from Reload ShadowMountPlus. */
+        const bool restarted = field_of(st, "restarted") == "1";
+        slog("reload ShadowMountPlus: back (%s, %d change(s) made)", restarted ? "it restarted and answers" : smp ? "it answers, but didn't restart" : "it doesn't answer", changes);
+        what = restarted && smp ? "ShadowMountPlus reloaded" : smp ? "ShadowMountPlus didn't restart" : "ShadowMountPlus didn't come back";
+        return true;
+    }
+    const bool started = field_of(st, "started") == "1";
+    slog("refresh home screen: back (ShadowMountPlus %s, %d change(s) made)", smp ? (started ? "started and answered" : "answered") : "didn't answer", changes);
+    what = smp ? (started ? "ShadowMountPlus started. Your home screen is up to date" : "Your home screen is up to date")
+               : "ShadowMountPlus didn't answer, so your home screen didn't change";
     return true;
 }
 
