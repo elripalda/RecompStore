@@ -233,6 +233,19 @@ function rs_category_sorts(): array {
     foreach (RS_CATEGORIES as $k => $_) $out[$k] = is_array($s) && isset(RS_SORTS[$s[$k] ?? '']) ? $s[$k] : 'manual';
     return $out;
 }
+// (2.2) The category tabs the store shows in its top bar by default, in order (players can change
+// theirs in the store's Customize). null: never set, so the catalog leaves "tabs" out and every
+// store shows all four, as before 2.2.
+function rs_store_tabs(): ?array {
+    $saved = rs_setting('store_tabs');
+    if ($saved === null) return null;
+    return rs_clean_tabs(json_decode($saved, true));
+}
+function rs_clean_tabs($in): array {
+    $out = [];
+    foreach (is_array($in) ? $in : [] as $k) if (is_string($k) && isset(RS_CATEGORIES[$k]) && !in_array($k, $out, true)) $out[] = $k;
+    return $out;
+}
 // (2.0) Short labels for a game's page: comma-separated, each 1-24 characters, at most 6.
 function rs_tags_list(string $text): array {
     $out = [];
@@ -374,7 +387,10 @@ function rs_clean_sections($in): array {
             // (2.0) The charts (installs counted by the store, and GitHub's releases): filled in by
             // the store and the site from /api/charts.php. Stores before 2.0 leave them out.
             $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
-            $out[] = ['type' => $type, 'title' => $title, 'layout' => $layout];
+            $row = ['type' => $type, 'title' => $title, 'layout' => $layout];
+            // (2.2) Only one part of the store (absent: every part). Stores before 2.2 show them all.
+            if (is_string($s['category'] ?? null) && isset(RS_CATEGORIES[$s['category']])) $row['category'] = $s['category'];
+            $out[] = $row;
             continue;
         }
         if ($type === 'category') {
@@ -651,7 +667,17 @@ function rs_build_catalog(bool $testing = false): array {
         // (2.1) How each category's page is sorted, and Discover's header; older stores skip them.
         'categories' => array_map(fn($m) => ['sort' => $m], rs_category_sorts()),
         'discover' => ['sections' => $sections, 'header' => rs_discover_header($listed)],
-    ];
+    ] + rs_catalog_v22();
+}
+
+// (2.2) The store's default tabs (only once set in Settings) and the ShadowMountPlus it offers
+// (admin/inc/smp.php). Older stores skip both.
+function rs_catalog_v22(): array {
+    $out = [];
+    $tabs = rs_store_tabs();
+    if ($tabs !== null) $out['tabs'] = $tabs;
+    $out['smp'] = rs_smp_catalog();
+    return $out;
 }
 
 // (2.1) Discover's header: how the featured games show at the top of the store's Discover.
@@ -1063,3 +1089,5 @@ require __DIR__ . '/connect.php';
 require __DIR__ . '/sign.php';
 // (2.1) The Analytics page's day-by-day counts.
 require __DIR__ . '/analytics.php';
+// (2.2) The ShadowMountPlus the store offers.
+require __DIR__ . '/smp.php';

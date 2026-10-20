@@ -148,7 +148,8 @@
         ${s.type === 'soon' ? `<p class="muted small-note">${soonGames.length
           ? `The ${soonGames.length === 1 ? 'game' : soonGames.length + ' games'} marked Coming soon, in the order of the Games page: ${soonGames.map((g) => esc(g.name)).join(', ')}.`
           : 'No game is marked Coming soon yet, so the store leaves this out. Tick Coming soon on a game to list it here.'}</p>` : ''}
-        ${isChart(s.type) ? `<p class="muted small-note">${CHARTS[s.type]} Filled in live, so the preview just shows your games. From Recomp Store 2.0; older stores leave it out.</p>` : ''}
+        ${isChart(s.type) ? `<label>Only<select data-only><option value="">Every part of the store</option>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+          <p class="muted small-note">${CHARTS[s.type]} Filled in live, so the preview just shows your ${s.category ? esc((CATS[s.category] || '').toLowerCase()) : 'games'}. From Recomp Store 2.0; older stores leave it out${s.category ? ', and stores before 2.2 show every part in it' : ''}.</p>` : ''}
         ${s.type === 'category' ? `<label>Part of the store<select data-cat>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
           <p class="muted small-note">${inCat(s.category).length
             ? `${inCat(s.category).length === 1 ? '1 game' : inCat(s.category).length + ' games'}, in the order of the Games page: ${inCat(s.category).map((g) => esc(g.name)).join(', ')}.`
@@ -189,6 +190,12 @@
       if (spot) spot.addEventListener('change', () => { s.game = spot.value; changed(true); });
       const cat = card.querySelector('[data-cat]');
       if (cat) cat.addEventListener('change', () => { s.category = cat.value; changed(true); });
+      // (2.2) A chart of one part of the store only.
+      const only = card.querySelector('[data-only]');
+      if (only) only.addEventListener('change', () => {
+        if (only.value) s.category = only.value; else delete s.category;
+        changed(true);
+      });
     });
   }
 
@@ -277,7 +284,7 @@
         y += BANNER_H + SEC_GAP;
         return;
       }
-      const items = s.type === 'soon' ? soonGames : s.type === 'category' ? inCat(s.category) : isChart(s.type) ? listed : s.all ? listed : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
+      const items = s.type === 'soon' ? soonGames : s.type === 'category' ? inCat(s.category) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : s.all ? listed : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
       if (!items.length) {
         html += `<div class="d-empty" style="${pos(96, y, 1728, 64)}">${esc(s.title || NAMES[s.type])}: nothing in it, so the store leaves it out</div>`;
         y += 64 + SEC_GAP;

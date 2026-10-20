@@ -27,6 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]));
             }
             $n = count($clean);
+            // (2.2) The change log says which charts show only one part of the store.
+            $only = [];
+            foreach ($clean as $s) if (isset($s['category']) && in_array($s['type'], ['top', 'trending', 'new', 'updated'], true)) $only[] = ($s['title'] !== '' ? $s['title'] : $s['type']) . ': ' . RS_CATEGORIES[$s['category']];
+            rs_log('discover', 'sections', $n . ' section' . ($n === 1 ? '' : 's') . ($only ? '; only one part: ' . implode(', ', $only) : ''));
             rs_flash("Saved Discover ($n " . ($n === 1 ? 'section' : 'sections') . '). Press Publish to send it to the store and the site.');
         }
     } catch (Throwable $e) {

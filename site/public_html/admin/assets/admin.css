@@ -349,3 +349,30 @@ form.sortbar select{width:auto;min-width:200px;margin:0}
 .d-header-edit label.hint{flex-direction:row;align-items:center;flex-wrap:wrap;font-weight:500}
 .d-header-edit label.hint input[type=range]{width:auto;flex:1;min-width:120px;max-width:220px;padding:0;border:0;background:none}
 .beta-file .pill{align-self:flex-start;margin:4px 0 0}
+/* (2.2) Settings: Store tabs, ShadowMountPlus */
+ol.tab-order{list-style:none;margin:6px 0 16px;padding:0;display:grid;gap:8px;max-width:420px}
+ol.tab-order li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px 8px 14px;border:1px solid var(--line);border-radius:14px;background:rgba(11,18,32,.35)}
+ol.tab-order label.check{margin:0}
+ol.tab-order .icon-btn{width:36px;min-height:36px;padding:0;font-size:14px}
+dl.smp-pin{display:grid;gap:6px;margin:4px 0 14px}
+dl.smp-pin div{display:flex;gap:12px;flex-wrap:wrap;align-items:baseline}
+dl.smp-pin dt{color:var(--muted);min-width:76px;font-size:14px}
+dl.smp-pin dd{margin:0;min-width:0}
+dl.smp-pin code.hash{font-size:12.5px;word-break:break-all}
+table.smp-rel{margin-top:12px}
+table.smp-rel tr.on td{background:rgba(53,214,244,.06)}
+table.smp-rel td form.inline{margin:0}
+form.smp-min{align-items:flex-end;margin-top:18px}
+form.smp-min label{margin:0;flex:0 1 220px}
+form.smp-min small{flex:1 1 280px}
+@media (max-width:700px){
+  table.smp-rel thead{display:none}
+  table.smp-rel,table.smp-rel tbody,table.smp-rel tr,table.smp-rel td{display:block;width:100%}
+  table.smp-rel tr{padding:12px 4px;border-top:1px solid rgba(244,248,252,.1)}
+  table.smp-rel tr.on{background:rgba(53,214,244,.06);border-radius:12px}
+  table.smp-rel tr.on td{background:none}
+  table.smp-rel td{border:0;padding:2px 8px}
+  table.smp-rel td code{word-break:break-all}
+  table.smp-rel td:last-child{padding-top:8px}
+  table.smp-rel td:last-child .pill{margin-left:0}
+}

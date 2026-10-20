@@ -169,6 +169,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $q = preg_replace('/[^0-9a-f]/', '', strtolower((string)($_POST['console'] ?? '')));
         header('Location: settings.php' . ($q !== '' ? '?console=' . urlencode($q) : '') . '#testers');
         exit;
+    } elseif ($act === 'tabs') {
+        // (2.2) The category tabs in the store's top bar by default, in the order they were on the page.
+        if (!empty($_POST['tabs_default'])) {
+            rs_db()->prepare('DELETE FROM settings WHERE k = ?')->execute(['store_tabs']);
+            rs_log('settings', 'store tabs', 'back to the default (all four)');
+            rs_flash('Saved: stores show Games, Emulators, Apps and Tools, as before. Press Publish to send it out.');
+        } else {
+            $show = array_flip(array_map('strval', (array)($_POST['show'] ?? [])));
+            $tabs = array_values(array_filter(rs_clean_tabs((array)($_POST['order'] ?? [])), fn($k) => isset($show[$k])));
+            rs_set_setting('store_tabs', json_encode($tabs));
+            $names = array_map(fn($k) => RS_CATEGORIES[$k], $tabs);
+            rs_log('settings', 'store tabs', $tabs ? implode(', ', $names) : 'none (only Discover, Library and Settings)');
+            rs_flash('Saved: ' . ($tabs ? implode(', ', $names) : 'no category tabs, only Discover, Library and Settings') . '. Press Publish to send it out.');
+        }
+        header('Location: settings.php#tabs');
+        exit;
+    } elseif ($act === 'smp_check') {
+        // (2.2) drakmor's releases, asked again now.
+        [$ok, $list, $msg] = rs_smp_releases(true);
+        rs_flash($ok ? 'GitHub lists ' . count($list) . ' release' . (count($list) === 1 ? '' : 's') . ' of ShadowMountPlus.' . ($msg !== '' ? ' ' . $msg : '') : $msg, $ok ? 'ok' : 'err');
+        header('Location: settings.php?smp=1#smp');
+        exit;
+    } elseif ($act === 'smp_pin') {
+        $tag = trim((string)($_POST['tag'] ?? ''));
+        $why = '';
+        @set_time_limit(120);
+        $pin = rs_smp_fetch($tag, $why);
+        if (!$pin) {
+            rs_flash('Not changed. ' . $why, 'err');
+        } else {
+            rs_set_setting('smp_pin', json_encode($pin, JSON_UNESCAPED_SLASHES));
+            rs_log('settings', 'shadowmountplus', 'offers ' . $pin['version'] . ' (' . $pin['asset'] . ($pin['elf'] !== '' ? ' > ' . $pin['elf'] : '') . ', ' . $pin['size'] . ' bytes, sha256 ' . substr($pin['sha256'], 0, 16) . ')');
+            rs_flash('Saved: stores offer ShadowMountPlus ' . $pin['version'] . '. Press Publish to send it out.');
+        }
+        header('Location: settings.php?smp=1#smp');
+        exit;
+    } elseif ($act === 'smp_clear') {
+        rs_db()->prepare('DELETE FROM settings WHERE k = ?')->execute(['smp_pin']);
+        rs_log('settings', 'shadowmountplus', 'no version offered');
+        rs_flash('Saved: stores don\'t offer a ShadowMountPlus download. Press Publish to send it out.');
+        header('Location: settings.php#smp');
+        exit;
+    } elseif ($act === 'smp_min') {
+        $min = trim((string)($_POST['smp_min'] ?? ''));
+        if ($min === '') $min = RS_SMP_MIN_DEFAULT;
+        if (!rs_smp_version_ok($min)) rs_flash('A version is letters, numbers, dots and dashes, like 1.7beta5.', 'err');
+        else {
+            rs_set_setting('smp_min', $min);
+            rs_log('settings', 'shadowmountplus minimum', $min);
+            rs_flash('Saved: stores warn about ShadowMountPlus older than ' . $min . '. Press Publish to send it out.');
+        }
+        header('Location: settings.php#smp');
+        exit;
     } elseif (($_POST['action'] ?? '') === 'taken') {
         // (2.0) Title IDs taken outside the store: one per line, the ID then what uses it.
         $lines = [];
@@ -289,6 +342,83 @@ unset($_SESSION['recovery_once']);
     <button class="primary">Save settings</button>
   </form>
 </section>
+<?php
+// (2.2) The store's default tabs, and the ShadowMountPlus it offers.
+$tabsSaved = rs_store_tabs();
+$tabsOn = $tabsSaved ?? array_keys(RS_CATEGORIES);
+$tabRows = array_merge($tabsOn, array_values(array_diff(array_keys(RS_CATEGORIES), $tabsOn)));
+$pin = rs_smp_pin();
+$smpOpen = isset($_GET['smp']);
+[$smpOk, $smpList, $smpMsg] = $smpOpen ? rs_smp_releases(false) : [true, [], ''];
+?>
+<section class="card" id="tabs">
+  <h2>Store tabs</h2>
+  <p class="muted">The parts of the store that get a tab in the store's top bar, in this order. Discover, Library and Settings are always there, and every part stays on Discover either way. Players can change theirs in the store's Customize. Recomp Store 2.2 and newer.</p>
+  <form method="post" data-tabs>
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="tabs">
+    <ol class="tab-order">
+    <?php foreach ($tabRows as $i => $k): ?>
+      <li data-tab>
+        <input type="hidden" name="order[]" value="<?= h($k) ?>">
+        <label class="check"><input type="checkbox" name="show[]" value="<?= h($k) ?>" <?= in_array($k, $tabsOn, true) ? 'checked' : '' ?>> <?= h(RS_CATEGORIES[$k]) ?></label>
+        <span class="sec-tools">
+          <button type="button" class="icon-btn" data-tab-move="-1" aria-label="Move <?= h(RS_CATEGORIES[$k]) ?> up">↑</button>
+          <button type="button" class="icon-btn" data-tab-move="1" aria-label="Move <?= h(RS_CATEGORIES[$k]) ?> down">↓</button>
+        </span>
+      </li>
+    <?php endforeach; ?>
+    </ol>
+    <div class="actions">
+      <button class="btn">Save tabs</button>
+      <?php if ($tabsSaved !== null): ?><button class="link" name="tabs_default" value="1">Back to the default</button><?php endif; ?>
+      <small class="muted"><?= $tabsSaved === null ? 'Not set: stores show all four, as before.' : 'Press Publish after saving.' ?></small>
+    </div>
+  </form>
+</section>
+<section class="card" id="smp">
+  <h2>ShadowMountPlus <?= $pin ? '<span class="pill ok">' . h($pin['version']) . '</span>' : '<span class="pill">None offered</span>' ?></h2>
+  <p class="muted">The store can download ShadowMountPlus for players, so they don't have to find it themselves. Pick the release you've tested: the site downloads it once to note its checksum, and stores take only that file, from drakmor's GitHub. It goes out with the signed catalog when you Publish.</p>
+  <?php if ($pin): ?>
+  <dl class="smp-pin">
+    <div><dt>Offered</dt><dd><?= h($pin['version']) ?><?= $pin['published'] !== '' ? ' <span class="muted">· released ' . h(date('M j, Y', strtotime($pin['published']))) . '</span>' : '' ?></dd></div>
+    <div><dt>File</dt><dd><code><?= h($pin['asset']) ?></code><?= $pin['elf'] !== '' ? ' › <code>' . h($pin['elf']) . '</code>' : '' ?> <span class="muted">· <?= h(number_format($pin['size'] / 1048576, 1)) ?> MB</span></dd></div>
+    <div><dt>SHA-256</dt><dd><code class="hash"><?= h($pin['sha256']) ?></code></dd></div>
+  </dl>
+  <?php endif; ?>
+  <div class="actions">
+    <form method="post" class="inline"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="smp_check"><button class="btn">Check GitHub</button></form>
+    <?php if (!$smpOpen): ?><a href="settings.php?smp=1#smp">Show the releases</a><?php endif; ?>
+    <?php if ($pin): ?><form method="post" class="inline" onsubmit="return confirm('Stop offering ShadowMountPlus in the store?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="smp_clear"><button class="link">Stop offering it</button></form><?php endif; ?>
+  </div>
+  <?php if ($smpOpen): ?>
+    <?php if (!$smpOk): ?><p class="warn"><?= h($smpMsg) ?></p>
+    <?php elseif (!$smpList): ?><p class="muted">GitHub lists no releases.</p>
+    <?php else: ?>
+    <?php if ($smpMsg !== ''): ?><p class="muted"><?= h($smpMsg) ?></p><?php endif; ?>
+    <div class="table-wrap"><table class="stats smp-rel">
+      <thead><tr><th>Release</th><th>Released</th><th>File</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach (array_slice($smpList, 0, 12) as $rel): $a = rs_smp_asset($rel); $tag = (string)$rel['tag_name']; $on = $pin && $pin['version'] === $tag; ?>
+        <tr<?= $on ? ' class="on"' : '' ?>>
+          <td><strong><?= h($tag) ?></strong><?= !empty($rel['prerelease']) ? ' <span class="pill">Pre-release</span>' : '' ?></td>
+          <td class="muted"><?= $rel['published_at'] !== '' ? h(date('M j, Y', strtotime((string)$rel['published_at']))) : '' ?></td>
+          <td><?= $a ? '<code>' . h((string)$a['name']) . '</code> <span class="muted">' . h(number_format((int)($a['size'] ?? 0) / 1048576, 1)) . ' MB</span>' : '<span class="muted">No .elf or zip</span>' ?></td>
+          <td><?php if ($on): ?><span class="pill ok">Offered</span><?php elseif ($a): ?>
+            <form method="post" class="inline" data-smp-pin><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="smp_pin"><input type="hidden" name="tag" value="<?= h($tag) ?>"><button class="btn">Offer this one</button></form>
+          <?php endif; ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+    <?php endif; ?>
+  <?php endif; ?>
+  <form method="post" class="find-row smp-min">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="smp_min">
+    <label>Oldest that works<input name="smp_min" value="<?= h(rs_smp_min()) ?>" maxlength="40" class="mono" spellcheck="false"></label>
+    <button class="btn">Save</button>
+    <small class="muted">Stores warn players running an older one. Before 1.7beta5, ShadowMountPlus pauses kstuff while the store is open, and sending it again takes the open store's storage away.</small>
+  </form>
+</section>
 <?php $v2all = rs_site_v2(); ?>
 <section class="card" id="site-v2">
   <h2>Recomp Store 2.0 on the website</h2>
@@ -394,4 +524,4 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <div><button class="btn">Change password</button></div>
   </form>
 </section>
-<?php rs_foot(['assets/qrcode.js', 'assets/security.js']);
+<?php rs_foot(['assets/qrcode.js', 'assets/security.js', 'assets/settings.js']);

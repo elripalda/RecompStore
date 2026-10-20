@@ -100,7 +100,8 @@
         if (!charts || !v2on()) return '';
         const ranked = sec.type === 'top' || sec.type === 'trending';
         const ids = (charts[sec.type] || []).map((x) => (typeof x === 'string' ? x : x && x.id));
-        const items = ids.map(byId).filter(Boolean).slice(0, sec.layout === 'grid' ? 24 : 12);
+        // (2.2) A chart of one part of the store only.
+        const items = ids.map(byId).filter((a) => a && (!sec.category || (a.category || 'games') === sec.category)).slice(0, sec.layout === 'grid' ? 24 : 12);
         if (!items.length) return '';
         const title = `<h2>${esc(sec.title || { top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated' }[sec.type])}</h2>`;
         if (sec.layout === 'wide') return `<section class="games">${title}<div class="rowscroll wides">${items.map((a) => wideHTML(a, false)).join('')}</div></section>`;
