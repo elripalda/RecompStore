@@ -185,6 +185,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         header('Location: settings.php#tabs');
         exit;
+    } elseif ($act === 'whats_new') {
+        // (2.2) What's new in the store, written here.
+        $why = '';
+        $w = rs_clean_whats_new((string)($_POST['wn_version'] ?? ''), (string)($_POST['wn_title'] ?? ''), (string)($_POST['wn_body'] ?? ''), $why);
+        if (!$w) {
+            $_SESSION['whats_new_draft'] = ['version' => mb_substr((string)($_POST['wn_version'] ?? ''), 0, 40), 'title' => mb_substr((string)($_POST['wn_title'] ?? ''), 0, 200), 'body' => mb_substr((string)($_POST['wn_body'] ?? ''), 0, 20000)];
+            rs_flash('Not saved. ' . $why, 'err');
+        } else {
+            rs_set_setting('whats_new', json_encode($w, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            rs_log('settings', "what's new", $w['version'] . ': ' . $w['title'] . ' (' . mb_strlen($w['body']) . ' characters)');
+            rs_flash("Saved What's new for " . $w['version'] . '. Press Publish to send it out.');
+        }
+        header('Location: settings.php#whats-new');
+        exit;
+    } elseif ($act === 'whats_new_clear') {
+        rs_db()->prepare('DELETE FROM settings WHERE k = ?')->execute(['whats_new']);
+        rs_log('settings', "what's new", 'cleared');
+        rs_flash("What's new is cleared. Press Publish to send it out.");
+        header('Location: settings.php#whats-new');
+        exit;
     } elseif ($act === 'smp_check') {
         // (2.2) drakmor's releases, asked again now.
         [$ok, $list, $msg] = rs_smp_releases(true);
@@ -351,6 +371,35 @@ $pin = rs_smp_pin();
 $smpOpen = isset($_GET['smp']);
 [$smpOk, $smpList, $smpMsg] = $smpOpen ? rs_smp_releases(false) : [true, [], ''];
 ?>
+<?php
+$wn = rs_whats_new();
+$wnDraft = (array)($_SESSION['whats_new_draft'] ?? []);
+unset($_SESSION['whats_new_draft']);
+$wnForm = $wnDraft ?: ($wn ?? ['version' => rs_setting('store_version', RS_VERSION), 'title' => '', 'body' => '']);
+if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version']) $wnForm['title'] = ''; // the default: shown as the placeholder
+?>
+<section class="card" id="whats-new">
+  <h2>What's new <?= $wn ? '<span class="pill ok">' . h($wn['version']) . '</span>' : '<span class="pill">Not set</span>' ?></h2>
+  <p class="muted">What the store shows about its newest version, and the site's Get Recomp Store too. Lines starting with "- " are bullets; a blank line starts a new paragraph. It goes out with the signed catalog when you Publish. Recomp Store 2.2 and newer.</p>
+  <div class="wn">
+    <form method="post" class="wn-form" data-wn>
+      <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="whats_new">
+      <div class="grid2">
+        <label>Version<input name="wn_version" value="<?= h((string)$wnForm['version']) ?>" maxlength="19" inputmode="decimal" pattern="\d{1,4}(\.\d{1,4}){0,3}" placeholder="2.2.2" required data-wn-version><small>The store version it's about.</small></label>
+        <label><span>Title <span class="muted">(optional)</span></span><input name="wn_title" value="<?= h((string)$wnForm['title']) ?>" maxlength="80" placeholder="What's new in <?= h((string)$wnForm['version']) ?>" data-wn-title></label>
+      </div>
+      <label><span>What's new</span><textarea name="wn_body" rows="12" maxlength="<?= RS_WHATS_NEW_MAX ?>" placeholder="- Open waits for a new app's tile, then opens it&#10;- Library: On this PS5 lists everything in your homebrew folders" required data-wn-body><?= h((string)$wnForm['body']) ?></textarea><small><span data-wn-count><?= mb_strlen((string)$wnForm['body']) ?></span> of <?= number_format(RS_WHATS_NEW_MAX) ?> characters</small></label>
+      <div class="actions"><button class="btn primary">Save What's new</button><small class="muted">Saving doesn't publish.</small></div>
+    </form>
+    <div class="wn-preview" aria-live="polite">
+      <span class="lbl muted">Preview: the store's sheet</span>
+      <div class="wn-sheet" data-wn-preview></div>
+    </div>
+  </div>
+  <?php if ($wn): ?>
+  <form method="post" class="inline" onsubmit="return confirm('Clear What\'s new? The store and the site stop showing it once you Publish.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="whats_new_clear"><button class="link">Clear</button></form>
+  <?php endif; ?>
+</section>
 <section class="card" id="tabs">
   <h2>Store tabs</h2>
   <p class="muted">The parts of the store that get a tab in the store's top bar, in this order. Discover, Library and Settings are always there, and every part stays on Discover either way. Players can change theirs in the store's Customize. Recomp Store 2.2 and newer.</p>

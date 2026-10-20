@@ -140,6 +140,44 @@ then fix.
 The website's game page shows "People also installed" from it, under the page, as a row of tiles,
 when the app has a list and the 2.0 side is on.
 
+## 5. `whats_new`: What's new, written on the site
+
+Admin: Settings > What's new. It has Version, Title (optional) and the text, a live preview drawn
+like the store's sheet, Save, and Clear. Saving doesn't publish.
+
+```json
+"whats_new": {
+  "version": "2.2.2",
+  "title": "What's new in 2.2.2",
+  "body": "Open waits for a new app's tile now, then opens it.\n\n- Library: On this PS5 lists everything in your homebrew folders\n- Move an app to your M.2 or a USB drive\n\nThanks to everyone who sent logs."
+}
+```
+
+Only in the catalog once it's written; Clear takes it out again at the next Publish. It's in the testers'
+catalog too.
+
+- `version`: digits and dots only, 1 to 4 parts of 1 to 4 digits (`2.2.2`). It's the store version
+  the notes are about. Show them to players on that version, or about to update to it.
+- `title`: one line, at most 80 characters. It's never empty: the site fills in `What's new in <version>`
+  when the admin leaves it blank.
+- `body`: plain text, at most 4,000 characters (code points).
+  - Line breaks are `\n` only.
+  - Tabs become spaces.
+  - Control characters and bidirectional-override marks are taken out.
+  - Trailing spaces are dropped, and three or more line breaks become two.
+  - It's never empty.
+
+How to draw `body` (the admin preview and the website do exactly this):
+
+- Split it into lines.
+- A line starting with `- ` is a bullet: the text after `- `. Bullets next to each other make one list.
+- Any other line that isn't blank belongs to the paragraph it's in. Lines next to each other make one
+  paragraph, with a line break between them.
+- A blank line ends the paragraph or list it's in.
+- A bullet straight after paragraph lines ends that paragraph, and a paragraph line straight after
+  bullets ends that list.
+- Nothing else is markup: `#`, `*`, `<b>` and links are shown as typed.
+
 ## Website
 
-`assets/site.js` honours a chart section's `category` the same way, and shows `also` on game pages (index.html loads site.js and site.css as `?v=13`).
+`assets/site.js` honours a chart section's `category` the same way, shows `also` on game pages, and shows `whats_new` in Get Recomp Store, folded under the steps (index.html loads site.js and site.css as `?v=13`).

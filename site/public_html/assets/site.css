@@ -417,3 +417,9 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .form input[type=checkbox],.form input[type=radio]{width:auto}
 /* (2.2) A game page's People also installed row */
 .game .games.also{margin-top:56px}
+/* (2.2) What's new in Get Recomp Store */
+.manual.whats-new{margin-bottom:16px}
+.whats-new .wn-body{margin-top:10px}
+.whats-new .wn-body p{margin:0 0 10px}
+.whats-new .wn-body ul{margin:0 0 10px;padding-left:20px}
+.whats-new .wn-body li{margin:0 0 6px}

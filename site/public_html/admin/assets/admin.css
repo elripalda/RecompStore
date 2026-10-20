@@ -376,3 +376,15 @@ form.smp-min small{flex:1 1 280px}
   table.smp-rel td:last-child{padding-top:8px}
   table.smp-rel td:last-child .pill{margin-left:0}
 }
+/* (2.2) What's new: the form beside a preview drawn like the store's sheet */
+.wn{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,420px);gap:24px;align-items:start}
+@media (max-width:980px){.wn{grid-template-columns:minmax(0,1fr)}}
+.wn-form textarea{min-height:240px;line-height:1.5}
+.wn-preview .lbl{display:block;font-size:13px;margin:0 0 8px}
+.wn-sheet{background:linear-gradient(180deg,rgba(22,34,54,.96),rgba(14,22,38,.96));border:1px solid rgba(244,248,252,.1);border-radius:26px;padding:26px 28px;box-shadow:0 24px 60px rgba(0,0,0,.4);max-height:520px;overflow:auto;overflow-wrap:anywhere}
+.wn-sheet .wn-kick{display:block;font:700 12px Figtree,sans-serif;letter-spacing:1.6px;text-transform:uppercase;color:var(--cyan)}
+.wn-sheet h3{font:800 24px Sora,sans-serif;margin:6px 0 12px;letter-spacing:-.3px}
+.wn-sheet p{margin:0 0 12px;color:#d6deea}
+.wn-sheet ul{margin:0 0 12px;padding:0;list-style:none}
+.wn-sheet li{position:relative;padding-left:20px;margin:0 0 8px;color:#d6deea}
+.wn-sheet li::before{content:'';position:absolute;left:4px;top:.6em;width:6px;height:6px;border-radius:50%;background:var(--cyan)}

@@ -246,6 +246,36 @@ function rs_clean_tabs($in): array {
     foreach (is_array($in) ? $in : [] as $k) if (is_string($k) && isset(RS_CATEGORIES[$k]) && !in_array($k, $out, true)) $out[] = $k;
     return $out;
 }
+// (2.2) What's new in the store, as the admin writes it in Settings: shown in the store (and on the
+// site's Get Recomp Store) for that version. The body is plain text: lines starting with "- " are
+// bullets, a blank line starts a new paragraph. null when it isn't set.
+const RS_WHATS_NEW_MAX = 4000;
+function rs_whats_new(): ?array {
+    $w = json_decode((string)rs_setting('whats_new', ''), true);
+    if (!is_array($w)) return null;
+    $why = '';
+    return rs_clean_whats_new((string)($w['version'] ?? ''), (string)($w['title'] ?? ''), (string)($w['body'] ?? ''), $why, false);
+}
+// Checked and tidied: the version digits and dots; the title one line (or "What's new in <version>");
+// the body without control characters but its line breaks, at most RS_WHATS_NEW_MAX characters (longer:
+// refused when saving, cut when read). null with $why when it won't do.
+function rs_clean_whats_new(string $version, string $title, string $body, string &$why, bool $saving = true): ?array {
+    $version = trim($version);
+    if (!preg_match('/^\d{1,4}(\.\d{1,4}){0,3}$/', $version)) { $why = 'The version is numbers and dots, like 2.2.2.'; return null; }
+    $plain = fn(string $s): string => (string)preg_replace('/[\x{0}-\x{9}\x{B}-\x{1F}\x{7F}-\x{9F}\x{2028}\x{2029}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', mb_scrub($s, 'UTF-8'));
+    $title = trim((string)preg_replace('/\s+/u', ' ', $plain(str_replace(["\r", "\n", "\t"], ' ', $title))));
+    if (mb_strlen($title) > 80) $title = rtrim(mb_substr($title, 0, 80));
+    if ($title === '') $title = "What's new in " . $version;
+    $body = str_replace(["\r\n", "\r", "\t"], ["\n", "\n", ' '], mb_scrub($body, 'UTF-8'));
+    $body = implode("\n", array_map('rtrim', explode("\n", $plain($body))));
+    $body = trim((string)preg_replace("/\n{3,}/", "\n\n", $body), "\n ");
+    if ($body === '') { $why = "Write what's new first."; return null; }
+    if (mb_strlen($body) > RS_WHATS_NEW_MAX) {
+        if ($saving) { $why = 'Keep it to ' . number_format(RS_WHATS_NEW_MAX) . ' characters or fewer (it\'s ' . number_format(mb_strlen($body)) . ').'; return null; }
+        $body = rtrim(mb_substr($body, 0, RS_WHATS_NEW_MAX));
+    }
+    return ['version' => $version, 'title' => $title, 'body' => $body];
+}
 // (2.0) Short labels for a game's page: comma-separated, each 1-24 characters, at most 6.
 function rs_tags_list(string $text): array {
     $out = [];
@@ -670,13 +700,15 @@ function rs_build_catalog(bool $testing = false): array {
     ] + rs_catalog_v22();
 }
 
-// (2.2) The store's default tabs (only once set in Settings) and the ShadowMountPlus it offers
-// (admin/inc/smp.php). Older stores skip both.
+// (2.2) The store's default tabs (only once set in Settings), the ShadowMountPlus it offers
+// (admin/inc/smp.php) and What's new (only once written). Older stores skip them.
 function rs_catalog_v22(): array {
     $out = [];
     $tabs = rs_store_tabs();
     if ($tabs !== null) $out['tabs'] = $tabs;
     $out['smp'] = rs_smp_catalog();
+    $w = rs_whats_new();
+    if ($w) $out['whats_new'] = $w;
     return $out;
 }
 

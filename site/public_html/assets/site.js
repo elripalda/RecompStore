@@ -402,6 +402,27 @@
     if (notes && repoUrl) notes.addEventListener('toggle', () => { if (notes.open) loadNotes(a.source.repo, notes.querySelector('[data-notes]')); }, { once: false });
   }
 
+  // (2.2) What's new's plain text, as the store draws it: lines starting with "- " are bullets, a blank
+  // line starts a new paragraph, and a single line break stays one.
+  function notesBlocks(text) {
+    const html = [];
+    let para = [], list = [];
+    const flush = () => {
+      if (para.length) html.push(`<p>${para.map(esc).join('<br>')}</p>`);
+      if (list.length) html.push(`<ul>${list.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`);
+      para = []; list = [];
+    };
+    String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach((raw) => {
+      const line = raw.replace(/\s+$/, '');
+      if (!line.trim()) { flush(); return; }
+      if (/^- /.test(line)) { if (para.length) flush(); list.push(line.slice(2)); return; }
+      if (list.length) flush();
+      para.push(line);
+    });
+    flush();
+    return html.join('');
+  }
+
   // ---- Patch notes: every release on the game's GitHub repo -------------------------
   const notesCache = {};
   function md(text) {
@@ -1263,6 +1284,16 @@
         rib.innerHTML = '<strong>Preview</strong> Only you see 2.0';
         rib.title = 'Visitors see the site without 2.0. Change it in the admin\'s Settings.';
         document.body.appendChild(rib);
+      }
+      // (2.2) What's new in the store, as the admin wrote it: under the steps in Get Recomp Store.
+      const wn = cat.whats_new;
+      if (wn && typeof wn.body === 'string' && wn.body.trim() && !document.getElementById('whats-new')) {
+        const d = document.createElement('details');
+        d.className = 'manual whats-new';
+        d.id = 'whats-new';
+        d.innerHTML = `<summary>${esc(wn.title || "What's new in " + (wn.version || ''))}</summary><div class="wn-body">${notesBlocks(wn.body)}</div>`;
+        const man = dlg.querySelector('details.manual');
+        man.parentNode.insertBefore(d, man);
       }
       document.getElementById('payload-slot').innerHTML = s.payload
         ? `<a class="btn primary" href="${esc(s.payload)}">Download RecompStore-Installer.elf</a>`
