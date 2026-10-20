@@ -105,6 +105,41 @@ then fix.
 - A version with no beta part (`1.7`) is newer than any `1.7beta`.
 - `unknown` can't be compared, so don't warn about it.
 
+## 4. `also` in the charts: people also installed
+
+`GET /api/charts.php` (what the store logs as "charts: HTTP 200") gains `also`:
+
+```json
+"also": {
+  "PPSA80001": ["PPSA80002", "PPSA80003", "PPSA80004", "PPSA80006"],
+  "PPSA80002": ["PPSA80001", "PPSA80003", "PPSA80006"]
+}
+```
+
+- **The map.** For each app, up to 8 other app ids, most telling first.
+  - It's always an object. It's `{}` when no app qualifies.
+  - An app with no list has no key.
+- **Ids only.** No console ids and no counts.
+- **Privacy floor:**
+  - An app gets a list only once 5 consoles have it (`app_installs`, `removed_at IS NULL`).
+  - Another app is on that list only if at least 3 of those consoles have it too.
+- **Ranking.** Installs together beyond what the other app's own popularity would give:
+  `together - installs(A) x installs(B) / consoles with anything installed`.
+  - Only apps above that line are listed, so an app on nearly every console doesn't top every list.
+  - Ties: more installs together first, then the id.
+- **Ids it can name.** Only apps in the published `catalog.json`, so never hidden, beta or
+  testers-only ones. The charts aren't per console or tester-aware, so neither is this.
+  - An app hidden after the map was built drops out at once. The filter runs on every charts build.
+- **Cost.**
+  - One SQL pass: a self-join of `app_installs` on `install_id`, limited to catalog apps with 5 or
+    more installs, `HAVING` 3 or more.
+  - It's cached on its own (`kv_cache` `charts_also`) and rebuilt at most once an hour. The charts
+    around it are still rebuilt every 10 minutes.
+  - 36,000 installs (3,000 consoles x 12 of 120 apps) took 0.65 s on a local MariaDB.
+
+The website's game page shows "People also installed" from it, under the page, as a row of tiles,
+when the app has a list and the 2.0 side is on.
+
 ## Website
 
-`assets/site.js` honours a chart section's `category` the same way (index.html loads it as `?v=13`).
+`assets/site.js` honours a chart section's `category` the same way, and shows `also` on game pages (index.html loads site.js and site.css as `?v=13`).

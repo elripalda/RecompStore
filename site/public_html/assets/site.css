@@ -415,3 +415,5 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .form label.check input{margin-top:4px}
 @media (max-width:760px){.submit-page .two,.submit-page .three,.pics{grid-template-columns:1fr}.kinds{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .form input[type=checkbox],.form input[type=radio]{width:auto}
+/* (2.2) A game page's People also installed row */
+.game .games.also{margin-top:56px}

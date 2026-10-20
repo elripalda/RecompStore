@@ -348,6 +348,13 @@
     }).join('')}</div>`;
   }
 
+  // (2.2) People also installed: other apps on the consoles that have this one (the charts' "also").
+  function alsoHTML(a) {
+    if (!v2on() || !charts || !charts.also || !Array.isArray(charts.also[a.id])) return '';
+    const items = charts.also[a.id].map(byId).filter(Boolean).slice(0, 8);
+    if (!items.length) return '';
+    return `<section class="games also"><h2>People also installed</h2><div class="rowscroll">${items.map((x) => tileHTML(x, false)).join('')}</div></section>`;
+  }
   function game(id) {
     const a = byId(id);
     if (!a) { notFound(); return; }
@@ -387,6 +394,7 @@
             ${linksHTML(a)}
           </aside>
         </div>
+        ${alsoHTML(a)}
       </article>`;
     setBackdrop(a);
     resolveDownload(a);

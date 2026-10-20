@@ -903,7 +903,66 @@ function rs_charts(bool $fresh = false): array {
         'updated' => array_map('strval', array_slice($order($updated), 0, 50)),
         'stats' => (object)$stats,
         'community' => array_slice($community, 0, 50),
+        // (2.2) People also installed: for each app, others its consoles have (ids only).
+        'also' => (object)rs_charts_also($apps, $top, $fresh),
     ];
     rs_kv_put('charts', json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     return $out;
+}
+
+// (2.2) People also installed, for apps in the published catalog (so never hidden, beta or
+// testers-only ones): app id => up to 8 other ids, most telling first. Rebuilt at most hourly.
+// An app gets a list once 5 consoles have it; another app is on it once 3 of those consoles have
+// that one too. Ranked by the installs together beyond what the other app's popularity alone
+// would give (together - A's installs x B's installs / consoles), so an app on nearly every console
+// isn't at the top of every list; only ones above that line are listed. Only ids go out.
+const RS_ALSO_MIN_APP = 5, RS_ALSO_MIN_PAIR = 3, RS_ALSO_MAX = 8;
+function rs_charts_also(array $apps, array $top, bool $fresh = false): array {
+    $map = null;
+    if (!$fresh && ($c = rs_kv_get('charts_also')) && $c['age'] < 3600) {
+        $j = json_decode($c['v'], true);
+        if (is_array($j)) $map = $j;
+    }
+    if ($map === null) {
+        $map = rs_also_build(array_keys($apps), $top);
+        rs_kv_put('charts_also', json_encode((object)$map, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+    // Hidden or taken off since it was built: left out now.
+    $out = [];
+    foreach ($map as $id => $list) {
+        if (!isset($apps[$id]) || !is_array($list)) continue;
+        $keep = array_values(array_filter(array_map('strval', $list), fn($x) => isset($apps[$x]) && $x !== (string)$id));
+        if ($keep) $out[(string)$id] = array_slice($keep, 0, RS_ALSO_MAX);
+    }
+    return $out;
+}
+
+function rs_also_build(array $ids, array $top): array {
+    $ids = array_values(array_filter(array_map('strval', $ids), fn($x) => $x !== ''));
+    $from = array_values(array_filter($ids, fn($x) => (int)($top[$x] ?? 0) >= RS_ALSO_MIN_APP));
+    if (!$from) return [];
+    $db = rs_db();
+    $consoles = (int)$db->query('SELECT COUNT(DISTINCT install_id) FROM app_installs WHERE removed_at IS NULL')->fetchColumn();
+    if ($consoles < 1) return [];
+    // One pass: every pair of catalog apps on the same console, counted, 3 or more only.
+    $in = fn(array $l) => implode(',', array_fill(0, count($l), '?'));
+    $st = $db->prepare('SELECT a.app_id, b.app_id, COUNT(*) AS n FROM app_installs a
+        JOIN app_installs b ON b.install_id = a.install_id AND b.app_id <> a.app_id AND b.removed_at IS NULL
+        WHERE a.removed_at IS NULL AND a.app_id IN (' . $in($from) . ') AND b.app_id IN (' . $in($ids) . ')
+        GROUP BY a.app_id, b.app_id HAVING n >= ' . RS_ALSO_MIN_PAIR);
+    $st->execute(array_merge($from, $ids));
+    $pairs = [];
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$x, $y, $n]) {
+        $x = (string)$x; $y = (string)$y; $n = (int)$n;
+        $expected = (int)($top[$x] ?? 0) * (int)($top[$y] ?? 0) / $consoles;
+        $beyond = $n - $expected;
+        if ($beyond <= 0) continue;
+        $pairs[$x][] = [$y, $beyond, $n];
+    }
+    $map = [];
+    foreach ($pairs as $x => $list) {
+        usort($list, fn($p, $q) => [$q[1], $q[2], $p[0]] <=> [$p[1], $p[2], $q[0]]);
+        $map[$x] = array_map(fn($p) => $p[0], array_slice($list, 0, RS_ALSO_MAX));
+    }
+    return $map;
 }
