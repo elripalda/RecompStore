@@ -202,6 +202,73 @@ void frost(std::vector<unsigned char> &px, int w, int h, int radius)
 
 bool blur_tag(const std::string &path) { return path.size() > 5 && path.compare(path.size() - 5, 5, "#blur") == 0; }
 
+/* (2.2.3) A picture's main colour: its colourful pixels by hue (in 24 slices, each with its
+ * neighbours), the strongest slice's average, made bright enough to glow. About 4000 pixels
+ * looked at, whatever its size. false when it's mostly grey. */
+bool main_colour(const unsigned char *rgba, int w, int h, std::uint32_t &out)
+{
+    if (!rgba || w <= 0 || h <= 0) return false;
+    const int step = std::max(1, std::max(w, h) / 64);
+    double wt[24] = {}, sr[24] = {}, sg[24] = {}, sb[24] = {};
+    double seen = 0, colourful = 0;
+    for (int y = step / 2; y < h; y += step)
+        for (int x = step / 2; x < w; x += step)
+        {
+            const unsigned char *p = rgba + (std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4;
+            if (p[3] < 128) continue;
+            seen += 1;
+            const int r = p[0], g = p[1], b = p[2];
+            const int mx = std::max(r, std::max(g, b)), mn = std::min(r, std::min(g, b));
+            if (mx < 40) continue;
+            const double sat = double(mx - mn) / double(mx), val = double(mx) / 255.0;
+            if (sat < 0.22) continue;
+            double hue;
+            const double d = double(mx - mn);
+            if (mx == r)
+            {
+                hue = double(g - b) / d; /* (no fmod: only the imports the console is known to have) */
+                if (hue < 0) hue += 6.0;
+            }
+            else if (mx == g) hue = double(b - r) / d + 2.0;
+            else hue = double(r - g) / d + 4.0;
+            const int k = std::clamp(int(hue * 4.0), 0, 23);
+            const double q = sat * val;
+            colourful += 1;
+            wt[k] += q;
+            sr[k] += q * r;
+            sg[k] += q * g;
+            sb[k] += q * b;
+        }
+    if (seen < 16 || colourful < seen * 0.04) return false;
+    int best = 0;
+    double best_w = -1;
+    for (int k = 0; k < 24; ++k)
+    {
+        const double v = wt[k] + 0.5 * (wt[(k + 23) % 24] + wt[(k + 1) % 24]);
+        if (v > best_w) { best_w = v; best = k; }
+    }
+    double r = 0, g = 0, b = 0, q = 0;
+    for (int k : {(best + 23) % 24, best, (best + 1) % 24})
+    {
+        r += sr[k]; g += sg[k]; b += sb[k]; q += wt[k];
+    }
+    if (q <= 0) return false;
+    r /= q; g /= q; b /= q;
+    /* As bright as a glow wants (value 0.92), and coloured enough (saturation 0.45 to 0.85). */
+    const double mx = std::max(r, std::max(g, b)), mn = std::min(r, std::min(g, b));
+    if (mx <= 0) return false;
+    double sat = (mx - mn) / mx;
+    const double want_sat = std::clamp(sat, 0.45, 0.85);
+    auto fix = [&](double c) {
+        const double t = mx > mn ? (c - mn) / (mx - mn) : 1.0; /* 0 at the least, 1 at the most */
+        const double v = 0.92 * 255.0;
+        return std::clamp(v * (1.0 - want_sat * (1.0 - t)), 0.0, 255.0);
+    };
+    const int R = int(std::lround(fix(r))), G = int(std::lround(fix(g))), B = int(std::lround(fix(b)));
+    out = (std::uint32_t(R) << 16) | (std::uint32_t(G) << 8) | std::uint32_t(B);
+    return true;
+}
+
 /* ---- pictures decoded off the render thread (Gfx::texture_file_async) ----
  *
  * One worker reads and decodes; the newest request goes first, so the covers
@@ -220,6 +287,8 @@ struct Load
     std::vector<unsigned char> rgba;
     int w = 0, h = 0;
     std::uint64_t wanted = 0; /* the frame it was last asked for */
+    std::uint32_t tint = 0; /* (2.2.3) main_colour's */
+    bool has_tint = false;
 };
 
 struct Loader
@@ -276,10 +345,14 @@ void *load_work(void *)
                 if (ok && blur_tag(path))
                     frost(rgba, w, h, std::max(2, std::max(w, h) / 48));
             }
+        std::uint32_t tint = 0;
+        const bool has_tint = ok && !blur_tag(path) && main_colour(rgba.data(), w, h, tint);
         std::lock_guard<std::mutex> g(L.lock);
         auto it = L.loads.find(path);
         if (it == L.loads.end())
             continue;
+        it->second.tint = tint;
+        it->second.has_tint = has_tint;
         it->second.state = ok ? Load::Done : Load::Failed;
         it->second.rgba.swap(rgba);
         it->second.w = w;
@@ -660,7 +733,21 @@ Texture *Gfx::texture_file_async(const std::string &path, bool *pending, int max
     if (!async_loads_)
     {
         if (!blur_tag(path))
-            return texture_file(path.substr(0, path.find('#')), max_side);
+        {
+            /* (2.2.3) The preview tool: decoded here, its main colour with it. */
+            std::vector<unsigned char> bytes, rgba;
+            int w = 0, h = 0, n = 0;
+            if (!read_file(path.substr(0, path.find('#')), bytes))
+                return nullptr;
+            unsigned char *pixels = stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n, 4);
+            if (!pixels)
+                return nullptr;
+            fit_side(pixels, w, h, max_side, rgba);
+            stbi_image_free(pixels);
+            Texture *t = texture_rgba(rgba.data(), w, h);
+            if (t) t->has_tint = main_colour(rgba.data(), w, h, t->tint);
+            return t;
+        }
         std::vector<unsigned char> bytes, rgba;
         int w = 0, h = 0, n = 0;
         if (!read_file(path.substr(0, path.find('#')), bytes))
@@ -678,6 +765,8 @@ Texture *Gfx::texture_file_async(const std::string &path, bool *pending, int max
     Loader &L = loader();
     std::vector<unsigned char> rgba;
     int w = 0, h = 0;
+    std::uint32_t tint = 0;
+    bool has_tint = false;
     {
         std::lock_guard<std::mutex> g(L.lock);
         auto it = L.loads.find(path);
@@ -707,12 +796,16 @@ Texture *Gfx::texture_file_async(const std::string &path, bool *pending, int max
         rgba.swap(load.rgba);
         w = load.w;
         h = load.h;
+        tint = load.tint;
+        has_tint = load.has_tint;
         L.loads.erase(it);
     }
     --uploads_left_;
     Texture *t = upload_later(rgba.data(), w, h);
     if (!t)
         return nullptr;
+    t->tint = tint;
+    t->has_tint = has_tint;
     return t;
 }
 

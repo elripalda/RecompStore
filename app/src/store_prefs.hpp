@@ -35,6 +35,8 @@ struct StorePrefs
     std::vector<std::string> seen_news; /* What's new versions already shown */
     std::string last_root;          /* the last homebrew folder picked for an install */
     std::string last_version;       /* the store version that last saved these */
+    /* (2.2.3) */
+    int all_sort = 0;               /* Library: 0 name, 1 popular, 2 new, 3 updated */
 };
 
 /* false when there's no file (or it isn't one the store wrote): out keeps its defaults. */

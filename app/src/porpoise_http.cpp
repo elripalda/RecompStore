@@ -8,6 +8,7 @@
 
 #include <condition_variable>
 #include <cstdio>
+#include <atomic>
 #include <mutex>
 
 #include "trace.hpp"
@@ -51,13 +52,21 @@ namespace
 std::mutex g_one_lock;
 std::condition_variable g_one_free;
 bool g_one_busy = false;
+std::atomic<int> g_one_waiting{0}; /* (Recomp Store 2.2.3) */
 }
+
+bool Session::others_waiting() { return g_one_waiting.load() > 0; }
 
 bool Session::init()
 {
     {
         std::unique_lock<std::mutex> lock(g_one_lock);
-        g_one_free.wait(lock, [] { return !g_one_busy; });
+        if (g_one_busy)
+        {
+            ++g_one_waiting;
+            g_one_free.wait(lock, [] { return !g_one_busy; });
+            --g_one_waiting;
+        }
         g_one_busy = true;
     }
     locked_ = true;

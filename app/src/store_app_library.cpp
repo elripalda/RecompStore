@@ -65,7 +65,8 @@ std::string Store::tab_name(int kind) const
     case Emulators: return "Emulators";
     case Apps: return "Apps";
     case Tools: return "Tools";
-    case Library: return "Library";
+    case Library: return "My Apps";   /* (2.2.3) */
+    case AllApps: return "Library";   /* (2.2.3) the whole store */
     default: return "Settings";
     }
 }
@@ -112,7 +113,8 @@ std::vector<int> Store::tab_order() const
             }
         }
     }
-    out.push_back(Library);
+    out.push_back(AllApps); /* (2.2.3) Library: everything in the store */
+    out.push_back(Library); /* My Apps */
     out.push_back(Settings);
     return out;
 }
@@ -193,7 +195,7 @@ std::vector<const App *> Store::library_apps() const
     std::vector<const App *> pins, rest;
     for (const App &a : catalog_.apps)
     {
-        const std::string v = engine().installed(a.id);
+        const std::string v = inst_v(a.id);
         if (v.empty()) continue;
         if (prefs_.my_filter == 1 && !pinned(a.id)) continue; /* (2.2.2) Favorites */
         (pinned(a.id) ? pins : rest).push_back(&a);
@@ -206,7 +208,7 @@ std::vector<const App *> Store::library_apps() const
     {
         /* Each app's time once, not once per comparison (a file's date each). */
         std::map<const App *, long long> when;
-        for (const App *x : rest) when[x] = installed_time(x->id);
+        for (const App *x : rest) when[x] = inst_time(x->id);
         std::stable_sort(rest.begin(), rest.end(), [&](const App *x, const App *y) {
             const long long tx = when[x], ty = when[y];
             return tx != ty ? tx > ty : by_name(x, y);
@@ -249,8 +251,8 @@ std::vector<const App *> Store::beta_apps() const
 
 std::vector<int> Store::library_views() const
 {
-    /* (2.2.2) My Apps, On this PS5, Updates, Betas (when there are some). */
-    std::vector<int> v{0, 3, 1};
+    /* (2.2.3) Installed, Updates, On this PS5, Drives, then Betas (when there are some). */
+    std::vector<int> v{0, 1, 3, 4};
     if (!beta_apps().empty()) v.push_back(2);
     return v;
 }
@@ -265,6 +267,19 @@ static bool in_tab(const App &a, const std::string &cat, const std::string &sour
 std::vector<std::string> Store::category_chips(int kind) const
 {
     std::vector<std::string> out{"All"};
+    if (kind == AllApps)
+    {
+        /* (2.2.3) Library: the parts of the store that have something in them. */
+        bool has[4] = {};
+        const char *cats[4] = {"games", "emulators", "apps", "tools"};
+        for (const App &a : catalog_.apps)
+            for (int i = 0; i < 4; ++i)
+                if (!a.beta && a.category == cats[i]) has[i] = true;
+        const char *names[4] = {"Games", "Emulators", "Apps", "Tools"};
+        for (int i = 0; i < 4; ++i)
+            if (has[i]) out.push_back(names[i]);
+        return out;
+    }
     const std::string cat = category_of(kind);
     const std::string src = kind >= kSourceTab && std::size_t(kind - kSourceTab) < src_tabs_.size() ? src_tabs_[std::size_t(kind - kSourceTab)] : "";
     for (const std::vector<App> *list : {&catalog_.apps, &catalog_.soon})
@@ -279,6 +294,23 @@ std::vector<std::string> Store::category_chips(int kind) const
 
 std::vector<const App *> Store::category_apps(int kind) const
 {
+    if (kind == AllApps)
+    {
+        /* (2.2.3) Library: every app in the store (or one part), sorted as the player chose; Coming
+         * Soon after them. */
+        const auto chips = category_chips(kind);
+        const std::string label = cat_chip_ > 0 && cat_chip_ < int(chips.size()) ? chips[std::size_t(cat_chip_)] : "";
+        std::string cat = label;
+        for (char &c : cat) c = char(std::tolower(static_cast<unsigned char>(c)));
+        std::vector<const App *> out, soon;
+        for (const App &a : catalog_.apps)
+            if (!a.beta && (cat.empty() || a.category == cat)) out.push_back(&a);
+        static const char *modes[4] = {"az", "installs", "new", "updated"};
+        sort_by(modes[std::clamp(prefs_.all_sort, 0, 3)], out);
+        for (const App &a : catalog_.soon)
+            if (cat.empty() || a.category == cat) out.push_back(&a);
+        return out;
+    }
     const std::string cat = category_of(kind);
     const std::string src = kind >= kSourceTab && std::size_t(kind - kSourceTab) < src_tabs_.size() ? src_tabs_[std::size_t(kind - kSourceTab)] : "";
     const auto chips = category_chips(kind);
@@ -303,7 +335,12 @@ void Store::sort_apps(const std::string &category, std::vector<const App *> &v) 
 {
     /* (2.1) "manual" leaves the admin's order (the catalog's, as the apps come). The others keep
      * it for what they can't tell apart. */
-    const std::string &mode = catalog_.cat_sort[std::clamp(category_index(category), 0, 3)];
+    sort_by(catalog_.cat_sort[std::clamp(category_index(category), 0, 3)], v);
+}
+
+/* (2.2.3) The same, by a sort's name: "manual", "az", "installs", "new", "updated". */
+void Store::sort_by(const std::string &mode, std::vector<const App *> &v) const
+{
     if (mode == "manual" || v.size() < 2)
         return;
     std::map<const App *, std::string> names;
@@ -510,7 +547,7 @@ bool Store::update_library(float dt, int moves, bool u, bool d)
         col_ = 0;
         lscroll_ = lscroll_to_ = 0;
         lib_view_t_ = 0;
-        if (to == 3) engine().look_console(); /* (2.2) looked for again each time it's shown */
+        if (to == 3 || to == 4) engine().look_console(); /* (2.2) looked for again each time it's shown; (2.2.3) the drives too */
         play(int(Sfx::Tab));
     };
     if (pressed(pad::BtnL2)) { switch_view(-1); return true; }
@@ -530,6 +567,8 @@ bool Store::update_library(float dt, int moves, bool u, bool d)
     }
     if (lib_view_ == 3)
         return update_console(dt, moves, u, d); /* (2.2) */
+    if (lib_view_ == 4)
+        return update_drives(dt, moves, u, d); /* (2.2.3) */
     if (lib_view_ == 0)
     {
         const auto list = library_apps();
@@ -648,15 +687,20 @@ void Store::draw_library2(Gfx &gfx)
             count = std::to_string(console_list().size()) + " of " + count; /* (2.2.2) Show: a part of them */
         if (!console_.empty()) count += "  \xC2\xB7  " + std::string(sized ? "" : "at least ") + size_text(std::uint64_t(all));
         if (engine().storage_lost()) count = "Can't see the console's storage"; /* (2.2.1) not "0 folders" */
-        draw_tab_header(gfx, "Library", count);
+        draw_tab_header(gfx, "My Apps", count);
+    }
+    else if (lib_view_ == 4)
+    {
+        const auto dr = engine().drives();
+        draw_tab_header(gfx, "My Apps", dr.size() == 1 ? "1 drive" : std::to_string(dr.size()) + " drives");
     }
     else
-        draw_tab_header(gfx, "Library", mine.size() == 1 ? "1 app installed" : std::to_string(mine.size()) + " apps installed");
+        draw_tab_header(gfx, "My Apps", mine.size() == 1 ? "1 app installed" : std::to_string(mine.size()) + " apps installed");
 
     /* The views, as a glass bar: (2.2.2) My Apps, On this PS5, Updates (with its count), Betas. */
     {
-        const char *names[4] = {"My Apps", "Updates", "Betas", "On this PS5"};
-        float widths[4] = {0, 0, 0, 0}, total = 12;
+        const char *names[5] = {"Installed", "Updates", "Betas", "On this PS5", "Drives"}; /* (2.2.3) */
+        float widths[5] = {0, 0, 0, 0, 0}, total = 12;
         const int badge = int(ups.size()) + store_up;
         for (int v : views)
         {
@@ -707,6 +751,11 @@ void Store::draw_library2(Gfx &gfx)
     if (lib_view_ == 3)
     {
         draw_console(gfx, slide); /* (2.2) */
+        return;
+    }
+    if (lib_view_ == 4)
+    {
+        draw_drives(gfx, slide); /* (2.2.3) */
         return;
     }
     if (lib_view_ == 0)
@@ -793,7 +842,7 @@ void Store::draw_library2(Gfx &gfx)
             if (r.kind == 2)
             {
                 const App &a = *r.app;
-                const std::string inst = engine().installed(a.id);
+                const std::string inst = inst_v(a.id);
                 const bool going = job.phase == Phase::Working && job.app_id == a.id;
                 const bool waiting = queue_place(a.id) > 1; /* (2.2.2) */
                 std::string line = going ? (job.total ? job.step + "  " + std::to_string(int(100.0 * double(job.done) / double(job.total))) + "%"
@@ -885,7 +934,7 @@ void Store::draw_library2(Gfx &gfx)
                 const App &a = *list[std::size_t(i)];
                 bool up = false;
                 const std::string st = state_of(a, &up);
-                const bool inst = !engine().installed(a.id).empty();
+                const bool inst = !inst_v(a.id).empty();
                 draw_app_row(gfx, a, 96, y, 1728, f, inst ? st : std::string("Unlocked on this PS5 \xC2\xB7 not installed yet"),
                              up ? "Update" : inst ? "Open" : "Install", up || !inst ? 0 : 2);
                 continue;
@@ -902,6 +951,7 @@ void Store::draw_library2(Gfx &gfx)
         }
     }
     gfx.unclip();
+    edge_fade(gfx, ctop - 12, kBottom, lscroll_ > 0.5f); /* (2.2.3) */
 }
 
 /* ---- A category tab ------------------------------------------------------------------ */
@@ -912,19 +962,35 @@ bool Store::update_category(float dt, int moves, bool u, bool d)
     const auto chips = category_chips(tab_);
     const auto list = category_apps(tab_);
     const int n = int(list.size());
-    const bool has_chips = chips.size() > 1;
+    const bool all = tab_ == AllApps; /* (2.2.3) Library: a Sort chip after the parts */
+    const bool has_chips = chips.size() > 1 || all;
     if (cat_on_chips_)
     {
         if (!has_chips) cat_on_chips_ = false;
-        const int c = std::clamp(cat_chip_ + moves, 0, int(chips.size()) - 1);
-        if (c != cat_chip_)
+        const int last = int(chips.size()) - 1 + (all ? 1 : 0);
+        const int at = cat_sort_on_ ? last : cat_chip_;
+        const int c = std::clamp(at + moves, 0, last);
+        if (c != at)
         {
-            cat_chip_ = c;
-            col_ = 0;
-            cscroll_ = cscroll_to_ = 0;
+            cat_sort_on_ = all && c == last;
+            if (!cat_sort_on_)
+            {
+                cat_chip_ = c;
+                col_ = 0;
+                cscroll_ = cscroll_to_ = 0;
+            }
             play(int(Sfx::Move));
         }
-        if ((d || pressed(pad::BtnCross)) && n > 0) { cat_on_chips_ = false; play(int(Sfx::Move)); }
+        if (cat_sort_on_ && pressed(pad::BtnCross))
+        {
+            prefs_.all_sort = (prefs_.all_sort + 1) % 4;
+            save_prefs();
+            col_ = 0;
+            cscroll_ = cscroll_to_ = 0;
+            play(int(Sfx::Select));
+            return true;
+        }
+        if ((d || pressed(pad::BtnCross)) && n > 0) { cat_on_chips_ = false; cat_sort_on_ = false; play(int(Sfx::Move)); }
         return true;
     }
     if (n == 0)
@@ -959,18 +1025,33 @@ void Store::draw_category(Gfx &gfx)
     const int n = int(list.size());
     std::size_t total = 0;
     const std::string src = tab_ >= kSourceTab && std::size_t(tab_ - kSourceTab) < src_tabs_.size() ? src_tabs_[std::size_t(tab_ - kSourceTab)] : "";
-    for (const App &a : catalog_.apps) total += in_tab(a, category_of(tab_), src) ? 1 : 0;
+    if (tab_ == AllApps)
+        for (const App &a : catalog_.apps) total += a.beta ? 0 : 1;
+    else
+        for (const App &a : catalog_.apps) total += in_tab(a, category_of(tab_), src) ? 1 : 0;
     const char *noun = tab_ == Games ? "game" : tab_ == Emulators ? "emulator" : tab_ == Tools ? "tool" : "app";
     draw_tab_header(gfx, tab_name(tab_),
                     std::to_string(total) + " " + noun + (total == 1 ? "" : "s"));
     float list_top = kContent;
+    if (tab_ == AllApps)
+    {
+        /* (2.2.3) Library's Sort, at the right of its row: Cross on it picks the next. */
+        static const char *sorts[4] = {"Name", "Popular", "New", "Updated"};
+        const std::string label = std::string("Sort: ") + sorts[std::clamp(prefs_.all_sort, 0, 3)];
+        const float w = gfx.measure(Font::SemiBold, 18, label) + 44;
+        const float x = 1824 - w;
+        const bool on = cat_on_chips_ && cat_sort_on_;
+        glass(gfx, x, kTop, w, 46, 23, kGlass, false);
+        if (on) ring(gfx, x, kTop, w, 46, 23, 1.f, true);
+        gfx.text_mid(Font::SemiBold, 18, x + w / 2, kTop + 23, C(kFrost), Align::Center, label);
+    }
     if (chips.size() > 1)
     {
         /* The labels in this part of the store: one picked filters the grid. */
         float x = 96;
         for (int i = 0; i < int(chips.size()); ++i)
         {
-            const bool picked = i == cat_chip_, on = cat_on_chips_ && picked;
+            const bool picked = i == cat_chip_, on = cat_on_chips_ && picked && !cat_sort_on_;
             const float w = gfx.measure(Font::SemiBold, 18, chips[std::size_t(i)]) + 40;
             if (x + w > 1824) break;
             if (picked) gfx.panel(x, kTop, w, 46, C(kFrost), 0.92f, 23);
@@ -1002,6 +1083,7 @@ void Store::draw_category(Gfx &gfx)
         draw_tile(gfx, *list[std::size_t(i)], 96 + float(i % kPerRow) * (kTileS + kTileGap), y, kTileS, ease_out(f));
     }
     gfx.unclip();
+    edge_fade(gfx, list_top - 12, kBottom, cscroll_ > 0.5f); /* (2.2.3) */
     if (float(rows) * kTilePitch - cscroll_ > view_h + 8)
         draw_more(gfx);
 }
@@ -1011,10 +1093,23 @@ void Store::draw_category(Gfx &gfx)
 namespace
 {
 /* (2.2.2) Start on, Tabs, Library view, Library order, Favorites on Discover, Icon colors, Background,
- * Motion, Advanced mode, and (Advanced mode only) Install new apps to. */
+ * Motion, Advanced mode, and (Advanced mode only) Install new apps to. (2.2.3) Shown in groups:
+ * Tabs, Look, Discover, Motion, Advanced (kCusOrder: the rows in the order shown). */
 const int kCustomRows = 10;
-const float kCusPitch = 84;
-const int kCusShown = 8;
+const float kCusPitch = 80, kCusHead = 50;
+const int kCusOrder[kCustomRows] = {0, 1, 2, 3, 5, 6, 4, 7, 8, 9};
+const char *cus_group(int shown) /* the group a row starts, "" when it's in the one above's */
+{
+    switch (shown)
+    {
+    case 0: return "TABS";
+    case 2: return "LOOK";
+    case 6: return "DISCOVER";
+    case 7: return "MOTION";
+    case 8: return "ADVANCED";
+    default: return "";
+    }
+}
 } // namespace
 
 bool Store::update_customize(float dt, bool l, bool r, bool u, bool d)
@@ -1023,19 +1118,22 @@ bool Store::update_customize(float dt, bool l, bool r, bool u, bool d)
     const int rows = prefs_.advanced ? kCustomRows : kCustomRows - 1;
     const int to = std::clamp(cus_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, rows - 1);
     if (to != cus_row_) { cus_row_ = to; play(int(Sfx::Move)); }
-    if (cus_row_ < cus_top_) cus_top_ = cus_row_;
-    if (cus_row_ >= cus_top_ + kCusShown) cus_top_ = cus_row_ - kCusShown + 1;
-    cus_top_ = std::clamp(cus_top_, 0, std::max(0, rows - kCusShown));
     const int step = r || pressed(pad::BtnCross) ? 1 : l ? -1 : 0;
     if (!step) return false;
-    switch (cus_row_)
+    switch (kCusOrder[std::clamp(cus_row_, 0, kCustomRows - 1)])
     {
     case 0:
     {
-        const int kinds[6] = {Discover, Games, Emulators, Apps, Tools, Library};
+        /* (2.2.3) The tabs there are now: Discover, Library, My Apps, and the parts of the store
+         * that have their own. */
+        std::vector<int> kinds;
+        for (int t : tab_order())
+            if (t != Settings) kinds.push_back(t);
+        if (kinds.empty()) kinds.push_back(Discover);
         int at = 0;
-        for (int i = 0; i < 6; ++i) if (kinds[i] == prefs_.start_tab) at = i;
-        prefs_.start_tab = kinds[(at + step + 6) % 6];
+        for (int i = 0; i < int(kinds.size()); ++i) if (kinds[std::size_t(i)] == prefs_.start_tab) at = i;
+        const int n = int(kinds.size());
+        prefs_.start_tab = kinds[std::size_t((at + step + n) % n)];
         break;
     }
     case 1:
@@ -1071,58 +1169,87 @@ bool Store::update_customize(float dt, bool l, bool r, bool u, bool d)
 void Store::draw_customize(Gfx &gfx, float cx, float top, float cw)
 {
     gfx.text_mid(Font::ExtraBold, 38, cx, top + 48 + 24, C(kFrost), Align::Left, "Customize");
-    const float list_top = top + 48 + 48 + 18;
-    const char *start_names[8] = {"Discover", "Library", "", "", "Games", "Emulators", "Apps", "Tools"};
+    const float list_top = top + 48 + 48 + 10, list_bottom = 1080 - 110 - 20;
     const char *orders[3] = {"Name", "Recently installed", "Updates first"};
     struct Row
     {
         const char *title, *help;
         std::string value;
+        int sw = -1; /* (2.2.3) a switch: 1 on, 0 off; -1 a value to step through */
     };
     std::string tabs_value = "As the store sets them";
     if (prefs_.tabs_custom)
     {
-        const auto order = tab_order();
-        const int n = int(order.size()) - 3; /* not Discover, Library, Settings */
-        tabs_value = n <= 0 ? std::string("None") : n == 1 ? std::string("1 tab") : std::to_string(n) + " tabs";
+        int n = 0;
+        for (int t : tab_order()) n += is_category(t) && t != AllApps ? 1 : 0;
+        tabs_value = n <= 0 ? std::string("No extra tabs") : n == 1 ? std::string("1 extra tab") : std::to_string(n) + " extra tabs";
     }
     const Row rows[kCustomRows] = {
-        {"Start on", "The tab the store opens on.", start_names[std::clamp(prefs_.start_tab, 0, 7)]},
-        {"Tabs", "Which parts of the store get a tab, and in what order.", tabs_value},
-        {"Library view", "My Apps as a grid, or a list with more about each app.", prefs_.lib_view == 0 ? "Grid" : "List"},
-        {"Library order", "Favorites always come first.", orders[prefs_.lib_order]},
-        {"Favorites on Discover", "A row of your favorites at the top of Discover. Square adds an app.", prefs_.pins_on_discover ? "On" : "Off"},
+        {"Start on", "The tab the store opens on.", tab_name(prefs_.start_tab)},
+        {"Tabs", "Give Games, Emulators, Apps or Tools a tab of their own.", tabs_value},
+        {"My Apps view", "A grid, or a list with more about each app.", prefs_.lib_view == 0 ? "Grid" : "List"},
+        {"My Apps order", "Favorites always come first.", orders[prefs_.lib_order]},
+        {"Favorites on Discover", "A row of your favorites at the top of Discover. Square adds an app.", "", prefs_.pins_on_discover ? 1 : 0},
         {"Icon colors", "The icons for Games, Emulators, Apps and Tools.", prefs_.icon_colors == 0 ? "Match the logo" : "Colorful"},
-        {"Background", "The focused app's art behind everything, or a calm gradient.", prefs_.backdrop == 0 ? "App art" : "Calm"},
-        {"Motion", "Reduced keeps movement to a minimum.", prefs_.reduced_motion ? "Reduced" : "Full"},
-        {"Advanced mode", "Shows title IDs and folders, and where new apps install.", prefs_.advanced ? "On" : "Off"},
+        {"Background", "The focused app's art and colour behind everything, or a calm gradient.", prefs_.backdrop == 0 ? "App art" : "Calm"},
+        {"Reduce motion", "Less movement: no shimmer, no easing, no sliding.", "", prefs_.reduced_motion ? 1 : 0},
+        {"Advanced mode", "Shows title IDs and folders, and where new apps install.", "", prefs_.advanced ? 1 : 0},
         {"Install new apps to", "Updates go where each app already is. ShadowMountPlus finds apps in all of these.", install_label()},
     };
     const int nrows = prefs_.advanced ? kCustomRows : kCustomRows - 1;
-    const int first = std::clamp(cus_top_, 0, std::max(0, nrows - kCusShown));
-    float ry = list_top;
-    for (int i = first; i < nrows && i < first + kCusShown; ++i)
+    /* Where each shown row is, with its group's heading above the first of a group. */
+    float ys[kCustomRows] = {};
+    float y = 0;
+    for (int k = 0; k < nrows; ++k)
     {
-        const bool on = in_section_ && cus_row_ == i;
-        const float pitch = kCusPitch;
-        gfx.panel(cx, ry, cw, 1.25f, kLine, 1.f, 0);
-        if (on) ring(gfx, cx - 12, ry + 6, cw + 24, pitch - 10, 18, 1.f, true);
-        gfx.text_mid(Font::SemiBold, 22, cx + 8, ry + 18 + 13, C(kFrost), Align::Left, rows[i].title);
-        gfx.text_mid(Font::Regular, 17, cx + 8, ry + 18 + 26 + 6 + 10, C(kMuted), Align::Left, fit(gfx, Font::Regular, 17, cw - 420, rows[i].help));
-        /* The value, between its arrows when focused (Tabs: it opens). */
-        const float vw = gfx.measure(Font::SemiBold, 19, rows[i].value);
-        const bool opens = i == 1;
-        const float vx = cx + cw - 8 - (on ? 34 : 0);
-        gfx.text_mid(Font::SemiBold, 19, vx, ry + 47, i == 8 && prefs_.advanced ? C(kCyan) : C(kFrost), Align::Right, rows[i].value);
-        if (on && !opens)
-            gfx.glyph(Glyph::Arrow, vx - vw - 18, ry + 47, 12, C(kFrost, 0.7f), 3.14159265f * 1.5f);
-        if (on)
-            gfx.glyph(Glyph::Arrow, cx + cw - 14, ry + 47, 12, C(kFrost, 0.7f), 3.14159265f * 0.5f);
-        ry += pitch;
+        if (*cus_group(k)) y += kCusHead;
+        ys[k] = y;
+        y += kCusPitch;
     }
+    const float total = y, view = list_bottom - list_top;
+    /* Scrolled just enough to show the focused row whole (and its heading, at the top of a group). */
+    const int fr = std::clamp(in_section_ ? cus_row_ : 0, 0, nrows - 1);
+    float want = cus_scroll_to_;
+    const float row_top = ys[fr] - (*cus_group(fr) ? kCusHead : 0.f);
+    if (row_top < want) want = row_top;
+    if (ys[fr] + kCusPitch > want + view) want = ys[fr] + kCusPitch - view;
+    want = std::clamp(want, 0.f, std::max(0.f, total - view));
+    cus_scroll_to_ = want;
+    cus_scroll_ = prefs_.reduced_motion ? want : approach(cus_scroll_, want, 1.f / 60.f, 12.f);
+    gfx.push_clip(cx - 30, list_top - 4, cw + 60, view + 8);
+    for (int k = 0; k < nrows; ++k)
+    {
+        const float ry = list_top + ys[k] - cus_scroll_;
+        /* Only whole rows (the arrows say there's more). */
+        if (ry + kCusPitch > list_bottom + 6 || ry - (*cus_group(k) ? kCusHead : 0.f) < list_top - 6) continue;
+        const Row &row = rows[kCusOrder[k]];
+        if (const char *g = cus_group(k); *g)
+            gfx.text_mid(Font::Bold, 15, cx + 8, ry - kCusHead + 30, C(kCyan), Align::Left, g, 2);
+        const bool on = in_section_ && cus_row_ == k;
+        if (!*cus_group(k)) gfx.panel(cx, ry, cw, 1.25f, kLine, 1.f, 0);
+        if (on) ring(gfx, cx - 12, ry + 4, cw + 24, kCusPitch - 8, 18, 1.f, true);
+        gfx.text_mid(Font::SemiBold, 22, cx + 8, ry + 16 + 13, C(kFrost), Align::Left, row.title);
+        gfx.text_mid(Font::Regular, 17, cx + 8, ry + 16 + 26 + 6 + 10, C(kMuted), Align::Left, fit(gfx, Font::Regular, 17, cw - 420, row.help));
+        const float mid = ry + kCusPitch / 2;
+        if (row.sw >= 0)
+        {
+            draw_switch(gfx, cx + cw - 8 - 52, mid, row.sw == 1, on);
+            continue;
+        }
+        /* The value, between its arrows when focused (Tabs: it opens). */
+        const float vw = gfx.measure(Font::SemiBold, 19, row.value);
+        const bool opens = kCusOrder[k] == 1;
+        const float vx = cx + cw - 8 - (on ? 34 : 0);
+        gfx.text_mid(Font::SemiBold, 19, vx, mid, C(kFrost), Align::Right, row.value);
+        if (on && !opens)
+            gfx.glyph(Glyph::Arrow, vx - vw - 18, mid, 12, C(kFrost, 0.7f), 3.14159265f * 1.5f);
+        if (on)
+            gfx.glyph(Glyph::Arrow, cx + cw - 14, mid, 12, C(kFrost, 0.7f), 3.14159265f * 0.5f);
+    }
+    gfx.pop_clip();
     /* More rows above or below: a faint arrow at that end. */
-    if (first > 0) gfx.glyph(Glyph::Arrow, cx + cw / 2, list_top - 10, 13, C(kFrost, 0.5f), 0);
-    if (first + kCusShown < nrows) gfx.glyph(Glyph::Arrow, cx + cw / 2, ry + 14, 13, C(kFrost, 0.5f), 3.14159265f);
+    if (cus_scroll_ > 1) gfx.glyph(Glyph::Arrow, cx + cw / 2, list_top - 12, 13, C(kFrost, 0.5f), 0);
+    if (cus_scroll_ + view < total - 1) gfx.glyph(Glyph::Arrow, cx + cw / 2, list_bottom + 10, 13, C(kFrost, 0.5f), 3.14159265f);
 }
 
 const std::vector<Place> &Store::install_places_now() const
@@ -1187,6 +1314,7 @@ std::string Store::cross_hint() const
         if (con_select_) return "Mark";
         return "Manage";
     }
+    if (tab_ == Library && lib_view_ == 4) return engine().drives().empty() ? "" : "Its apps"; /* (2.2.3) Drives */
     if (tab_ == Library && lib_view_ == 0 && my_on_row_) return "Choose";
     if (tab_ == Library && lib_view_ == 1) return update_apps().empty() && engine().store_update().empty() ? "" : "Update";
     if (tab_ == Library && lib_view_ == 0 && library_apps().empty()) return "";

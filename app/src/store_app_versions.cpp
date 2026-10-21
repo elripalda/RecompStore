@@ -39,7 +39,7 @@ bool Store::has_versions(const App &a) const
 std::vector<Store::VersionRow> Store::version_rows(const App &a, int &state) const
 {
     std::vector<VersionRow> out;
-    const std::string inst = engine().installed(a.id);
+    const std::string inst = inst_v(a.id);
     auto same = [&](const std::string &v) { return !inst.empty() && inst != "?" && version_key(v) == version_key(inst); };
     if (a.beta)
     {
@@ -315,7 +315,7 @@ void Store::draw_versions(Gfx &gfx)
     gfx.set_layer(0, (1 - k2) * 20, k2);
     const float cw = 820, cx0 = (W - cw) / 2, cpad = 48, ciw = cw - cpad * 2;
     /* Over an install: what stays. Older than the newest: Update All leaves it (it's kept). */
-    const std::string inst = engine().installed(a->id);
+    const std::string inst = inst_v(a->id);
     std::string body = !inst.empty() && inst != "?" ? "Your saves and game files stay. Files a newer version added stay too." : "";
     if (!vers_pick_.newest)
         body += std::string(body.empty() ? "" : " ") + "Update all skips it until you update it yourself.";

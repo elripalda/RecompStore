@@ -44,6 +44,10 @@ struct Texture
     /* Made by texture_file_async: its first copy goes in from staging[0]
      * (from no layout), and the staging buffer is let go after it. */
     bool fresh = false;
+    /* (2.2.3) Its main colour, worked out where it was decoded (off the render thread):
+     * 0xRRGGBB, has_tint false when it's mostly grey. */
+    std::uint32_t tint = 0;
+    bool has_tint = false;
 };
 
 enum class Font
@@ -215,6 +219,13 @@ public:
 
     /* Everything drawn after this is moved by (dx, dy) design pixels and faded:
      * how a screen slides in. begin() resets it. */
+    /* (2.2.3) The layer set now: to put it back after drawing outside it. */
+    void get_layer(float &dx, float &dy, float &fade) const
+    {
+        dx = layer_dx_;
+        dy = layer_dy_;
+        fade = layer_fade_;
+    }
     void set_layer(float dx = 0, float dy = 0, float fade = 1)
     {
         layer_dx_ = dx;
