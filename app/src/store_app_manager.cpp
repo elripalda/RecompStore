@@ -10,6 +10,8 @@
 #include "porpoise_sound.hpp"
 
 #include <algorithm>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <cmath>
 #include <cstdio>
 
@@ -588,6 +590,7 @@ void Store::draw_console(Gfx &gfx, float slide)
                      console_looking_ ? "Looking in your homebrew folders\xE2\x80\xA6"
                      : console_.empty() ? "Nothing in your homebrew folders." : "Nothing here. Show: All lists everything.");
     gfx.unclip();
+    edge_fade(gfx, top - above, kBottom, lscroll_ > 0.5f); /* (2.2.3) */
     if (total_h - lscroll_ > view_h + 8) draw_more(gfx);
 }
 
@@ -886,4 +889,132 @@ bool Store::take_manage_result(const JobState &job)
     engine().look_console();
     return true;
 }
+/* ---- (2.2.3) My Apps > Drives ------------------------------------------------------------------ */
+
+bool Store::update_drives(float dt, int moves, bool u, bool d)
+{
+    (void)dt;
+    (void)moves;
+    const auto dr = engine().drives();
+    const int n = int(dr.size());
+    if (n == 0)
+    {
+        if (u) { lib_bar_ = true; play(int(Sfx::Move)); }
+        return true;
+    }
+    drv_sel_ = std::clamp(drv_sel_, 0, n - 1);
+    if (u)
+    {
+        if (drv_sel_ == 0) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
+        --drv_sel_;
+        play(int(Sfx::Move));
+    }
+    if (d && drv_sel_ + 1 < n) { ++drv_sel_; play(int(Sfx::Move)); }
+    if (pressed(pad::BtnCross))
+    {
+        /* Its apps, in On this PS5 (where they can be moved and deleted). */
+        prefs_.con_filter = dr[std::size_t(drv_sel_)].homebrew;
+        save_prefs();
+        lib_view_ = 3;
+        col_ = 0;
+        lscroll_ = lscroll_to_ = 0;
+        lib_view_t_ = 0;
+        console_rev_ = ~0u;
+        engine().look_console();
+        play(int(Sfx::Select));
+    }
+    return true;
+}
+
+void Store::draw_drives(Gfx &gfx, float slide)
+{
+    const auto dr = engine().drives();
+    const float top = kContent + slide;
+    if (dr.empty())
+    {
+        gfx.text_mid(Font::Regular, 20, 96, top + 30, C(kMuted), Align::Left, "Looking at your drives\xE2\x80\xA6");
+        return;
+    }
+    drv_sel_ = std::clamp(drv_sel_, 0, int(dr.size()) - 1);
+    /* The drives, down the left: each one's name, where it is, and a bar of what's used. */
+    const float lx = 96, lw = 660, ch = 132, gap = 16;
+    for (int i = 0; i < int(dr.size()); ++i)
+    {
+        const DriveSpace &s = dr[std::size_t(i)];
+        const float y = top + float(i) * (ch + gap);
+        if (y > kBottom - ch) break;
+        const bool on = i == drv_sel_ && !lib_bar_;
+        float &f = focus_anim_[std::min(400 + i, 511)];
+        f = approach(f, on ? 1.f : 0.f, 1.f / 60.f, prefs_.reduced_motion ? 60.f : 14.f);
+        glass(gfx, lx, y, lw, ch, 26, {1, 1, 1, 0.07f + 0.05f * f}, true);
+        ring(gfx, lx, y, lw, ch, 26, f);
+        gfx.text_mid(Font::Bold, 24, lx + 28, y + 34, C(kFrost), Align::Left, s.label);
+        gfx.text_mid(Font::Regular, 16, lx + lw - 28, y + 34, C(kMuted), Align::Right, s.mount);
+        const double used = s.total > s.free ? double(s.total - s.free) : 0, total = double(std::max<std::uint64_t>(1, s.total));
+        const float bx = lx + 28, bw = lw - 56, by = y + 64;
+        gfx.panel(bx, by, bw, 12, C(kFrost, 0.10f), 1.f, 6);
+        const float k = float(std::clamp(used / total, 0.0, 1.0));
+        if (k > 0) gfx.panel(bx, by, std::max(12.f, bw * k), 12, C(k > 0.92f ? 0xFF9A8A : kCyan), 1.f, 6);
+        gfx.text_mid(Font::Regular, 17, bx, y + 102, C(0xB9C4D3), Align::Left,
+                     size_text(s.free) + " free of " + size_text(s.total));
+    }
+    /* The focused drive's top folders and what each takes: to see what's using the space. */
+    const DriveSpace &s = dr[std::size_t(drv_sel_)];
+    const float rx = lx + lw + 40, rw = 1824 - rx, rh = kBottom - top - 10;
+    glass(gfx, rx, top, rw, rh, 30, C(kMidnight, 0.55f), true);
+    gfx.text_mid(Font::Bold, 15, rx + 32, top + 34, C(kCyan), Align::Left, "WHAT'S ON IT", 2);
+    gfx.text_mid(Font::Regular, 16, rx + rw - 32, top + 34, C(kMuted), Align::Right, "Look only \xC2\xB7 apps move and delete in On this PS5");
+    bool looking = false;
+    auto items = engine().drive_folders(s.mount, &looking);
+    std::stable_sort(items.begin(), items.end(), [](const FolderSize &a, const FolderSize &b) {
+        if ((a.size < 0) != (b.size < 0)) return a.size >= 0;
+        return a.size > b.size;
+    });
+    float y = top + 70;
+    const float row = 44;
+    long long biggest = 1;
+    for (const FolderSize &f : items) biggest = std::max(biggest, f.size);
+    if (items.empty())
+        gfx.text_mid(Font::Regular, 19, rx + 32, y + 10, C(kMuted), Align::Left, looking ? "Looking\xE2\x80\xA6" : "Nothing at its top.");
+    for (const FolderSize &f : items)
+    {
+        if (y + row > top + rh - 20) break;
+        if (f.dir)
+            gfx.image(folder_icon_, rx + 32, y + 8, 26, 26, {}, 6);
+        else
+        {
+            gfx.panel(rx + 37, y + 9, 17, 24, C(kFrost, 0.16f), 1.f, 4); /* a file: a little page */
+            gfx.panel(rx + 41, y + 17, 9, 2, C(kFrost, 0.45f), 1.f, 1);
+            gfx.panel(rx + 41, y + 22, 9, 2, C(kFrost, 0.45f), 1.f, 1);
+        }
+        gfx.text_mid(Font::SemiBold, 19, rx + 72, y + row / 2, C(kFrost), Align::Left, fit(gfx, Font::SemiBold, 19, rw * 0.45f, f.name));
+        const std::string sz = f.size < 0 ? "\xE2\x80\xA6" : size_text(std::uint64_t(f.size));
+        gfx.text_mid(Font::Regular, 18, rx + rw - 32, y + row / 2, C(0xB9C4D3), Align::Right, sz);
+        if (f.size > 0)
+        {
+            const float bw = (rw * 0.30f) * float(double(f.size) / double(biggest));
+            gfx.panel(rx + rw - 32 - 130 - rw * 0.30f, y + row / 2 - 4, std::max(6.f, bw), 8, C(kCyan, 0.55f), 1.f, 4);
+        }
+        y += row;
+    }
+}
+
+/* A USB drive plugged in or taken out while the store is open: said, and looked at again. */
+void Store::watch_usb()
+{
+    /* (2.2.3) The engine's own thread looks (every 2 s): only its answer is read here. */
+    bool known = false;
+    const unsigned mask = engine().usb_seen(&known);
+    if (!known) return;
+    if (!usb_known_) { usb_known_ = true; usb_mask_ = mask; return; }
+    if (mask == usb_mask_) return;
+    for (int i = 0; i < 8; ++i)
+    {
+        const bool was = usb_mask_ & (1u << i), now = mask & (1u << i);
+        if (was != now) toast(std::string("USB drive ") + std::to_string(i + 1) + (now ? " connected" : " removed"));
+    }
+    usb_mask_ = mask;
+    engine().look_console();
+}
+
 } // namespace recomp

@@ -612,7 +612,7 @@ void Store::take_link_actions()
         }
         bool update = false;
         state_of(*app, &update);
-        const std::string v = engine().installed(app->id);
+        const std::string v = inst_v(app->id);
         if (!v.empty() && v != "?" && !update)
         {
             /* (2.1) Kept at an older version the player picked: updated only from its page. */

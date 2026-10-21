@@ -3,6 +3,8 @@
  *   store-preview <assets dir> <out dir>
  * Based on Porpoise's tools/ui-preview (GPL-3.0-or-later). */
 #include <unistd.h>
+#include <chrono>
+#include <map>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -257,6 +259,51 @@ int main(int argc, char **argv)
     (void)press;
     const char *only = std::getenv("PREVIEW_ONLY");
     auto want = [&](const char *n) { return !only || std::strstr(only, n); };
+    /* (2.2.3) PREVIEW_PERF: each screen's own time per frame (update and draw, not the GPU), and how
+     * often it asks the engine things, over 120 frames once it has settled. */
+    if (std::getenv("PREVIEW_PERF"))
+    {
+        extern std::map<std::string, long> g_perf_calls;
+        auto measure = [&](const char *name, int scroll) {
+            settle(60);
+            for (int i = 0; i < 20; ++i) { gfx.begin(0, float(W), float(H), 12.0f, 0.0f, false); store.draw(gfx); render_noop(); }
+            g_perf_calls.clear();
+            double total = 0, worst = 0;
+            const int N = 120;
+            for (int i = 0; i < N; ++i)
+            {
+                porpoise::pad::State p;
+                if (scroll && (i % 10) == 0) p.buttons = scroll == 1 ? porpoise::pad::BtnDown : porpoise::pad::BtnRight;
+                const auto t0 = std::chrono::steady_clock::now();
+                store.update(p, 0.016f);
+                gfx.begin(0, float(W), float(H), 12.0f, 0.0f, false);
+                store.draw(gfx);
+                const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                total += ms; worst = std::max(worst, ms);
+                render_noop();
+            }
+            std::string calls;
+            for (auto &kv : g_perf_calls) calls += " " + kv.first + "=" + std::to_string(kv.second / N);
+            std::printf("perf %-22s avg %6.2f ms  worst %6.2f ms  per frame:%s\n", name, total / N, worst, calls.c_str());
+        };
+        if (std::getenv("PREVIEW_PERF_DL"))
+        {
+            /* While an install downloads, two more waiting (the pill, the page's Downloading). */
+            recomp::preview_job("install", "PPSA92011");
+            store.preview_queue({"PPSA64008", "PPSA94202"}, 0);
+        }
+        store.preview_tab(0); measure("discover", 0);
+        store.preview_tab(0); store.preview_row(1, 0); measure("discover-scroll", 1);
+        store.preview_mine(0, 0, 0); measure("library-myapps-grid", 0);
+        store.preview_mine(0, 0, 0); measure("library-myapps-scroll", 1);
+        store.preview_library(1, 0); measure("library-updates", 0);
+        store.preview_console2(0, 0, 0, ""); measure("library-console-grid", 0);
+        store.preview_console2(0, 1, 1, ""); measure("library-console-list", 1);
+        store.preview_category(4, 0, 0); measure("games-tab", 0);
+        store.preview_open("PPSA92011"); measure("app-page", 0);
+        store.preview_settings(0); measure("settings", 0);
+        return 0;
+    }
     for (float bt : {0.55f, 1.25f, 1.7f, 3.2f})
     {
         store.preview_boot(bt);
@@ -526,6 +573,47 @@ int main(int argc, char **argv)
     /* (2.2.2) The Library's views, Downloads, where to install, storage, the app page's rows,
      * Customize and its tabs, Settings > ShadowMountPlus and Storage, What's new. With
      * PREVIEW_CATALOG=site/catalog222.json and CHARTS=site/charts222.json. */
+    /* (2.2.3) Library is the whole store, My Apps what's on the console (with Drives); the patch notes
+     * of a release whose body is HTML and long addresses. */
+    if (want("v223"))
+    {
+        store.preview_tab(0); store.preview_row(1, 0); settle(90); frame("v223-discover");
+        store.preview_category(8, 0, 0); settle(60); frame("v223-library");
+        store.preview_category(8, 2, 0); store.preview_all_sort(1, false); settle(30); frame("v223-library-emulators-popular");
+        store.preview_category(8, 0, 0); store.preview_all_sort(0, true); settle(30); frame("v223-library-sort-focus");
+        store.preview_all_sort(0, false);
+        store.preview_mine(0, 0, 0); settle(60); frame("v223-myapps");
+        store.preview_mine(15, 0, 0); settle(60); frame("v223-myapps-scrolled");
+        store.preview_library(1, 0); settle(60); frame("v223-myapps-updates");
+        store.preview_console2(0, 0, 0, ""); settle(60); frame("v223-myapps-console");
+        store.preview_drives(0); settle(60); frame("v223-myapps-drives");
+        store.preview_drives(2); settle(60); frame("v223-myapps-drives-usb");
+        /* Downloads: a long name, how far, the rest waiting; Refresh's note beside it. */
+        recomp::preview_job("install", "PPSA92011"); store.preview_queue({"PPSA64008", "PPSA94202"}, 0);
+        store.preview_tab(0); store.preview_row(1, 0); store.preview_refresh(2); settle(40); frame("v223-pill");
+        store.preview_smp_row(-1); settle(30); frame("v223-settings-smp");
+        store.preview_refresh(0);
+        store.preview_customize(0); settle(30); frame("v223-customize");
+        store.preview_customize(7); settle(40); frame("v223-customize-motion");
+        store.preview_category(8, 0, 15); settle(60); frame("v223-library-scrolled");
+        store.preview_shimmer(true); store.preview_category(8, 0, 0); settle(20); frame("v223-shimmer"); store.preview_shimmer(false);
+        store.preview_open("PPSA64007"); store.preview_focus(0); settle(60); frame("v223-page");
+        store.preview_related(0, 1); settle(60); frame("v223-page-related");
+        store.preview_related(-1, 0); store.preview_scroll_page(0); store.preview_focus(3); settle(30); frame("v223-page-actions");
+        store.preview_row(1, 0); recomp::preview_job("", "");
+        if (const char *ra = std::getenv("PREVIEW_RA_NOTES"))
+        {
+            setenv("PREVIEW_NOTES", ra, 1);
+            store.preview_open("PPSA99764"); settle(60); frame("v223-notes-page");
+            store.preview_notes(2); settle(10); frame("v223-notes-open");
+            int lines = 0;
+            const float over = store.preview_notes_overflow(&lines);
+            std::printf("notes check: %d lines, widest goes %.1f px past its box%s\n", lines, over, over > 0.5f ? " (FAIL)" : " (ok)");
+            store.preview_notes(2, 12); settle(10); frame("v223-notes-scrolled");
+            store.preview_notes(0);
+            unsetenv("PREVIEW_NOTES");
+        }
+    }
     if (want("v222"))
     {
         store.preview_pin("PPSA64007"); store.preview_pin("PPSA99764"); store.preview_pin("PPSA97772"); store.preview_pin("PPSA92011");

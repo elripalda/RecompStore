@@ -133,7 +133,10 @@ bool Store::downloads_shown() const
 
 void Store::draw_downloads(Gfx &gfx)
 {
-    /* The pill at the top right: what's downloading, how far, how many wait. Options opens the list. */
+    /* The pill at the top right: what's downloading, how far, how many wait. Options opens the list.
+     * (2.2.3) Even room round everything, the name cut short with an ellipsis, how far it is as a
+     * fill inside the pill's own shape, the count of the rest in its own badge. */
+    dl_pill_x_ = 1920 - 96;
     if (!downloads_shown() || page_t_ > 0.5f) return;
     const JobState j = engine().job();
     const auto q = engine().queue();
@@ -143,13 +146,19 @@ void Store::draw_downloads(Gfx &gfx)
     {
         const App *a = find(j.app_id);
         name = a ? a->name : j.app_id;
-        if (j.total)
+        const bool getting = j.step.empty() || j.step == "Downloading";
+        if (getting && j.total)
         {
             frac = clamp01(float(double(j.done) / double(j.total)));
             right = std::to_string(int(frac * 100)) + "%";
         }
+        else if (getting)
+            right = j.done ? size_text(j.done) : std::string("Starting");
         else
-            right = "\xE2\x80\xA6";
+        {
+            frac = 1;
+            right = j.step == "Installing" ? "Installing" : "Checking";
+        }
     }
     else if (!q.empty())
     {
@@ -161,37 +170,41 @@ void Store::draw_downloads(Gfx &gfx)
         name = "Needs your answer";
     const int waiting = int(q.size()) - (j.phase == Phase::Working ? 0 : (q.empty() ? 0 : 1));
     const std::string more = waiting > 0 ? "+" + std::to_string(waiting) : std::string();
-    const float h = 44, cy = 76;
-    const float more_w = more.empty() ? 0 : gfx.measure(Font::Bold, 14, more) + 16 + 8;
-    const float right_w = right.empty() ? 0 : gfx.measure(Font::SemiBold, 17, right) + 10;
-    const float name_room = 280 - 44 - 16 - right_w - more_w - 18;
-    const std::string shown = fit(gfx, Font::SemiBold, 17, std::max(40.f, name_room), name);
-    const float w = 44 + gfx.measure(Font::SemiBold, 17, shown) + right_w + more_w + 22;
+    const float h = 48, cy = 76, top = cy - h / 2;
+    const float pad_l = 7, dot = 34, gap = 10, pad_r = 20;
+    const float right_w = right.empty() ? 0 : gfx.measure(Font::SemiBold, 17, right);
+    const float more_w = more.empty() ? 0 : gfx.measure(Font::Bold, 14, more) + 18;
+    const float fixed = pad_l + dot + gap + (right.empty() ? 0 : gap + right_w) + (more.empty() ? 0 : gap + more_w) + pad_r;
+    const std::string shown = fit(gfx, Font::SemiBold, 17, std::max(64.f, 360 - fixed), name);
+    const float name_w = gfx.measure(Font::SemiBold, 17, shown);
+    const float w = fixed + name_w;
     const float x = 1920 - 96 - w;
-    glass(gfx, x, cy - h / 2, w, h, h / 2, kGlass, true);
+    dl_pill_x_ = x;
+    glass(gfx, x, top, w, h, h / 2, kGlass, true);
+    if (frac > 0)
+    {
+        /* how far: the pill filling with cyan from the left, inside its own rounded shape */
+        gfx.push_clip(x, top, w * frac, h);
+        gfx.panel(x, top, w, h, C(kCyan, 0.20f), 1.f, h / 2);
+        gfx.pop_clip();
+    }
     /* a cyan dot with an arrow pointing down */
-    gfx.panel(x + 8, cy - 14, 28, 28, C(kCyan, 0.2f), 1.f, 14, C(kCyan, 0.6f), 1.f);
-    gfx.glyph(Glyph::Arrow, x + 22, cy + 1, 11, C(kCyan), 3.14159265f);
-    float tx = x + 44;
+    gfx.panel(x + pad_l, cy - dot / 2, dot, dot, C(kCyan, 0.22f), 1.f, dot / 2, C(kCyan, 0.6f), 1.f);
+    gfx.glyph(Glyph::Arrow, x + pad_l + dot / 2, cy + 1, 12, C(kCyan), 3.14159265f);
+    float tx = x + pad_l + dot + gap;
     gfx.text_mid(Font::SemiBold, 17, tx, cy, C(kFrost), Align::Left, shown);
-    tx += gfx.measure(Font::SemiBold, 17, shown) + 10;
+    tx += name_w;
     if (!right.empty())
     {
+        tx += gap;
         gfx.text_mid(Font::SemiBold, 17, tx, cy, C(kCyan), Align::Left, right);
         tx += right_w;
     }
     if (!more.empty())
     {
-        const float mw = more_w - 8;
-        gfx.panel(tx, cy - 11, mw, 22, C(kFrost, 0.16f), 1.f, 11);
-        gfx.text_mid(Font::Bold, 14, tx + mw / 2, cy, C(kFrost), Align::Center, more);
-    }
-    if (frac >= 0)
-    {
-        /* how far, along the bottom of the pill */
-        const float bx = x + 18, bw = w - 36;
-        gfx.panel(bx, cy + h / 2 - 7, bw, 3, C(kFrost, 0.12f), 1.f, 1.5f);
-        gfx.panel(bx, cy + h / 2 - 7, std::max(3.f, bw * frac), 3, C(kCyan), 1.f, 1.5f);
+        tx += gap;
+        gfx.panel(tx, cy - 12, more_w, 24, C(kFrost, 0.16f), 1.f, 12);
+        gfx.text_mid(Font::Bold, 14, tx + more_w / 2, cy, C(kFrost), Align::Center, more);
     }
 }
 
@@ -446,7 +459,7 @@ void Store::draw_queue_panel(Gfx &gfx, float k)
         {
             const int place = i + 1;
             line = "Waiting, " + ordinal(place) + " in line";
-            if (const App *wa = a; wa && !engine().installed(wa->id).empty()) line += "  \xC2\xB7  an update";
+            if (const App *wa = a; wa && !inst_v(wa->id).empty()) line += "  \xC2\xB7  an update";
             button = "Remove";
         }
         else
@@ -588,8 +601,8 @@ void Store::draw_place_panel(Gfx &gfx, float k)
 
 void Store::cache_look(bool now)
 {
-    if (!now && time_ - cache_t_ < 3.f) return;
-    cache_now_ = engine().cache_bytes(&cache_files_);
+    /* (2.2.3) As the engine's own thread last saw it: never a wait on the disk here. */
+    cache_now_ = engine().cache_seen(&cache_files_, now);
     cache_t_ = time_;
 }
 
@@ -858,7 +871,8 @@ std::vector<std::string> Store::shown_tab_entries() const
 {
     std::vector<std::string> out;
     if (prefs_.tabs_custom) return prefs_.tabs;
-    out = catalog_.tabs_set ? catalog_.tabs : std::vector<std::string>{"games", "emulators", "apps", "tools"};
+    /* (2.2.3) None by default: Library has every part; the catalog may suggest some. */
+    out = catalog_.tabs_set ? catalog_.tabs : std::vector<std::string>{};
     for (const std::string &v : prefs_.source_tabs) out.push_back("source:" + v);
     return out;
 }
@@ -1416,7 +1430,7 @@ std::vector<Store::RelRow> Store::related_rows(const App &a) const
         for (const std::string &t : x.tags)
             if (std::find(a.tags.begin(), a.tags.end(), t) != a.tags.end()) score += 2;
         if (!owner.empty() && lower_ascii(x.repo).rfind(owner + "/", 0) == 0) score += 1;
-        like.push_back({&x, score, !engine().installed(x.id).empty()});
+        like.push_back({&x, score, !inst_v(x.id).empty()});
     }
     std::stable_sort(like.begin(), like.end(), [](const Score &p, const Score &q) {
         if (p.inst != q.inst) return !p.inst;

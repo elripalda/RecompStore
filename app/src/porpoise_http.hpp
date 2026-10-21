@@ -43,6 +43,10 @@ public:
      * -1 when there was no answer. */
     int request(const std::string &url, const std::string *form, std::vector<std::uint8_t> &out,
                 std::size_t limit = std::size_t(4) << 20);
+    /* (Recomp Store 2.2.3) Another thread is waiting for the one session: a long download hands
+     * it over between pieces, so a quick request (Send logs, patch notes, pictures) needn't wait
+     * for the whole download. */
+    static bool others_waiting();
     /* The console's error code from the last request that failed (0 if none). */
     int last_error() const { return last_error_; }
 

@@ -27,7 +27,7 @@ public:
     void set_display(unsigned w, unsigned h) { disp_w_ = w; disp_h_ = h; }
 
     /* For the desktop preview: jump straight to a screen. */
-    void preview_tab(int tab) { tab_ = tab; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
+    void preview_tab(int tab) { inst_.clear(); tab_ = tab; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
     void preview_open(const std::string &id);
     void preview_settings(int section) { tab_ = 3; section_ = section; in_section_ = false; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; }
     void preview_boot(float t) { booted_ = false; boot_t_ = t; }
@@ -157,13 +157,23 @@ public:
     void preview_smp_row(int row) { preview_settings(SecSmp); in_section_ = row >= 0; smp_row_ = std::max(0, row); }
     void preview_storage_row(int row) { preview_settings(SecStorage); in_section_ = row >= 0; sto_row_ = std::max(0, row); }
     void preview_customize_top(int row) { preview_customize(row); }
+    /* (2.2.3) The patch notes as laid out: how far the widest line goes past its box (0 none), and how
+     * many lines there are. */
+    float preview_notes_overflow(int *lines = nullptr) const;
+    void preview_all_sort(int sort, bool focus_sort) { prefs_.all_sort = sort; cat_on_chips_ = focus_sort; cat_sort_on_ = focus_sort; }
+    void preview_drives(int sel) { preview_library(4, 0); drv_sel_ = sel; }
+    void preview_shimmer(bool on) { shimmer_test_ = on; }
+    void preview_scroll_page(float y) { page_scroll_ = page_scroll_to_ = y; }
 
 private:
     /* The kinds of tab (2.0: Updates is a view of the Library now; Games, Emulators and Apps
      * are shown when the catalog has something in them). tab_ holds a kind; tab_order() the
      * kinds in the order the tab bar shows them. */
     /* (2.2.2) kSourceTab + i: a source the player pinned as a tab (src_tabs_[i]). */
-    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, Games = 4, Emulators = 5, Apps = 6, Tools = 7, kSourceTab = 100 };
+    /* (2.2.3) Library (kind AllApps) is the whole store now, by part; what's on the console is My
+     * Apps (kind Library, kept for what it was: its views Installed, Updates, On this PS5, Drives, Betas). */
+    enum Tab { Discover = 0, Library = 1, Updates = 2, Settings = 3, Games = 4, Emulators = 5, Apps = 6, Tools = 7, AllApps = 8,
+               kSourceTab = 100 };
     /* Settings' sections, by kind; settings_order() lists them as shown. */
     enum SetSec { SecGeneral = 0, SecAdding = 1, SecRedeem = 2, SecAbout = 3, SecCustomize = 4, SecLink = 5, SecSources = 6,
                   SecStorage = 7 /* (2.2.2) */, SecSmp = 8 /* (2.2.2) */ };
@@ -171,7 +181,7 @@ private:
     std::vector<int> settings_order() const;
     std::string tab_name(int kind) const;
     static const char *category_of(int kind); /* "games", "emulators", "apps", "tools"; "" for others */
-    static bool is_category(int kind) { return kind == Games || kind == Emulators || kind == Apps || kind == Tools || kind >= kSourceTab; }
+    static bool is_category(int kind) { return kind == Games || kind == Emulators || kind == Apps || kind == Tools || kind == AllApps || kind >= kSourceTab; }
     void go_tab(int kind, int dir);
 
     /* (2.0) What the player chose to keep: Settings > Customize, the favorites, menu sounds, (2.2.2)
@@ -189,6 +199,18 @@ private:
     std::vector<const App *> category_apps(int kind) const; /* with the chip's label applied */
     /* (2.1) Apps of one part of the store in the order the catalog says for it (Catalog::cat_sort). */
     void sort_apps(const std::string &category, std::vector<const App *> &apps) const;
+    void sort_by(const std::string &mode, std::vector<const App *> &apps) const; /* (2.2.3) */
+    bool cat_sort_on_ = false; /* (2.2.3) Library: its Sort chip focused */
+    /* (2.2.3) My Apps > Drives: each drive and what's at its top (read-only); a USB drive coming or
+     * going while the store is open. */
+    bool update_drives(float dt, int moves, bool u, bool d);
+    void draw_drives(porpoise::ui::Gfx &gfx, float slide);
+    void watch_usb();
+    int drv_sel_ = 0;
+    float drv_scroll_ = 0;
+    unsigned usb_mask_ = 0;
+    float usb_t_ = -10;
+    bool usb_known_ = false;
     std::vector<std::string> category_chips(int kind) const; /* "All" then the labels used */
     std::vector<int> library_views() const;          /* 0 My Apps, 1 Updates, 2 Betas (when there are some), (2.2) 3 On this PS5 */
     bool update_library(float dt, int moves, bool u, bool d);
@@ -250,6 +272,23 @@ private:
     int line_first(const DLine &l, int col) const;
     float item_x(const DLine &l, int i, int first) const;
     std::string state_of(const App &a, bool *update_ready) const;
+    /* (2.2.3) What's installed and when, as the engine last said. Asking the engine for each tile
+     * every frame was hundreds of file reads a frame on the PS5 (a stat and a read each), which
+     * made every screen lag, worst while a download kept the drive busy. Kept until something
+     * changes (the catalog, a job, the console's apps); a few stale ones looked at again each frame. */
+    std::string tile_line(const App &a, bool *update_ready = nullptr) const; /* (2.2.3) */
+    const std::string &inst_v(const std::string &id) const;
+    long long inst_time(const std::string &id) const;
+    void inst_tick();
+    struct Inst
+    {
+        std::string v;
+        long long when = -2; /* -2 not asked yet */
+        float at = 0;
+    };
+    mutable std::map<std::string, Inst> inst_;
+    unsigned long long inst_key_ = ~0ull;
+    std::string inst_last_app_; /* (2.2.3) the job's app when inst_key_ was made */
     std::string version_of(const App &a) const;
     std::vector<const App *> featured_apps() const;
     /* (2.1) Discover's header: its style (0 carousel, 1 spotlight, 2 split, 3 mosaic, 4 none) and
@@ -283,7 +322,11 @@ private:
     void picker_go(const std::string &path);
     bool update_picker(float dt);
 
-    void draw_backdrop(porpoise::ui::Gfx &gfx);
+    void draw_backdrop(porpoise::ui::Gfx &gfx, float alpha = 1.f);
+    /* (2.2.3) What scrolls fades out under the header above it and into the hints below: the
+     * background drawn again over its edges, a little less in each strip. */
+    void edge_fade(porpoise::ui::Gfx &gfx, float top, float bottom, bool at_top, bool at_bottom = true);
+    void draw_hint_band(porpoise::ui::Gfx &gfx);
     void draw_top(porpoise::ui::Gfx &gfx);
     void draw_discover(porpoise::ui::Gfx &gfx);
     void draw_settings(porpoise::ui::Gfx &gfx);
@@ -397,6 +440,15 @@ private:
     float nav_left_ = 0, nav_right_ = 0, nav_up_ = 0, nav_down_ = 0;
     std::string focus_id_;
     float backdrop_t_ = 1;
+    /* (2.2.3) The background's soft tint, the focused app's main colour (its icon's, worked out
+     * where it was decoded), eased in and out; and the glow round a focused icon. */
+    bool shimmer_test_ = false; /* (2.2.3) the preview: tiles drawn as if their icons were loading */
+    float dl_pill_x_ = 1920 - 96, tabs_right_ = 1534; /* (2.2.3) */ /* (2.2.3) where the downloads pill starts (the Refresh note goes left of it) */
+    float tint_a_ = 0, tint_rgb_[3] = {0.13f, 0.83f, 0.93f}, tint_to_[3] = {0.13f, 0.83f, 0.93f};
+    void draw_tint(porpoise::ui::Gfx &gfx, float alpha = 1.f);
+    porpoise::ui::Color glow_of(const porpoise::ui::Texture *icon, float a) const;
+    void draw_shimmer(porpoise::ui::Gfx &gfx, float x, float y, float w, float h, float r);
+    void draw_switch(porpoise::ui::Gfx &gfx, float x, float cy, bool on, bool focus);
     std::string backdrop_id_, backdrop_prev_;
 
     std::string page_id_;
@@ -444,6 +496,7 @@ private:
         std::string text;
     };
     std::vector<NoteLine> notes_lines_;
+    float notes_w_ = 0; /* (2.2.3) the width they were laid out for */
 
     /* Updating the store itself (Latest Updates): waiting for its installer to start. */
     bool store_updating_ = false;
@@ -763,5 +816,6 @@ private:
     mutable std::string rel_key_; /* related_rows' last answer, for this app and catalog */
     mutable std::vector<RelRow> rel_cache_;
     int cus_top_ = 0; /* Customize: the first row shown */
+    float cus_scroll_ = 0, cus_scroll_to_ = 0; /* (2.2.3) Customize, scrolled (its groups' headings make it taller) */
 };
 } // namespace recomp

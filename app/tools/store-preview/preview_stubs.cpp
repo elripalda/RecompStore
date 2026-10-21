@@ -9,6 +9,24 @@
 #include <cstdlib>
 #include <string>
 
+/* (2.2.3) PREVIEW_PERF: how often the screens ask the engine things, and what the PS5's file calls
+ * would cost (PREVIEW_IO_US microseconds each, spun: installed() is a stat and a file read there). */
+#include <atomic>
+#include <chrono>
+#include <map>
+#include <mutex>
+std::map<std::string, long> g_perf_calls;
+std::mutex g_perf_m;
+void perf_count(const char *what) { std::lock_guard<std::mutex> l(g_perf_m); ++g_perf_calls[what]; }
+void perf_cost(const char *what)
+{
+    perf_count(what);
+    static const long us = std::getenv("PREVIEW_IO_US") ? std::atol(std::getenv("PREVIEW_IO_US")) : 0;
+    if (us <= 0) return;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(us);
+    while (std::chrono::steady_clock::now() < until) {}
+}
+
 namespace recomp
 {
 namespace
@@ -87,7 +105,7 @@ bool Engine::queue_add(const std::string &id, const std::string &v, const std::s
     g_queue.push_back({id, v, root});
     return true;
 }
-std::vector<QueueItem> Engine::queue() const { queue_read(); return g_queue; }
+std::vector<QueueItem> Engine::queue() const { perf_count("queue"); queue_read(); return g_queue; }
 bool Engine::queue_remove(const std::string &id)
 {
     queue_read();
@@ -99,6 +117,20 @@ std::string Engine::queue_pump() { return ""; } /* the screens stay as set up */
 bool Engine::cancel_job() { return true; }
 std::vector<std::string> Engine::auto_update_picks(const std::vector<std::string> &, bool) const { return {}; }
 unsigned Engine::checks_done() const { return 0; }
+/* (2.2.3) The Drives view: what's at a drive's top, made up (some sizes still being worked out). */
+std::vector<FolderSize> Engine::drive_folders(const std::string &mount, bool *looking) const
+{
+    if (looking) *looking = false;
+    std::vector<FolderSize> v;
+    auto add = [&](const char *n, long long mb, bool dir = true) { FolderSize f; f.name = n; f.path = mount + "/" + n; f.size = mb < 0 ? -1 : mb << 20; f.dir = dir; v.push_back(f); };
+    if (mount == "/data")
+    {
+        add("homebrew", 61440); add("recompstore", 2310); add("etaHEN", 140); add("roms", 18200); add("PCSX2", 920);
+        add("shadowmount", 35); add("payloads", 12); add("Jellyfin", -1); add("game-backups", 104000); add("notes.txt", 0, false);
+    }
+    else { add("homebrew", 9216); add("Games", 210000); add("Movies", -1); }
+    return v;
+}
 std::vector<DriveSpace> Engine::drives() const
 {
     std::vector<DriveSpace> d;
@@ -109,7 +141,10 @@ std::vector<DriveSpace> Engine::drives() const
     d.push_back({"USB drive 1", "/mnt/usb0", "/mnt/usb0/homebrew", 931ull << 30, 702ull << 30, true});
     return d;
 }
-std::uint64_t Engine::cache_bytes(std::size_t *files) const
+std::uint64_t Engine::cache_seen(std::size_t *files, bool) const { perf_count("cache_seen"); return cache_bytes_now(files); }
+unsigned Engine::usb_seen(bool *known) const { if (known) *known = true; return getenv("PREVIEW_USB") ? 1u : 0u; }
+std::uint64_t Engine::cache_bytes(std::size_t *files) const { return cache_bytes_now(files); }
+std::uint64_t Engine::cache_bytes_now(std::size_t *files)
 {
     const char *e = std::getenv("PREVIEW_CACHE_MB");
     if (files) *files = e && std::atoi(e) == 0 ? 0 : 3;
@@ -165,6 +200,7 @@ JobState Engine::job() const
  * PREVIEW_CONSOLE_ICON: a real param.json's icon0.png for the PS5SX2 row. */
 std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
 {
+    perf_count("console_apps");
     load();
     if (looking) *looking = false;
     std::vector<ConsoleApp> v;
@@ -198,6 +234,15 @@ std::vector<ConsoleApp> Engine::console_apps(bool *looking) const
     add("/mnt/ext1/homebrew/PPSA77003", "PPSA77003", "RetroArch", "1.19", "PPSA77003", 1290, true, icon_of("PPSA77003"));
     add("/data/homebrew/PPSA94202", "PPSA94202", "Sonic Unleashed Recompiled", "0.1.4", "PPSA94202", 9120, true, icon_of("PPSA94202"));
     add("/mnt/usb0/homebrew/PPSA99412", "PPSA99412", "ItemzFlow", "1.12", "", 38, true, "");
+    /* (2.2.3) PREVIEW_CONSOLE_N more folders, for the speed test. */
+    if (const char *n = std::getenv("PREVIEW_CONSOLE_N"))
+        for (int i = 0; i < std::atoi(n); ++i)
+        {
+            static std::vector<std::string> keep;
+            if (keep.size() < 400) { keep.push_back("/data/homebrew/PPSA9" + std::to_string(1000 + i)); keep.push_back("PPSA9" + std::to_string(1000 + i)); keep.push_back("Homebrew app " + std::to_string(i + 1)); }
+            const std::size_t k = std::size_t(i) * 3;
+            if (k + 2 < keep.size()) add(keep[k].c_str(), keep[k + 1].c_str(), keep[k + 2].c_str(), "1.0", "", 20 + i * 13, true, "");
+        }
     return v;
 }
 unsigned Engine::console_revision() const { return 1; }
@@ -321,7 +366,7 @@ bool Engine::resolve_clash(const std::string &, int, const std::string &, const 
 void Engine::refresh() {}
 std::string moved_id(const std::string &id) { const char *m = std::getenv("PREVIEW_MOVED"); return m && id == "PPSA92011" ? m : ""; }
 std::string installed_id(const std::string &id) { const std::string m = moved_id(id); return m.empty() ? id : m; }
-long long installed_time(const std::string &id) { long long h = 0; for (char c : id) h = h * 31 + c; return 1700000000 + (h & 0xFFFF); }
+long long installed_time(const std::string &id) { perf_cost("installed_time"); long long h = 0; for (char c : id) h = h * 31 + c; return 1700000000 + (h & 0xFFFF); }
 int Engine::redeem_state(std::string &m, std::string &a) const { m.clear(); a.clear(); const char *e = std::getenv("PREVIEW_REDEEM"); return e ? std::atoi(e) : 0; }
 void Engine::redeem_ack() {}
 /* (1.1.0) Send logs: PREVIEW_LOGS the state (1 sending). */
@@ -340,6 +385,7 @@ std::vector<LogFile> game_log_files(const App &a)
 }
 std::string Engine::installed(const std::string &id) const
 {
+    perf_cost("installed");
     if (const char *e = std::getenv("PREVIEW_INSTALLED"))
     {
         /* (2.0) A list: "PPSA92011=1.0,PPSA69421=0.9" (each one's recorded version). */

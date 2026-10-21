@@ -102,6 +102,7 @@ bool load_prefs_file(const std::string &path, StorePrefs &out)
     }
     if (!p.tabs_custom) p.tabs.clear();
     p.con_view = std::clamp(int(j["consoleView"].integer(0)), 0, 1);
+    p.all_sort = std::clamp(int(j["librarySort"].integer(0)), 0, 3);
     p.con_sort = std::clamp(int(j["consoleSort"].integer(0)), 0, 3);
     p.con_filter = j["consoleFilter"].str("all");
     if (p.con_filter.empty() || p.con_filter.size() > 64) p.con_filter = "all";
@@ -135,6 +136,7 @@ bool save_prefs_file(const std::string &path, const StorePrefs &p)
     t += ",\"tabs\":" + json_list(p.tabs_custom ? p.tabs : std::vector<std::string>{});
     t += ",\"sourceTabs\":" + json_list(p.source_tabs);
     t += ",\"consoleView\":" + std::to_string(p.con_view);
+    t += ",\"librarySort\":" + std::to_string(p.all_sort);
     t += ",\"consoleSort\":" + std::to_string(p.con_sort);
     t += ",\"consoleFilter\":" + json_text(p.con_filter);
     t += ",\"myFilter\":" + std::to_string(p.my_filter);

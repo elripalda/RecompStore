@@ -396,6 +396,15 @@ struct QueueItem
 /* (2.2.2) A drive as the store sees it: its name, where it's mounted, its homebrew folder, and how
  * big it is and how much is free (ShadowMountPlus's /api/v1/storage when it answered, else the
  * store's own look). */
+/* (2.2.3) A drive's top folder or file and what it takes (-1 not worked out yet): the Drives view,
+ * read-only. */
+struct FolderSize
+{
+    std::string name, path;
+    long long size = -1;
+    bool dir = true;
+};
+
 struct DriveSpace
 {
     std::string label, mount, homebrew;
@@ -456,10 +465,20 @@ public:
     unsigned checks_done() const;
     /* (2.2.2) The drives, as last looked (look_console looks): name, size, free. */
     std::vector<DriveSpace> drives() const;
+    /* (2.2.3) What's at the top of a drive ("/data", "/mnt/ext1", "/mnt/usb0"), sizes worked out
+     * on a thread of their own (the first call starts it; looking: still working them out). */
+    std::vector<FolderSize> drive_folders(const std::string &mount, bool *looking = nullptr) const;
     /* (2.2.2) The download cache (/data/recompstore/downloads): what it holds now. clear_downloads
      * deletes it but for what an install, the queue or the store's own update is using; freed and
      * files: what went; false (and why) when nothing could go. */
     std::uint64_t cache_bytes(std::size_t *files = nullptr) const;
+    /* (2.2.3) The same, as a thread of its own last saw it: never waits on the disk (asks again
+     * when it's over 3 s old, or now when fresh). */
+    std::uint64_t cache_seen(std::size_t *files = nullptr, bool fresh = false) const;
+    static std::uint64_t cache_bytes_now(std::size_t *files = nullptr);
+    /* (2.2.3) Which /mnt/usbN have something on them (bit N), as that thread last saw (every 2 s);
+     * known: false until it has looked once. */
+    unsigned usb_seen(bool *known = nullptr) const;
     bool clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why);
     /* (2.2.2) Delete several folders at once (On this PS5's Select): a job, kind "mdeletes", that
      * takes each as Delete does, one after another (the store's own installs as from their page),

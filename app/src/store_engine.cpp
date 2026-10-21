@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <sched.h>
 #include <cctype>
 #include <dirent.h>
 #include <cerrno>
@@ -1590,8 +1591,11 @@ bool fetch_art_batch(porpoise::http::Session &http, const std::vector<std::strin
     return true;
 }
 
-void fetch_art(porpoise::http::Session &http)
+/* budget (2.2.3): 0 everything; else at most that many requests (the quick thread, during a job). */
+void fetch_art(porpoise::http::Session &http, int budget)
 {
+    static std::mutex one; /* the worker and the quick thread never both at once */
+    std::lock_guard<std::mutex> lk(one);
     Catalog c;
     {
         std::lock_guard<std::mutex> l(g.m);
@@ -1617,9 +1621,20 @@ void fetch_art(porpoise::http::Session &http)
     };
     const std::string media = kSite + "/media/";
     bool batches = true;
+    int left = budget;
     for (std::size_t i = 0; i < want.size();)
     {
-        if (job_waiting())
+        if (budget > 0)
+        {
+            /* The quick thread: a few requests, then the rest later (the worker's, or the next turn). */
+            if (left-- <= 0)
+            {
+                std::lock_guard<std::mutex> l(g.m);
+                g.art_more = true;
+                return;
+            }
+        }
+        else if (job_waiting())
         {
             /* An install the player chose doesn't wait for pictures: the rest after it. */
             slog("art: %zu left for after the job waiting", want.size() - i);
@@ -1771,6 +1786,24 @@ bool resolve(porpoise::http::Session &http, const App &a, Target &t, std::string
  * new give up. 200 once all of it is here. */
 double mono_s();
 bool cancel_now();
+/* (2.2.3) The one HTTP session handed to whoever is waiting for it (Send logs, patch notes, the
+ * pictures), then taken back: a long download no longer holds everything else up. false when the
+ * network couldn't be set up again. */
+bool hand_session_over(porpoise::http::Session &http)
+{
+    if (!porpoise::http::Session::others_waiting()) return true;
+    http.term();
+    /* Until the one waiting has taken it (it's busy then, and init() below waits for it). */
+    for (int i = 0; i < 30 && porpoise::http::Session::others_waiting(); ++i) usleep(10000);
+    static unsigned told = 0;
+    if (told++ < 20) slog("download: let another request go first");
+    return http.init();
+}
+
+/* (2.2.3) Whether a GitHub download can go on from part way (a Range request answered with the
+ * part, through GitHub's redirect): 0 not known yet, 1 yes, -1 no (it then never hands over). */
+std::atomic<int> g_gh_ranges{0};
+
 int download_in_parts(porpoise::http::Session &http, const std::string &url, std::uint64_t size,
                       const std::function<bool(const std::uint8_t *, std::size_t)> &take, std::uint64_t &got,
                       const bool &write_ok)
@@ -1779,6 +1812,7 @@ int download_in_parts(porpoise::http::Session &http, const std::string &url, std
     int idle = 0;
     while (got < size)
     {
+        if (!hand_session_over(http)) return -1; /* (2.2.3) between pieces */
         const std::uint64_t from = got, to = std::min(size, from + kPart) - 1;
         const double t0 = mono_s();
         const int st = http.get_part(
@@ -2136,17 +2170,54 @@ void run_install(const std::string &id, int answer, const std::string &version, 
         set_job("Downloading", 0, t.size);
         timespec dl0;
         clock_gettime(CLOCK_MONOTONIC, &dl0);
+        /* (2.2.3) While one long request streams, another thread waiting for the session (Send logs,
+         * patch notes, pictures) gets it between pieces: the stream stops, the session goes over, and
+         * the rest comes in parts. Progress is told about 10 times a second, not every read. */
+        bool streaming = false, hand_over = false;
+        double told = 0;
+        std::uint64_t since_yield = 0;
         auto take = [&](const std::uint8_t *p, std::size_t n) {
             if (cancel_now()) { cancelled = true; return false; } /* (2.2.2) the player stopped it */
             if (std::fwrite(p, 1, n, out) != n) { write_ok = false; return false; }
             sha.update(p, n);
             got += n;
-            set_job("Downloading", got, t.size);
+            const double now = mono_s();
+            if (now - told >= 0.1 || got == t.size)
+            {
+                told = now;
+                set_job("Downloading", got, t.size);
+            }
+            if ((since_yield += n) >= (1u << 20))
+            {
+                since_yield = 0;
+                sched_yield(); /* the screens first */
+            }
+            if (streaming && g_gh_ranges.load() == 1 && t.size > got && porpoise::http::Session::others_waiting())
+            {
+                hand_over = true;
+                return false;
+            }
             return true;
         };
         const bool in_parts = a.source != "github" && t.size > 0;
         slog("download %s: started%s", a.id.c_str(), in_parts ? " (in parts)" : "");
+        if (!in_parts && t.size > (8u << 20) && g_gh_ranges.load() == 0)
+        {
+            /* Can it go on from part way? One byte asked for, through GitHub's redirect. */
+            const int pst = http.get_part(t.url, 1, 1, [](const std::uint8_t *, std::size_t) { return false; }, 30);
+            g_gh_ranges = pst == 206 ? 1 : -1;
+            slog("download: a part of a GitHub file: HTTP %d (%s)", pst,
+                 pst == 206 ? "other requests can go first during downloads" : "downloads keep the connection to the end");
+        }
+        streaming = !in_parts;
         status = in_parts ? download_in_parts(http, t.url, t.size, take, got, write_ok) : http.get_stream(t.url, take);
+        streaming = false;
+        while (hand_over && !cancelled && write_ok && got < t.size)
+        {
+            hand_over = false;
+            status = hand_session_over(http) ? download_in_parts(http, t.url, t.size, take, got, write_ok) : -1;
+        }
+        set_job("Downloading", got, t.size);
         std::fclose(out);
         timespec dl1;
         clock_gettime(CLOCK_MONOTONIC, &dl1);
@@ -4308,6 +4379,8 @@ void remember_releases(const std::string &repo, const std::string &text)
 
 bool fetch_notes(porpoise::http::Session &http, const std::string &repo)
 {
+    static std::mutex one; /* (2.2.3) the worker and the quick thread never both at once */
+    std::lock_guard<std::mutex> lk(one);
     std::vector<std::uint8_t> body;
     const int status = github_releases(http, repo, body);
     const std::string text(body.begin(), body.end());
@@ -4428,7 +4501,7 @@ void *worker(void *)
                         refresh_charts(http);
                         refresh_ids(http);
                     }
-                    fetch_art(http);
+                    fetch_art(http, 0);
                     if (now >= next_store_check)
                     {
                         /* At start, then every 6 hours; a minute after GitHub couldn't be reached,
@@ -4475,21 +4548,7 @@ void *worker(void *)
                 run_redeem(code);
                 continue;
             }
-            /* (1.1.0) Logs to send, the same way. */
-            std::string lapp, lmsg;
-            bool lsend = false;
-            {
-                std::lock_guard<std::mutex> l(g.m);
-                lsend = g.pending_logs;
-                g.pending_logs = false;
-                lapp.swap(g.pending_logs_app);
-                lmsg.swap(g.pending_logs_msg);
-            }
-            if (lsend)
-            {
-                run_send_logs(lapp, lmsg);
-                continue;
-            }
+            /* (2.2.3) Send logs: the quick thread's now (quick_main), never behind a job. */
             /* (2.0) A source added (read it now, so its apps show), and a report on one. */
             std::vector<std::string> due;
             bool report = false;
@@ -4514,7 +4573,7 @@ void *worker(void *)
                 if (http.init())
                 {
                     for (const std::string &v : due) fetch_source(http, v);
-                    fetch_art(http);
+                    fetch_art(http, 0);
                 }
                 else
                 {
@@ -4594,7 +4653,7 @@ void *worker(void *)
                 /* (2.0) The pictures left for a job, now it's done. */
                 porpoise::http::Session http("art", "RecompStore/2.0");
                 if (http.init())
-                    fetch_art(http);
+                    fetch_art(http, 0);
                 else
                 {
                     std::lock_guard<std::mutex> l(g.m);
@@ -4619,6 +4678,68 @@ void *worker(void *)
                     }
                 }
             }
+        }
+    }
+    return nullptr;
+}
+
+/* (2.2.3) The quick thread: what mustn't wait for an install. Send logs any time; and while the
+ * worker is busy with a job, the patch notes and Versions a page asks for, and a few pictures. Each
+ * takes the one HTTP session for a moment; a download hands it over between pieces. */
+void *quick_main(void *)
+{
+    double last_art = 0;
+    for (;;)
+    {
+        usleep(50000);
+        std::string lapp, lmsg;
+        bool lsend = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            lsend = g.pending_logs;
+            g.pending_logs = false;
+            lapp.swap(g.pending_logs_app);
+            lmsg.swap(g.pending_logs_msg);
+        }
+        if (lsend)
+        {
+            run_send_logs(lapp, lmsg);
+            continue;
+        }
+        bool busy = false, art = false;
+        std::set<std::string> repos;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            busy = g.job.phase == Phase::Working;
+            if (busy)
+            {
+                repos.swap(g.notes_wanted);
+                art = g.art_more;
+            }
+        }
+        if (!busy) continue; /* the worker does these itself when it's free */
+        if (!repos.empty())
+        {
+            porpoise::http::Session http("notes-quick", "RecompStore/2.2");
+            const bool up = http.init();
+            for (const std::string &r : repos)
+            {
+                if (up)
+                    fetch_notes(http, r);
+                else
+                {
+                    std::lock_guard<std::mutex> l(g.m);
+                    g.notes_at[r] = mono_s();
+                    if (!g.notes.count(r)) g.notes_failed.insert(r);
+                }
+            }
+            continue;
+        }
+        if (art && mono_s() - last_art > 4)
+        {
+            last_art = mono_s();
+            porpoise::http::Session http("art-quick", "RecompStore/2.2");
+            if (http.init()) fetch_art(http, 2);
         }
     }
     return nullptr;
@@ -5459,6 +5580,9 @@ void Engine::start(const std::string &data_dir)
     pthread_t t;
     create_title_thread(&t, worker, nullptr);
     pthread_detach(t);
+    pthread_t qt; /* (2.2.3) */
+    create_title_thread(&qt, quick_main, nullptr);
+    pthread_detach(qt);
     /* (2.0) Link a phone, beside it. */
     pthread_t lt;
     create_title_thread(&lt, link_worker, nullptr);
@@ -7714,8 +7838,182 @@ std::vector<DriveSpace> Engine::drives() const
     return g.drives;
 }
 
+/* ---- (2.2.3) What's at the top of each drive, for the Drives view (read-only) ---- */
+namespace
+{
+std::mutex g_dfold_m;
+std::map<std::string, std::vector<FolderSize>> g_dfold; /* mount -> its top entries */
+std::map<std::string, double> g_dfold_at;               /* mount -> when it was last looked at whole */
+std::set<std::string> g_dfold_want;                     /* mounts asked for */
+std::set<std::string> g_dfold_looking;
+bool g_dfold_started = false;
+
+bool drive_mount_ok(const std::string &m)
+{
+    if (m == "/data") return true;
+    for (const char *p : {"/mnt/ext", "/mnt/usb"})
+        if (m.rfind(p, 0) == 0 && m.size() == std::strlen(p) + 1 && m.back() >= '0' && m.back() <= '9') return true;
+    return false;
+}
+
+void *dfold_main(void *)
+{
+    for (;;)
+    {
+        std::string mount;
+        {
+            std::lock_guard<std::mutex> l(g_dfold_m);
+            for (const std::string &m : g_dfold_want)
+                if (!g_dfold_at.count(m) || mono_s() - g_dfold_at[m] > 60) { mount = m; break; }
+            if (!mount.empty()) g_dfold_looking.insert(mount);
+        }
+        if (mount.empty()) { usleep(250000); continue; }
+        std::vector<FolderSize> top;
+        if (DIR *d = opendir(mount.c_str()))
+        {
+            while (dirent *x = readdir(d))
+            {
+                if (x->d_name[0] == '.' || top.size() >= 64) continue;
+                FolderSize f;
+                f.name = x->d_name;
+                f.path = mount + "/" + f.name;
+                struct stat st;
+                if (stat(f.path.c_str(), &st) != 0) continue;
+                f.dir = S_ISDIR(st.st_mode);
+                if (!f.dir) f.size = (long long)st.st_size;
+                top.push_back(f);
+            }
+            closedir(d);
+        }
+        std::sort(top.begin(), top.end(), [](const FolderSize &a, const FolderSize &b) { return a.name < b.name; });
+        {
+            std::lock_guard<std::mutex> l(g_dfold_m);
+            g_dfold[mount] = top; /* the names now; the sizes as they come */
+        }
+        for (std::size_t i = 0; i < top.size(); ++i)
+        {
+            if (!top[i].dir) continue;
+            std::uint64_t bytes = 0;
+            std::size_t files = 0;
+            fs::tree_size(top[i].path, bytes, files);
+            sched_yield();
+            std::lock_guard<std::mutex> l(g_dfold_m);
+            auto &v = g_dfold[mount];
+            for (FolderSize &f : v)
+                if (f.path == top[i].path) f.size = (long long)bytes;
+        }
+        std::lock_guard<std::mutex> l(g_dfold_m);
+        g_dfold_at[mount] = mono_s();
+        g_dfold_looking.erase(mount);
+    }
+    return nullptr;
+}
+} // namespace
+
+std::vector<FolderSize> Engine::drive_folders(const std::string &mount, bool *looking) const
+{
+    if (!drive_mount_ok(mount)) return {};
+    std::lock_guard<std::mutex> l(g_dfold_m);
+    g_dfold_want.insert(mount);
+    if (!g_dfold_started)
+    {
+        pthread_t t;
+        g_dfold_started = create_title_thread(&t, dfold_main, nullptr) == 0;
+        if (g_dfold_started) pthread_detach(t);
+    }
+    if (looking) *looking = g_dfold_looking.count(mount) || !g_dfold_at.count(mount);
+    auto it = g_dfold.find(mount);
+    return it == g_dfold.end() ? std::vector<FolderSize>() : it->second;
+}
+
 /* ---- The download cache ---- */
+/* (2.2.3) The quick local looks, on a thread of their own so the screen never waits on a disk
+ * that's busy with a download or an unpack: the USB drives every 2 s, the cache when asked. */
+namespace
+{
+std::atomic<unsigned> g_usb_mask{0};
+std::atomic<bool> g_usb_known{false};
+std::atomic<bool> g_cache_want{true};
+std::atomic<unsigned long long> g_cache_b{0}, g_cache_n{0};
+std::atomic<long long> g_cache_ms{-1000000}; /* when it was asked for last (mono ms) */
+std::atomic<bool> g_local_started{false};
+
+void *local_main(void *)
+{
+    double usb_t = -10;
+    for (;;)
+    {
+        if (g_cache_want.exchange(false))
+        {
+            std::size_t n = 0;
+            const std::uint64_t b = Engine::cache_bytes_now(&n);
+            g_cache_b = b;
+            g_cache_n = n;
+        }
+        if (mono_s() - usb_t >= 2)
+        {
+            usb_t = mono_s();
+            unsigned mask = 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                const std::string m = "/mnt/usb" + std::to_string(i);
+                struct stat st;
+                DIR *d = stat(m.c_str(), &st) == 0 && S_ISDIR(st.st_mode) ? opendir(m.c_str()) : nullptr;
+                bool any = false;
+                if (d)
+                {
+                    while (dirent *x = readdir(d))
+                        if (x->d_name[0] != '.') { any = true; break; }
+                    closedir(d);
+                }
+                if (any) mask |= 1u << i;
+            }
+            g_usb_mask = mask;
+            g_usb_known = true;
+        }
+        usleep(200000);
+    }
+    return nullptr;
+}
+
+void start_local()
+{
+    bool was = false;
+    if (!g_local_started.compare_exchange_strong(was, true)) return;
+    pthread_t t;
+    if (create_title_thread(&t, local_main, nullptr) == 0)
+        pthread_detach(t);
+    else
+        g_local_started = false;
+}
+} // namespace
+
+std::uint64_t Engine::cache_seen(std::size_t *files, bool fresh) const
+{
+    start_local();
+    const long long now = (long long)(mono_s() * 1000);
+    if (fresh || now - g_cache_ms.load() > 3000)
+    {
+        g_cache_ms = now;
+        g_cache_want = true;
+    }
+    if (files) *files = std::size_t(g_cache_n.load());
+    return g_cache_b.load();
+}
+
+unsigned Engine::usb_seen(bool *known) const
+{
+    start_local();
+    if (known) *known = g_usb_known.load();
+    return g_usb_mask.load();
+}
+
 std::uint64_t Engine::cache_bytes(std::size_t *files) const
+{
+    return cache_bytes_now(files);
+}
+
+std::uint64_t Engine::cache_bytes_now(std::size_t *files)
 {
     std::string dir;
     {
