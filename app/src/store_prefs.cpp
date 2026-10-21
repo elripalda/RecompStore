@@ -88,6 +88,8 @@ bool load_prefs_file(const std::string &path, StorePrefs &out)
     p.reduced_motion = j["reducedMotion"].boolean(false);
     p.advanced = j["advanced"].boolean(false);
     p.sounds = j["sounds"].boolean(true);
+    p.music = j["music"].boolean(true);
+    p.music_volume = std::clamp(int(j["musicVolume"].integer(40)), 0, 100) / 10 * 10;
     read_list(j["pins"], p.pins, 64, 64);
     p.icon_colors = std::clamp(int(j["iconColors"].integer(0)), 0, 1);
     p.tabs_custom = j["tabsCustom"].boolean(false);
@@ -130,6 +132,7 @@ bool save_prefs_file(const std::string &path, const StorePrefs &p)
     t += std::string(",\"reducedMotion\":") + yes(p.reduced_motion);
     t += std::string(",\"advanced\":") + yes(p.advanced);
     t += std::string(",\"sounds\":") + yes(p.sounds);
+    t += std::string(",\"music\":") + yes(p.music) + ",\"musicVolume\":" + std::to_string(p.music_volume);
     t += ",\"pins\":" + json_list(p.pins);
     t += ",\"iconColors\":" + std::to_string(p.icon_colors);
     t += std::string(",\"tabsCustom\":") + yes(p.tabs_custom);
