@@ -37,6 +37,9 @@ struct StorePrefs
     std::string last_version;       /* the store version that last saved these */
     /* (2.2.3) */
     int all_sort = 0;               /* Library: 0 name, 1 popular, 2 new, 3 updated */
+    /* (2.5) The menu music: on by default, at 40%. */
+    bool music = true;
+    int music_volume = 40;          /* 0..100, in steps of 10 */
 };
 
 /* false when there's no file (or it isn't one the store wrote): out keeps its defaults. */

@@ -112,6 +112,7 @@ void Store::start(Gfx &gfx, const std::string &data_dir, bool freed, float px_sc
     }
     engine().start(data_dir);
     load_prefs(); /* (2.0) Customize, pins, sounds */
+    porpoise::sound::set_music(prefs_.music, float(prefs_.music_volume) / 100.f); /* (2.5) the menu music */
 }
 
 void Store::play(int effect)
@@ -1980,8 +1981,21 @@ bool Store::update(const pad::State &p, float dt)
         {
             /* (2.2.2) Menu sounds, Update everything automatically, Refresh, Testers-only apps (a
              * tester's). ShadowMountPlus's rows have a section of their own now. */
-            const int g = std::clamp(gen_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, engine().tester() ? 3 : 2);
+            const int g = std::clamp(gen_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, engine().tester() ? 4 : 3);
             if (g != gen_row_) { gen_row_ = g; play(int(Sfx::Move)); }
+            /* (2.5) Menu music: Left and Right set its volume (0 turns it off), Cross turns it on or off. */
+            if (gen_row_ == 1 && (l || r))
+            {
+                const int v = std::clamp(prefs_.music_volume + (r ? 10 : -10), 0, 100);
+                if (v != prefs_.music_volume || (r && !prefs_.music))
+                {
+                    prefs_.music_volume = v;
+                    prefs_.music = v > 0;
+                    porpoise::sound::set_music(prefs_.music, float(v) / 100.f);
+                    save_prefs();
+                    play(int(Sfx::Move));
+                }
+            }
             if (pressed(pad::BtnCross))
             {
                 if (gen_row_ == 0)
@@ -1992,12 +2006,20 @@ bool Store::update(const pad::State &p, float dt)
                 }
                 else if (gen_row_ == 1)
                 {
+                    prefs_.music = !prefs_.music;
+                    if (prefs_.music && prefs_.music_volume == 0) prefs_.music_volume = 40;
+                    porpoise::sound::set_music(prefs_.music, float(prefs_.music_volume) / 100.f);
+                    save_prefs();
+                    play(int(Sfx::Select));
+                }
+                else if (gen_row_ == 2)
+                {
                     prefs_.auto_all = !prefs_.auto_all;
                     save_prefs();
                     if (prefs_.auto_all) auto_checks_ = 0; /* looked at now */
                     play(int(Sfx::Select));
                 }
-                else if (gen_row_ == 3)
+                else if (gen_row_ == 4)
                 {
                     engine().set_test_view(!engine().test_view()); /* (2.0) the other catalog, read now */
                     toast(engine().test_view() ? "Showing testers-only apps" : "Showing what everyone sees");
@@ -2015,7 +2037,8 @@ bool Store::update(const pad::State &p, float dt)
                     }
                 }
             }
-            if (pressed(pad::BtnCircle) || l) { in_section_ = false; play(int(Sfx::Back)); return true; }
+            /* (2.5) Left sets the music's volume on its row; elsewhere it goes back out. */
+            if (pressed(pad::BtnCircle) || (l && gen_row_ != 1)) { in_section_ = false; play(int(Sfx::Back)); return true; }
         }
     }
     if (focus_id_ != backdrop_id_ && !focus_id_.empty())
@@ -2924,9 +2947,21 @@ void Store::draw_settings(Gfx &gfx)
         option(0, "Menu sounds", "Soft clicks for moving, opening pages and installing.");
         toggle(sounds_on_, kGreen);
         ry += 104;
+        /* (2.5) The menu music, looping: Left and Right for its volume. */
+        option(1, "Menu music", "Plays while you browse. Left and Right change the volume.");
+        {
+            const float bw = 160, bx = cx + cw - 8 - 74 - 24 - bw - 70, by = ry + 52 - 4;
+            const float level = prefs_.music ? float(prefs_.music_volume) / 100.f : 0.f;
+            gfx.panel(bx, by, bw, 8, C(kFrost, 0.18f), 1.f, 4);
+            if (level > 0) gfx.panel(bx, by, bw * level, 8, C(kCyan), 1.f, 4);
+            gfx.text_mid(Font::SemiBold, 19, bx + bw + 58, ry + 52, prefs_.music ? C(kFrost) : C(kMuted), Align::Right,
+                         prefs_.music ? std::to_string(prefs_.music_volume) + "%" : "Off");
+        }
+        toggle(prefs_.music, kGreen);
+        ry += 104;
         /* (2.2.2) Every app with an update, in the download queue on its own (an app's page can do it
          * for that one only). ShadowMountPlus's rows are in its own section now. */
-        option(1, "Update everything automatically", "Updates download on their own after each check. Apps kept at an older version are left alone.");
+        option(2, "Update everything automatically", "Updates download on their own after each check. Apps kept at an older version are left alone.");
         toggle(prefs_.auto_all, kGreen);
         ry += 104;
         {
@@ -2956,7 +2991,7 @@ void Store::draw_settings(Gfx &gfx)
             }
             /* (2.0) Refresh: the catalog, updates, and apps installed while the store was open
              * (Triangle does the same from every other tab). */
-            option(2, "Refresh",
+            option(3, "Refresh",
                    st == 1   ? "Reading the catalog and asking GitHub about the store and your games\xE2\x80\xA6"
                    : st == 3 ? "GitHub couldn't be reached. Check your connection and try again."
                    : st == 2 ? result
@@ -2970,7 +3005,7 @@ void Store::draw_settings(Gfx &gfx)
             /* (2.0) A console the admin marked as a tester: the testers-only apps, or what
              * everyone else sees (to check the store as it goes out). */
             const bool on = engine().test_view();
-            option(3, "Testers-only apps", on ? "Shown, marked Testing. Turn off to see the store as everyone else does."
+            option(4, "Testers-only apps", on ? "Shown, marked Testing. Turn off to see the store as everyone else does."
                                               : "Hidden: you see what everyone else sees.");
             const float sx = cx + cw - 8 - 74, sy = ry + 52 - 21;
             gfx.panel(sx, sy, 74, 42, on ? C(0xB9AEFF) : C(kFrost, 0.22f), 1.f, 21);

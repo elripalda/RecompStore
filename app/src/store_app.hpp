@@ -552,7 +552,7 @@ private:
     float opening_t_ = 0, opening_poll_ = 0;
     bool open_checked_ = false;
 
-    int gen_row_ = 0;          /* Settings > General: 0 sounds, 1 the ShadowMountPlus file, 2 start it */
+    int gen_row_ = 0;          /* Settings > General: 0 sounds, 1 music, 2 update everything, 3 refresh, 4 testers-only */
     std::string settings_note_;
     bool settings_note_bad_ = false;
 
