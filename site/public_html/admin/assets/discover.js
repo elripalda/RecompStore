@@ -13,7 +13,7 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const games = S.games || [];
   const byId = (id) => games.find((g) => g.id === id);
-  const listed = games.filter((g) => !g.hidden && !g.soon); // in the catalog, in the admin's order
+  const listed = games.filter((g) => !g.hidden && !g.soon && !g.beta); // in the catalog, in the admin's order
   // (2.0) A testers-only app: only testers' stores show it in a section.
   const optName = (g) => g.name + (g.testers ? ' (testers only)' : '');
   const soonGames = games.filter((g) => !g.hidden && g.soon);
@@ -100,6 +100,53 @@
   // (2.0) The parts of the store: a category section lists every game in one of them.
   const CATS = S.categories || { games: 'Games', emulators: 'Emulators', apps: 'Apps', tools: 'Tools' };
   const inCat = (c) => listed.filter((g) => (g.category || 'games') === c);
+  // (2.5) A Category section's order, or a Games section's showing every game: its page's ('')
+  // or its own. Worked out the same way as the catalog does it (admin/inc/bootstrap.php, rs_sort_ids).
+  const SSORTS = S.sectionSorts || { '': 'Same as its page', az: 'A to Z', new: 'Newest first', updated: 'Recently updated', installs: 'Most installed', custom: 'Your own order' };
+  const PAGE = S.pageSorts || {};
+  const SORTN = S.sortNames || {};
+  const FACTS = S.facts || {};
+  const fact = (m, id) => (FACTS[m] && FACTS[m][id] != null ? +FACTS[m][id] : undefined);
+  const byName = (x, y) => String(x.name).localeCompare(String(y.name), undefined, { numeric: true, sensitivity: 'base' });
+  function sortList(list, sort, order) {
+    const at = new Map(list.map((g, i) => [g.id, i]));
+    const tie = (x, y) => at.get(x.id) - at.get(y.id);
+    if (sort === 'custom') {
+      const ids = (order || []).filter((id, k, a) => at.has(id) && a.indexOf(id) === k);
+      return ids.map((id) => list[at.get(id)]).concat(list.filter((g) => !ids.includes(g.id)));
+    }
+    const out = list.slice();
+    if (sort === 'az') out.sort((x, y) => byName(x, y) || tie(x, y));
+    else if (sort === 'installs') out.sort((x, y) => (fact('installs', y.id) || 0) - (fact('installs', x.id) || 0) || byName(x, y) || tie(x, y));
+    else if (sort === 'new' || sort === 'updated') {
+      const t = (g) => (sort === 'updated' ? fact('updated', g.id) : undefined) ?? fact('first', g.id) ?? Infinity;
+      out.sort((x, y) => (t(y) - t(x)) || tie(x, y));
+    }
+    return out;
+  }
+  const ownOrder = (s) => s.type === 'category' || (s.type === 'games' && s.all);
+  // What the section lists, in order. A category with no order of its own follows its page's.
+  function itemsOf(s) {
+    const base = s.type === 'category' ? inCat(s.category) : listed;
+    if (s.sort) return sortList(base, s.sort, s.order);
+    return s.type === 'category' && PAGE[s.category] && PAGE[s.category] !== 'manual' ? sortList(base, PAGE[s.category]) : base;
+  }
+  const pageName = (s) => s.type === 'category' ? `Same as the ${CATS[s.category] || 'part'} page (${(SORTN[PAGE[s.category] || 'manual'] || 'your order').toLowerCase()})` : 'Same as the Games page';
+  const GRIP = '<svg width="12" height="18" viewBox="0 0 14 22" aria-hidden="true"><g fill="currentColor"><circle cx="3.5" cy="4" r="2"/><circle cx="10.5" cy="4" r="2"/><circle cx="3.5" cy="11" r="2"/><circle cx="10.5" cy="11" r="2"/><circle cx="3.5" cy="18" r="2"/><circle cx="10.5" cy="18" r="2"/></g></svg>';
+  function orderHTML(s) {
+    const items = itemsOf(s);
+    const opts = Object.entries(SSORTS).map(([v, t]) => `<option value="${esc(v)}" ${(s.sort || '') === v ? 'selected' : ''}>${esc(v === '' ? pageName(s) : t)}</option>`).join('');
+    const what = s.type === 'category' ? (items.length === 1 ? '1 app' : items.length + ' apps') : (items.length === 1 ? '1 app' : `All ${items.length} apps`);
+    let body;
+    if (!items.length) body = `<p class="muted small-note">Nothing in it yet, so the store leaves it out. Set a game's Category on its page.</p>`;
+    else if (s.sort === 'custom') body = `<p class="muted small-note">${what}. Drag them by the handle, or use the arrows. Apps you add later go at the end until you move them.</p>
+          <ol class="picked olist" data-olist>${items.map((g, k) => `
+            <li data-id="${esc(g.id)}"><button type="button" class="grip" data-ogrip aria-label="Move ${esc(g.name)}: drag, or use the arrow keys" title="Drag to move">${GRIP}</button><span class="num">${k + 1}</span>${g.icon ? `<img src="${esc(g.icon)}" alt="">` : `<span class="blank">${esc(g.name.slice(0, 2))}</span>`}<span>${esc(optName(g))}</span>
+              <button type="button" class="icon-btn" data-omove="${k},-1" ${k === 0 ? 'disabled' : ''} aria-label="Earlier">↑</button>
+              <button type="button" class="icon-btn" data-omove="${k},1" ${k === items.length - 1 ? 'disabled' : ''} aria-label="Later">↓</button></li>`).join('')}</ol>`;
+    else body = `<p class="muted small-note">${what}: ${items.map((g) => esc(g.name)).join(', ')}.${s.sort === 'new' || s.sort === 'updated' || s.sort === 'installs' ? ' Worked out again each time you Publish.' : ''}</p>`;
+    return `<label>Order<select data-sort>${opts}</select></label>${body}`;
+  }
   // (2.3.0) Collections (Admin > Collections): a section shows one as a row.
   const COLLS = S.collections || [];
   const coll = (id) => COLLS.find((c) => c.id === id);
@@ -115,6 +162,9 @@
 
   // ---- The sections, as cards --------------------------------------------------------
   function renderList() {
+    // (2.5) A long own-order list keeps its scroll position across redraws.
+    const kept = {};
+    listEl.querySelectorAll('.card.sec').forEach((c) => { const ol = c.querySelector('[data-olist]'); if (ol) kept[c.dataset.i] = ol.scrollTop; });
     listEl.innerHTML = '';
     if (!sections.length) {
       listEl.innerHTML = '<p class="muted">No sections, so the store and the site show the default: every game in a grid, then Coming soon. Add one below to arrange it yourself.</p>';
@@ -122,6 +172,7 @@
     sections.forEach((s, i) => {
       const card = document.createElement('section');
       card.className = 'card sec';
+      card.dataset.i = i;
       const layouts = LAYOUTS[s.type] || [];
       const chosen = (s.games || []).map(byId).filter(Boolean);
       const addable = listed.filter((g) => !(s.games || []).includes(g.id));
@@ -142,7 +193,7 @@
             <label><input type="radio" name="all${i}" value="1" data-all ${s.all ? 'checked' : ''}><span>Every game</span></label>
             <label><input type="radio" name="all${i}" value="0" data-all ${s.all ? '' : 'checked'}><span>Choose games</span></label>
           </div>
-          ${s.all ? '<p class="muted small-note">Every game, in the order of the Games page.</p>' : `
+          ${s.all ? orderHTML(s) : `
           <ol class="picked">${chosen.map((g, k) => `
             <li>${g.icon ? `<img src="${esc(g.icon)}" alt="">` : `<span class="blank">${esc(g.name.slice(0, 2))}</span>`}<span>${esc(g.name)}</span>
               <button type="button" class="icon-btn" data-gmove="${k},-1" ${k === 0 ? 'disabled' : ''} aria-label="Earlier">↑</button>
@@ -156,15 +207,15 @@
         ${isChart(s.type) ? `<label>Only<select data-only><option value="">Every part of the store</option>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
           <p class="muted small-note">${CHARTS[s.type]} Filled in live, so the preview just shows your ${s.category ? esc((CATS[s.category] || '').toLowerCase()) : 'games'}. From Recomp Store 2.0; older stores leave it out${s.category ? ', and stores before 2.2 show every part in it' : ''}.</p>` : ''}
         ${s.type === 'category' ? `<label>Part of the store<select data-cat>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-          <p class="muted small-note">${inCat(s.category).length
-            ? `${inCat(s.category).length === 1 ? '1 game' : inCat(s.category).length + ' games'}, in the order of the Games page: ${inCat(s.category).map((g) => esc(g.name)).join(', ')}.`
-            : 'Nothing in it yet, so the store leaves it out. Set a game\'s Category on its page.'} Stores before 2.0 leave this section out.</p>` : ''}
+          ${orderHTML(s)}` : ''}
         ${s.type === 'collection' ? (COLLS.length ? `<label>Collection<select data-coll>${COLLS.map((c) => `<option value="${esc(c.id)}" ${s.collection === c.id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></label>
           <p class="muted small-note">${inColl(s.collection).length ? `${inColl(s.collection).length === 1 ? '1 app' : inColl(s.collection).length + ' apps'}: ${inColl(s.collection).map((g) => esc(g.name)).join(', ')}.` : 'Nothing listed in it yet, so the store leaves it out.'} An empty title uses the collection's name. Cross on the title opens its page in the store, with Install all. Stores before 2.3 leave it out.</p>`
           : '<p class="muted small-note">No collections yet. Make one on the <a href="collections.php">Collections</a> page.</p>') : ''}
         ${s.type === 'spotlight' ? `<label>Game<select data-spot>${listed.map((g) => `<option value="${esc(g.id)}" ${s.game === g.id ? 'selected' : ''}>${esc(optName(g))}</option>`).join('')}</select></label>
           <p class="muted small-note">A still banner of its backdrop, framed as on the Art card.</p>` : ''}`;
       listEl.appendChild(card);
+      const ol = card.querySelector('[data-olist]');
+      if (ol && kept[i]) ol.scrollTop = kept[i];
 
       card.querySelector('[data-title]').addEventListener('input', (e) => {
         s.title = e.target.value;
@@ -197,7 +248,15 @@
       const spot = card.querySelector('[data-spot]');
       if (spot) spot.addEventListener('change', () => { s.game = spot.value; changed(true); });
       const cat = card.querySelector('[data-cat]');
-      if (cat) cat.addEventListener('change', () => { s.category = cat.value; changed(true); });
+      if (cat) cat.addEventListener('change', () => { s.category = cat.value; if (s.sort === 'custom') s.order = itemsOf(Object.assign({}, s, { sort: '' })).map((g) => g.id); changed(true); });
+      // (2.5) Its order. Your own order starts from the one it had.
+      const so = card.querySelector('[data-sort]');
+      if (so) so.addEventListener('change', () => {
+        const was = itemsOf(s).map((g) => g.id);
+        if (so.value) s.sort = so.value; else delete s.sort;
+        if (s.sort === 'custom') s.order = was; else delete s.order;
+        changed(true);
+      });
       const cl = card.querySelector('[data-coll]');
       if (cl) cl.addEventListener('change', () => { s.collection = cl.value; changed(true); });
       // (2.2) A chart of one part of the store only.
@@ -208,6 +267,110 @@
       });
     });
   }
+
+  // ---- (2.5) Your own order: arrows, arrow keys on the handle, or dragging it ---------------
+  const secOf = (el) => sections[+el.closest('.card.sec').dataset.i];
+  function reorder(s, from, to, focus) {
+    const ids = itemsOf(s).map((g) => g.id);
+    if (to < 0 || to >= ids.length || from === to) return;
+    const [id] = ids.splice(from, 1);
+    ids.splice(to, 0, id);
+    s.order = ids;
+    changed(true);
+    if (focus) {
+      const card = listEl.querySelector(`.card.sec[data-i="${sections.indexOf(s)}"]`);
+      const li = card && card.querySelector(`[data-olist] li[data-id="${CSS.escape(id)}"]`);
+      if (li) { li.scrollIntoView({ block: 'nearest' }); li.querySelector(focus).focus({ preventScroll: true }); }
+    }
+  }
+  listEl.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-omove]');
+    if (!b) return;
+    const [k, d] = b.dataset.omove.split(',').map(Number);
+    const s = secOf(b);
+    reorder(s, k, k + d, (k + d === 0 && d < 0) || (k + d === itemsOf(s).length - 1 && d > 0) ? '[data-ogrip]' : `[data-omove="${k + d},${d}"]`);
+  });
+  listEl.addEventListener('keydown', (e) => {
+    const g = e.target.closest('[data-ogrip]');
+    if (!g) return;
+    const li = g.closest('li'), s = secOf(g);
+    const k = [...li.parentNode.children].indexOf(li), n = li.parentNode.children.length;
+    const to = { ArrowUp: k - 1, ArrowDown: k + 1, Home: 0, End: n - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    reorder(s, k, to, '[data-ogrip]');
+  });
+  let odrag = null;
+  const oplace = () => {
+    const { row, ol, y } = odrag;
+    const others = [...ol.children].filter((r) => r !== row);
+    let before = null;
+    for (const r of others) { const b = r.getBoundingClientRect(); if (y < b.top + b.height / 2) { before = r; break; } }
+    if (before !== row.nextElementSibling || (!before && ol.lastElementChild !== row)) {
+      const tops = new Map(others.map((r) => [r, r.getBoundingClientRect().top]));
+      ol.insertBefore(row, before);
+      others.forEach((r) => {
+        const dy = tops.get(r) - r.getBoundingClientRect().top;
+        if (!dy) return;
+        r.style.transition = 'none';
+        r.style.transform = `translateY(${dy}px)`;
+        requestAnimationFrame(() => { r.style.transition = 'transform .15s ease'; r.style.transform = ''; });
+      });
+    }
+    row.style.transform = '';
+    row.style.transform = `translateY(${y - odrag.grab - row.getBoundingClientRect().top}px)`;
+  };
+  const otick = () => {
+    if (!odrag) return;
+    if (odrag.moved) {
+      // Near the list's top or bottom (it scrolls), or the window's: scroll so it can go all the way.
+      const b = odrag.ol.getBoundingClientRect(), y = odrag.y, edge = 44;
+      const v = y < b.top + edge ? -Math.ceil((b.top + edge - y) / 5) : y > b.bottom - edge ? Math.ceil((y - b.bottom + edge) / 5) : 0;
+      const before = odrag.ol.scrollTop;
+      if (v) odrag.ol.scrollTop += v;
+      const w = y < 70 ? -Math.ceil((70 - y) / 6) : y > innerHeight - 70 ? Math.ceil((y - innerHeight + 70) / 6) : 0;
+      if (w && odrag.ol.scrollTop === before) window.scrollBy(0, w);
+      if (v || w) oplace();
+    }
+    odrag.raf = requestAnimationFrame(otick);
+  };
+  listEl.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest('[data-ogrip]');
+    if (!grip || e.button !== 0 || odrag) return;
+    e.preventDefault();
+    const row = grip.closest('li');
+    odrag = { row, grip, ol: row.parentNode, s: secOf(grip), id: e.pointerId, y: e.clientY, y0: e.clientY, grab: e.clientY - row.getBoundingClientRect().top, moved: false, raf: 0 };
+    grip.setPointerCapture(e.pointerId);
+    row.classList.add('dragging');
+    document.body.classList.add('dragging');
+    odrag.raf = requestAnimationFrame(otick);
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!odrag || e.pointerId !== odrag.id) return;
+    odrag.y = e.clientY;
+    if (!odrag.moved && Math.abs(odrag.y - odrag.y0) < 4) return;
+    odrag.moved = true;
+    oplace();
+  });
+  const oend = (e) => {
+    if (!odrag || e.pointerId !== odrag.id) return;
+    const { row, grip, ol, s, raf, moved } = odrag;
+    odrag = null;
+    cancelAnimationFrame(raf);
+    row.style.transform = '';
+    row.classList.remove('dragging');
+    document.body.classList.remove('dragging');
+    if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId);
+    if (!moved) { grip.focus({ preventScroll: true }); return; }
+    const keep = ol.scrollTop, id = row.dataset.id;
+    s.order = [...ol.children].map((r) => r.dataset.id);
+    changed(true);
+    const card = listEl.querySelector(`.card.sec[data-i="${sections.indexOf(s)}"]`);
+    const nol = card && card.querySelector('[data-olist]');
+    if (nol) { nol.scrollTop = keep; const g = nol.querySelector(`li[data-id="${CSS.escape(id)}"] [data-ogrip]`); if (g) g.focus({ preventScroll: true }); }
+  };
+  window.addEventListener('pointerup', oend);
+  window.addEventListener('pointercancel', oend);
 
   document.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.add;
@@ -295,7 +458,7 @@
         y += BANNER_H + SEC_GAP;
         return;
       }
-      const items = s.type === 'soon' ? soonGames : s.type === 'category' ? inCat(s.category) : s.type === 'collection' ? inColl(s.collection) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : s.all ? listed : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
+      const items = s.type === 'soon' ? soonGames : ownOrder(s) ? itemsOf(s) : s.type === 'collection' ? inColl(s.collection) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
       if (!items.length) {
         html += `<div class="d-empty" style="${pos(96, y, 1728, 64)}">${esc(s.title || NAMES[s.type])}: nothing in it, so the store leaves it out</div>`;
         y += 64 + SEC_GAP;

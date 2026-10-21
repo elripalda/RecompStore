@@ -894,6 +894,8 @@ function rs_charts(bool $fresh = false): array {
     $mine = array_flip(array_map('strval', $db->query('SELECT id FROM games')->fetchAll(PDO::FETCH_COLUMN)));
     foreach ($top as $id => $n) if (!isset($apps[$id]) && !isset($mine[(string)$id]) && $n >= 3) $community[] = ['id' => (string)$id, 'installs' => (int)$n];
     usort($community, fn($x, $y) => $y['installs'] <=> $x['installs']);
+    // (2.5) Every app's newest release, for Discover sections sorted Recently updated (rs_sort_facts).
+    rs_kv_put('charts_times', json_encode((object)$updated));
     $out = [
         // When it was built: 'built', since 'updated' is the Recently updated list.
         'ok' => true, 'built' => gmdate('c'),
@@ -910,6 +912,27 @@ function rs_charts(bool $fresh = false): array {
     ];
     rs_kv_put('charts', json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     return $out;
+}
+
+// (2.5) What Discover's own-order sections sort by: when each app was first published, its newest
+// release (as of the charts' last build) and how many consoles have it. Once per request.
+function rs_sort_facts(): array {
+    static $f = null;
+    if ($f !== null) return $f;
+    $f = ['first' => [], 'updated' => [], 'installs' => []];
+    try {
+        rs_stats_tables();
+        $db = rs_db();
+        foreach ($db->query('SELECT app_id, UNIX_TIMESTAMP(first_at) FROM app_published')->fetchAll(PDO::FETCH_KEY_PAIR) as $id => $t) $f['first'][(string)$id] = (int)$t;
+        foreach ($db->query('SELECT app_id, COUNT(*) FROM app_installs WHERE removed_at IS NULL GROUP BY app_id')->fetchAll(PDO::FETCH_KEY_PAIR) as $id => $n) $f['installs'][(string)$id] = (int)$n;
+        $t = rs_kv_get('charts_times');
+        if ($t === null) { rs_charts(true); $t = rs_kv_get('charts_times'); }
+        $u = $t ? json_decode($t['v'], true) : null;
+        if (is_array($u)) foreach ($u as $id => $ts) $f['updated'][(string)$id] = (int)$ts;
+    } catch (Throwable $e) {
+        // Without them, those sorts fall back to the admin's order.
+    }
+    return $f;
 }
 
 // (2.2) People also installed, for apps in the published catalog (so never hidden, beta or

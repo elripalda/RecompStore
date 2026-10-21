@@ -436,7 +436,9 @@ function rs_clean_sections($in): array {
         if ($type === 'category') {
             // (2.0) Every app in one part of the store; stores before 2.0 leave it out.
             $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
-            $out[] = ['type' => 'category', 'title' => $title, 'layout' => $layout, 'category' => rs_category((string)($s['category'] ?? 'games'))];
+            $row = ['type' => 'category', 'title' => $title, 'layout' => $layout, 'category' => rs_category((string)($s['category'] ?? 'games'))];
+            rs_clean_section_sort($s, $row);
+            $out[] = $row;
             continue;
         }
         if ($type === 'spotlight') {
@@ -449,8 +451,64 @@ function rs_clean_sections($in): array {
         if ($type === 'soon') { $out[] = ['type' => 'soon', 'title' => $title, 'layout' => $layout]; continue; }
         $games = [];
         foreach (is_array($s['games'] ?? null) ? $s['games'] : [] as $g) if (($g = $id($g)) && !in_array($g, $games, true) && count($games) < 64) $games[] = $g;
-        $out[] = ['type' => 'games', 'title' => $title, 'layout' => $layout, 'all' => !empty($s['all']), 'games' => $games];
+        $row = ['type' => 'games', 'title' => $title, 'layout' => $layout, 'all' => !empty($s['all']), 'games' => $games];
+        if ($row['all']) rs_clean_section_sort($s, $row);
+        $out[] = $row;
     }
+    return $out;
+}
+
+// (2.5) The order of a Category section, or a Games section showing every game: '' follows the
+// page it comes from (the part's page, or the Games page). 'custom' keeps the admin's own list.
+const RS_SECTION_SORTS = ['' => 'Same as its page', 'az' => 'A to Z', 'new' => 'Newest first', 'updated' => 'Recently updated', 'installs' => 'Most installed', 'custom' => 'Your own order'];
+function rs_clean_section_sort(array $s, array &$row): void {
+    $sort = is_string($s['sort'] ?? null) && isset(RS_SECTION_SORTS[$s['sort']]) ? $s['sort'] : '';
+    if ($sort === '') return;
+    $row['sort'] = $sort;
+    if ($sort !== 'custom') return;
+    $ids = [];
+    foreach (is_array($s['order'] ?? null) ? $s['order'] : [] as $g)
+        if (is_string($g) && preg_match('/^[A-Za-z0-9_-]{1,64}$/', $g) && !in_array($g, $ids, true) && count($ids) < 300) $ids[] = $g;
+    $row['order'] = $ids;
+}
+
+// (2.5) Apps ($list: id, name, in the admin's order) in a section's order. Ties keep the admin's
+// order; A to Z ignores case and reads numbers as numbers. Not published yet counts as newest.
+function rs_sort_ids(array $list, string $sort, array $custom, array $facts): array {
+    $list = array_values($list);
+    $pos = [];
+    foreach ($list as $i => $a) $pos[$a['id']] = $i;
+    if ($sort === 'custom') {
+        $out = array_values(array_filter($custom, fn($id) => isset($pos[$id])));
+        $in = array_flip($out);
+        foreach ($list as $a) if (!isset($in[$a['id']])) $out[] = $a['id'];
+        return $out;
+    }
+    $first = $facts['first'] ?? [];
+    $key = match ($sort) {
+        'new' => fn($id) => $first[$id] ?? PHP_INT_MAX,
+        'updated' => fn($id) => $facts['updated'][$id] ?? $first[$id] ?? PHP_INT_MAX,
+        'installs' => fn($id) => $facts['installs'][$id] ?? 0,
+        default => null,
+    };
+    usort($list, function ($x, $y) use ($sort, $key, $pos) {
+        if ($sort === 'az') return strnatcasecmp($x['name'], $y['name']) ?: $pos[$x['id']] <=> $pos[$y['id']];
+        if ($key === null) return $pos[$x['id']] <=> $pos[$y['id']];
+        $c = $key($y['id']) <=> $key($x['id']);
+        if ($c !== 0) return $c;
+        return $sort === 'installs' ? (strnatcasecmp($x['name'], $y['name']) ?: $pos[$x['id']] <=> $pos[$y['id']]) : $pos[$x['id']] <=> $pos[$y['id']];
+    });
+    return array_column($list, 'id');
+}
+
+// (2.5) A section with its own order goes out as a Games section listing every app in that order,
+// which every store from 1.0.6 on shows as it comes. Its part and sort ride along.
+function rs_section_resolved(array $s, array $pool, array $facts): array {
+    $cat = $s['type'] === 'category' ? $s['category'] : null;
+    $list = array_filter($pool, fn($a) => $cat === null || $a['category'] === $cat);
+    $out = ['type' => 'games', 'title' => $s['title'], 'layout' => $s['layout'], 'all' => false,
+        'games' => rs_sort_ids($list, $s['sort'], $s['order'] ?? [], $facts), 'sort' => $s['sort']];
+    if ($cat !== null) $out['category'] = $cat;
     return $out;
 }
 
@@ -645,6 +703,7 @@ function rs_build_catalog(bool $testing = false): array {
     $featuredV2 = [];
     $soon = [];
     $soonV2 = [];
+    $pool = []; // (2.5) every app listed, in the admin's order, for sections with their own order
     foreach (array_values(array_filter(rs_games(false), fn($g) => !$g['beta'] && ($testing || empty($g['testers'])))) as $i => $g) {
         $notGame = rs_category((string)$g['category']) !== 'games';
         if ($g['soon']) {
@@ -668,6 +727,7 @@ function rs_build_catalog(bool $testing = false): array {
             continue;
         }
         $app = rs_app_entry($g, $i);
+        $pool[] = ['id' => $g['id'], 'name' => (string)$g['name'], 'category' => rs_category((string)$g['category'])]; // (2.5)
         if (!empty($g['testers'])) $app['testing'] = true;
         $min = $app['minStore'] ?? '';
         if ($notGame || ($min !== '' && version_compare($min, RS_V2_FROM, '>='))) $v2[] = $app;
@@ -682,7 +742,10 @@ function rs_build_catalog(bool $testing = false): array {
     $sections = [];
     foreach (rs_discover_sections() as $s) {
         if ($s['type'] === 'spotlight' && !in_array($s['game'], $listed, true)) continue;
-        if ($s['type'] === 'games') $s['games'] = array_values(array_filter($s['games'], fn($id) => in_array($id, $listed, true)));
+        if (isset($s['sort'])) {
+            $facts ??= rs_sort_facts();
+            $s = rs_section_resolved($s, $pool, $facts);
+        } elseif ($s['type'] === 'games') $s['games'] = array_values(array_filter($s['games'], fn($id) => in_array($id, $listed, true)));
         $sections[] = $s;
     }
     return [

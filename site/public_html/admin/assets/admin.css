@@ -117,6 +117,12 @@ h3.sub{font:700 15px Figtree,sans-serif;letter-spacing:1.5px;text-transform:uppe
 .picked li>span:not(.blank){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picked img,.picked .blank{width:32px;height:32px;border-radius:9px;object-fit:cover;flex:none}
 .picked .blank{display:flex;align-items:center;justify-content:center;background:rgba(244,248,252,.08);font:700 12px Sora,sans-serif}
+/* (2.5) Discover: a section's own order, dragged by the handle or moved with the arrows */
+.olist{max-height:440px;overflow:auto;overscroll-behavior:contain;padding:2px 4px 2px 0}
+.olist .grip{width:26px;min-height:32px;margin:0 -2px 0 -4px}
+.picked.olist li>span.num{width:24px;flex:none;text-align:right;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.olist li.dragging{position:relative;z-index:3;border-color:rgba(53,214,244,.75);background:rgba(20,32,52,.97);box-shadow:0 12px 30px rgba(0,0,0,.45);transition:none!important}
+.olist li.dragging .grip{cursor:grabbing;color:var(--cyan)}
 .add-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 12px}
 .small-note{font-size:14px;margin:0 0 10px}
 .warn{color:#ffd98a}
