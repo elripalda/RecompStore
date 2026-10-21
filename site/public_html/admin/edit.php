@@ -27,7 +27,7 @@ $modsTemplate = json_encode([['id' => 'hd-pack', 'name' => 'HD textures', 'autho
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'inside', 'zip_id', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs', 'keep'];
+             'repo', 'asset', 'inside', 'zip_id', 'manual', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs', 'keep'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -108,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($badTag !== '') $error = 'Labels: "' . $badTag . '" is too long. Up to 6 short labels, comma-separated, like Recomp, Xbox 360.';
     elseif (($isNew || $g['id'] !== $oldId) && rs_move_block($g['id'])) $error = RS_MOVE_BLOCK[0] . ' to ' . RS_MOVE_BLOCK[1] . ' are kept for the PS5 store itself (it gives them to games whose own ID is taken on a console). Pick another title ID.';
     elseif (($isNew || $g['id'] !== $oldId) && isset(rs_taken_ids()[$g['id']])) $error = $g['id'] . ' is already used outside the store (' . (rs_taken_ids()[$g['id']] ?: 'see Settings') . '). Two apps with one title ID clash on a PS5: pick another.';
+    elseif (mb_strlen($g['manual']) > 500) $error = 'Not plug and play: 500 characters at most.';
     elseif ($g['zip_id'] !== '' && (!preg_match('/^[A-Za-z]{4}\d{5}$/', $g['zip_id']) || strcasecmp($g['zip_id'], $g['id']) === 0)) $error = 'Title ID in its zip: four letters and five numbers, like PPSA12345, and not this game\'s own (leave it empty then).';
     elseif ($g['inside'] !== '' && (!preg_match('/\.zip$/i', $g['inside']) || strlen($g['inside']) > 300 || $g['inside'][0] === '/' || preg_match('#\\\\|(^|/)\.\.(/|$)|[\x00-\x1f\x7f]#', $g['inside']))) $error = 'The zip inside the download: its whole name in that zip, ending in .zip, with / between folders (for example */prospero/builder/Assets/payload.zip). No .. and no \\.';
     elseif ($g['setup'] && $g['slots'] !== '' && !is_array(json_decode($g['slots'], true))) $error = 'The game files list isn\'t valid. Use the template\'s format.';
@@ -407,6 +408,8 @@ if (!$isNew) {
       <small><strong>only</strong>, <strong>files</strong> and <strong>wrong</strong> (needs Recomp Store 1.1.2, set for you), for a disc: <code>only</code> the disc's folders to copy, each with its path (<code>["DBZ3"]</code> copies DBZ3 and what's in it, nothing else); <code>files</code> the files the disc must have, <code>[{"path": "DBZ3/yae3_xenon.xex", "size": 4890624, "crc32": "F67F6C97"}, ...]</code> (crc32 optional): a disc without them, or with another size or CRC, is refused before anything is copied, and the slot counts as set up once they're all there at their sizes; <code>wrong</code> what to tell a player whose disc that is ("This app needs the USA Budokai HD Collection.").</small>
       <small><strong>file</strong> (needs Recomp Store 1.0.6, set for you): the player's own file copied in, such as a ROM or a game's data files. <code>ext</code> the extensions to show (".z64 .n64 .v64"); <code>pick</code> the file to choose ("pak0.pk3"); <code>also</code> the files beside it that go too ("pak?.pk3"); <code>need</code> how many must be there to play (9); <code>name</code> what to call it in the game's folder ("DIABDAT.MPQ"); <code>sha1</code> the SHA-1s it may have, space-separated; <code>n64</code> true for a Nintendo 64 ROM (any byte order, saved as .z64); <code>made</code> a file the game makes from it, which counts as set up ("sm64.o2r").</small></label>
   </div>
+  <label><span>Not plug and play <span class="muted">(optional)</span></span><textarea name="manual" rows="3" maxlength="500" placeholder="Install it, then copy your valve folder into the game's folder with FTP."><?= h($g['manual'] ?? '') ?></textarea>
+    <small>For a game the store can't set up by itself: what the player has to do by hand. The site shows it on the game's page in amber, with a Manual setup tag, and so does Recomp Store 2.6. Leave empty when the store sets it all up.</small></label>
   <label><span>Save folders <span class="muted">(optional)</span></span><textarea name="saves" rows="2" class="mono" placeholder="userdata"><?= h($g['saves']) ?></textarea>
     <small>Where the game keeps its saves, one per line, inside its folder (like userdata, or baseq3/q3config.cfg). With these, Delete in Recomp Store 1.0.6 offers Keep my saves: everything else goes, and the saves are there when it's installed again.</small></label>
   <label><span>Keep when updating <span class="muted">(optional)</span></span><textarea name="keep" rows="3" class="mono" placeholder="user_data"><?= h($g['keep']) ?></textarea>

@@ -155,6 +155,7 @@ struct App
     std::string id, name, kind /* original, community */, author;
     std::string blurb, description, news, credits;
     std::string version, released, size, needs;
+    std::string manual; /* (2.6) not plug and play: what the player does by hand (catalog "manualSetup") */
     int build = 0;
     std::string source /* github, url */, repo, asset /* may hold * and ? */, url, sha256;
     /* (2.1) A beta zip's signature from Recomp Store Signer (rs_sig.h): a beta installs only

@@ -369,7 +369,7 @@
         <a class="back" href="#/">← All games</a>
         <div class="game-grid">
           <div class="game-info">
-            <div class="chips">${tagFor(a)}<span class="tag">${esc(a.id)}</span>${shareHTML(a, 'game')}</div>
+            <div class="chips">${tagFor(a)}<span class="tag">${esc(a.id)}</span>${a.manualSetup ? '<span class="tag warn">Manual setup</span>' : ''}${shareHTML(a, 'game')}</div>
             ${a.logo && a.logo.url
               ? `<h1 class="logo-h1"><img src="${esc(a.logo.url)}" alt="${esc(a.name)}" style="--s:${(a.logo.page && a.logo.page.scale ? a.logo.page.scale : 100) / 100}"></h1>`
               : `<h1>${esc(a.name)}</h1>`}
@@ -379,6 +379,7 @@
               <summary><span class="kicker">What's new${a.version ? ' · ' + esc(a.version) : ''}</span>${a.news ? `<p>${esc(a.news)}</p>` : ''}${repoUrl ? '<span class="more">All patch notes</span>' : ''}</summary>
               <div class="notes" data-notes><p class="muted">Loading the notes from GitHub…</p></div>
             </details>` : ''}
+            ${a.manualSetup ? `<div class="glass manual-note"><span class="kicker">Not plug and play</span><p>${esc(a.manualSetup)}</p></div>` : ''}
             ${a.setup ? setupHTML(a) : ''}
             ${a.credits ? `<p class="credits">${esc(a.credits)}</p>` : ''}
             <div class="glass disc-note"><span class="kicker">Bring your own disc</span><p>Recomp Store and this game's GitHub repository don't host any game files. Set it up from your own legally obtained copy.</p></div>

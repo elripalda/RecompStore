@@ -103,6 +103,8 @@ function rs_game_defaults(): array {
         // (2.5.1) The title ID of the app in its zip, when it's another app's (two releases with
         // the same ID): the store installs it under this entry's ID instead. Empty: the same.
         'zip_id' => '',
+        // (2.6) Not plug and play: what the player does by hand (FTP, a PC step), shown on its page.
+        'manual' => '',
         'icon' => '', 'hero' => '', 'hero_web' => '',
         'focus_x' => 50, 'focus_y' => 30, 'zoom' => 100,
         // A logo in place of the name: where it sits on the banner (b) and the game page (p),
@@ -672,6 +674,7 @@ function rs_app_entry(array $g, int $order): array {
     }
     if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
     if (($zid = rs_zip_id($g)) !== '') $app['titleId'] = $zid; // (2.5.1)
+    if (trim((string)($g['manual'] ?? '')) !== '') $app['manualSetup'] = mb_substr(trim((string)$g['manual']), 0, 500); // (2.6)
     $links = rs_clean_links($g['links']);
     if ($links) $app['links'] = $links;
     $saves = rs_saves_list((string)$g['saves']);

@@ -171,6 +171,11 @@ details.news summary:hover .more{color:var(--cyan)}
 .release code{background:rgba(11,18,32,.6);padding:1px 6px;border-radius:6px}
 .disc-note{padding:22px 28px;margin:26px 0 0;max-width:820px;background:rgba(53,214,244,.08);border-color:rgba(53,214,244,.4)}
 .disc-note p{margin:0;color:#e1e8f1}
+/* (2.6) A game the store can't set up by itself */
+.manual-note{padding:22px 28px;margin:26px 0 0;max-width:820px;background:rgba(255,200,90,.08);border-color:rgba(255,200,90,.4)}
+.manual-note .kicker{color:#ffd98a}
+.manual-note p{margin:0;color:#f1e6d2}
+.tag.warn{color:#ffd98a;background:rgba(255,200,90,.1);border-color:rgba(255,200,90,.45)}
 
 /* Home: report a bug, submit a port */
 .help{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:56px}
