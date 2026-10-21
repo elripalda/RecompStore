@@ -201,8 +201,8 @@ file slot. The catalog's new `requires` lists more the game needs, ticked in the
 ## 12. Discord posts
 
 - Admin > Settings > Discord: the webhook (pasted by the owner; only the end of it is shown again,
-  like `…/webhooks/1234…abcd`; never logged, never in the catalog), switches for new apps, updates and
-  new betas, and **Send a test**.
+  like `…/webhooks/1234…abcd`; never logged, never in the catalog), switches for new apps and updates
+  (a new version), and **Send a test** (its own one a minute, so a test never holds back a post).
 - After a signed publish goes out, the site compares the new catalog with the one before and posts
   one message (embeds, at most 10) for what's new. At most one post a minute; a post that fails is
   logged without the address and never stops the publish (3 s timeout).
@@ -210,10 +210,12 @@ file slot. The catalog's new `requires` lists more the game needs, ticked in the
 ## 13. Restore my apps
 
 - The console keeps its list of installed store apps in its linked-phone state, and on each linked
-  device's record (`link_apps`, kept after unlinking), and can save it to a USB drive as
+  device's record (`link_apps`: one list per device and console, the 4 newest per device, kept after
+  unlinking; a state with no store apps never writes over one), and can save it to a USB drive as
   `RecompStore Backups/my-apps.json`: `{"format":1,"made":..,"apps":[{"id","name","version"}]}`.
-- Settings > Restore my apps: from a linked phone (the lists the site keeps for the devices linked to
-  this console), from a USB drive, or from a phone upload (a `.json`). It shows what will come back
+- Settings > Restore my apps: from a linked phone (`POST /api/link.php a=myapps` with the console's
+  install and token: `{ok, lists: [{from, made, apps}]}`, the lists kept for the devices linked to this
+  console now, newest first), from a USB drive, or from a phone upload (a `.json`). It shows what will come back
   and queues each app not installed.
 
 ## 14. Mods

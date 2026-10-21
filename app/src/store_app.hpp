@@ -37,6 +37,15 @@ public:
     void preview_focus(int f) { page_focus_ = f; }
     void preview_choose(const std::string &slot, const std::string &image) { chosen_[page_id_ + "/" + slot] = image; }
     void preview_row(int row, int col) { row_ = row; col_ = col; page_open_ = false; page_t_ = 0; confirm_ = false; }
+    /* (2.3.0) Discover's row with this title (its first, if none has it). */
+    void preview_row_titled(const std::string &t, int col)
+    {
+        const auto lines = discover_lines();
+        int r = 0;
+        for (int i = 0; i < int(lines.size()); ++i)
+            if (lines[std::size_t(i)].title == t) { r = i; break; }
+        preview_row(r, col);
+    }
     void preview_confirm(int sel = 0) { confirm_ = true; confirm_t_ = 1; confirm_sel_ = sel; const App *a = find(page_id_); confirm_saves_ = a && !a->saves.empty(); }
     void preview_notes(int mode, int top = 0) { notes_focus_ = mode >= 1; notes_open_ = mode >= 2; notes_t_ = notes_open_ ? 1.f : 0.f; notes_top_ = top; confirm_ = false; }
     void preview_general(int row) { tab_ = 3; section_ = 0; in_section_ = true; gen_row_ = row; booted_ = true; boot_t_ = 10; tab_t_ = 1; enter_t_ = 1; page_open_ = false; page_t_ = 0; confirm_ = false; }
@@ -164,7 +173,17 @@ public:
      * many lines there are. */
     float preview_notes_overflow(int *lines = nullptr) const;
     void preview_all_sort(int sort, bool focus_sort) { prefs_.all_sort = sort; cat_on_chips_ = focus_sort; cat_sort_on_ = focus_sort; }
-    void preview_drives(int sel) { preview_library(4, 0); drv_sel_ = sel; }
+    void preview_drives(int sel, int col = 0, int app = 0) { preview_library(4, 0); drv_sel_ = sel; drv_col_ = col; drv_app_ = app; }
+    void preview_drive_move(int sel)
+    {
+        sync_console();
+        const auto apps = drive_apps(engine().drives()[std::size_t(drv_sel_)].homebrew);
+        if (apps.empty()) return;
+        open_manage(*apps[std::size_t(std::clamp(drv_app_, 0, int(apps.size()) - 1))]);
+        mng_t_ = 1; mng_places_.clear();
+        for (const Place &p : install_places_now()) if (p.path != mng_app_.root) mng_places_.push_back(p);
+        mng_stage_ = 1; mng_sel_ = sel; mng_direct_ = true;
+    }
     /* (2.3.0) */
     void preview_upload(int mode, int slot) { open_upload(mode, page_id_, slot); panel_t_ = 1; }
     void preview_upload_status(const ReceiverStatus &st, const std::string &code) { up_st_ = st; up_code_ = code; up_why_.clear(); up_poll_ = 1e9f; }
@@ -174,6 +193,11 @@ public:
     }
     void preview_ask(const LinkAction &a, const ConsoleApp &c) { rq_ = a; rq_app_ = c; open_panel(PanelAsk); panel_t_ = 1; panel_sel_ = 1; }
     void preview_backup_first(bool on) { backup_first_ = on; }
+    void preview_collection(const std::string &id, int stage = 0, int sel = 0) { open_collection(id); panel_t_ = 1; co_stage_ = stage; panel_sel_ = sel; if (stage) co_places_ = install_places_now(); }
+    void preview_search(const std::string &text, bool kb) { preview_category(AllApps, 0, 0, true); cat_search_on_ = true; search_ = text; kb_ = false; if (kb) { open_kb(3); kb_t_ = 1; } }
+    void preview_myapps(int stage, const MyAppsList &l, int sel = 0) { open_myapps(); panel_t_ = 1; ma_stage_ = stage; ma_list_ = l; panel_sel_ = sel; }
+    void preview_mods(int sel, int ask = 0) { open_mods(page_id_); panel_t_ = 1; panel_sel_ = sel; md_ask_ = ask; md_ask_sel_ = 0; }
+    void preview_feedback(const std::string &msg, int pick, int sel) { open_feedback(page_id_); logs_t_ = 1; logs_msg_ = msg; logs_cat_ = pick; logs_chip_ = std::max(0, pick); logs_sel_ = sel; }
     void preview_shimmer(bool on) { shimmer_test_ = on; }
     void preview_scroll_page(float y) { page_scroll_ = page_scroll_to_ = y; }
 
@@ -219,6 +243,10 @@ private:
     void draw_drives(porpoise::ui::Gfx &gfx, float slide);
     void watch_usb();
     int drv_sel_ = 0;
+    int drv_col_ = 0, drv_app_ = 0; /* (2.3.0) 1: the drive's apps (Cross moves one) */
+    std::vector<const ConsoleApp *> drive_apps(const std::string &homebrew) const;
+    std::string move_saves_app() const;
+    bool mng_direct_ = false; /* (2.3.0) the sheet opened straight on Move (from Drives): Circle closes it */
     float drv_scroll_ = 0;
     unsigned usb_mask_ = 0;
     float usb_t_ = -10;
@@ -255,7 +283,8 @@ private:
     struct Control
     {
         enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */,
-                    Versions /* (2.1) */, Favorite /* (2.2.2) */, AutoUpdate /* (2.2.2) */, Saves /* (2.3.0) */ } kind;
+                    Versions /* (2.1) */, Favorite /* (2.2.2) */, AutoUpdate /* (2.2.2) */, Saves /* (2.3.0) */,
+                    Like /* (2.3.0) */, Feedback /* (2.3.0) a beta's */, Mods /* (2.3.0) */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
@@ -270,6 +299,7 @@ private:
         std::string title;   /* the title; a spotlight's names it */
         std::vector<const App *> items;
         std::vector<int> cats; /* kind 5: the category tabs, in order */
+        std::string coll;      /* (2.3.0) a collection's row: Cross opens the collection */
         int count() const { return kind == 5 ? int(cats.size()) : int(items.size()); }
     };
 
@@ -279,6 +309,7 @@ private:
     Art &art(const App &a);
     const App *find(const std::string &id) const; /* a game, or a Coming soon entry */
     std::vector<DLine> discover_lines() const;
+    bool on_collection_row() const; /* (2.3.0) Discover's focus is on a collection's row */
     /* Discover: the first item of a line that scrolls sideways that's shown, with col
      * focused (or last focused) on it; and where item i of it is drawn. */
     int line_first(const DLine &l, int col) const;
@@ -625,7 +656,7 @@ private:
      * add (a repo or a list's address), 2 why a source is reported. */
     int kb_mode_ = 0;
     std::string src_text_, src_why_;
-    std::string &kb_text() { return kb_mode_ == 1 ? src_text_ : kb_mode_ == 2 ? src_why_ : logs_msg_; }
+    std::string &kb_text() { return kb_mode_ == 1 ? src_text_ : kb_mode_ == 2 ? src_why_ : kb_mode_ == 3 ? search_ : logs_msg_; }
     void open_kb(int mode);
     void kb_finished(); /* Done on the keyboard: what its text was for */
     /* Settings > Sources: the row focused (0 Add a source, then the sources), and how the last
@@ -712,7 +743,7 @@ private:
     /* Sheets over the store (panel_): the download queue, where to install, the storage view, What's
      * new, the tabs, deleting what's selected. panel_sel_: the row or button focused. */
     enum PanelKind { PanelNone = 0, PanelQueue, PanelPlace, PanelStorage, PanelNews, PanelTabs, PanelDelete,
-                     PanelUpload /* (2.3.0) */, PanelSaves, PanelAsk };
+                     PanelUpload /* (2.3.0) */, PanelSaves, PanelAsk, PanelCollection, PanelMyApps, PanelMods };
     int panel_ = 0;
     float panel_t_ = 0;
     int panel_sel_ = 0, panel_top_ = 0;
@@ -876,6 +907,45 @@ private:
     int logs_cat_ = -1, logs_chip_ = 0;
     bool logs_fb_ = false;
     std::string ma_note_;
+    void open_feedback(const std::string &id);
+    /* Ready to play: what the game needs, each 1 ready, 0 not yet, 2 can't be told here. */
+    struct Need
+    {
+        std::string label, why;
+        int state = 2;
+    };
+    std::vector<Need> ready_items(const App &a) const;
+    float ready_height(const App &a) const;
+    void draw_ready(porpoise::ui::Gfx &gfx, const App &a, float x, float y, float w, float alpha);
+    /* Collections: the one open, and (stage 1) where Install all puts them. */
+    std::string co_id_;
+    int co_stage_ = 0;
+    std::vector<Place> co_places_;
+    const Collection *collection(const std::string &id) const;
+    void open_collection(const std::string &id);
+    void install_all(const std::string &root);
+    bool update_collection_panel(float dt);
+    void draw_collection_panel(porpoise::ui::Gfx &gfx, float k);
+    /* Library: Search (its pill between the parts and Sort), the text, and the match. */
+    std::string search_;
+    bool cat_search_on_ = false;
+    bool search_match(const App &a) const;
+    /* Restore my apps: 0 where from, 1 the list. */
+    int ma_stage_ = 0;
+    MyAppsList ma_list_;
+    bool ma_note_bad_ = false, ma_waiting_ = false;
+    void open_myapps();
+    std::vector<std::string> myapps_sources() const;
+    bool update_myapps_panel(float dt);
+    void draw_myapps_panel(porpoise::ui::Gfx &gfx, float k);
+    /* Mods: the app's, and the question over one (its actions). */
+    std::string md_app_, md_note_;
+    bool md_note_bad_ = false;
+    int md_ask_ = 0, md_ask_sel_ = 0;
+    void open_mods(const std::string &id);
+    std::vector<std::string> mod_actions(const App &a, const App::Mod &m) const;
+    bool update_mods_panel(float dt);
+    void draw_mods_panel(porpoise::ui::Gfx &gfx, float k);
     float cus_scroll_ = 0, cus_scroll_to_ = 0; /* (2.2.3) Customize, scrolled (its groups' headings make it taller) */
 };
 } // namespace recomp

@@ -490,6 +490,8 @@ Charts Engine::charts() const
         st.stars = kv.second["stars"].integer(-1);
         c.stats.push_back({kv.first, st});
     }
+    for (const auto &kv : j["likes"].members()) c.likes.push_back({kv.first, kv.second.integer(0)}); /* (2.3.0) */
+    std::stable_sort(c.likes.begin(), c.likes.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
     for (const auto &kv : j["also"].members()) /* (2.2.2) people also installed */
     {
         std::vector<std::string> v;
@@ -534,13 +536,19 @@ int Engine::clear_state(std::uint64_t &f, std::size_t &d, std::size_t &t, std::s
 void Engine::clear_ack() {}
 int Engine::loader_seen() { return 1; }
 void Engine::like(const std::string &, bool) {}
-bool Engine::liked(const std::string &) const { return false; }
-long long Engine::like_count(const std::string &) const { return 0; }
+bool Engine::liked(const std::string &id) const { return id == "PPSA92011"; }
+long long Engine::like_count(const std::string &id) const { return id == "PPSA92011" ? 128 : 0; }
 void Engine::link_result(long long, const std::string &, const std::string &, const std::string &, const std::string &) {}
 void Engine::link_push_soon() {}
 void Engine::set_phone_prefs(const std::vector<std::string> &, const std::vector<std::string> &, bool) {}
 bool Engine::read_my_apps(const std::string &, MyAppsList &, std::string &why) { why = "preview"; return false; }
 bool Engine::send_logs(const std::string &, const std::string &, const std::string &, const std::string &, const std::string &) { return true; }
+int Engine::my_apps_lists(std::vector<MyAppsList> &out, std::string &why) const { out.clear(); why.clear(); return 0; }
+bool Engine::save_my_apps(const std::string &, std::string &) const { return true; }
+void Engine::ask_my_apps() {}
+std::string Engine::my_apps_json() const { return "{}"; }
+int Engine::mod_state(const App &, const App::Mod &m) const { return m.id == "hd" ? 1 : m.id == "fix" ? 2 : 0; }
+bool Engine::mod_job(const std::string &, const std::string &, const std::string &) { return true; }
 } // namespace recomp
 
 namespace porpoise::pad { std::int32_t user_of(int) { return 1; } }

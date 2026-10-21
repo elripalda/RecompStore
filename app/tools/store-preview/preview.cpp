@@ -656,6 +656,37 @@ int main(int argc, char **argv)
         store.preview_panel_close(); store.preview_row(1, 0);
         store.preview_storage_row(2); settle(30); frame("v230-settings-storage");
     }
+    if (want("v231"))
+    {
+        /* (2.3.0) round 2: Ready to play, likes, mods, tester feedback, collections, Most liked, search,
+         * Restore my apps, Move from Drives. */
+        store.preview_open("PPSA92011"); store.preview_focus(0); settle(80); frame("v231-page-ready-like-mods");
+        store.preview_mods(0); settle(10); frame("v231-mods");
+        store.preview_mods(1, 1); settle(10); frame("v231-mods-ask");
+        store.preview_panel_close();
+        store.preview_feedback("", -1, 0); settle(20); frame("v231-feedback-empty");
+        store.preview_feedback("Crashes when I open the second level.", 1, 3); settle(20); frame("v231-feedback-ready");
+        store.preview_logs_close();
+        store.preview_tab(0); store.preview_row_titled("Starter pack", 1); settle(90); frame("v231-discover-collection");
+        store.preview_row_titled("Most liked", 0); settle(40); frame("v231-discover-most-liked");
+        store.preview_collection("starter"); settle(20); frame("v231-collection");
+        store.preview_collection("starter", 1, 1); settle(10); frame("v231-collection-where");
+        store.preview_panel_close();
+        store.preview_search("", false); settle(40); frame("v231-library-search-pill");
+        store.preview_search("ga", true); settle(40); frame("v231-library-search-typing");
+        store.preview_search("perfect", false); settle(40); frame("v231-library-search-results");
+        store.preview_search("zzz", false); settle(40); frame("v231-library-search-none");
+        store.preview_search("", false);
+        store.preview_storage_row(3); settle(30); frame("v231-settings-storage");
+        store.preview_myapps(0, {}); settle(10); frame("v231-myapps");
+        recomp::MyAppsList l; l.from = "Ruben's iPhone"; l.made = "2026-10-20T19:00:00Z";
+        l.apps = {{"PPSA92011", "SmackDown vs. Raw 2011", "1.0.0"}, {"PPSA64007", "Perfect Dark", "2.0.0"}, {"PPSA97772", "", ""}, {"PPSA99764", "", ""}, {"GONE01", "An old app", "1.0"}};
+        store.preview_myapps(1, l); settle(10); frame("v231-myapps-list");
+        store.preview_panel_close();
+        store.preview_console2(0, 0, 0, ""); settle(30);
+        store.preview_drives(0, 1, 0); settle(60); frame("v231-drives-apps");
+        store.preview_drive_move(0); settle(10); frame("v231-drives-move");
+    }
     if (want("v222"))
     {
         store.preview_pin("PPSA64007"); store.preview_pin("PPSA99764"); store.preview_pin("PPSA97772"); store.preview_pin("PPSA92011");
