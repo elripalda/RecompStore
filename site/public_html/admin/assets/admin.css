@@ -388,3 +388,11 @@ form.smp-min small{flex:1 1 280px}
 .wn-sheet ul{margin:0 0 12px;padding:0;list-style:none}
 .wn-sheet li{position:relative;padding-left:20px;margin:0 0 8px;color:#d6deea}
 .wn-sheet li::before{content:'';position:absolute;left:4px;top:.6em;width:6px;height:6px;border-radius:50%;background:var(--cyan)}
+
+/* (2.3.0) Inbox: logs by what happened */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 18px}
+.chips a{padding:6px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.14);color:inherit;text-decoration:none;font-size:14px}
+.chips a[aria-current="page"]{background:#35d6f4;color:#06111c;border-color:transparent;font-weight:700}
+.tag.cat-bug{background:rgba(255,200,87,.16);color:#ffc857}.tag.cat-crash{background:rgba(229,72,77,.18);color:#ff8a80}
+.tag.cat-install{background:rgba(155,140,255,.18);color:#c3b9ff}.tag.cat-slow{background:rgba(95,227,161,.16);color:#9ff0c6}
+.tag.cat-other{background:rgba(255,255,255,.1);color:#cdd6e2}.tag.cat-{background:transparent;color:#95a2b4;border:1px dashed rgba(255,255,255,.2)}

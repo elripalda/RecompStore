@@ -88,6 +88,12 @@ $where = match ($show) {
     'done' => "WHERE status = 'done'",
     default => "WHERE status <> 'done'",
 };
+// (2.3.0) Logs by what happened: ?show=logs&cat=bug|crash|install|slow|other|none.
+rs_inbox_category_column();
+$cat = (string)($_GET['cat'] ?? '');
+if ($show === 'logs' && (array_key_exists($cat, RS_LOG_CATEGORIES) || $cat === 'none'))
+    $where .= ' AND category = ' . rs_db()->quote($cat === 'none' ? '' : $cat);
+else $cat = '';
 $rows = rs_db()->query("SELECT * FROM inbox $where ORDER BY created DESC LIMIT 300")->fetchAll();
 $counts = rs_db()->query("SELECT kind, COUNT(*) n FROM inbox WHERE status <> 'done' GROUP BY kind")->fetchAll(PDO::FETCH_KEY_PAIR);
 $names = [];
@@ -130,6 +136,13 @@ rs_head('Inbox');
   <a href="inbox.php?show=source" <?= $show === 'source' ? 'aria-current="page"' : '' ?>>Sources<?= !empty($counts['source']) ? ' <span class="count">' . (int)$counts['source'] . '</span>' : '' ?></a>
   <a href="inbox.php?show=done" <?= $show === 'done' ? 'aria-current="page"' : '' ?>>Done</a>
 </nav>
+<?php if ($show === 'logs'): ?>
+<nav class="chips" aria-label="What happened">
+  <a href="inbox.php?show=logs" <?= $cat === '' ? 'aria-current="page"' : '' ?>>All</a>
+  <?php foreach (RS_LOG_CATEGORIES as $k => $v): ?><a href="inbox.php?show=logs&amp;cat=<?= h($k) ?>" <?= $cat === $k ? 'aria-current="page"' : '' ?>><?= h($v) ?></a><?php endforeach; ?>
+  <a href="inbox.php?show=logs&amp;cat=none" <?= $cat === 'none' ? 'aria-current="page"' : '' ?>>No category</a>
+</nav>
+<?php endif; ?>
 
 <section class="list">
 <?php foreach ($rows as $r): $bug = $r['kind'] === 'bug'; $label = ['bug' => 'Bug', 'submit' => 'Submission', 'message' => 'Message', 'logs' => 'Logs', 'source' => 'Source reported'][$r['kind']] ?? $r['kind']; ?>
@@ -137,6 +150,7 @@ rs_head('Inbox');
     <?php if ($r['kind'] === 'logs'): $fs = $files[(int)$r['id']] ?? []; ?>
     <header>
       <span class="tag cyan">Logs</span>
+      <span class="tag cat-<?= h($r['category'] ?? '') ?>"><?= h(RS_LOG_CATEGORIES[$r['category'] ?? ''] ?? 'No category') ?></span>
       <strong><?= h($names[$r['app_id']] ?? $r['app_id']) ?></strong>
       <span class="muted"><?= $r['version'] !== '' ? 'version ' . h($r['version']) : 'not installed' ?><?= $r['name'] !== '' ? ' · ' . h($r['name']) : '' ?></span>
       <?php if ($r['contact'] !== ''): ?><span class="tag beta" title="Console <?= h($r['contact']) ?>">Beta tester · <?= h(substr($r['contact'], 0, 6)) ?></span><?php endif; ?>

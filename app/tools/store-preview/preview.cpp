@@ -614,6 +614,48 @@ int main(int argc, char **argv)
             unsetenv("PREVIEW_NOTES");
         }
     }
+    if (want("v230"))
+    {
+        /* (2.3.0) Upload from your phone, a game's saves, the phone's requests, Send logs' category,
+         * Back up saves first, Storage's new row. */
+        store.preview_open("PPSA92011"); store.preview_focus(0); settle(60); frame("v230-page-saves-row");
+        store.preview_picker("game", "/data"); settle(30); frame("v230-chooser-phone-row");
+        store.preview_upload(0, 0); settle(10); frame("v230-upload-starting");
+        recomp::ReceiverStatus st; st.known = true; st.state = "listening"; st.ip = "192.168.1.42"; st.port = 8380;
+        store.preview_upload_status(st, "482913"); settle(10); frame("v230-upload-waiting");
+        st.state = "receiving"; st.file = "SmackDown vs Raw 2011.iso"; st.bytes = 3ull << 30; st.total = 7ull << 30; st.speed = 41ull << 20;
+        store.preview_upload_status(st, "482913"); settle(10); frame("v230-upload-receiving");
+        st.state = "listening"; st.ip.clear(); st.file.clear();
+        store.preview_upload_status(st, "482913"); settle(10); frame("v230-upload-no-ip");
+        st.state = "locked"; st.ip = "192.168.1.42"; st.error = "Too many wrong codes. Close this screen and open it again for a new code.";
+        store.preview_upload_status(st, "482913"); settle(10); frame("v230-upload-locked");
+        store.preview_panel_close();
+        std::vector<recomp::Backup> bl(3);
+        bl[0].file = "PPSA92011 2026-10-20 191500.zip"; bl[0].made = "2026-10-20T19:15:00Z"; bl[0].mtime = 1792523700; bl[0].where = "Console storage"; bl[0].ok = true; bl[0].version = "1.0.0"; bl[0].size = 4ull << 20;
+        bl[1] = bl[0]; bl[1].file = "PPSA92011 2026-10-18 101200 auto.zip"; bl[1].mtime = 1792318320; bl[1].auto_made = true; bl[1].size = 3ull << 20;
+        bl[2] = bl[0]; bl[2].where = "USB drive 1"; bl[2].usb = true; bl[2].mtime = 1792232400; bl[2].size = 3ull << 20;
+        store.preview_saves(bl, 0); settle(10); frame("v230-saves");
+        store.preview_saves(bl, 3); settle(10); frame("v230-saves-row");
+        store.preview_saves(bl, 3, 3, 1); settle(10); frame("v230-saves-choose");
+        store.preview_saves(bl, 3, 1, 1); settle(10); frame("v230-saves-restore");
+        store.preview_saves({}, 0); settle(10); frame("v230-saves-empty");
+        store.preview_upload(2, -1); store.preview_upload_status(st, "482913"); settle(10); frame("v230-saves-to-phone");
+        store.preview_panel_close();
+        store.preview_confirm(2); store.preview_backup_first(true); settle(20); frame("v230-delete-backup-first");
+        store.preview_backup_first(false); settle(5); frame("v230-delete-backup-off");
+        store.preview_backup_first(true); store.preview_row(1, 0);
+        store.preview_open("PPSA92011");
+        store.preview_logs("", 0, 0, "", false, 1, 0, -1); settle(20); frame("v230-logs-empty");
+        store.preview_logs("It", 1, 0, "", false, 1, 0, 1); settle(20); frame("v230-logs-not-ready");
+        store.preview_logs("The game freezes when I open Create a Superstar.", 3, 0, "", false, 1, 0, 1); settle(20); frame("v230-logs-ready");
+        store.preview_logs_close();
+        recomp::LinkAction la; la.kind = "delete"; la.id = 7; la.app = "PPSA92011";
+        recomp::ConsoleApp ca; ca.folder = "/data/homebrew/PPSA92011"; ca.name = "SmackDown vs. Raw 2011"; ca.size = 7516192768LL; ca.root = "/data/homebrew";
+        store.preview_ask(la, ca); settle(10); frame("v230-phone-delete");
+        la.kind = "move"; la.to = "/mnt/usb0/homebrew"; store.preview_ask(la, ca); settle(10); frame("v230-phone-move");
+        store.preview_panel_close(); store.preview_row(1, 0);
+        store.preview_storage_row(2); settle(30); frame("v230-settings-storage");
+    }
     if (want("v222"))
     {
         store.preview_pin("PPSA64007"); store.preview_pin("PPSA99764"); store.preview_pin("PPSA97772"); store.preview_pin("PPSA92011");

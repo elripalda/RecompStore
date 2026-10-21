@@ -4,6 +4,8 @@
 // by its cookie (rs_device). Answers are JSON. The contract: docs/api-2.0.md, sections 0 and 1.
 //   Store:  a=hello | code | poll | unlink | state
 //   Browser: a=claim | webcode | mine (GET) | send | redeem | forget
+// (2.3.0) send kinds cancel, favorite, autoupdate, delete, move, text (docs/store-2.3.md, 5); the
+// state is forgotten when a console has no linked device left.
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 
@@ -111,9 +113,20 @@ if ($a === 'poll' && $post) {
     rs_out(200, ['ok' => true, 'devices' => $devicesOf($install), 'actions' => $actions]);
 }
 
+// (2.3.0) A console with no linked device left: what it last reported goes.
+$forgetState = function (string $install) use ($db): void {
+    $st = $db->prepare('SELECT COUNT(*) FROM link_devices WHERE install_id = ?');
+    $st->execute([$install]);
+    if ((int)$st->fetchColumn() === 0) {
+        $db->prepare('DELETE FROM link_state WHERE install_id = ?')->execute([$install]);
+        $db->prepare('DELETE FROM link_queue WHERE install_id = ? AND taken IS NULL')->execute([$install]);
+    }
+};
+
 if ($a === 'unlink' && $post) {
     $install = $consoleOf();
     $db->prepare('UPDATE link_devices SET install_id = NULL, linked = NULL WHERE device_id = ? AND install_id = ?')->execute([$s('device', 16), $install]);
+    $forgetState($install);
     rs_out(200, ['ok' => true]);
 }
 
@@ -211,6 +224,34 @@ if ($a === 'send' && $post) {
         else rs_out(422, ['ok' => false, 'error' => 'Enter a GitHub repo like owner/name, or a list\'s https:// address.']);
         $what = $data['repo'] ?? $data['list'];
         if (rs_source_blocked(isset($data['repo']) ? 'repo' : 'list', $what)) rs_out(200, ['ok' => false, 'blocked' => true, 'error' => 'This source was taken down.']);
+    } elseif (in_array($kind, ['cancel', 'favorite', 'autoupdate', 'delete', 'move'], true)) {
+        // (2.3.0) Managing the PS5. Delete and Move are only requests: the PS5 asks first.
+        $app = (string)($data['app'] ?? '');
+        $folder = (string)($data['folder'] ?? '');
+        $out = [];
+        if ($app !== '' && preg_match('/^[A-Za-z0-9_.-]{3,48}$/', $app)) $out['app'] = $app;
+        elseif (in_array($kind, ['delete', 'move'], true) && preg_match('#^/(data|mnt/(ext|usb)\d)/homebrew/[A-Za-z0-9_.-]{1,64}$#', $folder) && !str_contains($folder, '..')) $out['folder'] = $folder;
+        else rs_out(422, ['ok' => false, 'error' => 'That isn\'t an app on your PS5.']);
+        if ($kind === 'favorite' || $kind === 'autoupdate') $out['on'] = !empty($data['on']) && $data['on'] !== '0' ? 1 : 0;
+        if ($kind === 'move') {
+            // Only a drive the console said it has (its last state).
+            $to = (string)($data['to'] ?? '');
+            $st = $db->prepare('SELECT state FROM link_state WHERE install_id = ?');
+            $st->execute([$dev['install_id']]);
+            $state = json_decode((string)$st->fetchColumn(), true);
+            $roots = array_map(fn($d) => (string)($d['root'] ?? ''), is_array($state['drives'] ?? null) ? $state['drives'] : []);
+            if ($to === '' || !in_array($to, $roots, true)) rs_out(422, ['ok' => false, 'error' => 'Your PS5 doesn\'t have that drive right now.']);
+            $out['to'] = $to;
+        }
+        if (in_array($kind, ['delete', 'move'], true)) {
+            if (rs_rate_over('ask' . substr((string)$dev['device_id'], 0, 8), 20, 3600)) rs_out(429, ['ok' => false, 'error' => 'That\'s a lot of requests. Wait a bit and try again.']);
+            rs_rate_hit('ask' . substr((string)$dev['device_id'], 0, 8));
+        }
+        $data = $out;
+    } elseif ($kind === 'text') {
+        $text = trim(preg_replace('/[\x00-\x1F\x7F]/u', ' ', (string)($data['text'] ?? '')) ?? '');
+        if ($text === '' || mb_strlen($text) > 200) rs_out(422, ['ok' => false, 'error' => 'Type up to 200 characters.']);
+        $data = ['text' => $text];
     } else {
         rs_out(400, ['ok' => false, 'error' => 'Unknown request.']);
     }
@@ -220,7 +261,11 @@ if ($a === 'send' && $post) {
     $st->execute([$dev['install_id']]);
     if ((int)$st->fetchColumn() >= 20) rs_out(200, ['ok' => false, 'error' => 'Your PS5 has 20 things waiting already. Open Recomp Store on it so it can catch up.']);
     rs_link_queue($db, $dev['install_id'], $dev['device_id'], $kind, $data);
-    rs_out(200, ['ok' => true, 'message' => 'Sent. Your PS5 picks it up in a few seconds while Recomp Store is open.']);
+    $req = (int)$db->lastInsertId();
+    if (in_array($kind, ['delete', 'move', 'cancel'], true))
+        rs_log('phone ' . $kind, (string)($data['app'] ?? $data['folder'] ?? ''), 'console ' . substr((string)$dev['install_id'], 0, 6) . ', device ' . substr((string)$dev['device_id'], 0, 6) . ', request ' . $req . (isset($data['to']) ? ', to ' . $data['to'] : ''));
+    rs_out(200, ['ok' => true, 'req' => $req,
+                 'message' => in_array($kind, ['delete', 'move'], true) ? 'Waiting for you to confirm on the PS5.' : 'Sent. Your PS5 picks it up in a few seconds while Recomp Store is open.']);
 }
 
 if ($a === 'redeem' && $post) {
@@ -263,6 +308,7 @@ if ($a === 'forget' && $post) {
     if ($dev) {
         $db->prepare("DELETE FROM link_codes WHERE device_id = ? AND used IS NULL")->execute([$dev['device_id']]);
         $db->prepare('DELETE FROM link_devices WHERE device_id = ?')->execute([$dev['device_id']]);
+        if ($dev['install_id'] !== null) $forgetState((string)$dev['install_id']);
     }
     rs_device_cookie('', time() - 3600);
     rs_out(200, ['ok' => true]);

@@ -30,6 +30,8 @@ if ($app !== '' && !preg_match('/^[A-Za-z0-9_-]+$/', $app)) rs_reply(422, ['ok' 
 $store = preg_replace('/[^0-9A-Za-z.\-]/', '', $s('store', 32));
 $version = $s('version', 64);
 $message = $s('message', 2000);
+// (2.3.0) What happened, from 2.3.0 stores: one of five; anything else is kept as other.
+$category = isset($_POST['category']) ? (array_key_exists($s('category', 16), RS_LOG_CATEGORIES) ? $s('category', 16) : 'other') : '';
 
 // The files: at most 10, each kept to its last 400 KB, 2 MB in all.
 $names = is_array($_POST['name'] ?? null) ? array_values($_POST['name']) : [];
@@ -79,10 +81,11 @@ try {
             $db->query("SELECT RELEASE_LOCK('rs_inbox')");
             rs_reply(429, ['ok' => false, 'error' => 'That\'s a lot of logs at once. Try again in an hour.']);
         }
+        rs_inbox_category_column();
         $db->beginTransaction();
-        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created)
-                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW())')
-           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'Recomp Store ' . $store, $console, $version, $message, $ip]);
+        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category)
+                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?)')
+           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'Recomp Store ' . $store, $console, $version, $message, $ip, $category]);
         $id = (int)$db->lastInsertId();
         $put = $db->prepare('INSERT INTO inbox_files (inbox_id, name, size, body) VALUES (?, ?, ?, ?)');
         foreach ($files as $f) $put->execute([$id, $f['name'], strlen($f['body']), $f['body']]);

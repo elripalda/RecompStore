@@ -956,17 +956,97 @@
     refreshMe().then(drawMy);
     every(() => refreshMe().then(() => { if (!document.activeElement || !view.contains(document.activeElement) || document.activeElement === document.body) drawMy(); }), 30000);
   }
+  // (2.3.0) Requests sent from here (Delete, Move, ...): their number, until the PS5 says how it went.
+  const myReqs = {};
+  let reqTimer = 0;
+  const gb = (b) => (Number(b) / 1073741824 >= 1000 ? (Number(b) / 1099511627776).toFixed(2) + ' TB' : (Number(b) / 1073741824).toFixed(1) + ' GB');
+  const sizeWords = (b) => (Number(b) > 0 ? (Number(b) >= 1073741824 ? gb(b) : Math.max(1, Math.round(Number(b) / 1048576)) + ' MB') : '');
+  function reqLine(key) {
+    const st = me && me.state || {};
+    const mine = Object.entries(myReqs).filter(([, r]) => r.key === key).map(([id]) => Number(id)).sort((x, y) => y - x)[0];
+    if (!mine) return '';
+    const r = (Array.isArray(st.requests) ? st.requests : []).find((q) => Number(q.id) === mine);
+    if (!r || r.state === 'waiting') return `<span class="req-line">Waiting for you to confirm on the PS5…</span>`;
+    return `<span class="req-line ${r.state === 'done' ? 'ok' : 'bad'}">${esc(r.state === 'ignored' ? 'Ignored on the PS5.' : r.text || (r.state === 'done' ? 'Done.' : 'It didn\'t work.'))}</span>`;
+  }
   function appRow(x) {
-    const a = byId(x.id);
-    const name = (a && a.name) || x.name || x.id;
+    const a = x.id ? byId(x.id) : null;
+    const name = (a && a.name) || x.name || x.id || String(x.folder || '').split('/').pop();
+    const st = me && me.state || {};
+    const v2 = Number(st.v) >= 2;
+    const key = x.id || x.folder;
+    const drives = (Array.isArray(st.drives) ? st.drives : []).filter((d) => d.root && d.root !== x.root);
     return `
-      <li class="glass ps5-app">
+      <li class="glass ps5-app" data-key="${esc(key)}">
         ${a ? `<a href="#/game/${encodeURIComponent(a.id)}">${iconHTML(a, 56)}</a>` : `<span class="ico mono">${esc(String(name).slice(0, 2))}</span>`}
         <span class="ps5-app-words"><strong>${a ? `<a href="#/game/${encodeURIComponent(a.id)}">${esc(name)}</a>` : esc(name)}</strong>
-          <span>${x.version ? esc(x.version) : 'Installed'}${x.update ? ` · <em class="upd">${esc(x.update)} ready</em>` : ''}</span></span>
+          <span>${x.version ? esc(x.version) : 'Installed'}${x.update ? ` · <em class="upd">${esc(x.update)} ready</em>` : ''}${v2 && x.size > 0 ? ' · ' + sizeWords(x.size) : ''}${v2 && x.where ? ' · ' + esc(x.where) : ''}</span>
+          ${v2 ? reqLine(key) : ''}</span>
         ${x.update ? `<button class="btn small" type="button" data-send-app="${esc(x.id)}">Update</button>` : ''}
+        ${v2 ? `<span class="ps5-acts">
+          ${x.store ? `<button class="chip-btn${x.fav ? ' on' : ''}" type="button" data-act="favorite" data-on="${x.fav ? 0 : 1}" aria-pressed="${x.fav ? 'true' : 'false'}">${x.fav ? '★ Favorite' : '☆ Favorite'}</button>
+          <button class="chip-btn${x.auto ? ' on' : ''}" type="button" data-act="autoupdate" data-on="${x.auto ? 0 : 1}" aria-pressed="${x.auto ? 'true' : 'false'}">Auto-update ${x.auto ? 'on' : 'off'}</button>` : ''}
+          ${drives.length ? `<select class="chip-btn" data-act="move" aria-label="Move ${esc(name)} to"><option value="">Move to…</option>${drives.map((d) => `<option value="${esc(d.root)}">${esc(d.label)}</option>`).join('')}</select>` : ''}
+          <button class="chip-btn danger" type="button" data-act="delete">Delete</button>
+        </span>` : ''}
       </li>`;
   }
+  function storageHTML(st) {
+    const drives = Array.isArray(st.drives) ? st.drives : [];
+    if (!drives.length) return '';
+    return `<h2 class="my-h2">Storage</h2><div class="glass drives-card">${drives.map((d) => {
+      const sized = d.sized && Number(d.total) > 0;
+      const used = sized ? Math.min(100, Math.max(0, 100 * (1 - Number(d.free) / Number(d.total)))) : 0;
+      return `<div class="drive-row"><span class="drive-name">${esc(d.label)}</span><span class="drive-num">${sized ? gb(d.free) + ' free of ' + gb(d.total) : 'Size unknown'}</span>
+        <span class="drive-bar${sized ? '' : ' unknown'}"><i style="width:${used.toFixed(1)}%"></i></span></div>`;
+    }).join('')}</div>`;
+  }
+  function downloadsHTML(st) {
+    const q = st.queue || {};
+    const waiting = Array.isArray(q.waiting) ? q.waiting : [];
+    if (!q.now && !waiting.length) return '';
+    const nm = (id) => { const a = byId(id); return esc((a && a.name) || id); };
+    return `<h2 class="my-h2">Downloads</h2><ul class="ps5-apps">
+      ${q.now ? `<li class="glass ps5-app"><span class="ps5-app-words"><strong>${nm(q.now)}</strong><span>${esc(q.step || 'Installing')}${Number(q.total) > 0 ? ' · ' + Math.round(100 * Number(q.done) / Number(q.total)) + '%' : ''}</span></span></li>` : ''}
+      ${waiting.filter((id) => id !== q.now).map((id) => `<li class="glass ps5-app" data-key="${esc(id)}"><span class="ps5-app-words"><strong>${nm(id)}</strong><span>Waiting${reqLine(id) ? '' : ''}</span>${reqLine(id)}</span>
+        <button class="btn small" type="button" data-act="cancel">Cancel</button></li>`).join('')}
+    </ul>`;
+  }
+  function sendAct(kind, key, extra, btn) {
+    const st = me && me.state || {};
+    const x = (Array.isArray(st.apps) ? st.apps : []).find((y) => (y.id || y.folder) === key) || { id: key };
+    if (kind === 'delete' && !confirm(`Ask your PS5 to delete ${x.name || key}? It asks you to confirm on the PS5 first.`)) return;
+    const data = Object.assign(x.id ? { app: x.id } : { folder: x.folder }, extra || {});
+    if (btn) btn.disabled = true;
+    api('send', { kind, data }).then((res) => {
+      if (btn) btn.disabled = false;
+      if (!res.ok) { alert(res.error || 'That didn\'t go through.'); return; }
+      if (res.req && (kind === 'delete' || kind === 'move' || kind === 'cancel')) myReqs[res.req] = { key, kind };
+      if (kind === 'favorite' || kind === 'autoupdate') { x[kind === 'favorite' ? 'fav' : 'auto'] = !!extra.on; }
+      drawMy();
+      clearTimeout(reqTimer);
+      let tries = 0;
+      const tick = () => refreshMe().then(() => { drawMy(); if (++tries < 40 && Object.keys(myReqs).length) reqTimer = setTimeout(tick, 4000); });
+      reqTimer = setTimeout(tick, 4000);
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b || !b.closest('.my-ps5')) return;
+    const li = b.closest('[data-key]');
+    if (!li) return;
+    const kind = b.dataset.act;
+    sendAct(kind, li.dataset.key, kind === 'favorite' || kind === 'autoupdate' ? { on: Number(b.dataset.on) } : {}, b);
+  });
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('select[data-act="move"]');
+    if (!sel || !sel.value || !sel.closest('.my-ps5')) return;
+    const li = sel.closest('[data-key]');
+    const to = sel.value;
+    const label = sel.options[sel.selectedIndex].textContent;
+    sel.value = '';
+    if (li && confirm(`Ask your PS5 to move it to ${label}? It asks you to confirm on the PS5 first.`)) sendAct('move', li.dataset.key, { to }, sel);
+  });
   function drawMy() {
     const box = view.querySelector('[data-my]');
     if (!box) return;
@@ -980,7 +1060,8 @@
       return;
     }
     const st = me.state || {};
-    const apps = appsOnPs5().slice().sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id)));
+    const apps = (Number(st.v) >= 2 && Array.isArray(st.apps) ? st.apps.filter((x) => x && (x.id || x.folder)) : appsOnPs5())
+      .slice().sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id)));
     const ups = apps.filter((x) => x.update);
     const srcs = Array.isArray(st.sources) ? st.sources.filter((x) => x && x.value) : [];
     const sendable = cat.apps.filter((a) => !onPs5(a.id)).slice().sort((x, y) => x.name.localeCompare(y.name));
@@ -994,6 +1075,8 @@
         </div>
         <span class="tag">Linked to this ${esc(thisDevice())}</span>
       </section>
+      ${storageHTML(st)}
+      ${downloadsHTML(st)}
       <h2 class="my-h2">On your PS5 <span class="muted">${apps.length || ''}</span></h2>
       ${ups.length ? `<p class="glass note-card upd-card">${ups.length === 1 ? '1 update is' : ups.length + ' updates are'} ready. Install ${ups.length === 1 ? 'it' : 'them'} from here, or from Latest Updates on your PS5.</p>` : ''}
       ${apps.length ? `<ul class="ps5-apps">${apps.map(appRow).join('')}</ul>`

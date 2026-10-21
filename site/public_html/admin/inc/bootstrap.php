@@ -819,6 +819,18 @@ function rs_submission_columns(): void {
     $db = rs_db();
     if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'data'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN data MEDIUMTEXT NULL');
     if (!$db->query("SHOW COLUMNS FROM inbox_pictures LIKE 'role'")->fetch()) $db->exec("ALTER TABLE inbox_pictures ADD COLUMN role VARCHAR(8) NOT NULL DEFAULT ''");
+    rs_inbox_category_column();
+    $done = true;
+}
+
+// (2.3.0) Send logs says what happened: bug, crash, install, slow or other ('' from older stores).
+const RS_LOG_CATEGORIES = ['bug' => 'Bug', 'crash' => 'Crash', 'install' => 'Won\'t install', 'slow' => 'Slow', 'other' => 'Other'];
+function rs_inbox_category_column(): void {
+    static $done = false;
+    if ($done) return;
+    rs_inbox_table();
+    $db = rs_db();
+    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'category'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN category VARCHAR(16) NOT NULL DEFAULT ''");
     $done = true;
 }
 

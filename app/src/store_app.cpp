@@ -562,6 +562,8 @@ std::vector<Store::Control> Store::page_controls(const App &a) const
     c.push_back({Control::Favorite, -1}); /* (2.2.2) the star, at the end of that row */
     if (!inst.empty() && inst != "?" && !(a.beta && a.sig.empty()))
         c.push_back({Control::AutoUpdate, -1}); /* (2.2.2) a row of its own */
+    if (!inst.empty() && inst != "?" && !a.saves.empty() && !a.custom)
+        c.push_back({Control::Saves, -1}); /* (2.3.0) back up and restore, a row of its own */
     return c;
 }
 
@@ -861,6 +863,14 @@ void Store::picker_go(const std::string &path)
             }
         }
     picker_err_ = !list_dir(path, entries_, ext);
+    /* (2.3.0) A game's file: from a phone on the same Wi-Fi, as the first row of every folder. */
+    if (picker_mode_ == 0)
+    {
+        FsEntry phone;
+        phone.name = "Upload from your phone";
+        phone.path = kPhoneChoice;
+        entries_.insert(entries_.begin(), phone);
+    }
 }
 
 bool Store::update_picker(float dt)
@@ -891,7 +901,12 @@ bool Store::update_picker(float dt)
         if (pressed(pad::BtnCross) && n > 0)
         {
             const FsEntry &e = entries_[std::size_t(picker_sel_)];
-            if (e.is_dir)
+            if (e.path == kPhoneChoice)
+            {
+                picker_ = false; /* (2.3.0) the receiver's sheet instead */
+                open_upload(0, page_id_, picker_slot_);
+            }
+            else if (e.is_dir)
             {
                 picker_go(e.path);
                 play(int(Sfx::Select));
@@ -1161,7 +1176,12 @@ bool Store::update(const pad::State &p, float dt)
     }
     else
         speed_step_.clear();
-    if (job.kind == "storeupdate" && (job.phase == Phase::Done || job.phase == Phase::Failed))
+    phone_job_seen(job); /* (2.3.0) a phone's Delete or Move: how it went, back to the phone */
+    if (take_23_result(job))
+    {
+        /* (2.3.0) a backup, a restore, a mod */
+    }
+    else if (job.kind == "storeupdate" && (job.phase == Phase::Done || job.phase == Phase::Failed))
     {
         /* The store's own update: downloaded and checked, it goes to the installer. */
         engine().acknowledge();
@@ -1366,7 +1386,7 @@ bool Store::update(const pad::State &p, float dt)
             {
                 logs_view_ = st;
                 logs_result_ = msg;
-                logs_sel_ = st == 2 ? 1 : 2;
+                logs_sel_ = st == 2 ? 2 : 3; /* (2.3.0) Done, or Send again */
             }
             else
             {
@@ -1379,6 +1399,8 @@ bool Store::update(const pad::State &p, float dt)
 
     take_link_actions(); /* (2.0) what a linked phone sent */
     tick_auto_update();  /* (2.2.2) */
+    tick_clear();        /* (2.3.0) Clear download cache, on its thread */
+    if ((prefs_sync_t_ -= dt) <= 0) { prefs_sync_t_ = 1; sync_phone_prefs(); } /* (2.3.0) for the phone's view */
     check_news();        /* (2.2.2) What's new, once */
     {
         /* (2.0) A phone linked while Link a phone is open: said straight away. */
@@ -1464,6 +1486,11 @@ bool Store::update(const pad::State &p, float dt)
         const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
         const int sel = std::clamp(confirm_sel_ + (r ? 1 : 0) - (l ? 1 : 0), 0, last);
         if (sel != confirm_sel_) { confirm_sel_ = sel; play(int(Sfx::Move)); }
+        if (has_saves && pressed(pad::BtnTriangle))
+        {
+            backup_first_ = !backup_first_; /* (2.3.0) Back up saves first */
+            play(int(Sfx::Select));
+        }
         if (pressed(pad::BtnCircle) || (pressed(pad::BtnCross) && confirm_sel_ == 0))
         {
             confirm_ = false;
@@ -1473,7 +1500,8 @@ bool Store::update(const pad::State &p, float dt)
         {
             confirm_ = false;
             const bool keep_saves = last == 2 && confirm_sel_ == 1;
-            if (engine().remove(page_id_, keep_saves))
+            const bool first = has_saves && !keep_saves && backup_first_ && engine().saves_here(page_id_);
+            if (engine().remove(page_id_, keep_saves, first))
             {
                 notice_.clear();
                 page_focus_ = 0;
@@ -1653,6 +1681,8 @@ bool Store::update(const pad::State &p, float dt)
                 toggle_pin(a->id); /* (2.2.2) */
             else if (c.kind == Control::AutoUpdate)
                 toggle_auto(a->id); /* (2.2.2) */
+            else if (c.kind == Control::Saves)
+                open_saves(a->id); /* (2.3.0) */
             else if (c.kind == Control::Delete)
             {
                 if (engine().job().phase == Phase::Working)
@@ -3612,15 +3642,16 @@ void Store::draw_page(Gfx &gfx)
                                : "Updates replace only the app's own files. Anything else in its folder stays as it is.", 3);
     const float note_h = 24.6f * float(note.size());
     const bool can_delete = !inst.empty() && inst != "?";
-    bool has_auto = false;
+    bool has_auto = false, has_saves = false;
     for (const Control &c : ctl) has_auto = has_auto || c.kind == Control::AutoUpdate;
-    const float del_h = 56 + (has_auto ? 12 + 56 : 0); /* (2.2.3) the actions' bar; Auto-update's row */
+    for (const Control &c : ctl) has_saves = has_saves || c.kind == Control::Saves;
+    const float del_h = 56 + (has_auto ? 12 + 56 : 0) + (has_saves ? 12 + 56 : 0); /* (2.2.3) the actions' bar; Auto-update's row; (2.3.0) Saves' */
     float ph = 40 + head_h + 28 + btn_h;
     for (float part : {prog_h, notice_h, setup_h, rows_h, del_h, note_h})
         if (part > 0)
             ph += 28 + part;
     ph += 40;
-    ph = std::min(ph, H - py - (has_auto ? 80.f : 40.f)); /* (2.2.2) clear of the hints, with Auto-update's row */
+    ph = std::min(ph, H - py - (has_auto || has_saves ? 80.f : 40.f)); /* (2.2.2) clear of the hints, with Auto-update's row */
     glass(gfx, px, py, pw, ph, 34, C(kMidnight, 0.74f), true);
 
     float ry = py + 40;
@@ -3885,9 +3916,22 @@ void Store::draw_page(Gfx &gfx)
             draw_switch(gfx, ix + iw - 22 - 52, ry + bh / 2, on, af);
             ry += bh;
         }
+        if (has_saves)
+        {
+            /* (2.3.0) Saves: back up, restore, or send them to a phone. */
+            ry += 12;
+            const bool sf = focused(Control::Saves, -1);
+            glass(gfx, ix, ry, iw, bh, 18, sf ? C(kFrost, 0.12f) : Color{1, 1, 1, 0.05f}, false);
+            ring(gfx, ix, ry, iw, bh, 18, sf ? 1.f : 0.f, true);
+            gfx.text_mid(Font::SemiBold, 19, ix + 22, ry + bh / 2, C(kFrost), Align::Left, "Saves");
+            gfx.text_mid(Font::Regular, 16, ix + 22 + gfx.measure(Font::SemiBold, 19, "Saves") + 14, ry + bh / 2, C(kMuted), Align::Left,
+                         "Back up, restore, or keep them on your phone");
+            if (chevron_) gfx.image(chevron_, ix + iw - 22 - 22, ry + bh / 2 - 11, 22, 22, C(kSoft));
+            ry += bh;
+        }
     }
     ry += 28;
-    if (ry + note_h < py + ph - (has_auto ? 30.f : 0.f))
+    if (ry + note_h < py + ph - (has_auto || has_saves ? 30.f : 0.f))
     {
         if (a.custom)
         {
@@ -3985,7 +4029,7 @@ void Store::draw_picker(Gfx &gfx)
     const float row_h = 72, gap = 8;
     if (picker_err_)
         gfx.text_mid(Font::Regular, 19, rx, ry + 30, C(kMuted), Align::Left, "This folder can't be opened.");
-    else if (entries_.empty())
+    else if (entries_.size() <= (picker_mode_ == 0 ? 1u : 0u))
         gfx.text_mid(Font::Regular, 19, rx, ry + 30, C(kMuted), Align::Left,
                      picker_mode_ == 1 ? "No .elf files or folders here."
                      : hint_line.rfind("Your own", 0) == 0 ? "No disc images or folders here."
@@ -3996,12 +4040,18 @@ void Store::draw_picker(Gfx &gfx)
         const bool f = i == picker_sel_ && picker_col_ == 1;
         gfx.panel(rx, ry, rw, row_h, {1, 1, 1, f ? 0.14f : 0.06f}, 1.f, 18, {1, 1, 1, f ? 0.0f : 0.12f}, 1.25f);
         ring(gfx, rx, ry, rw, row_h, 18, f ? 1.f : 0.f);
+        const bool phone = e.path == kPhoneChoice; /* (2.3.0) */
         Texture *ic = e.is_dir ? folder_icon_ : disc_icon_;
-        if (ic)
+        if (phone)
+        {
+            gfx.panel(rx + 22, ry + row_h / 2 - 16, 22, 32, Color{0, 0, 0, 0}, 1.f, 5, C(kCyan), 2.f);
+            gfx.panel(rx + 29, ry + row_h / 2 + 9, 8, 3, C(kCyan), 1.f, 1.5f);
+        }
+        else if (ic)
             gfx.image(ic, rx + 20, ry + row_h / 2 - 15, 30, 30, e.is_dir ? C(kSoft) : C(kCyan));
-        const char *tag = e.is_dir ? "Open" : "Use this";
+        const char *tag = phone ? "Same Wi-Fi" : e.is_dir ? "Open" : "Use this";
         const float tw = gfx.measure(Font::Bold, 15, tag);
-        const std::string sz = e.is_dir ? "" : size_text(e.size);
+        const std::string sz = e.is_dir || phone ? "" : size_text(e.size);
         const float sw = sz.empty() ? 0 : gfx.measure(Font::Regular, 17, sz) + 24;
         gfx.text_mid(Font::SemiBold, 20, rx + 68, ry + row_h / 2, C(kFrost), Align::Left,
                      fit(gfx, Font::SemiBold, 20, rw - 68 - tw - sw - 48, e.name));
@@ -4292,6 +4342,9 @@ void Store::open_logs(const std::string &id)
     logs_msg_.clear();
     logs_result_.clear();
     logs_sel_ = 0;
+    logs_cat_ = -1; /* (2.3.0) what happened: picked first */
+    logs_chip_ = 0;
+    logs_fb_ = false;
     std::string m;
     logs_view_ = engine().logs_state(m) == 1 ? 1 : 0;
     App a;
@@ -4323,22 +4376,49 @@ bool Store::update_logs(float dt)
         play(int(Sfx::Back));
         return true;
     }
+    /* (2.3.0) 0 what happened (the chips), 1 the message, 2 Cancel, 3 Send. */
     int sel = logs_sel_;
-    if (u) sel = 0;
-    if (d && sel == 0) sel = 2;
-    if (sel > 0 && l) sel = 1;
-    if (sel > 0 && r) sel = 2;
+    if (sel == 0)
+    {
+        const int c = std::clamp(logs_chip_ + (r ? 1 : 0) - (l ? 1 : 0), 0, 4);
+        if (c != logs_chip_) { logs_chip_ = c; play(int(Sfx::Move)); }
+        if (d) sel = 1;
+    }
+    else if (sel == 1)
+    {
+        if (u) sel = 0;
+        if (d) sel = 3;
+    }
+    else
+    {
+        if (u) sel = 1;
+        if (l) sel = 2;
+        if (r) sel = 3;
+    }
     if (sel != logs_sel_) { logs_sel_ = sel; play(int(Sfx::Move)); }
+    static const char *kCats[5] = {"bug", "crash", "install", "slow", "other"};
     if (pressed(pad::BtnCross))
     {
         if (logs_sel_ == 0)
-            open_kb(0);
+        {
+            logs_cat_ = logs_chip_;
+            logs_sel_ = 1;
+            play(int(Sfx::Select));
+        }
         else if (logs_sel_ == 1)
+            open_kb(0);
+        else if (logs_sel_ == 2)
         {
             logs_ = false;
             play(int(Sfx::Back));
         }
-        else if (engine().send_logs(logs_app_, logs_msg_))
+        else if (!logs_ready())
+        {
+            logs_view_ = 0;
+            logs_sel_ = logs_cat_ < 0 ? 0 : 1;
+            play(int(Sfx::Error));
+        }
+        else if (engine().send_logs(logs_app_, logs_msg_, kCats[std::clamp(logs_cat_, 0, 4)]))
         {
             logs_view_ = 1;
             logs_result_.clear();
@@ -4348,6 +4428,14 @@ bool Store::update_logs(float dt)
             play(int(Sfx::Error));
     }
     return true;
+}
+
+/* (2.3.0) Send logs is ready: what happened is picked, and the message has 3 characters that aren't spaces. */
+bool Store::logs_ready() const
+{
+    int n = 0;
+    for (const char c : logs_msg_) n += c != ' ' && c != '\n' && c != '\t';
+    return logs_cat_ >= 0 && n >= 3;
 }
 
 bool Store::update_keyboard(float dt)
@@ -4465,7 +4553,11 @@ void Store::draw_logs(Gfx &gfx)
     std::string report_url;
     const std::string report = logs_view_ == 2 ? engine().logs_report(report_url) : std::string();
     const float report_h = report.empty() ? 0.f : 30 + 200;
-    const float bh = pad + 44 + 14 + 30 * float(lines.size()) + 18 + 27 * float(files.size()) + 26 + 22 + 10 + msg_h +
+    const bool ready = logs_ready();
+    const bool asking = logs_view_ == 0 || logs_view_ == 3;
+    const float chips_h = 22 + 10 + 52 + 26; /* (2.3.0) what happened */
+    const float hint_h = asking && !ready ? 14 + 22 : 0;
+    const float bh = pad + 44 + 14 + 30 * float(lines.size()) + 18 + 27 * float(files.size()) + 26 + chips_h + 22 + 10 + msg_h + hint_h +
                      (result.empty() ? 0.f : 18 + 26) + report_h + 30 + 64 + pad;
     const float by = (H - bh) / 2;
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
@@ -4479,10 +4571,26 @@ void Store::draw_logs(Gfx &gfx)
         y += 27;
     }
     y += 26;
-    gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, "YOUR MESSAGE \xC2\xB7 OPTIONAL", 2);
+    {
+        /* (2.3.0) What happened: one of five, picked first. */
+        gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, "WHAT HAPPENED", 2);
+        y += 22 + 10;
+        static const char *kNames[5] = {"Bug", "Crash", "Won't install", "Slow", "Other"};
+        const float gap = 12, cw = (iw - gap * 4) / 5;
+        for (int i = 0; i < 5; ++i)
+        {
+            const float x = bx + pad + float(i) * (cw + gap);
+            const bool picked = logs_cat_ == i, on = asking && logs_sel_ == 0 && logs_chip_ == i;
+            gfx.panel(x, y, cw, 52, picked ? C(kCyan) : C(kFrost, on ? 0.16f : 0.07f), 1.f, 26, picked || on ? Color{0, 0, 0, 0} : kRim, picked || on ? 0.f : 1.25f);
+            ring(gfx, x, y, cw, 52, 26, on ? 1.f : 0.f, true);
+            gfx.text_mid(Font::SemiBold, 19, x + cw / 2, y + 26, picked ? C(kMidnight) : C(kFrost), Align::Center, kNames[i]);
+        }
+        y += 52 + 26;
+    }
+    gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, "YOUR MESSAGE", 2);
     y += 22 + 10;
     {
-        const bool on = logs_view_ != 1 && logs_view_ != 2 && logs_sel_ == 0;
+        const bool on = logs_view_ != 1 && logs_view_ != 2 && logs_sel_ == 1;
         gfx.panel(bx + pad, y, iw, msg_h, C(kFrost, on ? 0.12f : 0.06f), 1.f, 20, on ? Color{0, 0, 0, 0} : kRim, on ? 0.f : 1.25f);
         ring(gfx, bx + pad, y, iw, msg_h, 20, on ? 1.f : 0.f, true);
         if (msg.empty())
@@ -4491,6 +4599,12 @@ void Store::draw_logs(Gfx &gfx)
         else
             draw_lines(gfx, Font::Regular, 21, bx + pad + 24, y + 28, 31, C(kFrost), msg);
         y += msg_h;
+    }
+    if (hint_h > 0)
+    {
+        y += 14;
+        gfx.text_mid(Font::SemiBold, 18, bx + pad, y + 11, C(kAmber), Align::Left, "Pick what happened and write a few words");
+        y += 22;
     }
     if (!result.empty())
     {
@@ -4526,9 +4640,9 @@ void Store::draw_logs(Gfx &gfx)
         for (int i = 0; i < 2; ++i)
         {
             const float x = bx + pad + float(i) * (w2 + gap);
-            const bool on = !sending && logs_sel_ == i + 1;
+            const bool on = !sending && logs_sel_ == i + 2;
             Color bg = i == 1 ? C(kCyan, on ? 1.f : 0.3f) : C(kFrost, on ? 1.f : 0.12f);
-            if (sending) bg.a *= 0.5f;
+            if (sending || (i == 1 && !ready)) bg.a *= 0.4f; /* (2.3.0) Send stays off until it's ready */
             gfx.panel(x, y, w2, 64, bg, 1.f, 20);
             ring(gfx, x, y, w2, 64, 20, on ? 1.f : 0.f, true);
             gfx.text_mid(Font::Bold, 22, x + w2 / 2, y + 32, on ? C(kMidnight) : C(kFrost, sending ? 0.6f : 1.f), Align::Center, labels[i]);
@@ -4553,8 +4667,8 @@ void Store::draw_keyboard(Gfx &gfx)
     float y = by + pad;
     const std::string &text = kb_text();
     const char *title = kb_mode_ == 1 ? "A GitHub repo, or a list's address" : kb_mode_ == 2 ? "What's wrong with this source?" : "Your message";
-    const char *empty = kb_mode_ == 1 ? "owner/name, or https://â¦"
-                        : kb_mode_ == 2 ? "It's broken, it isn't what it says, or it shouldn't be hereâ¦"
+    const char *empty = kb_mode_ == 1 ? "owner/name, or https://\xE2\x80\xA6"
+                        : kb_mode_ == 2 ? "It's broken, it isn't what it says, or it shouldn't be here\xE2\x80\xA6"
                                         : "What were you doing when it went wrong?";
     gfx.text_mid(Font::ExtraBold, 30, bx + pad, y + 20, C(kFrost), Align::Left, title);
     gfx.text_mid(Font::Regular, 18, bx + bw - pad, y + 20, text.size() >= kMessageMax ? C(0xFFB4A8) : C(kDim), Align::Right,
@@ -4691,7 +4805,7 @@ void Store::draw_confirm(Gfx &gfx)
         body += " It can't be undone.";
     const auto title = wrap(gfx, Font::ExtraBold, 32, iw, "Delete " + a->name + "?", 2);
     const auto lines = wrap(gfx, Font::Regular, 20, iw, body, saves ? 8 : 5);
-    const float bh = pad + 40 * float(title.size()) + 18 + 30 * float(lines.size()) + 36 + 64 + pad;
+    const float bh = pad + 40 * float(title.size()) + 18 + 30 * float(lines.size()) + 36 + (saves ? 56 + 24 : 0) + 64 + pad;
     const float by = (H - bh) / 2;
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
     float y = by + pad;
@@ -4699,6 +4813,16 @@ void Store::draw_confirm(Gfx &gfx)
         gfx.text_mid(Font::ExtraBold, 32, bx + pad, y + 40 * (float(i) + 0.5f), C(kFrost), Align::Left, title[i]);
     y += 40 * float(title.size()) + 18;
     y += draw_lines(gfx, Font::Regular, 20, bx + pad, y, 30, C(kSoft), lines) + 36;
+    if (saves)
+    {
+        /* (2.3.0) Back up saves first: Triangle turns it on or off. */
+        glass(gfx, bx + pad, y, iw, 56, 18, Color{1, 1, 1, 0.05f}, false);
+        gfx.text_mid(Font::SemiBold, 19, bx + pad + 22, y + 28, C(kFrost), Align::Left, "Back up saves first");
+        gfx.text_mid(Font::Regular, 16, bx + pad + 22 + gfx.measure(Font::SemiBold, 19, "Back up saves first") + 14, y + 28, C(kMuted), Align::Left,
+                     "Triangle turns it on or off");
+        draw_switch(gfx, bx + pad + iw - 22 - 52, y + 28, backup_first_, false);
+        y += 56 + 24;
+    }
     const int n = saves ? 3 : 2;
     const float gap = 16, w2 = (iw - gap * float(n - 1)) / float(n);
     const char *labels2[2] = {"Cancel", "Delete"};

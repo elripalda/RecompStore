@@ -423,3 +423,15 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .whats-new .wn-body p{margin:0 0 10px}
 .whats-new .wn-body ul{margin:0 0 10px;padding-left:20px}
 .whats-new .wn-body li{margin:0 0 6px}
+
+/* (2.3.0) My PS5: storage, downloads, managing each app */
+.drives-card{padding:16px 18px;display:grid;gap:14px}
+.drive-row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center}
+.drive-name{font-weight:700}.drive-num{color:var(--muted,#aab6c6);font-size:14px}
+.drive-bar{grid-column:1/-1;height:10px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden}
+.drive-bar i{display:block;height:100%;background:#35d6f4;border-radius:5px}.drive-bar.unknown{background:rgba(255,255,255,.05)}
+.ps5-app{flex-wrap:wrap}.ps5-acts{display:flex;flex-wrap:wrap;gap:8px;width:100%;margin-top:4px}
+.chip-btn{font:inherit;font-size:14px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:inherit;cursor:pointer;min-height:36px}
+.chip-btn.on{background:rgba(53,214,244,.18);border-color:rgba(53,214,244,.5)}.chip-btn.danger{color:#ff8a80;border-color:rgba(229,72,77,.4)}
+select.chip-btn{appearance:auto;max-width:100%}
+.req-line{display:block;font-size:14px;color:#ffc857;margin-top:2px}.req-line.ok{color:#9ff0c6}.req-line.bad{color:#ffb4a8}

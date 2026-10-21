@@ -267,6 +267,9 @@ bool Store::update_panel(float dt)
     case PanelNews: return update_news_panel(dt);
     case PanelTabs: return update_tabs_panel(dt);
     case PanelDelete: return update_delete_panel(dt);
+    case PanelUpload: return update_upload_panel(dt); /* (2.3.0) */
+    case PanelSaves: return update_saves_panel(dt);
+    case PanelAsk: return update_ask_panel(dt);
     default: panel_ = 0; return true;
     }
 }
@@ -283,6 +286,9 @@ void Store::draw_panel(Gfx &gfx)
     case PanelNews: draw_news_panel(gfx, k); break;
     case PanelTabs: draw_tabs_panel(gfx, k); break;
     case PanelDelete: draw_delete_panel(gfx, k); break;
+    case PanelUpload: draw_upload_panel(gfx, k); break; /* (2.3.0) */
+    case PanelSaves: draw_saves_panel(gfx, k); break;
+    case PanelAsk: draw_ask_panel(gfx, k); break;
     default: break;
     }
     gfx.set_layer();
@@ -296,6 +302,8 @@ std::string Store::panel_cross_hint() const
     case PanelPlace: return "Install here";
     case PanelNews: return "Got it";
     case PanelTabs: return "On or off";
+    case PanelUpload: return "Close";
+    case PanelAsk: return "Choose";
     default: return "Choose";
     }
 }
@@ -606,20 +614,7 @@ void Store::cache_look(bool now)
     cache_t_ = time_;
 }
 
-void Store::clear_cache(std::string &note, bool &bad)
-{
-    std::uint64_t freed = 0;
-    std::size_t files = 0;
-    std::string why;
-    const bool ok = engine().clear_downloads(freed, files, why);
-    if (files)
-        note = "Cleared " + size_text(freed) + " from the download cache." + (why.empty() ? std::string() : " " + why);
-    else
-        note = why.empty() ? std::string("The download cache is empty already.") : why;
-    bad = !ok;
-    cache_look(true);
-    play(int(ok ? Sfx::Complete : Sfx::Error));
-}
+/* (2.3.0) clear_cache: store_app_23.cpp (on the engine's thread, with progress). */
 
 void Store::draw_drive_bars(Gfx &gfx, float x, float y0, float w, bool compact)
 {
@@ -633,11 +628,20 @@ void Store::draw_drive_bars(Gfx &gfx, float x, float y0, float w, bool compact)
     }
     for (const DriveSpace &d : drives)
     {
-        if (!d.total) continue;
         std::uint64_t apps = 0;
         for (const ConsoleApp &c : console_)
             if (c.root == d.homebrew && c.size > 0) apps += std::uint64_t(c.size);
         const std::uint64_t cache = d.homebrew == kHomebrew ? cache_now_ : 0;
+        /* (2.2.4) Figures that can't be right (none, or less than what's on it) aren't drawn. */
+        if (!d.sized || !d.total || apps + cache > d.total)
+        {
+            gfx.text_mid(Font::Bold, compact ? 19.f : 21.f, x, y + 12, C(kFrost), Align::Left, d.label);
+            gfx.text_mid(Font::Regular, compact ? 16.f : 18.f, x + w, y + 12, C(kSoft), Align::Right, "Size unknown");
+            const float by = y + (compact ? 30 : 34), bh = compact ? 12.f : 16.f;
+            gfx.panel(x, by, w, bh, C(kFrost, 0.06f), 1.f, bh / 2);
+            y += compact ? 64 : 76;
+            continue;
+        }
         const std::uint64_t used = d.total > d.free ? d.total - d.free : 0;
         const std::uint64_t other = used > apps + cache ? used - apps - cache : 0;
         gfx.text_mid(Font::Bold, compact ? 19.f : 21.f, x, y + 12, C(kFrost), Align::Left, d.label);
@@ -702,7 +706,7 @@ void Store::draw_storage_panel(Gfx &gfx, float k)
     std::stable_sort(big.begin(), big.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return a->size > b->size; });
     if (big.size() > 6) big.resize(6);
     int nd = 0;
-    for (const DriveSpace &d : drives) nd += d.total ? 1 : 0;
+    nd = int(drives.size()); /* (2.2.4) a drive whose size is unknown has its row too */
     const float bw = 1100, pad = 48;
     const float bh = pad + 44 + 20 + float(std::max(1, nd)) * 76 + 30 + 24 + 30 + 14 + 44 * float(std::max<std::size_t>(1, big.size())) + 24 + 64 + pad;
     float bx, by;
@@ -1307,11 +1311,12 @@ bool Store::update_storage_section(float dt, bool u, bool d)
     (void)dt;
     cache_look(false);
     sync_console();
-    const int s = std::clamp(sto_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, 1);
+    const int s = std::clamp(sto_row_ + (d ? 1 : 0) - (u ? 1 : 0), 0, 2);
     if (s != sto_row_) { sto_row_ = s; play(int(Sfx::Move)); }
     if (!pressed(pad::BtnCross)) return true;
     if (sto_row_ == 0) clear_cache(settings_note_, settings_note_bad_);
-    else open_panel(PanelStorage);
+    else if (sto_row_ == 1) open_panel(PanelStorage);
+    else open_upload(1, "", -1); /* (2.3.0) */
     return true;
 }
 
@@ -1325,12 +1330,14 @@ void Store::draw_storage_section(Gfx &gfx, float cx, float top, float cw, float 
     {
         const char *title, *help;
         std::string value;
-    } rows[2] = {
+    } rows[3] = {
         {"Clear download cache", "Downloads the store keeps while it installs. What an install or the queue is using stays.",
-         cache_now_ ? size_text(cache_now_) + (cache_files_ == 1 ? " in 1 file" : " in " + std::to_string(cache_files_) + " files") : std::string("Empty")},
+         clearing_ ? std::string("Clearing\xE2\x80\xA6")
+         : cache_now_ ? size_text(cache_now_) + (cache_files_ == 1 ? " in 1 file" : " in " + std::to_string(cache_files_) + " files") : std::string("Empty")},
         {"See what's using space", "Each drive, the apps on it, and the biggest folders.", "Open"},
+        {"Upload from your phone", "Send files from a phone on the same Wi-Fi. They land in Uploads.", "Open"}, /* (2.3.0) */
     };
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 3; ++i)
     {
         gfx.panel(cx, y, cw, 1.25f, kLine, 1.f, 0);
         if (in_section_ && sto_row_ == i) ring(gfx, cx - 12, y + 6, cw + 24, 82, 18, 1.f, true);

@@ -52,6 +52,12 @@ struct LinkInfo
 struct LinkAction
 {
     std::string kind, app, repo, list, report;
+    /* (2.3.0) The phone's request number (requests in the state say how it went), a folder (an app
+     * the store didn't install), where to move it (a homebrew folder), on/off (favorite,
+     * autoupdate: 1 on, 0 off, -1 not said) and text typed on the phone. */
+    long long id = 0;
+    std::string folder, to, text;
+    int on = -1;
 };
 
 /* (1.1.2) A file a disc must have: its path on the disc, its exact size and, when has_crc,
@@ -215,6 +221,18 @@ struct App
     long long stars = -1, downloads = -1;
     /* (2.0) Only consoles the admin marked as testers see it (the test catalog): a badge says so. */
     bool testing = false;
+    /* (2.3.0) What it needs to be ready to play, ticked in the admin ("requires"): loader, smp,
+     * kstuff, etahen, internet, usb. The store checks those it can; the rest show grey. */
+    std::vector<std::string> requires_;
+    /* (2.3.0) Its mods: the folder they go in, inside its own ("modsDir", default "mods"), and each
+     * one (a GitHub release file, its SHA-256, the folder it's unpacked or copied into). */
+    std::string mods_dir;
+    struct Mod
+    {
+        std::string id, name, author, blurb, repo, asset, sha256, target;
+        std::uint64_t size = 0;
+    };
+    std::vector<Mod> mods;
     /* Filled by the engine: where its art was saved, empty until it is. */
     std::string icon_file, hero_file, logo_file;
     /* (2.0) data_dir and saves as the catalog says them, before the engine points them at
@@ -234,12 +252,23 @@ struct Section
     std::string title;  /* above it; a spotlight's kicker */
     std::string layout; /* "row" (sideways), "grid" (every game, rows of six) or "wide" */
     bool all = false;   /* "games": every game in the store, in the admin's order */
+    /* (2.3.0) type "collection": the collection's id (Catalog::collections); "liked": Most liked
+     * (the charts' likes), category optional. */
+    std::string collection;
     std::vector<std::string> ids; /* "games": these, in this order; "spotlight": the first */
+};
+
+/* (2.3.0) A collection the admin made: its name, a line about it, its apps in order. */
+struct Collection
+{
+    std::string id, title, blurb;
+    std::vector<std::string> ids;
 };
 
 struct Catalog
 {
     std::vector<App> apps;
+    std::vector<Collection> collections; /* (2.3.0) */
     std::vector<App> soon; /* Coming soon */
     std::vector<Section> sections; /* empty: the store's own (Latest games, Coming soon) */
     std::vector<std::string> featured;
@@ -308,6 +337,14 @@ struct Charts
 {
     std::vector<std::string> top, trending, fresh /* "new" */, updated;
     std::vector<std::pair<std::string, ChartStat>> stats;
+    /* (2.3.0) Likes ("likes"): each app's count, most liked first. */
+    std::vector<std::pair<std::string, long long>> likes;
+    long long likes_of(const std::string &id) const
+    {
+        for (const auto &kv : likes)
+            if (kv.first == id) return kv.second;
+        return 0;
+    }
     /* (2.2.2) People also installed ("also"): for an app, other apps' IDs, most telling first. */
     std::vector<std::pair<std::string, std::vector<std::string>>> also;
     bool have = false;
@@ -410,12 +447,56 @@ struct DriveSpace
     std::string label, mount, homebrew;
     std::uint64_t total = 0, free = 0;
     bool from_smp = false;
+    bool sized = true; /* (2.2.4) false: its size can't be told (Console storage without ShadowMountPlus) */
 };
 
 /* (2.2.2) ShadowMountPlus's version strings, compared loosely (drakmor's tags aren't uniform):
  * numbers in order, then the beta number (none is newer than any beta), then fix. -1 a is older,
  * 0 the same, 1 a is newer, 2 one of them can't be compared ("unknown", ""). */
 int smp_version_cmp(const std::string &a, const std::string &b);
+
+/* (2.3.0) Upload from your phone: the receiver payload's job (docs/store-2.3.md, 2). */
+struct ReceiverJob
+{
+    std::string title;     /* the phone page's heading */
+    std::string dest;      /* where uploads go, "" none */
+    std::string ext;       /* ".iso .bin", "" any */
+    std::string backups;   /* the backups folder it may serve, read only, "" none */
+    std::string backup_id; /* an app: only its backups, and a backup sent goes to its folder */
+    std::uint64_t max = 0; /* the biggest file, bytes; 0: the real free space less 512 MB */
+    int idle = 600;
+};
+/* What the receiver last said, for the screen it's open for. */
+struct ReceiverStatus
+{
+    bool known = false;     /* it answered for this screen */
+    std::string state;      /* starting, listening, receiving, sending, stopped, failed, locked; "" not yet */
+    std::string ip, file, last, error;
+    std::string why;        /* the store couldn't start it: why ("" it could) */
+    int port = 0, files = 0;
+    std::uint64_t bytes = 0, total = 0, speed = 0;
+};
+/* (2.3.0) A save backup (docs/store-2.3.md, 3). */
+struct Backup
+{
+    std::string path, file;    /* the zip, and its name */
+    std::string made, version; /* from its manifest ("" when it can't be read) */
+    std::string where;         /* "Console storage", "USB drive 1" */
+    bool usb = false, auto_made = false;
+    bool ok = false;           /* its manifest says it's this app's */
+    std::uint64_t size = 0;
+    long long mtime = 0;
+};
+/* (2.3.0) Restore my apps: a list of apps from a phone, a USB drive or a file. */
+struct MyApp
+{
+    std::string id, name, version;
+};
+struct MyAppsList
+{
+    std::string from, made; /* where it came from ("Ruben's iPhone", "USB drive 1"), when it was made */
+    std::vector<MyApp> apps;
+};
 
 class Engine
 {
@@ -632,6 +713,65 @@ public:
     /* Take over a game that was installed by hand: the store records its version (its
      * recompstore.json, or param.json's contentVersion) and handles its updates from now. */
     bool adopt(const std::string &app_id, std::string &version_out);
+
+    /* ---- (2.3.0) docs/store-2.3.md ---- */
+    /* Upload from your phone: the receiver payload started for one screen (code: the 6 digits it
+     * asks for), stopped when the screen closes, and what it last said (read from its status file;
+     * cheap enough for each few frames). false and why when it can't even be asked. */
+    bool start_receiver(const ReceiverJob &job, std::string &code, std::string &why);
+    void stop_receiver();
+    ReceiverStatus receiver_status() const;
+    /* The real space of a drive or the console's storage (ShadowMountPlus's figures): false when it
+     * can't be told. */
+    static bool space_of(const std::string &path, std::uint64_t &total, std::uint64_t &avail);
+    /* Save backups: an app's, newest first (the console's, then USB drives'); whether any of its
+     * saves are on the console; back them up (a job, kind "backup"; usb: a copy on the first USB
+     * drive too); restore one (kind "restore": the current saves backed up first); delete one. */
+    std::vector<Backup> backups(const std::string &app_id) const;
+    bool saves_here(const std::string &app_id) const;
+    bool backup_saves(const std::string &app_id, bool usb);
+    bool restore_saves(const std::string &app_id, const std::string &zip);
+    bool delete_backup(const std::string &app_id, const std::string &zip, std::string &why);
+    std::string backups_dir() const; /* /data/recompstore/backups */
+    std::string usb_drive() const;   /* the first USB drive in ("/mnt/usb0"), "" none */
+    /* Delete and Move with the saves backed up first (a failed backup stops it). */
+    bool remove(const std::string &app_id, bool keep_saves, bool backup_first);
+    bool manage(const std::string &kind, const std::string &folder, const std::string &dest, const std::string &backup_app);
+    /* Clear download cache on a thread of its own: state 0 nothing asked, 1 clearing, 2 done, 3 some
+     * couldn't go (why); done/total: files gone of those it looked at. */
+    bool clear_downloads_start();
+    int clear_state(std::uint64_t &freed, std::size_t &done, std::size_t &total, std::string &why) const;
+    void clear_ack();
+    /* Ready to play: whether a payload loader answers on 127.0.0.1:9021 (1 yes, 0 no, -1 not
+     * looked yet). Looks on a thread, at most every 30 s, opening and closing a connection with
+     * nothing sent. */
+    int loader_seen();
+    /* Likes: like or unlike an app (sent to the site), whether this console likes it. */
+    void like(const std::string &app_id, bool on);
+    bool liked(const std::string &app_id) const;
+    long long like_count(const std::string &app_id) const; /* the site's, with this console's latest like in it */
+    /* Link a phone: a request's outcome, for the phone (state "waiting", "done", "failed",
+     * "ignored"), and the state sent soon rather than within the minute. */
+    void link_result(long long id, const std::string &kind, const std::string &app, const std::string &state, const std::string &text);
+    void link_push_soon();
+    /* The favorites and Auto-update choices (the screens keep them), for the phone's state. */
+    void set_phone_prefs(const std::vector<std::string> &favs, const std::vector<std::string> &autos, bool all);
+    /* Restore my apps: the installed store apps as a list (my-apps.json), saved to a file; read one
+     * back; the lists the site keeps for the phones linked to this console (ask, then 0 none yet, 1
+     * asking, 2 here, 3 couldn't). */
+    std::string my_apps_json() const;
+    bool save_my_apps(const std::string &path, std::string &why) const;
+    static bool read_my_apps(const std::string &path, MyAppsList &out, std::string &why);
+    void ask_my_apps();
+    int my_apps_lists(std::vector<MyAppsList> &out, std::string &why) const;
+    /* Mods: a mod's state for an installed app (0 not installed, 1 on, 2 off), and a job on it
+     * ("install", "off", "on", "remove"; kind "mod"). */
+    int mod_state(const App &a, const App::Mod &m) const;
+    bool mod_job(const std::string &app_id, const std::string &mod_id, const std::string &what);
+    /* Send logs with what happened (category: bug, crash, install, slow, other) and, from a beta's
+     * Feedback, the tester's verdict (works, crashes, slow, other) and its build. */
+    bool send_logs(const std::string &app_id, const std::string &message, const std::string &category,
+                   const std::string &feedback = "", const std::string &build = "");
 };
 
 /* (1.1.0) A log file Send logs takes: where it is, and its name as sent (store.log, or its
