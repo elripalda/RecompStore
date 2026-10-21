@@ -100,6 +100,9 @@ function rs_game_defaults(): array {
         // When the release only has a bigger zip (a source archive): where the game's own zip
         // is inside it, its whole name there (* and ? allowed). Needs Recomp Store 1.0.4.
         'inside' => '',
+        // (2.5.1) The title ID of the app in its zip, when it's another app's (two releases with
+        // the same ID): the store installs it under this entry's ID instead. Empty: the same.
+        'zip_id' => '',
         'icon' => '', 'hero' => '', 'hero_web' => '',
         'focus_x' => 50, 'focus_y' => 30, 'zoom' => 100,
         // A logo in place of the name: where it sits on the banner (b) and the game page (p),
@@ -170,9 +173,15 @@ const RS_PART_FROM = '1.1.2';
 const RS_7Z_FROM = '1.9.1';
 // (2.0.1) A Title Update copied in as it is (raw), for a port whose own installer reads it (GTA IV).
 const RS_RAW_FROM = '2.0.1';
+const RS_ZIPID_FROM = '2.5.1'; // (2.5.1) installed under another title ID than its zip's
 // (2.0) What only the 2.0 store reads: an app that isn't a game (Emulators, Apps, Tools) needs it,
 // and anything that needs it is published apart, in v2Apps, which 1.x stores never read.
 const RS_V2_FROM = '1.9.1';
+// (2.5.1) The zip's own title ID when it isn't this entry's, else ''.
+function rs_zip_id(array $g): string {
+    $z = strtoupper(trim((string)($g['zip_id'] ?? '')));
+    return preg_match('/^[A-Z]{4}\d{5}$/', $z) && $z !== (string)$g['id'] ? $z : '';
+}
 function rs_min_store(array $g): string {
     $min = trim((string)$g['min_store']);
     $needs = function (string $v) use (&$min) { if ($min === '' || version_compare($min, $v, '<')) $min = $v; };
@@ -181,6 +190,7 @@ function rs_min_store(array $g): string {
     $file = $g['source'] === 'github' ? (string)$g['asset'] : (string)parse_url((string)$g['url'], PHP_URL_PATH);
     if (preg_match('/\.7z$/i', $file)) $needs(RS_7Z_FROM);
     if (trim((string)$g['inside']) !== '') $needs(RS_INSIDE_FROM);
+    if (rs_zip_id($g) !== '') $needs(RS_ZIPID_FROM);
     if ($g['setup']) {
         $slots = json_decode((string)$g['slots'], true);
         foreach (is_array($slots) ? $slots : [] as $sl) {
@@ -661,6 +671,7 @@ function rs_app_entry(array $g, int $order): array {
         $app['setup'] = ['dataDir' => $g['data_dir'], 'slots' => is_array($slots) ? $slots : []];
     }
     if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
+    if (($zid = rs_zip_id($g)) !== '') $app['titleId'] = $zid; // (2.5.1)
     $links = rs_clean_links($g['links']);
     if ($links) $app['links'] = $links;
     $saves = rs_saves_list((string)$g['saves']);

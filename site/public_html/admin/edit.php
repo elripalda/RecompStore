@@ -27,7 +27,7 @@ $modsTemplate = json_encode([['id' => 'hd-pack', 'name' => 'HD textures', 'autho
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $text = ['id', 'name', 'author', 'blurb', 'description', 'news', 'credits', 'version', 'released', 'size', 'needs',
-             'repo', 'asset', 'inside', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs', 'keep'];
+             'repo', 'asset', 'inside', 'zip_id', 'url', 'sha256', 'data_dir', 'slots', 'min_store', 'date', 'saves', 'logs', 'keep'];
     foreach ($text as $k) $g[$k] = trim((string)($_POST[$k] ?? ''));
     $g['kind'] = ($_POST['kind'] ?? '') === 'community' ? 'community' : 'original';
     $g['source'] = ($_POST['source'] ?? '') === 'url' ? 'url' : 'github';
@@ -108,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($badTag !== '') $error = 'Labels: "' . $badTag . '" is too long. Up to 6 short labels, comma-separated, like Recomp, Xbox 360.';
     elseif (($isNew || $g['id'] !== $oldId) && rs_move_block($g['id'])) $error = RS_MOVE_BLOCK[0] . ' to ' . RS_MOVE_BLOCK[1] . ' are kept for the PS5 store itself (it gives them to games whose own ID is taken on a console). Pick another title ID.';
     elseif (($isNew || $g['id'] !== $oldId) && isset(rs_taken_ids()[$g['id']])) $error = $g['id'] . ' is already used outside the store (' . (rs_taken_ids()[$g['id']] ?: 'see Settings') . '). Two apps with one title ID clash on a PS5: pick another.';
+    elseif ($g['zip_id'] !== '' && (!preg_match('/^[A-Za-z]{4}\d{5}$/', $g['zip_id']) || strcasecmp($g['zip_id'], $g['id']) === 0)) $error = 'Title ID in its zip: four letters and five numbers, like PPSA12345, and not this game\'s own (leave it empty then).';
     elseif ($g['inside'] !== '' && (!preg_match('/\.zip$/i', $g['inside']) || strlen($g['inside']) > 300 || $g['inside'][0] === '/' || preg_match('#\\\\|(^|/)\.\.(/|$)|[\x00-\x1f\x7f]#', $g['inside']))) $error = 'The zip inside the download: its whole name in that zip, ending in .zip, with / between folders (for example */prospero/builder/Assets/payload.zip). No .. and no \\.';
     elseif ($g['setup'] && $g['slots'] !== '' && !is_array(json_decode($g['slots'], true))) $error = 'The game files list isn\'t valid. Use the template\'s format.';
     elseif ($g['setup'] && $g['slots'] !== '' && ($slotErr = rs_slots_error(json_decode($g['slots'], true)))) $error = 'Game files: ' . $slotErr;
@@ -232,6 +233,7 @@ $hero = $g['hero_web'] ?: $g['hero'];
     <label data-gh>Zip name on the release<input name="asset" value="<?= h($g['asset']) ?>" placeholder="PPSA92011.zip"><small>The file the store downloads from each release. When its name changes with each version, put * for that part, like WindWaker-PS5-*.zip: the store then finds the newest itself (needs Recomp Store 1.0.3, set for you). A .7z works too, from Recomp Store 2.0 (set for you).</small></label>
     <label data-url>Download link<input name="url" value="<?= h($g['url']) ?>" placeholder="https://…/PPSA92011.zip"></label>
     <label class="span2">Zip inside the download (optional)<input name="inside" value="<?= h($g['inside']) ?>" placeholder="*/prospero/builder/Assets/payload.zip"><small>Only for a release that has no zip of its own PS5 files, just a bigger one (like a source zip) with that zip inside. Put its whole name inside the download, with * for a part that changes with each version. The store takes it out and installs it (needs Recomp Store 1.0.4, set for you). Leave empty for a normal release.</small></label>
+    <label class="span2">Title ID in its zip (optional)<input name="zip_id" value="<?= h($g['zip_id'] ?? '') ?>" placeholder="Same as the title ID above" maxlength="9"><small>Only when its release uses another app's title ID: put the zip's ID here and give this game a free one above. The store installs it under that one, so both fit on a PS5 (needs Recomp Store 2.5.1, set for you).</small></label>
     <label>Version<input name="version" value="<?= h($g['version']) ?>" placeholder="1.0.0"><small>Shown until the store and the site have read GitHub; updates come from GitHub's newest release.</small></label>
     <label>Needs Recomp Store<input name="min_store" value="<?= h($g['min_store']) ?>" placeholder="any version"><small>The oldest store that can install it; older ones are told to update first (before 1.0.3 they don't list it at all). <?php $auto = rs_min_store(array_merge($g, ['min_store' => ''])); echo $auto !== '' ? 'This game needs at least ' . h($auto) . ' for its category, zip name or game files' . (version_compare($auto, RS_V2_FROM, '>=') ? ' (2.0 only: older stores never see it)' : '') . '.' : 'Leave empty for any.'; ?></small></label>
     <label>Build<input type="number" min="1" name="build" value="<?= h((string)$g['build']) ?>"></label>
