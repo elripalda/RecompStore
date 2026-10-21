@@ -184,6 +184,33 @@ bool parse_catalog(const std::string &text, Catalog &out)
             if (plain_path(p) && a.saves.size() < 16) a.saves.push_back(p);
         }
         a.min_store = x["minStore"].str();
+        /* (2.3.0) What it needs to be ready to play, and its mods (docs/store-2.3.md, 7 and 14). */
+        for (std::size_t k = 0; k < x["requires"].size() && a.requires_.size() < 8; ++k)
+        {
+            const std::string r = x["requires"][k].str();
+            if (r == "loader" || r == "smp" || r == "kstuff" || r == "etahen" || r == "internet" || r == "usb") a.requires_.push_back(r);
+        }
+        a.mods_dir = x["modsDir"].str();
+        if (!a.mods_dir.empty() && (a.mods_dir[0] == '/' || !plain_path(a.mods_dir))) a.mods_dir.clear();
+        for (std::size_t k = 0; k < x["mods"].size() && a.mods.size() < 64; ++k)
+        {
+            const Json &m = x["mods"][k];
+            App::Mod md;
+            md.id = m["id"].str().substr(0, 48);
+            md.name = m["name"].str(md.id).substr(0, 120);
+            md.author = m["author"].str().substr(0, 80);
+            md.blurb = m["blurb"].str().substr(0, 400);
+            md.repo = m["repo"].str().substr(0, 200);
+            md.asset = m["asset"].str().substr(0, 260);
+            md.sha256 = m["sha256"].str();
+            md.target = m["target"].str();
+            md.size = std::uint64_t(std::max<long long>(0, m["size"].integer(0)));
+            bool id_ok = !md.id.empty();
+            for (const unsigned char c : md.id)
+                if (!(std::isalnum(c) || c == '-' || c == '_' || c == '.')) id_ok = false;
+            for (const App::Mod &o : a.mods) id_ok = id_ok && o.id != md.id;
+            if (id_ok && plain_leaf(md.target) && md.sha256.size() == 64) a.mods.push_back(md);
+        }
         for (std::size_t k = 0; k < x["logs"].size() && a.logs.size() < 12; ++k)
         {
             /* (1.1.0) inside the game's folder only */
@@ -428,6 +455,26 @@ bool parse_catalog(const std::string &text, Catalog &out)
         out.header_interval = int(std::clamp<long long>(h["interval"].integer(8), 4, 30));
     }
 
+    /* (2.3.0) Collections: a name, a line, apps in order (only ones in the catalog). */
+    for (std::size_t i = 0; i < j["collections"].size() && out.collections.size() < 32; ++i)
+    {
+        const Json &x = j["collections"][i];
+        Collection c;
+        c.id = x["id"].str().substr(0, 48);
+        c.title = x["title"].str().substr(0, 80);
+        c.blurb = x["blurb"].str().substr(0, 300);
+        for (std::size_t k = 0; k < x["ids"].size() && c.ids.size() < 60; ++k)
+        {
+            const std::string id = x["ids"][k].str();
+            bool there = false;
+            for (const App &a : out.apps) there = there || a.id == id;
+            if (there && std::find(c.ids.begin(), c.ids.end(), id) == c.ids.end()) c.ids.push_back(id);
+        }
+        bool dup = false;
+        for (const Collection &o : out.collections) dup = dup || o.id == c.id;
+        if (!c.id.empty() && !c.title.empty() && !c.ids.empty() && !dup) out.collections.push_back(c);
+    }
+
     /* Discover's sections (1.0.6). A kind or layout this store doesn't know is left out,
      * and so is a spotlight on a game that isn't in the catalog. */
     const Json &secs = j["discover"]["sections"];
@@ -441,8 +488,24 @@ bool parse_catalog(const std::string &text, Catalog &out)
         s.all = x["all"].boolean(false);
         for (std::size_t k = 0; k < x["games"].size(); ++k) s.ids.push_back(x["games"][k].str());
         if (s.type == "spotlight" && s.ids.empty()) s.ids.push_back(x["game"].str());
+        if ((s.type == "collection" || s.type == "liked") && s.layout.empty()) s.layout = "row"; /* (2.3.0) */
         const bool known_layout = s.layout == "row" || s.layout == "grid" || s.layout == "wide";
-        if (s.type == "category")
+        if (s.type == "collection")
+        {
+            /* (2.3.0) one of the catalog's collections, as a row */
+            s.collection = x["collection"].str();
+            bool there = false;
+            for (const Collection &c : out.collections) there = there || c.id == s.collection;
+            if (there && known_layout) out.sections.push_back(s);
+        }
+        else if (s.type == "liked")
+        {
+            /* (2.3.0) Most liked, from the charts; one part of the store's when it says */
+            const std::string c = x["category"].str();
+            if (c == "games" || c == "emulators" || c == "apps" || c == "tools") s.category = c;
+            if (known_layout) out.sections.push_back(s);
+        }
+        else if (s.type == "category")
         {
             s.category = x["category"].str();
             if (known_layout && (s.category == "games" || s.category == "emulators" || s.category == "apps" || s.category == "tools"))

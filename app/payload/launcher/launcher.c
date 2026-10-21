@@ -288,11 +288,14 @@ static int smp_post(const char *route, const char *body, char *out, size_t out_s
     return status;
 }
 
-/* A rescan, now that no app is open: true when ShadowMountPlus answered at all. */
+/* A rescan, now that no app is open: true when ShadowMountPlus answered at all. (2.3.0) It asks
+ * ShadowMountPlus to forget its tries too ("reset_attempts"): after two failed tries to register a
+ * title that isn't in the system's app list (a store deleted from the home screen), it stops trying
+ * until it's restarted or asked this way. */
 static bool smp_scan(void)
 {
     char reply[600];
-    const int status = smp_post("/api/v1/scan", "{}", reply, sizeof reply);
+    const int status = smp_post("/api/v1/scan", "{\"reset_attempts\":true}", reply, sizeof reply);
     if (status < 0)
         return false;
     log_line("asked ShadowMountPlus to look for new games: %.300s", reply);
@@ -613,6 +616,18 @@ int main(void)
                 if (time(NULL) - start >= 10 && same >= 3)
                     break;
             }
+            /* (2.3.0) Once more with ShadowMountPlus's tries reset, for a title it had given up on. */
+            if (smp_scan())
+            {
+                const int before = last;
+                for (int i = 0; i < 4; ++i)
+                {
+                    sleep(2);
+                    const int c = smp_count();
+                    if (c >= 0) last = c;
+                }
+                if (last != before) log_line("the last look added %d more", last - before);
+            }
             log_line("home screen refreshed in %ld s (%d games, %d change(s) made)", (long)(time(NULL) - start), last, changes);
             toast("Your home screen is up to date.");
         }
@@ -663,6 +678,24 @@ int main(void)
             }
             log_line("%s %s after %ld s (0x%08x)", result >= 0 ? "opened" : "still couldn't open", title,
                      (long)(time(NULL) - start), (unsigned)result);
+            if (result < 0 && !cancelled() && smp_scan())
+            {
+                /* (2.3.0) Once more, with its tries forgotten, before giving up. */
+                log_line("asked once more for %s, with ShadowMountPlus's tries reset", title);
+                const time_t again = time(NULL);
+                while (result < 0 && time(NULL) - again < 20 && !cancelled())
+                {
+                    sleep(2);
+                    app_launch_ctx_t ctx;
+                    memset(&ctx, 0, sizeof ctx);
+                    sceUserServiceGetForegroundUser(&ctx.user_id);
+                    char id[16];
+                    snprintf(id, sizeof id, "%s", title);
+                    char *argv[2] = {id, NULL};
+                    result = sceSystemServiceLaunchApp(title, argv, &ctx);
+                }
+                log_line("%s %s on the last try (0x%08x)", result >= 0 ? "opened" : "still couldn't open", title, (unsigned)result);
+            }
         }
         else
             log_line("ShadowMountPlus didn't answer on port 10101, so %s can't be added to the home screen from here", title);

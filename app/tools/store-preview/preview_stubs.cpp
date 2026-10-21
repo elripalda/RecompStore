@@ -515,6 +515,32 @@ std::vector<Place> Engine::install_places() const
 std::string Engine::install_root() const { if (const char *r = std::getenv("PREVIEW_ROOT")) return r; return g_root; }
 void Engine::set_install_root(const std::string &r) { g_root = r; }
 Engine &engine() { static Engine e; return e; }
+/* (2.3.0) */
+bool Engine::start_receiver(const ReceiverJob &, std::string &code, std::string &why) { code = "482913"; why.clear(); return true; }
+void Engine::stop_receiver() {}
+ReceiverStatus Engine::receiver_status() const { return ReceiverStatus(); }
+bool Engine::space_of(const std::string &, std::uint64_t &t, std::uint64_t &a) { t = 825ull << 30; a = 92ull << 30; return true; }
+std::vector<Backup> Engine::backups(const std::string &) const { return {}; }
+bool Engine::saves_here(const std::string &) const { return true; }
+bool Engine::backup_saves(const std::string &, bool) { return true; }
+bool Engine::restore_saves(const std::string &, const std::string &) { return true; }
+bool Engine::delete_backup(const std::string &, const std::string &, std::string &) { return true; }
+std::string Engine::backups_dir() const { return "/data/recompstore/backups"; }
+std::string Engine::usb_drive() const { return getenv("PREVIEW_USB") ? "/mnt/usb0" : ""; }
+bool Engine::remove(const std::string &, bool, bool) { return true; }
+bool Engine::manage(const std::string &, const std::string &, const std::string &, const std::string &) { return true; }
+bool Engine::clear_downloads_start() { return true; }
+int Engine::clear_state(std::uint64_t &f, std::size_t &d, std::size_t &t, std::string &w) const { f = 0; d = t = 0; w.clear(); return 0; }
+void Engine::clear_ack() {}
+int Engine::loader_seen() { return 1; }
+void Engine::like(const std::string &, bool) {}
+bool Engine::liked(const std::string &) const { return false; }
+long long Engine::like_count(const std::string &) const { return 0; }
+void Engine::link_result(long long, const std::string &, const std::string &, const std::string &, const std::string &) {}
+void Engine::link_push_soon() {}
+void Engine::set_phone_prefs(const std::vector<std::string> &, const std::vector<std::string> &, bool) {}
+bool Engine::read_my_apps(const std::string &, MyAppsList &, std::string &why) { why = "preview"; return false; }
+bool Engine::send_logs(const std::string &, const std::string &, const std::string &, const std::string &, const std::string &) { return true; }
 } // namespace recomp
 
 namespace porpoise::pad { std::int32_t user_of(int) { return 1; } }

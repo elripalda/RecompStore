@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "store_engine.hpp"
+#include "store_backup.hpp"
 #include "store_fs.hpp"
 
 #include "porpoise_http.hpp"
@@ -212,6 +213,7 @@ struct Shared
      * 1 sending, 2 sent, 3 didn't go). */
     bool pending_logs = false;
     std::string pending_logs_app, pending_logs_msg;
+    std::string pending_logs_extra; /* (2.3.0) &category=...&feedback=...&build=... */
     int logs = 0;
     std::string logs_msg;
     std::string logs_report, logs_report_url; /* (2.0) the report to finish on a phone */
@@ -269,6 +271,11 @@ struct Shared
     std::vector<std::string> smp_dests;
     bool smp_dests_known = false;
     unsigned games_checks = 0; /* (2.2.2) how many times the installed apps' updates were looked for */
+    /* (2.3.0) A job of 2.3.0's (store_engine_23.inc): "backup", "restore", "mod"; its arguments. And
+     * the app whose saves are backed up before a delete or a move. */
+    std::string pending_task;
+    std::vector<std::string> pending_task_args;
+    std::string pending_backup_first;
 };
 Shared g;
 
@@ -409,9 +416,13 @@ bool at_size_any_case(const std::string &dir, const std::string &rel, std::uint6
 void run_manage(const std::string &kind, const std::string &folder, const std::string &dest);
 void run_manage_many(const std::vector<std::string> &folders); /* (2.2.2) */
 void run_get_smp();                                         /* (2.2.2) */
+void run_task(const std::string &task, const std::vector<std::string> &args); /* (2.3.0) store_engine_23.inc */
+bool run_backup_first(const std::string &app_id);                            /* (2.3.0) */
 
 namespace
 {
+/* (2.2.4) The real space where path is (below, with ShadowMountPlus's storage figures). */
+bool real_space(const std::string &path, std::uint64_t &total, std::uint64_t &avail, bool &from_smp, bool may_ask = true);
 
 void set_job(const std::string &step, std::uint64_t done, std::uint64_t total)
 {
@@ -857,7 +868,7 @@ void logs_done(int state, const std::string &message)
 
 /* The store's log and the game's own log files, with the player's message and what's
  * installed, to recompstore.com/api/logs.php: the admin's inbox, under Logs. */
-void run_send_logs(const std::string &id, const std::string &message)
+void run_send_logs(const std::string &id, const std::string &message, const std::string &extra)
 {
     App a;
     {
@@ -867,7 +878,7 @@ void run_send_logs(const std::string &id, const std::string &message)
     }
     if (a.id.empty()) a.id = id;
     std::string form = beta_form("send", "&app=" + form_value(id) + "&version=" + form_value(engine().installed(id)) +
-                                             "&message=" + form_value(message));
+                                             "&message=" + form_value(message) + extra);
     std::uint64_t total = 0;
     std::size_t n = 0;
     for (const LogFile &f : game_log_files(a))
@@ -915,15 +926,31 @@ void run_send_logs(const std::string &id, const std::string &message)
 double mono_s();
 std::string sources_state_json();
 
-/* What the site keeps for My PS5: the apps on this console, what's newer, free space. */
+/* (2.3.0) Defined in store_engine_23.inc: the phone's requests and how they went, whether the state
+ * should go now, and the store's favorites and auto-update choices (the screens keep those). */
+std::string link_requests_json();
+bool link_push_wanted();
+void link_push_clear();
+void phone_prefs(std::vector<std::string> &favs, std::vector<std::string> &autos, bool &all);
+
+/* What the site keeps for My PS5 (docs/store-2.3.md, 5): the apps on this console (the store's and
+ * other homebrew), what's newer, the drives, the queue and the phone's requests. */
 std::string link_state_json()
 {
     Catalog c;
+    std::vector<ConsoleApp> con;
+    std::vector<QueueItem> queue;
+    JobState job;
     {
         std::lock_guard<std::mutex> l(g.m);
         c = g.catalog;
+        con = g.console;
+        queue = g.queue;
+        job = g.job;
     }
-    std::string apps;
+    std::vector<std::string> favs, autos;
+    bool auto_all = false;
+    phone_prefs(favs, autos, auto_all);
     auto esc = [](const std::string &v) {
         std::string o;
         for (const unsigned char ch : v)
@@ -931,8 +958,13 @@ std::string link_state_json()
             else if (ch >= 0x20) o += char(ch);
         return o;
     };
+    auto has = [](const std::vector<std::string> &v, const std::string &x) { return std::find(v.begin(), v.end(), x) != v.end(); };
+    std::string apps;
+    std::size_t n = 0;
+    std::set<std::string> listed; /* folders already in the list */
     for (const App &a : c.apps)
     {
+        if (n >= 200) break;
         std::string v = engine().installed(a.id);
         if (v.empty()) continue;
         std::string want = engine().newest_version(a);
@@ -940,16 +972,57 @@ std::string link_state_json()
         want.erase(0, version_start(want));
         const bool update = v != "?" && !want.empty() && version_key(v) != version_key(want) && !version_newer(v, want);
         v.erase(0, version_start(v));
+        const ConsoleApp *ca = nullptr;
+        const std::string folder = app_folder(a.id);
+        for (const ConsoleApp &x : con)
+            if (x.folder == folder) ca = &x;
+        listed.insert(folder);
+        char size[32];
+        std::snprintf(size, sizeof size, "%lld", ca ? ca->size : -1LL);
         apps += std::string(apps.empty() ? "" : ",") + "{\"id\":\"" + esc(a.id) + "\",\"name\":\"" + esc(a.name) + "\",\"version\":\"" +
                 esc(v == "?" ? std::string() : v) + "\",\"update\":\"" + esc(update ? want : std::string()) + "\",\"category\":\"" +
-                esc(a.category) + "\"}";
+                esc(a.category) + "\",\"size\":" + size + ",\"where\":\"" + esc(ca ? ca->place : std::string()) + "\",\"root\":\"" +
+                esc(ca ? ca->root : std::string()) + "\",\"folder\":\"" + esc(folder) + "\",\"fav\":" + (has(favs, a.id) ? "true" : "false") +
+                ",\"auto\":" + (auto_all || has(autos, a.id) ? "true" : "false") + ",\"store\":true}";
+        ++n;
     }
+    for (const ConsoleApp &x : con)
+    {
+        if (n >= 200) break;
+        if (!x.app || x.store || listed.count(x.folder)) continue;
+        char size[32];
+        std::snprintf(size, sizeof size, "%lld", x.size);
+        apps += std::string(apps.empty() ? "" : ",") + "{\"id\":\"\",\"name\":\"" + esc(x.name.empty() ? x.title_id : x.name) +
+                "\",\"version\":\"" + esc(x.version) + "\",\"update\":\"\",\"category\":\"\",\"size\":" + size + ",\"where\":\"" +
+                esc(x.place) + "\",\"root\":\"" + esc(x.root) + "\",\"folder\":\"" + esc(x.folder) + "\",\"fav\":false,\"auto\":false,\"store\":false}";
+        ++n;
+    }
+    std::string drives;
+    for (const DriveSpace &d : engine().drives())
+    {
+        char nums[96];
+        std::snprintf(nums, sizeof nums, "\"total\":%llu,\"free\":%llu,\"sized\":%s", (unsigned long long)d.total, (unsigned long long)d.free,
+                      d.sized && d.total ? "true" : "false");
+        drives += std::string(drives.empty() ? "" : ",") + "{\"label\":\"" + esc(d.label) + "\",\"root\":\"" + esc(d.homebrew) + "\"," + nums + "}";
+    }
+    std::string waiting;
+    for (const QueueItem &q : queue) waiting += std::string(waiting.empty() ? "\"" : ",\"") + esc(q.id) + "\"";
+    const bool going = job.phase == Phase::Working && (job.kind == "install" || job.kind == "update") && !job.app_id.empty();
+    char qnums[96];
+    std::snprintf(qnums, sizeof qnums, "\"done\":%llu,\"total\":%llu", (unsigned long long)job.done, (unsigned long long)job.total);
+    const std::string q = "{\"now\":\"" + esc(going ? job.app_id : std::string()) + "\",\"step\":\"" + esc(going ? job.step : std::string()) + "\"," +
+                          qnums + ",\"waiting\":[" + waiting + "]}";
     double free_gb = 0;
-    struct statvfs fs;
-    if (statvfs("/data", &fs) == 0) free_gb = double(fs.f_bavail) * double(fs.f_frsize) / 1073741824.0;
+    {
+        /* (2.3.0) The real figure (real_space), else none. */
+        std::uint64_t total = 0, avail = 0;
+        bool smp = false;
+        if (real_space("/data", total, avail, smp)) free_gb = double(avail) / 1073741824.0;
+    }
     char tail[64];
     std::snprintf(tail, sizeof tail, "],\"free_gb\":%.1f}", free_gb);
-    return "{\"apps\":[" + apps + "],\"sources\":[" + sources_state_json() + tail;
+    return "{\"v\":2,\"store\":\"" + std::string(kVersion) + "\",\"apps\":[" + apps + "],\"drives\":[" + drives + "],\"queue\":" + q +
+           ",\"requests\":[" + link_requests_json() + "],\"sources\":[" + sources_state_json() + tail;
 }
 
 /* The site's answer to a link request, as JSON; false when it didn't answer with one. */
@@ -1067,7 +1140,16 @@ void link_poll(porpoise::http::Session &http)
         x.repo = a["data"]["repo"].str().substr(0, 140);
         x.list = a["data"]["list"].str().substr(0, 500);
         x.report = a["data"]["report"].str().substr(0, 16);
-        if (x.kind == "install" || x.kind == "source" || x.kind == "refresh" || x.kind == "report") actions.push_back(x);
+        /* (2.3.0) Managing the PS5 from the phone (docs/store-2.3.md, 5). */
+        x.id = a["id"].integer(0);
+        x.folder = a["data"]["folder"].str().substr(0, 200);
+        x.to = a["data"]["to"].str().substr(0, 200);
+        x.text = a["data"]["text"].str().substr(0, 200);
+        if (a["data"]["on"].type() == Json::Type::Bool) x.on = a["data"]["on"].boolean(false) ? 1 : 0;
+        else if (a["data"]["on"].type() == Json::Type::Number) x.on = a["data"]["on"].integer(0) ? 1 : 0;
+        if (x.kind == "install" || x.kind == "source" || x.kind == "refresh" || x.kind == "report" || x.kind == "cancel" ||
+            x.kind == "favorite" || x.kind == "autoupdate" || x.kind == "delete" || x.kind == "move" || x.kind == "text")
+            actions.push_back(x);
     }
     std::lock_guard<std::mutex> l(g.m);
     bool changed = devices.size() != g.link.devices.size();
@@ -1138,7 +1220,8 @@ void *link_worker(void *)
             stats = !g.stats_due.empty();
         }
         const double interval = open ? 3 : devices > 0 ? 15 : 300;
-        const bool push_due = devices > 0 && now - last_push >= 60;
+        /* (2.3.0) Every minute, or a few seconds after something a phone asked for happened. */
+        const bool push_due = devices > 0 && (now - last_push >= 60 || (link_push_wanted() && now - last_push >= 3));
         if (now < next_try || (hello_ok && !want_code && !poll_now && unlinks.empty() && now < next_poll && !push_due && !stats))
             continue;
         porpoise::http::Session http("link", "RecompStore/2.0");
@@ -1185,6 +1268,7 @@ void *link_worker(void *)
         if (stats) link_stats(http);
         if (push_due)
         {
+            link_push_clear();
             const std::string state = link_state_json();
             if (state != last_state && state.size() < (60u << 10))
             {
@@ -1478,6 +1562,14 @@ bool parse_charts(const std::string &text, Charts &out)
         ids_into(kv.second, ids, 8);
         if (!ids.empty()) out.also.push_back({kv.first, ids});
     }
+    /* (2.3.0) Likes, most first. */
+    for (const auto &kv : j["likes"].members())
+    {
+        if (out.likes.size() >= 2000 || kv.first.empty() || kv.first.size() > 48) break;
+        const long long n = kv.second.integer(0);
+        if (n > 0) out.likes.push_back({kv.first, n});
+    }
+    std::stable_sort(out.likes.begin(), out.likes.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
     out.have = true;
     return true;
 }
@@ -1535,7 +1627,7 @@ bool job_waiting()
     std::lock_guard<std::mutex> l(g.m);
     return !g.pending_install.empty() || !g.pending_setup_app.empty() || !g.pending_delete.empty() || g.pending_store_dl ||
            g.pending_bench || !g.pending_redeem.empty() || g.pending_logs || !g.sources_due.empty() || g.pending_src_report ||
-           !g.pending_manage.empty() /* (2.2) */;
+           !g.pending_manage.empty() /* (2.2) */ || !g.pending_task.empty() /* (2.3.0) */;
 }
 
 /* (2.0) Pictures on recompstore.com/media, up to 24 in one request (api/art.php). On a PS5
@@ -1861,6 +1953,11 @@ std::vector<std::string> homebrew_roots();
 int forget_tile(const std::string &tid); /* (2.2) with the App manager */
 std::string place_name(const std::string &root);
 std::string size_words(std::uint64_t b);
+/* (2.2.4) The filesystem path is on: its size and the bytes free for new files, from
+ * ShadowMountPlus when it says (from_smp), else the drive's own statvfs; false when they can't
+ * be told (Console storage without ShadowMountPlus). may_ask false: only what's known already
+ * (the screens), never a request. */
+/* real_space: declared at the top of this part, before link_state_json. */
 /* (2.2.2) The bytes free for new files where path is (false when it can't be told). */
 bool free_bytes(const std::string &path, std::uint64_t &out)
 {
@@ -1881,10 +1978,10 @@ bool free_bytes(const std::string &path, std::uint64_t &out)
         }
     }
 #endif
-    struct statvfs fs;
-    if (statvfs(path.c_str(), &fs) != 0) return false;
-    out = std::uint64_t(fs.f_bavail) * fs.f_frsize;
-    return true;
+    /* (2.2.4) The real figures (real_space): never the sandbox's own for /data. */
+    std::uint64_t total = 0;
+    bool smp = false;
+    return real_space(path, total, out, smp);
 }
 /* (2.2.2) The player stopped the install that's downloading (Engine::cancel_job). */
 bool cancel_now()
@@ -2681,8 +2778,10 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                   const std::string &extra)
 {
     const bool unzip = kind == "unzip", del = kind == "delete", tree = kind == "tree" /* (2.2) Move */;
-    const char *what = unzip ? "install" : del ? "delete" : tree ? "move" : "setup";
-    const char *fallback = unzip ? "installing in the store" : del ? "deleting in the store" : "copying in the store";
+    const bool bk = kind == "backup", rs = kind == "restore"; /* (2.3.0) save backups */
+    const char *what = unzip ? "install" : del ? "delete" : tree ? "move" : bk ? "backup" : rs ? "restore" : "setup";
+    const char *fallback = unzip ? "installing in the store" : del ? "deleting in the store" : bk ? "backing up in the store"
+                           : rs ? "restoring in the store" : "copying in the store";
     if (changed) *changed = false;
     const std::string elf_path = std::string(PORPOISE_APP) + "/assets/payloads/recompstore-copier.elf";
     std::string elf;
@@ -2758,12 +2857,16 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                 set_job("Installing", done, total);
             else if (phase == "deleting")
                 set_job("Deleting", 0, 0);
+            else if (phase == "backingup")
+                set_job("Backing up your saves", done, total);
+            else if (phase == "restoring")
+                set_job("Restoring your saves", done, total);
             else if (phase == "checking")
                 set_job(unzip ? "Checking the installed files" : "Checking the copied files", unzip ? done : total, total);
             else if (phase == "done")
             {
                 const double secs = std::strtod(field_of(st, "seconds").c_str(), nullptr);
-                if (unzip || del || tree)
+                if (unzip || del || tree || bk || rs)
                     slog("%s: the copier finished: %s files in %.1f s", what, field_of(st, "files").c_str(), secs);
                 else
                 {
@@ -2782,7 +2885,7 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
                 fail_job(why.empty() ? std::string("The copier stopped with an error.") : why);
                 return Copier::Failed;
             }
-            else if (!unzip && !del && !tree)
+            else if (!unzip && !del && !tree && !bk && !rs)
                 set_job("Reading the disc image", 0, 0);
         }
         if (!started && mono_s() - sent > 15)
@@ -2797,6 +2900,8 @@ Copier run_copier(const std::string &kind, const std::string &image, const std::
         {
             if (changed) *changed = true; /* can't tell how far it got */
             fail_job(unzip ? "The copier stopped answering. Install the game again."
+                     : bk ? "The copier stopped answering. Back up again."
+                     : rs ? "The copier stopped answering. Check the game's saves before trying again."
                      : tree ? "The copier stopped answering. Check both places before trying again."
                      : del ? "The copier stopped answering. Press Delete again to finish."
                            : "The copier stopped answering. Set up again to carry on where it stopped.");
@@ -2842,8 +2947,8 @@ void run_setup_stfs_raw(const App &a, const Slot &slot, const std::string &image
     struct stat ds;
     if (stat(dst.c_str(), &ds) == 0 && ds.st_dev == src.st_dev && ds.st_ino == src.st_ino)
         return done("The Title Update is already in place."); /* chosen from where it goes */
-    struct statvfs fs;
-    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (16ull << 20))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(target, fs_free) && fs_free < size + (16ull << 20))
         return fail_job("There isn't room for the Title Update.");
     /* Copied under its own name, then renamed: never over a different file of the game's. */
     if (own != want && exists(target + "/" + own))
@@ -2907,8 +3012,8 @@ void run_setup_stfs(const App &a, const Slot &slot, const std::string &image)
             if (stat((base + "/" + e.name).c_str(), &st) != 0 || std::uint64_t(st.st_size) != e.size) need += e.size;
         }
         arcade_files = first.entries().size();
-        struct statvfs fs;
-        if (statvfs(base.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < need + (64ull << 20))
+        std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+        if (free_bytes(base, fs_free) && fs_free < need + (64ull << 20))
             return fail_job("There isn't room for the game's files: they need " + fmt_mb(need) + " free.");
     }
 
@@ -3028,8 +3133,8 @@ void run_setup_image(const App &a, const Slot &slot, const std::string &image)
         slog("setup %s: %s is already in the game's folder", id.c_str(), already.c_str());
         return finish("Your disc image is already in the game's folder.");
     }
-    struct statvfs fs;
-    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (64ull << 20))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(target, fs_free) && fs_free < size + (64ull << 20))
         return fail_job("There isn't room for the disc image: it needs " + fmt_mb(size) + " free.");
 
     const Copier c = run_copier("copy", image, target);
@@ -3317,8 +3422,8 @@ void run_setup_file(const App &a, const Slot &slot, const std::string &file)
             if (ok && dh.hex() == hex)
                 return finish("Your ROM is ready", "Your ROM is already in the game's folder.");
         }
-        struct statvfs fs;
-        if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < size + (16ull << 20))
+        std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+        if (free_bytes(target, fs_free) && fs_free < size + (16ull << 20))
             return fail_job("There isn't room for the ROM.");
         if (!write_file(dst, rom.data(), rom.size())) /* written beside it, then renamed into place */
             return fail_job("Writing your ROM into the game's folder failed. Is the storage full?");
@@ -3372,8 +3477,8 @@ void run_setup_file(const App &a, const Slot &slot, const std::string &file)
     }
     std::uint64_t total = 0;
     for (const auto &f : files) total += f.second;
-    struct statvfs fs;
-    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < total + (64ull << 20))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(target, fs_free) && fs_free < total + (64ull << 20))
         return fail_job("There isn't room for your files: they need " + fmt_mb(total) + " free.");
     int copied = 0;
     for (std::size_t i = 0; i < files.size(); ++i)
@@ -3521,8 +3626,8 @@ bool fetch_title_update(const App &a, const Slot &slot, std::string &path)
 
     /* Room for it, then the file itself, into <id>.part and renamed once it checks out. */
     make_dirs(dir);
-    struct statvfs fs;
-    if (statvfs(dir.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < expect + (64ull << 20))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(dir, fs_free) && fs_free < expect + (64ull << 20))
     {
         fail_job("There isn't room for the update: it needs " + fmt_mb(expect) + " free.");
         return false;
@@ -3698,8 +3803,8 @@ void run_setup(const std::string &id, const std::string &slot_key, const std::st
     std::sort(order.begin(), order.end(), [](const DiscFile *x, const DiscFile *y) { return x->sector < y->sector; });
 
     if (order.empty()) return fail_job("This disc image doesn't have the files " + a.name + " needs.");
-    struct statvfs fs;
-    if (statvfs(target.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < needed + (256ull << 20))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(target, fs_free) && fs_free < needed + (256ull << 20))
         return fail_job("There isn't enough free space: the game's files need " + fmt_mb(needed) + ".");
     slog("setup %s from %s: %zu files, %llu bytes, %llu still to copy, into %s\n", id.c_str(),
                  image.c_str(), order.size(), (unsigned long long)total, (unsigned long long)needed, target.c_str());
@@ -3944,8 +4049,8 @@ void run_bench()
 {
     const std::string dir = g.data;
     const std::string path = dir + "/speedtest.tmp";
-    struct statvfs fs;
-    if (statvfs(dir.c_str(), &fs) == 0 && std::uint64_t(fs.f_bavail) * fs.f_frsize < (1ull << 30))
+    std::uint64_t fs_free = 0; /* (2.2.4) the real figures */
+    if (free_bytes(dir, fs_free) && fs_free < (1ull << 30))
         return fail_job("The speed test needs 1 GB free on the console.");
     constexpr std::uint64_t kSize = 512ull << 20;
     Aligned buf(16u << 20);
@@ -4598,8 +4703,13 @@ void *worker(void *)
         std::string want_root;              /* (2.2.2) */
         std::vector<std::string> mdeletes;
         bool smpget = false;
+        std::string task, backup_first;     /* (2.3.0) */
+        std::vector<std::string> task_args;
         {
             std::lock_guard<std::mutex> l(g.m);
+            task.swap(g.pending_task);
+            task_args.swap(g.pending_task_args);
+            backup_first.swap(g.pending_backup_first);
             want_root.swap(g.pending_root);
             mdeletes.swap(g.pending_mdeletes);
             smpget = g.pending_smpget;
@@ -4629,10 +4739,16 @@ void *worker(void *)
             run_setup(sapp, sslot, simage, sfetch);
         else if (bench)
             run_bench();
+        else if (!task.empty())
+            run_task(task, task_args); /* (2.3.0) */
         else if (!del.empty())
-            run_delete(del, del_keep);
+        {
+            if (backup_first.empty() || run_backup_first(backup_first)) run_delete(del, del_keep);
+        }
         else if (!mkind.empty())
-            run_manage(mkind, mfolder, mdest); /* (2.2) */
+        {
+            if (backup_first.empty() || run_backup_first(backup_first)) run_manage(mkind, mfolder, mdest); /* (2.2) */
+        }
         else if (!mdeletes.empty())
             run_manage_many(mdeletes); /* (2.2.2) */
         else if (smpget)
@@ -4692,7 +4808,7 @@ void *quick_main(void *)
     for (;;)
     {
         usleep(50000);
-        std::string lapp, lmsg;
+        std::string lapp, lmsg, lextra;
         bool lsend = false;
         {
             std::lock_guard<std::mutex> l(g.m);
@@ -4700,10 +4816,11 @@ void *quick_main(void *)
             g.pending_logs = false;
             lapp.swap(g.pending_logs_app);
             lmsg.swap(g.pending_logs_msg);
+            lextra.swap(g.pending_logs_extra);
         }
         if (lsend)
         {
-            run_send_logs(lapp, lmsg);
+            run_send_logs(lapp, lmsg, lextra);
             continue;
         }
         bool busy = false, art = false;
@@ -5498,8 +5615,9 @@ void Engine::start(const std::string &data_dir)
     {
         struct statvfs fs;
         if (statvfs(where, &fs) == 0 && fs.f_blocks)
-            slog("space on %s: %.1f GB free of %.1f GB", where, double(fs.f_bavail) * fs.f_frsize / 1073741824.0,
-                 double(fs.f_blocks) * fs.f_frsize / 1073741824.0);
+            slog("space on %s: %.1f GB free of %.1f GB%s", where, double(fs.f_bavail) * fs.f_frsize / 1073741824.0,
+                 double(fs.f_blocks) * fs.f_frsize / 1073741824.0,
+                 std::string(where) == "/data" ? " (as the store's sandbox sees it; the real figures come from ShadowMountPlus)" : "");
     }
     {
         /* (2.0) Where new apps go (Settings > Customize, Advanced mode): a homebrew folder the
@@ -5958,10 +6076,15 @@ std::vector<Place> Engine::install_places() const
             if (d.homebrew == root && d.total) { p.free = d.free; p.total = d.total; from = true; }
         if (!from)
         {
-            struct statvfs fs;
-            if (statvfs(drive.c_str(), &fs) == 0) { p.free = std::uint64_t(fs.f_bavail) * fs.f_frsize; p.total = std::uint64_t(fs.f_blocks) * fs.f_frsize; }
-            std::uint64_t f = 0;
-            if (free_bytes(drive, f)) p.free = f;
+            /* (2.2.4) The real figures, as already known (this is asked by the screens). */
+            bool smp = false;
+            std::uint64_t total = 0, avail = 0;
+#ifdef RECOMP_ENGINE_TEST
+            if (std::getenv("E222_FREE") && free_bytes(drive, avail)) total = avail * 4; else
+#endif
+            if (!real_space(drive, total, avail, smp, false)) total = avail = 0;
+            p.free = avail;
+            p.total = total;
         }
         out.push_back(p);
     }
@@ -6167,6 +6290,10 @@ static bool smp_file_ok(std::string &path, std::string &why)
 /* ShadowMountPlus 1.7's own API: HTTP on 127.0.0.1:10101, one JSON object POSTed per
  * call (docs/api.md in its source). true when it answered with status 0; *answered
  * says whether anything answered at all. */
+/* (2.3.0) Every look for new apps asks ShadowMountPlus to forget its tries too: after two failed
+ * tries to register a title that isn't in the system's app list it stops trying, until it restarts
+ * or is asked with reset_attempts. */
+constexpr const char *kScanBody = "{\"reset_attempts\":true}";
 static bool smp_api(const char *route, const std::string &body, std::string &reply, bool *answered = nullptr)
 {
     if (answered) *answered = false;
@@ -6233,7 +6360,7 @@ int refresh_smp(std::string &why)
 {
     std::string reply;
     bool answered = false;
-    if (smp_api("/api/v1/scan", "{}", reply, &answered))
+    if (smp_api("/api/v1/scan", kScanBody, reply, &answered))
     {
         slog("ShadowMountPlus is running; asked it to look for new games: %s", reply.c_str());
         return 2;
@@ -6258,6 +6385,92 @@ int refresh_smp(std::string &why)
     return 1;
 }
 
+/* ---- (2.2.4) Free space: the real figures ------------------------------------------------
+ * Inside the store's sandbox statvfs("/data") answers a fixed 64 GB with 16 GB free, whatever
+ * the console's storage holds (every log since 2.0 says so), so the store can't trust its own
+ * call there. ShadowMountPlus runs outside the sandbox: its /api/v1/storage gives the real
+ * filesystems, the internal /user one /data lives on and each drive. Asked at most every 15
+ * seconds; a drive's own statvfs only when ShadowMountPlus doesn't say, and never /data's. */
+namespace
+{
+struct FsFig
+{
+    std::string where; /* a mount point, or "dest:" and a destination's path */
+    std::uint64_t total = 0, avail = 0;
+};
+std::mutex g_space_m;
+std::vector<FsFig> g_space;
+double g_space_at = -1e9;
+} // namespace
+
+static void space_refresh(bool force = false)
+{
+    {
+        std::lock_guard<std::mutex> l(g_space_m);
+        if (!force && mono_s() - g_space_at < 15) return;
+        g_space_at = mono_s(); /* claimed before asking, so callers don't pile up */
+    }
+    std::string reply;
+    bool answered = false;
+    Json j;
+    std::vector<FsFig> got;
+    if (smp_api("/api/v1/storage", "{}", reply, &answered) && Json::parse(reply, j) && j.is_object())
+    {
+        auto add = [&](const std::string &where, const Json &d) {
+            FsFig f;
+            f.where = where;
+            while (f.where.size() > 1 && f.where.back() == '/') f.where.pop_back();
+            const long long t = d["total_bytes"].integer(0);
+            const long long a = d["available_bytes"].integer(d["free_bytes"].integer(-1));
+            if (t <= 0 || a < 0 || a > t || got.size() >= 48) return;
+            f.total = std::uint64_t(t);
+            f.avail = std::uint64_t(a);
+            got.push_back(f);
+        };
+        for (std::size_t i = 0; i < j["mounts"].size() && i < 32; ++i) add(j["mounts"][i]["mount_point"].str(), j["mounts"][i]);
+        for (std::size_t i = 0; i < j["destinations"].size() && i < 32; ++i) add("dest:" + j["destinations"][i]["path"].str(), j["destinations"][i]);
+    }
+    std::lock_guard<std::mutex> l(g_space_m);
+    if (got.empty() && answered) slog("ShadowMountPlus answered without its storage figures");
+    g_space = got;
+}
+
+namespace
+{
+bool real_space(const std::string &path, std::uint64_t &total, std::uint64_t &avail, bool &from_smp, bool may_ask)
+{
+    from_smp = false;
+    total = avail = 0;
+    if (may_ask) space_refresh();
+    std::vector<FsFig> figs;
+    {
+        std::lock_guard<std::mutex> l(g_space_m);
+        figs = g_space;
+    }
+    auto pick = [&](const std::string &w) {
+        for (const FsFig &f : figs)
+            if (f.where == w)
+            {
+                total = f.total;
+                avail = f.avail;
+                from_smp = true;
+                return true;
+            }
+        return false;
+    };
+    if (path == "/data" || path.rfind("/data/", 0) == 0)
+        /* /data is on the console's /user filesystem (outside the sandbox). */
+        return pick("/user") || pick("dest:/data/homebrew") || pick("/user/data") || pick("/data");
+    const std::string drive = drive_of(path);
+    if (drive.rfind("/mnt/", 0) == 0 && (pick(drive) || pick("dest:" + drive) || pick("dest:" + drive + "/homebrew"))) return true;
+    struct statvfs fs;
+    if (statvfs(path.c_str(), &fs) != 0 || !fs.f_blocks) return false;
+    total = std::uint64_t(fs.f_blocks) * fs.f_frsize;
+    avail = std::uint64_t(fs.f_bavail) * fs.f_frsize;
+    return avail <= total;
+}
+} // namespace
+
 void smp_scan_later()
 {
     timespec ts;
@@ -6272,7 +6485,7 @@ void smp_scan_again()
 {
     std::string reply;
     bool answered = false;
-    const bool ok = smp_api("/api/v1/scan", "{}", reply, &answered);
+    const bool ok = smp_api("/api/v1/scan", kScanBody, reply, &answered);
     slog("ShadowMountPlus, asked again to look for new games: %s",
          ok ? reply.c_str() : answered ? "it didn't take it" : "it isn't running");
 }
@@ -6690,11 +6903,10 @@ void run_manage_move(const std::string &folder, const std::string &dest_root)
     std::size_t nfiles = 0;
     fs::tree_size(folder, bytes, nfiles);
     {
-        struct statvfs fsv;
         const std::string drive = drive_of(dest_root);
-        if (statvfs(drive.c_str(), &fsv) == 0 && fsv.f_blocks)
+        std::uint64_t free_b = 0;
+        if (free_bytes(drive, free_b)) /* (2.2.4) the real figures */
         {
-            const std::uint64_t free_b = std::uint64_t(fsv.f_bavail) * std::uint64_t(fsv.f_frsize);
             if (free_b < bytes + (64ull << 20))
                 return fail_job(place_name(dest_root) + " has " + size_words(free_b) + " free, and " + name + " needs " + size_words(bytes) + ".");
         }
@@ -7298,6 +7510,15 @@ std::vector<Place> places()
         }
     }
     out.push_back({"Console storage", "/data"});
+    /* (2.3.0) What came from a phone (Upload from your phone). */
+    {
+        std::string data;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            data = g.data;
+        }
+        if (!data.empty() && exists(data + "/uploads")) out.insert(out.begin(), Place{"Uploads", data + "/uploads"});
+    }
     return out;
 }
 
@@ -7806,16 +8027,21 @@ void look_drives(bool smp_running)
         bool same_drive = false;
         for (const DriveSpace &d : out) same_drive = same_drive || drive_of(d.homebrew) == drive;
         if (same_drive) continue;
-        struct statvfs fs;
-        if (statvfs(drive.c_str(), &fs) != 0 || !fs.f_blocks) continue;
+        /* (2.2.4) The real figures (real_space): Console storage without ShadowMountPlus has
+         * none the store can trust, so it says "Size unknown" rather than a wrong bar. */
         DriveSpace s;
         s.label = place_name(root);
         s.mount = drive;
         s.homebrew = root;
-        s.total = std::uint64_t(fs.f_blocks) * fs.f_frsize;
-        s.free = std::uint64_t(fs.f_bavail) * fs.f_frsize;
-        std::uint64_t f = 0;
-        if (free_bytes(drive, f)) s.free = f;
+        bool smp = false;
+        std::uint64_t total = 0, avail = 0;
+#ifdef RECOMP_ENGINE_TEST
+        if (std::getenv("E222_FREE") && free_bytes(drive, avail)) { total = avail * 4; smp = true; } else
+#endif
+        if (!real_space(drive, total, avail, smp)) { total = avail = 0; s.sized = false; }
+        s.total = total;
+        s.free = avail;
+        s.from_smp = smp;
         out.push_back(s);
     }
     std::lock_guard<std::mutex> l(g.m);
@@ -8040,7 +8266,9 @@ std::uint64_t Engine::cache_bytes_now(std::size_t *files)
     return total;
 }
 
-bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why)
+/* (2.3.0) The cache cleared, telling progress (files looked at, of all) as it goes: on a thread of
+ * its own from Settings > Storage (Engine::clear_downloads_start). */
+bool clear_cache_now(std::uint64_t &freed, std::size_t &files, std::string &why, const std::function<void(std::size_t, std::size_t)> &progress)
 {
     freed = 0;
     files = 0;
@@ -8049,7 +8277,7 @@ bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::stri
      * waiting to install, the store's own update while it's downloaded or waiting for its
      * installer, and ShadowMountPlus while it's fetched. */
     std::set<std::string> busy;
-    bool store_busy = false, smp_busy = false;
+    bool store_busy = false, smp_busy = false, mod_job = false;
     std::string dir;
     {
         std::lock_guard<std::mutex> l(g.m);
@@ -8059,6 +8287,7 @@ bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::stri
         for (const QueueItem &q : g.queue) busy.insert(q.id);
         store_busy = !g.store_zip.empty() || g.pending_store_dl || (g.job.phase == Phase::Working && g.job.kind == "storeupdate");
         smp_busy = g.pending_smpget || (g.job.phase == Phase::Working && g.job.kind == "smpget");
+        mod_job = !g.pending_task.empty() || (g.job.phase == Phase::Working && g.job.kind == "mod");
     }
     std::vector<std::string> names;
     if (DIR *d = opendir(dir.c_str()))
@@ -8067,13 +8296,17 @@ bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::stri
             if (e->d_name[0] != '.' && names.size() < 4000) names.push_back(e->d_name);
         closedir(d);
     }
-    std::size_t kept = 0, stuck = 0;
+    std::size_t kept = 0, stuck = 0, looked = 0;
     for (const std::string &n : names)
     {
+        if (progress) progress(looked, names.size());
+        ++looked;
         /* The app a file is for: its name up to the first dot ("PPSA64007.inner.zip"). */
         const std::string id = n.substr(0, n.find('.'));
         const bool smp_file = n.rfind("smp-", 0) == 0;
-        if (busy.count(id) || (id == "PPSA92000" && store_busy) || (smp_file && smp_busy) || n.find('/') != std::string::npos)
+        /* (2.3.0) A mod being downloaded: "mod-<app>-<mod>.part". */
+        const bool mod_busy = n.rfind("mod-", 0) == 0 && mod_job;
+        if (busy.count(id) || (id == "PPSA92000" && store_busy) || (smp_file && smp_busy) || mod_busy || n.find('/') != std::string::npos)
         {
             slog("download cache: kept %s (in use)", n.c_str());
             ++kept;
@@ -8097,7 +8330,13 @@ bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::stri
          kept, stuck);
     if (stuck) why = std::to_string(stuck) + (stuck == 1 ? " file couldn't be deleted." : " files couldn't be deleted.");
     else if (!files && kept) why = "Everything in it is in use right now.";
+    if (progress) progress(names.size(), names.size());
     return stuck == 0;
+}
+
+bool Engine::clear_downloads(std::uint64_t &freed, std::size_t &files, std::string &why)
+{
+    return clear_cache_now(freed, files, why, {});
 }
 
 /* ---- Deleting several at once ---- */
@@ -8357,3 +8596,6 @@ std::string disc_image_id(const std::string &path)
     return id;
 }
 } // namespace recomp
+
+/* (2.3.0) Upload from your phone, save backups, the phone's requests, likes, Restore my apps, mods. */
+#include "store_engine_23.inc"

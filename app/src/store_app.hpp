@@ -16,6 +16,8 @@ namespace recomp
 {
 /* (1.0.8) What chosen_ holds for a Title Update the store downloads itself: never a path. */
 constexpr const char *kDownloadChoice = "\x01" "download";
+/* (2.3.0) The file chooser's first row: Upload from your phone (never a path). */
+constexpr const char *kPhoneChoice = "\x01" "phone";
 class Store
 {
 public:
@@ -54,9 +56,10 @@ public:
     /* (1.1.0) Send logs on the open game's page: sel 0 the message, 1 Cancel, 2 Send; view 0
      * ready, 1 sending, 2 sent, 3 didn't go (result); kb: the keyboard open on the message. */
     void preview_logs(const std::string &msg, int sel, int view = 0, const std::string &result = "", bool kb = false,
-                      int kb_row = 1, int kb_col = 0)
+                      int kb_row = 1, int kb_col = 0, int cat = -1)
     {
         open_logs(page_id_);
+        logs_cat_ = cat; logs_chip_ = std::max(0, cat);
         logs_t_ = 1; logs_msg_ = msg; logs_sel_ = sel; logs_view_ = view; logs_result_ = result;
         kb_ = kb; kb_t_ = 1; kb_row_ = kb_row; kb_col_ = kb_col; kb_mode_ = 0;
     }
@@ -162,6 +165,15 @@ public:
     float preview_notes_overflow(int *lines = nullptr) const;
     void preview_all_sort(int sort, bool focus_sort) { prefs_.all_sort = sort; cat_on_chips_ = focus_sort; cat_sort_on_ = focus_sort; }
     void preview_drives(int sel) { preview_library(4, 0); drv_sel_ = sel; }
+    /* (2.3.0) */
+    void preview_upload(int mode, int slot) { open_upload(mode, page_id_, slot); panel_t_ = 1; }
+    void preview_upload_status(const ReceiverStatus &st, const std::string &code) { up_st_ = st; up_code_ = code; up_why_.clear(); up_poll_ = 1e9f; }
+    void preview_saves(const std::vector<Backup> &list, int sel, int ask = 0, int ask_sel = 1)
+    {
+        open_saves(page_id_); sv_list_ = list; panel_t_ = 1; panel_sel_ = sel; sv_ask_ = ask; sv_ask_sel_ = ask_sel;
+    }
+    void preview_ask(const LinkAction &a, const ConsoleApp &c) { rq_ = a; rq_app_ = c; open_panel(PanelAsk); panel_t_ = 1; panel_sel_ = 1; }
+    void preview_backup_first(bool on) { backup_first_ = on; }
     void preview_shimmer(bool on) { shimmer_test_ = on; }
     void preview_scroll_page(float y) { page_scroll_ = page_scroll_to_ = y; }
 
@@ -243,7 +255,7 @@ private:
     struct Control
     {
         enum Kind { Primary, Slot, Setup, Delete, Logs /* (1.1.0) Send logs */, Report /* (2.0) a custom app's source */,
-                    Versions /* (2.1) */, Favorite /* (2.2.2) */, AutoUpdate /* (2.2.2) */ } kind;
+                    Versions /* (2.1) */, Favorite /* (2.2.2) */, AutoUpdate /* (2.2.2) */, Saves /* (2.3.0) */ } kind;
         int slot = -1;
     };
     /* Discover (1.0.6), as the lines the D-pad moves between, top to bottom: the featured
@@ -651,6 +663,7 @@ private:
     void draw_toast(porpoise::ui::Gfx &gfx);
     std::size_t link_devices_ = std::size_t(-1); /* how many were linked (once known), to say when one more is */
     bool modal_open() const { return picker_ || keypad_ || kb_ || logs_ || clash_ || confirm_ || sheet_ || vers_ || moved_ || mng_ || lost_ || panel_; }
+    bool logs_ready() const; /* (2.3.0) a category and a few words */
     /* (2.2) Library > On this PS5 (store_app_manager.cpp): every folder in the homebrew folders
      * (Engine::console_apps); (2.2.2) as a grid or a list, sorted and filtered (Prefs::con_*). */
     std::vector<ConsoleApp> console_;
@@ -698,7 +711,8 @@ private:
     /* ---- (2.2.2) store_app_more.cpp ---- */
     /* Sheets over the store (panel_): the download queue, where to install, the storage view, What's
      * new, the tabs, deleting what's selected. panel_sel_: the row or button focused. */
-    enum PanelKind { PanelNone = 0, PanelQueue, PanelPlace, PanelStorage, PanelNews, PanelTabs, PanelDelete };
+    enum PanelKind { PanelNone = 0, PanelQueue, PanelPlace, PanelStorage, PanelNews, PanelTabs, PanelDelete,
+                     PanelUpload /* (2.3.0) */, PanelSaves, PanelAsk };
     int panel_ = 0;
     float panel_t_ = 0;
     int panel_sel_ = 0, panel_top_ = 0;
@@ -816,6 +830,52 @@ private:
     mutable std::string rel_key_; /* related_rows' last answer, for this app and catalog */
     mutable std::vector<RelRow> rel_cache_;
     int cus_top_ = 0; /* Customize: the first row shown */
+
+    /* ---- (2.3.0) store_app_23.cpp ---- */
+    /* Upload from your phone (the receiver): 0 a game's file slot, 1 any file (Settings > Storage),
+     * 2 a game's backups to and from the phone, 3 a list of apps. */
+    int up_mode_ = 0, up_slot_ = -1, up_files_ = 0;
+    std::string up_app_, up_code_, up_why_, up_last_;
+    ReceiverStatus up_st_;
+    float up_poll_ = 0;
+    void open_upload(int mode, const std::string &app, int slot);
+    void close_upload();
+    bool update_upload_panel(float dt);
+    void draw_upload_panel(porpoise::ui::Gfx &gfx, float k);
+    /* A game's saves: its backups, and the question over one (1 restore, 2 delete, 3 which). */
+    std::string sv_app_, sv_note_;
+    bool sv_note_bad_ = false;
+    std::vector<Backup> sv_list_;
+    int sv_ask_ = 0, sv_ask_sel_ = 0;
+    void open_saves(const std::string &id);
+    std::vector<std::string> saves_buttons() const;
+    bool update_saves_panel(float dt);
+    void draw_saves_panel(porpoise::ui::Gfx &gfx, float k);
+    /* Delete and Move: the saves backed up first (on unless the player turns it off). */
+    bool backup_first_ = true;
+    /* What a linked phone asks: Delete / Move wait for Delete or Ignore here; the job's result goes
+     * back to the phone. */
+    LinkAction rq_;
+    ConsoleApp rq_app_;
+    long long phone_req_ = 0;
+    std::string phone_req_kind_, phone_req_app_;
+    bool phone_action(const LinkAction &a);
+    bool update_ask_panel(float dt);
+    void draw_ask_panel(porpoise::ui::Gfx &gfx, float k);
+    void phone_job_seen(const JobState &job);
+    bool take_23_result(const JobState &job);
+    float prefs_sync_t_ = 0;
+    void sync_phone_prefs();
+    /* Clear download cache, on the engine's thread: where its words go. */
+    bool clearing_ = false;
+    std::string *clear_note_ = nullptr;
+    bool *clear_bad_ = nullptr;
+    void tick_clear();
+    /* Send logs: what happened (0 Bug .. 4 Other, -1 not picked yet), the chip focused; a beta's
+     * Feedback (Works, Crashes, Slow, Other) instead. */
+    int logs_cat_ = -1, logs_chip_ = 0;
+    bool logs_fb_ = false;
+    std::string ma_note_;
     float cus_scroll_ = 0, cus_scroll_to_ = 0; /* (2.2.3) Customize, scrolled (its groups' headings make it taller) */
 };
 } // namespace recomp

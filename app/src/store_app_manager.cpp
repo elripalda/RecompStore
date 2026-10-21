@@ -953,10 +953,19 @@ void Store::draw_drives(Gfx &gfx, float slide)
         const double used = s.total > s.free ? double(s.total - s.free) : 0, total = double(std::max<std::uint64_t>(1, s.total));
         const float bx = lx + 28, bw = lw - 56, by = y + 64;
         gfx.panel(bx, by, bw, 12, C(kFrost, 0.10f), 1.f, 6);
-        const float k = float(std::clamp(used / total, 0.0, 1.0));
+        /* (2.2.4) What's known to be on it: its apps, and for the one shown, its top folders. More
+         * than the drive's size means the size is wrong: "Size unknown", no bar. */
+        std::uint64_t listed = 0, folders = 0;
+        for (const ConsoleApp &c : console_)
+            if (c.root == s.homebrew && c.size > 0) listed += std::uint64_t(c.size);
+        if (i == drv_sel_)
+            for (const FolderSize &fs_ : engine().drive_folders(s.mount, nullptr))
+                if (fs_.size > 0) folders += std::uint64_t(fs_.size);
+        const bool sized = s.sized && s.total && std::max(listed, folders) <= s.total;
+        const float k = sized ? float(std::clamp(used / total, 0.0, 1.0)) : 0.f;
         if (k > 0) gfx.panel(bx, by, std::max(12.f, bw * k), 12, C(k > 0.92f ? 0xFF9A8A : kCyan), 1.f, 6);
         gfx.text_mid(Font::Regular, 17, bx, y + 102, C(0xB9C4D3), Align::Left,
-                     size_text(s.free) + " free of " + size_text(s.total));
+                     sized ? size_text(s.free) + " free of " + size_text(s.total) : std::string("Size unknown"));
     }
     /* The focused drive's top folders and what each takes: to see what's using the space. */
     const DriveSpace &s = dr[std::size_t(drv_sel_)];

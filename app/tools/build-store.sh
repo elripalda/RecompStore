@@ -38,6 +38,13 @@ PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-clang" -Wall -Werror -O2 \
     -o "$root/payload/launcher/recompstore-launcher.elf" "$root/payload/launcher/launcher.c" -lSceSystemService -lSceUserService -lSceNotification
 PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-strip" "$root/payload/launcher/recompstore-launcher.elf"
 cp "$root/payload/launcher/recompstore-launcher.elf" "$root/assets/payloads/recompstore-launcher.elf"
+# (2.3.0) The receiver payload (payload/receiver): files from a phone on the same Wi-Fi, and save
+# backups to it, only while the store's Upload or Back up to phone screen is open.
+python3 "$root/tools/make-receiver-page.py" "$root/payload/receiver"
+PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-clang" -Wall -Werror -O2 \
+    -o "$root/payload/receiver/recompstore-receiver.elf" "$root/payload/receiver/receiver.c" "$root/payload/receiver/page.c"
+PS5_PAYLOAD_SDK="$sdk" "$sdk/bin/prospero-strip" "$root/payload/receiver/recompstore-receiver.elf"
+cp "$root/payload/receiver/recompstore-receiver.elf" "$root/assets/payloads/recompstore-receiver.elf"
 # The installer payload (payload/installer): installs the store from its GitHub release,
 # and is how the store updates itself. Shipped in the app and on the release.
 make -s -C "$root/payload/installer" PS5_PAYLOAD_SDK="$sdk" clean all

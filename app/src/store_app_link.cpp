@@ -392,7 +392,7 @@ void Store::kb_finished()
     kb_ = false;
     if (kb_mode_ == 0)
     {
-        logs_sel_ = 2; /* on to Send */
+        logs_sel_ = 3; /* on to Send */
         play(int(Sfx::Back));
         return;
     }
@@ -580,9 +580,19 @@ void Store::take_link_actions()
             play(int(st == 2 ? Sfx::Complete : Sfx::Error));
         }
     }
+    /* (2.3.0) Typing from the phone goes into the keyboard that's open, straight away. */
+    for (std::size_t i = 0; i < link_waiting_.size(); ++i)
+        if (link_waiting_[i].kind == "text" && kb_)
+        {
+            const LinkAction t = link_waiting_[i];
+            link_waiting_.erase(link_waiting_.begin() + std::ptrdiff_t(i));
+            phone_action(t);
+            break;
+        }
     if (link_waiting_.empty() || modal_open() || !booted_) return;
     a = link_waiting_.front();
     link_waiting_.erase(link_waiting_.begin());
+    if (phone_action(a)) return; /* (2.3.0) cancel, favorite, autoupdate, text, delete, move */
     if (a.kind == "source")
     {
         sheet_ = true;
@@ -607,6 +617,7 @@ void Store::take_link_actions()
         if (!app || app->soon)
         {
             toast("Your phone sent an app this store doesn't have");
+            engine().link_result(a.id, a.kind, a.app, "failed", "This store doesn't have that app.");
             play(int(Sfx::Error));
             return;
         }
@@ -619,9 +630,15 @@ void Store::take_link_actions()
             const std::string kept = kept_at(*app);
             toast(!kept.empty() && newer_out(*app) ? app->name + " is kept at " + kept.substr(version_start(kept)) + ". Update it from its page."
                                                    : app->name + " is already installed");
+            engine().link_result(a.id, a.kind, a.app, "done", app->name + " is already installed.");
             return;
         }
-        if (queue_place(app->id) || !engine().queue_add(app->id)) return; /* (2.2.2) the download queue */
+        if (queue_place(app->id) || !engine().queue_add(app->id))
+        {
+            engine().link_result(a.id, a.kind, a.app, "done", "It's in the downloads already.");
+            return; /* (2.2.2) the download queue */
+        }
+        engine().link_result(a.id, a.kind, a.app, "done", update ? "Updating on your PS5." : "Installing on your PS5.");
         ++queue_total_;
         queue_fresh_ = true;
         toast((update ? "Updating " : "Installing ") + app->name + ", sent from your phone");

@@ -14,13 +14,16 @@
  * kind=delete (path0=, path1=, ...) deletes a game's folder and the game files set up
  * for it instead; kind=copy copies one file (a disc image the game reads as it is) into
  * the target folder; (2.2) kind=tree copies an app's whole folder (image=) to a new folder
- * in another homebrew folder (target=), for the App manager's Move.
+ * in another homebrew folder (target=), for the App manager's Move; (2.3.0) kind=backup makes a
+ * game's save backup (target= the zip, manifest=, save<i>=, as<i>=, dir<i>=, usb= a copy's folder)
+ * and kind=restore puts one back (image= the zip, target= the game's folder, the same save lines).
  * A file called "cancel" in that folder stops it. Files already in place at
  * their full size are kept, so a stopped setup carries on. It writes only
  * inside the target folder, never the port's own eboot.bin, sce_sys or
  * sce_module, and shows no notifications.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
+#include "store_backup.hpp"
 #include "store_disc.hpp"
 #include "store_fs.hpp"
 #include "store_zip.hpp"
@@ -676,6 +679,123 @@ int tree_job(const std::string &from, const std::string &to)
     return 0;
 }
 
+/* (2.3.0) A save path the store hands over: absolute, under /data/ or a drive, spelled plainly. */
+bool save_path_ok(const std::string &p)
+{
+#ifdef RECOMP_TEST_ROOT
+    const bool where = p.rfind(RECOMP_TEST_ROOT, 0) == 0 || p.rfind("/mnt/usb", 0) == 0;
+#else
+    const bool where = p.rfind("/data/", 0) == 0 || p.rfind("/mnt/", 0) == 0;
+#endif
+    if (!where || p.find("/../") != std::string::npos || p.find("/./") != std::string::npos || p.find("//") != std::string::npos || p.back() == '/')
+        return false;
+    for (const char c : p)
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F || c == '\\') return false;
+    return true;
+}
+
+std::vector<recomp::backup::Save> job_saves(const std::string &job, std::string &bad)
+{
+    std::vector<recomp::backup::Save> out;
+    for (int i = 0; i < 16; ++i)
+    {
+        const std::string path = field(job, ("save" + std::to_string(i)).c_str());
+        if (path.empty()) break;
+        recomp::backup::Save s;
+        s.path = path;
+        s.as = field(job, ("as" + std::to_string(i)).c_str());
+        s.dir = field(job, ("dir" + std::to_string(i)).c_str()) != "0";
+        if (!save_path_ok(path) || s.as.empty() || !recomp::zip::safe_name(s.as))
+        {
+            bad = path;
+            return {};
+        }
+        out.push_back(s);
+    }
+    return out;
+}
+
+bool usb_backups_dir(const std::string &p)
+{
+    return p.rfind("/mnt/usb", 0) == 0 && p.find("/RecompStore Backups/") != std::string::npos && p.find("..") == std::string::npos;
+}
+
+auto backup_progress = [](const char *, std::uint64_t done, std::uint64_t total) {
+    g_status.done = done;
+    g_status.total = total;
+    write_status();
+};
+auto backup_log = [](const std::string &line) { log_line("%s", line.c_str()); };
+
+/* kind "backup" (2.3.0): the saves into target, a zip in the store's backups folder. */
+int backup_job(const std::string &target, const std::string &job)
+{
+    const std::string root = kDir + "/backups/";
+    if (target.rfind(root, 0) != 0 || target.find("..") != std::string::npos || target.size() < root.size() + 6 ||
+        target.compare(target.size() - 4, 4, ".zip") != 0)
+        return fail("The copier only writes backups into the store's backups folder.");
+    const std::string mpath = field(job, "manifest"), usb = field(job, "usb");
+    std::string manifest, bad;
+    if (mpath != kJobDir + "/backup-manifest.json" || !read_text(mpath, manifest) || manifest.empty() || manifest.size() > 65536)
+        return fail("The backup's list of saves is missing.");
+    if (!usb.empty() && !usb_backups_dir(usb)) return fail("The copier only copies backups to a USB drive's RecompStore Backups.");
+    const std::vector<recomp::backup::Save> saves = job_saves(job, bad);
+    if (saves.empty()) return fail(bad.empty() ? std::string("There were no saves to back up.") : "A save's place isn't right: " + bad);
+    log_line("backup started (pid %d): %zu save place(s) -> %s", int(getpid()), saves.size(), target.c_str());
+    const double t0 = now_s();
+    g_status.phase = "backingup";
+    write_status(true);
+    std::string why;
+    std::size_t files = 0;
+    std::uint64_t bytes = 0;
+    if (!recomp::backup::make(target, manifest, saves, act_as, backup_progress, backup_log, why, files, bytes)) return fail(why);
+    if (!usb.empty() && !recomp::backup::copy_checked(target, usb, backup_log, why))
+        return fail("Your saves were backed up on the console, but not to the USB drive: " + why);
+    g_status.files = files;
+    g_status.seconds = now_s() - t0;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("backup done: %zu files, %llu KB in %.1f s, read back and checked", files, (unsigned long long)(bytes >> 10), now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
+/* kind "restore" (2.3.0): a backup zip's saves put back where they belong. */
+int restore_job(const std::string &zip, const std::string &target, const std::string &job)
+{
+    const std::string root = kDir + "/backups/";
+    if ((zip.rfind(root, 0) != 0 && !usb_backups_dir(zip)) || zip.find("..") != std::string::npos || zip.size() < 5 ||
+        zip.compare(zip.size() - 4, 4, ".zip") != 0)
+        return fail("The copier only restores the store's own backups.");
+    std::string bad;
+    const std::vector<recomp::backup::Save> saves = job_saves(job, bad);
+    if (saves.empty()) return fail(bad.empty() ? std::string("There were no saves to restore.") : "A save's place isn't right: " + bad);
+    for (const recomp::backup::Save &s : saves)
+        if (s.path.rfind(target + "/", 0) != 0 && s.path.rfind("/data/", 0) != 0
+#ifdef RECOMP_TEST_ROOT
+            && s.path.rfind(RECOMP_TEST_ROOT, 0) != 0
+#endif
+        )
+            return fail("A save's place isn't the game's: " + s.path);
+    log_line("restore started (pid %d): %s -> %zu save place(s)", int(getpid()), zip.c_str(), saves.size());
+    const double t0 = now_s();
+    g_status.phase = "restoring";
+    write_status(true);
+    std::string manifest, why;
+    std::vector<recomp::zip::Entry> entries;
+    if (!recomp::backup::check(zip, manifest, entries, backup_progress, why)) return fail("That backup can't be used: " + why + ".");
+    std::size_t files = 0;
+    if (!recomp::backup::restore(zip, entries, saves, act_as, backup_progress, backup_log, why, files))
+        return fail(why + " Your saves are as they were.");
+    g_status.files = files;
+    g_status.seconds = now_s() - t0;
+    g_status.phase = "done";
+    write_status(true);
+    log_line("restore done: %zu files in %.1f s, checked", files, now_s() - t0);
+    unlink((kJobDir + "/running").c_str());
+    return 0;
+}
+
 int main()
 {
     make_dirs(kDir + "/logs");
@@ -724,8 +844,9 @@ int main()
 #else
     const bool allowed_root = target.rfind("/data/", 0) == 0 || target.rfind("/mnt/", 0) == 0;
 #endif
-    if (target.size() < 8 || !allowed_root ||
-        target.find("/../") != std::string::npos || target.find("/./") != std::string::npos)
+    /* (2.3.0) A backup's target is its zip in the store's own backups folder (backup_job checks). */
+    if (kind != "backup" && (target.size() < 8 || !allowed_root ||
+        target.find("/../") != std::string::npos || target.find("/./") != std::string::npos))
         return fail("The game's folder isn't somewhere the store sets games up.");
     if (kind == "unzip")
         return unzip_job(image, target, job);
@@ -737,6 +858,10 @@ int main()
         return copy_job(image, target);
     if (kind == "tree")
         return tree_job(image, target);
+    if (kind == "backup")
+        return backup_job(target, job); /* (2.3.0) */
+    if (kind == "restore")
+        return restore_job(image, target, job);
     if (kind != "setup")
         return fail("The copier doesn't know the job \"" + kind + "\".");
     log_line("started (pid %d): %s -> %s", int(getpid()), image.c_str(), target.c_str());

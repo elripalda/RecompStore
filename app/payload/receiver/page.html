@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recomp Store</title>
+<style>
+:root{--bg:#0b1220;--card:rgba(255,255,255,.06);--line:rgba(255,255,255,.1);--fg:#eef3f8;--soft:#b9c4d3;--muted:#7f8ba0;--cyan:#35d6f4;--red:#ff8a80;--green:#57d68d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#163150 0,transparent 60%),var(--bg);color:var(--fg);font:16px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;min-height:100vh}
+main{max-width:560px;margin:0 auto;padding:22px 16px 40px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;margin-bottom:18px}.brand i{width:30px;height:30px;border-radius:9px;background:var(--cyan);display:inline-block}
+h1{font-size:24px;margin:0 0 4px}p{margin:0 0 12px;color:var(--soft)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.kick{font-size:12px;letter-spacing:.14em;font-weight:700;color:var(--cyan);text-transform:uppercase;margin-bottom:10px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:13px 18px;font:700 16px inherit;font-family:inherit;background:var(--cyan);color:#06111c;width:100%;cursor:pointer}
+.btn.ghost{background:rgba(255,255,255,.08);color:var(--fg);border:1px solid var(--line)}
+input[type=file]{display:none}
+.bar{height:10px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden;margin:10px 0 6px}.bar b{display:block;height:100%;width:0;background:var(--cyan);transition:width .2s}
+.row{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--soft)}
+.ok{color:var(--green)}.bad{color:var(--red)}
+ul{list-style:none;padding:0;margin:0}li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-top:1px solid var(--line)}li:first-child{border-top:0}
+li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}li small{display:block;color:var(--muted)}
+li a{flex:none;color:var(--cyan);font-weight:700;text-decoration:none;padding:8px 12px;border:1px solid var(--line);border-radius:12px}
+.muted{color:var(--muted);font-size:14px}
+</style></head><body><main>
+<div class="brand"><i></i>Recomp Store</div>
+<h1 id="t">Your PS5</h1><p id="s">Loading…</p>
+<section class="card" id="up" hidden><div class="kick">Send to your PS5</div><p id="hint"></p>
+<label class="btn" for="f">Choose a file</label><input id="f" type="file" multiple>
+<div id="prog" hidden><div class="bar"><b id="pb"></b></div><div class="row"><span id="pn"></span><span id="pp"></span></div></div><p id="msg" class="muted"></p></section>
+<section class="card" id="bk" hidden><div class="kick">Save backups</div><ul id="list"></ul><p id="none" class="muted" hidden>No backups yet. Make one on your PS5 first.</p>
+<div id="bup" hidden><p class="muted" style="margin-top:12px">Have a backup zip from before? Send it back to your PS5, then restore it there.</p><label class="btn ghost" for="b">Send a backup zip</label><input id="b" type="file" accept=".zip"></div></section>
+<p class="muted">Only works on your home Wi-Fi, while the screen on your PS5 stays open.</p>
+</main><script>
+const C=new URLSearchParams(location.search).get('c')||'';const $=s=>document.querySelector(s);
+const fmt=b=>b>=1073741824?(b/1073741824).toFixed(1)+' GB':b>=1048576?(b/1048576).toFixed(0)+' MB':Math.max(1,Math.round(b/1024))+' KB';
+let I={};
+function load(){fetch('/api/info?c='+encodeURIComponent(C)).then(r=>r.json()).then(j=>{if(!j.ok){$('#s').textContent=j.error||'That code isn\'t right.';return}I=j;$('#t').textContent=j.title||'Your PS5';
+$('#s').textContent=j.uploads?(j.ext?'Pick a '+j.ext.split(/[ ,]+/).join(' or ')+' file.':'Pick any file.')+' It goes straight to your PS5 over Wi-Fi.':'Download your save backups to keep them safe.';
+$('#up').hidden=!j.uploads;$('#hint').textContent='Up to '+fmt(j.max)+'. Big files take a while: keep this page open.';
+const bk=j.backups||[];$('#bk').hidden=!(bk.length||j.backup_id);$('#none').hidden=bk.length>0;$('#bup').hidden=!j.backup_id;
+$('#list').innerHTML=bk.sort((a,b)=>b.at-a.at).map(x=>`<li><span>${esc(x.file)}<small>${esc(x.id)} · ${fmt(x.size)} · ${new Date(x.at*1000).toLocaleString()}</small></span><a href="/api/backup?c=${encodeURIComponent(C)}&id=${encodeURIComponent(x.id)}&file=${encodeURIComponent(x.file)}" download="${esc(x.file)}">Save</a></li>`).join('')}).catch(()=>{$('#s').textContent='Your PS5 isn\'t answering. Is the screen still open on it?'})}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function send(files,to){const list=[...files];if(!list.length)return;$('#prog').hidden=false;const one=()=>{const f=list.shift();if(!f){load();return}
+if(f.size>I.max){$('#msg').textContent=f.name+' is bigger than the room on your PS5.';$('#msg').className='bad';return one()}
+const x=new XMLHttpRequest();x.open('PUT','/api/upload?c='+encodeURIComponent(C)+'&to='+to+'&name='+encodeURIComponent(f.name));
+const t0=Date.now();x.upload.onprogress=e=>{if(!e.lengthComputable)return;$('#pb').style.width=(100*e.loaded/e.total).toFixed(1)+'%';const s=(Date.now()-t0)/1000;$('#pn').textContent=f.name;$('#pp').textContent=fmt(e.loaded)+' of '+fmt(e.total)+(s>1?' · '+fmt(e.loaded/s)+'/s':'')};
+x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}$('#msg').textContent=j.ok?'Sent: '+j.name+'. It\'s on your PS5.':(j.error||'That didn\'t go through.');$('#msg').className=j.ok?'ok':'bad';one()};
+x.onerror=()=>{$('#msg').textContent='The upload stopped. Check your Wi-Fi and that the screen is still open on your PS5.';$('#msg').className='bad'};
+$('#pb').style.width='0';$('#pn').textContent=f.name;$('#pp').textContent='';x.send(f)};one()}
+$('#f').onchange=e=>send(e.target.files,'files');$('#b').onchange=e=>send(e.target.files,'backup');load();
+</script></body></html>
