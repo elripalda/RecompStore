@@ -1,0 +1,17 @@
+/* Recomp Store admin (2.3): the Games list's tick boxes and the bar for several games at once. */
+.bulk-pick{margin:0;flex:none;display:flex;align-items:center;justify-content:center;width:28px;min-height:44px;cursor:pointer}
+.bulk-pick input{margin:0}
+.row.bulk-on{border-color:rgba(53,214,244,.6);background:rgba(53,214,244,.07)}
+.bulk-bar{z-index:6;align-items:center;gap:10px 14px;border-color:rgba(53,214,244,.5)}
+.bulk-bar strong{white-space:nowrap}
+.bulk-bar label.bulk-op{margin:0;flex:0 1 280px}
+.bulk-bar select{height:44px;padding:0 12px}
+.bulk-bar .muted{font-size:14px}
+.order-bar:not([hidden]) + .bulk-bar{bottom:96px}
+@media (max-width:700px){
+  .bulk-bar{gap:8px;padding:10px 12px}
+  .bulk-bar label.bulk-op{flex:1 1 100%;order:-1}
+  .bulk-bar strong{flex:1 1 100%;font-size:14px;order:-2}
+  .bulk-bar button{flex:1 1 0;justify-content:center;padding:0 10px;min-height:40px;font-size:14px}
+  .bulk-bar .muted{display:none}
+}

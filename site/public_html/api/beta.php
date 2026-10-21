@@ -156,7 +156,7 @@ if ($a === 'file') {
         header("Content-Range: bytes $from-$to/$size");
     }
     rs_seen($db, $install, '');
-    if ($from === 0) rs_count_beta_download($db, $id, $install); // (2.1) Analytics
+    if ($from === 0) rs_count_beta_download($db, $id, $install, basename($path)); // (2.1) Analytics; (2.3) which build
     @set_time_limit(0);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/zip');

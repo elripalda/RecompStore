@@ -398,6 +398,7 @@ form.smp-min small{flex:1 1 280px}
 .tag.cat-other{background:rgba(255,255,255,.1);color:#cdd6e2}.tag.cat-{background:transparent;color:#95a2b4;border:1px dashed rgba(255,255,255,.2)}
 .dstage .d-head .d-more{opacity:.55;margin-left:6px}
 .colls{display:grid;gap:16px;max-width:860px}
+.colls{grid-template-columns:minmax(0,1fr)} /* (2.3) a collection's card fits a phone */
 .tag.fb-works{background:rgba(95,227,161,.16);color:#9ff0c6}.tag.fb-crashes{background:rgba(229,72,77,.18);color:#ff8a80}
 .tag.fb-slow{background:rgba(255,200,87,.16);color:#ffc857}.tag.fb-other{background:rgba(255,255,255,.1);color:#cdd6e2}
 .fb-app{margin-bottom:16px}

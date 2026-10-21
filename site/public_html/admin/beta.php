@@ -98,7 +98,7 @@ rs_head('Beta codes');
     <span class="muted"><?= count($rows) ?> <?= count($rows) === 1 ? 'code' : 'codes' ?>, <?= count(array_filter($rows, fn($r) => $r['install_id'] !== null && !(int)$r['revoked'])) ?> in use</span>
   </form>
   <?php if (!$rows): ?><p class="muted">No codes yet.</p><?php else: ?>
-  <table class="codes">
+  <div class="table-wrap"><table class="codes"><!-- (2.3) scrolls inside its card on a phone -->
     <thead><tr><th>Code</th><th>Game</th><th>Note</th><th>Status</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($rows as $r): $used = $r['install_id'] !== null; $off = (int)$r['revoked'] === 1; ?>
@@ -122,7 +122,7 @@ rs_head('Beta codes');
       </tr>
     <?php endforeach; ?>
     </tbody>
-  </table>
+  </table></div>
   <?php endif; ?>
 </section>
 <script>

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
+require __DIR__ . '/inc/bulk.php'; // (2.3) several games at once
 rs_require_login();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -67,6 +68,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $st = rs_db()->prepare('UPDATE games SET sort = ? WHERE id = ?');
                 foreach ($ids as $k => $id) $st->execute([($k + 1) * 10, $id]);
             }
+        } elseif ($action === 'bulk') {
+            rs_bulk_apply();
         } elseif ($action === 'delete' && isset($_POST['id'])) {
             rs_db()->prepare('DELETE FROM games WHERE id = ?')->execute([$_POST['id']]);
             rs_flash('Removed from the admin. Press Publish to take it out of the store and the site too.');
@@ -86,7 +89,7 @@ foreach ($all as $g) $counts[rs_category((string)$g['category'])]++;
 $games = $cat === '' ? $all : array_values(array_filter($all, fn($g) => rs_category((string)$g['category']) === $cat));
 $sorts = rs_category_sorts();
 $published = rs_setting('published_at');
-rs_head('Games');
+rs_head('Games', true, ['assets/bulk.css']);
 ?>
 <section class="head-row">
   <div>
@@ -121,6 +124,7 @@ rs_head('Games');
 <section class="list" data-order>
 <?php foreach ($games as $i => $g): ?>
   <article class="row<?= $g['hidden'] ? ' dim' : '' ?>" data-id="<?= h($g['id']) ?>" data-find-text="<?= h(mb_strtolower($g['name'] . ' ' . $g['id'] . ' ' . $g['author'])) ?>">
+    <?= rs_bulk_check($g) ?>
     <?php if (count($games) > 1): ?><button type="button" class="grip" data-grip aria-label="Move <?= h($g['name'] ?: 'Untitled') ?>: drag, or use the arrow keys" title="Drag to move"><svg width="14" height="22" viewBox="0 0 14 22" aria-hidden="true"><g fill="currentColor"><circle cx="3.5" cy="4" r="2"/><circle cx="10.5" cy="4" r="2"/><circle cx="3.5" cy="11" r="2"/><circle cx="10.5" cy="11" r="2"/><circle cx="3.5" cy="18" r="2"/><circle cx="10.5" cy="18" r="2"/></g></svg></button><?php endif; ?>
     <?php if ($g['icon']): ?><img class="icon" src="<?= h($g['icon']) ?>" alt=""><?php else: ?><span class="icon blank"><?= h(mb_substr($g['name'] ?: '?', 0, 2)) ?></span><?php endif; ?>
     <div class="meta">
@@ -159,4 +163,5 @@ rs_head('Games');
   <button type="button" data-order-undo>Undo</button>
   <span class="muted">The new order isn't saved yet. Saving doesn't publish.</span>
 </form>
-<?php rs_foot(['assets/games.js']);
+<?= rs_bulk_bar($cat) ?>
+<?php rs_foot(['assets/games.js', 'assets/bulk.js']);
