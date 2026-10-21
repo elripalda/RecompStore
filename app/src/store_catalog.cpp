@@ -259,6 +259,8 @@ bool parse_catalog(const std::string &text, Catalog &out)
         a.released = x["released"].str();
         a.size = x["size"].str();
         a.needs = x["needs"].str();
+        a.manual = x["manualSetup"].str(); /* (2.6) */
+        if (a.manual.size() > 600) a.manual.resize(600);
         a.build = int(x["build"].integer());
         a.source = x["source"]["type"].str("github");
         a.repo = x["source"]["repo"].str();

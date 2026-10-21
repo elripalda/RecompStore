@@ -3528,6 +3528,7 @@ void Store::draw_page(Gfx &gfx)
         if (tid.rfind("gh-", 0) != 0) chip(tid, Font::SemiBold, kGlass, kRim, C(kFrost));
         if (a.category == "games" || !a.needs.empty())
             chip("Needs your " + (a.needs.empty() ? std::string("own game") : a.needs), Font::SemiBold, kGlass, kRim, C(kFrost));
+        if (!a.manual.empty()) chip("Manual setup", Font::Bold, C(kAmber, 0.16f), C(kAmber, 0.6f), C(0xFFD9A0)); /* (2.6) */
         y += 34 + 26;
     }
     {
@@ -3573,8 +3574,10 @@ void Store::draw_page(Gfx &gfx)
                             ? "Recomp Store and this game's GitHub repository don't host any game files. Set it up from your own "
                               "legally obtained copy."
                             : "Recomp Store doesn't host any game files. Set it up from your own legally obtained copy.";
-    const bool disc_box = game_like || a.category == "emulators";
-    const auto disc = wrap(gfx, Font::Regular, 18, 820 - 64, kDisc, 3);
+    /* (2.6) Not plug and play: what to do by hand, in amber, where the bring-your-own note goes. */
+    const bool manual = !a.manual.empty();
+    const bool disc_box = manual || game_like || a.category == "emulators";
+    const auto disc = wrap(gfx, Font::Regular, 18, 820 - 64, manual ? a.manual : std::string(kDisc), manual ? 5 : 3);
     const float dh = disc_box ? 22 + 16 + 10 + 27 * float(disc.size()) + 22 : 0;
     /* Open, the notes cover everything from the description down (text is drawn over
      * panels, so what they cover fades out rather than showing through). */
@@ -3621,8 +3624,9 @@ void Store::draw_page(Gfx &gfx)
     if (u > 0.01f && disc_box)
     {
         const float dy = std::min(y, bottom - dh);
-        gfx.panel(x, dy, 820, dh, C(kCyan, 0.08f * u), 1.f, 22, C(kCyan, 0.35f * u), 1.25f);
-        gfx.text_mid(Font::Bold, 14, x + 32, dy + 22 + 8, C(kCyan, u), Align::Left, kDiscHead, 2);
+        const std::uint32_t tone = manual ? kAmber : kCyan;
+        gfx.panel(x, dy, 820, dh, C(tone, 0.08f * u), 1.f, 22, C(tone, 0.35f * u), 1.25f);
+        gfx.text_mid(Font::Bold, 14, x + 32, dy + 22 + 8, C(tone, u), Align::Left, manual ? "NOT PLUG AND PLAY" : kDiscHead, 2);
         draw_lines(gfx, Font::Regular, 18, x + 32, dy + 22 + 16 + 10, 27, C(kBody, u), disc);
     }
     /* Open: the box grows from What's new up over the description and down to the bottom. */
