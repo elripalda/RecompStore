@@ -2416,7 +2416,11 @@ void run_install(const std::string &id, int answer, const std::string &version, 
      * ID like "gh-..." is only the store's name for it), and its folder in the archive is the
      * one that's a PS5 app. A catalog app's folder is named after its ID, as before. */
     std::string own = a.id, hint = a.id, learned_param;
-    if (a.custom)
+    /* (2.5.1) A catalog app whose release has another app's title ID: its zip is read like a
+     * custom app's (titleId says which app in it), and it's installed under the catalog's ID,
+     * given it with the same rewrite a move uses. */
+    const bool renamed = !a.custom && !a.title_id.empty() && a.title_id != a.id;
+    if (a.custom || renamed)
     {
         set_job("Reading the release", 0, 0);
         std::string why;
@@ -2427,7 +2431,7 @@ void run_install(const std::string &id, int answer, const std::string &version, 
             return fail_job(why);
         }
         slog("install %s: a PS5 app with title ID %s, in %s", a.id.c_str(), own.c_str(), hint.empty() ? "the top of the archive" : hint.c_str());
-        if (moved_id(a.id).empty() && answer != 2)
+        if (a.custom && moved_id(a.id).empty() && answer != 2)
         {
             /* The catalog's own app, or another source's, with this title ID: that's the one. */
             std::lock_guard<std::mutex> l(g.m);
@@ -2445,7 +2449,7 @@ void run_install(const std::string &id, int answer, const std::string &version, 
     {
         std::string incoming = learned_param; /* a custom app's, read already */
         if (incoming.empty() && !zip::read_one(install_zip, hint, "sce_sys/param.json", incoming, 1u << 20)) incoming.clear();
-        const Clash c = find_clash(a, own, incoming);
+        const Clash c = find_clash(a, renamed ? a.id : own, incoming);
         if (c.found)
         {
             const bool is_inner = install_zip != zip_path;
@@ -2465,9 +2469,9 @@ void run_install(const std::string &id, int answer, const std::string &version, 
             g.job.clash_pkg = c.pkg;
             g.job.clash_with = c.with;
             g.job.clash_new = fresh;
-            g.job.clash_tid = own;
+            g.job.clash_tid = renamed ? a.id : own;
             g.job.error = (c.with.empty() ? std::string("Another app") : c.with) + " already uses " + a.name + "'s title ID (" +
-                          own + ") on your PS5, so nothing was installed.";
+                          (renamed ? a.id : own) + ") on your PS5, so nothing was installed.";
             return;
         }
     }
@@ -2476,7 +2480,7 @@ void run_install(const std::string &id, int answer, const std::string &version, 
      * writes back after about a gigabyte), or here when there's no payload loader. */
     /* Where it already is, if it's on the console: under its new title ID when it was moved,
      * else its own (a custom app's, as just read). */
-    const std::string under = moved_id(a.id).empty() ? own : moved_id(a.id);
+    const std::string under = moved_id(a.id).empty() ? (renamed ? a.id : own) : moved_id(a.id);
     const std::string root = tid_folder_in(under, want_root); /* (2.2.2) where it already is, else where the player picked */
     const std::string record = g.data + "/installed/" + a.id + ".txt";
     /* (2.1.1) Already on the console: an update, which ShadowMountPlus doesn't need to add. */
