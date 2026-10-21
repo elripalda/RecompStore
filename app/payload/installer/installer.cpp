@@ -246,13 +246,15 @@ std::string store_folder()
     return std::string(HOMEBREW_DIR) + "/" STORE_TITLE;
 }
 
-/* ShadowMountPlus 1.7's API: "look for new games now". */
-bool smp_rescan()
+/* ShadowMountPlus 1.7's API (HTTP on 127.0.0.1:10101): one JSON object POSTed, its answer's JSON
+ * object back. true when something answered. */
+bool smp_call(const char *route, const std::string &body, std::string &reply)
 {
+    reply.clear();
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return false;
     timeval limit{};
-    limit.tv_sec = 2;
+    limit.tv_sec = 3;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof limit);
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof limit);
     sockaddr_in sa{};
@@ -264,25 +266,107 @@ bool smp_rescan()
         close(fd);
         return false;
     }
-    const char req[] = "POST /api/v1/scan HTTP/1.1\r\nHost: 127.0.0.1:10101\r\nContent-Type: application/json\r\n"
-                       "Content-Length: 2\r\nConnection: close\r\n\r\n{}";
+    char head[256];
+    std::snprintf(head, sizeof head,
+                  "POST %s HTTP/1.1\r\nHost: 127.0.0.1:10101\r\nContent-Type: application/json\r\n"
+                  "Content-Length: %zu\r\nConnection: close\r\n\r\n",
+                  route, body.size());
+    const std::string req = head + body;
 #ifdef MSG_NOSIGNAL
     const int flags = MSG_NOSIGNAL;
 #else
     const int flags = 0;
 #endif
-    bool sent = send(fd, req, sizeof req - 1, flags) == ssize_t(sizeof req - 1);
+    bool sent = send(fd, req.data(), req.size(), flags) == ssize_t(req.size());
     std::string got;
     char buf[2048];
-    for (ssize_t n; sent && (n = recv(fd, buf, sizeof buf, 0)) > 0;)
+    for (ssize_t n; sent && (n = recv(fd, buf, sizeof buf, 0)) > 0 && got.size() < 65536;)
         got.append(buf, std::size_t(n));
     close(fd);
-    const std::size_t open = got.find('{'), end = got.rfind('}');
+    if (got.compare(0, 5, "HTTP/") != 0) return false;
+    const std::size_t at = got.find("\r\n\r\n"), open = at == std::string::npos ? at : got.find('{', at), end = got.rfind('}');
+    if (open != std::string::npos && end != std::string::npos && end > open) reply = got.substr(open, end - open + 1);
+    return true;
+}
+
+/* "Look for new games now". (2.2.3 hotfix) With reset, ShadowMountPlus also forgets that it gave
+ * up on a title: after two tries it stops adding one that isn't in the system's app list (a store
+ * that was deleted from the home screen, say) until it's restarted or asked to reset. */
+bool smp_rescan(bool reset, bool *deferred = nullptr)
+{
+    std::string reply;
+    const bool answered = smp_call("/api/v1/scan", reset ? "{\"reset_attempts\":true}" : "{}", reply);
     recomp::Json j;
-    const bool ok = open != std::string::npos && end != std::string::npos && end > open &&
-                    recomp::Json::parse(got.substr(open, end - open + 1), j) && j["status"].integer(-1) == 0;
-    log_line("ShadowMountPlus %s", ok ? "is running; asked it to look for new games" : got.empty() ? "didn't answer" : "didn't take the request");
+    const bool ok = answered && recomp::Json::parse(reply, j) && j["status"].integer(-1) == 0;
+    if (deferred)
+    {
+        std::string flat;
+        for (const char c : reply)
+            if (c != ' ' && c != '\n' && c != '\r' && c != '\t') flat += c;
+        *deferred = ok && flat.find("\"scan_deferred\":true") != std::string::npos;
+    }
+    log_line("ShadowMountPlus %s%s: %s", ok ? "is running; asked it to look for new games" : answered ? "didn't take the request" : "didn't answer",
+             reset ? " (counters reset)" : "", reply.substr(0, 300).c_str());
     return ok;
+}
+
+/* (2.2.3 hotfix) Whether the store is on the home screen: ShadowMountPlus's app list says so. */
+bool store_on_home()
+{
+    std::string reply;
+    if (!smp_call("/api/v1/games/info", "{\"title_id\":\"" STORE_TITLE "\"}", reply)) return false;
+    recomp::Json j;
+    if (!recomp::Json::parse(reply, j) || j["status"].integer(-1) != 0) return false;
+    /* "installed" sits on the game's item; spacing doesn't matter. */
+    std::string flat;
+    for (const char c : reply)
+        if (c != ' ' && c != '\n' && c != '\r' && c != '\t') flat += c;
+    return flat.find("\"installed\":true") != std::string::npos;
+}
+
+/* (2.2.3 hotfix) After installing: ask ShadowMountPlus (counters reset) and wait until the store
+ * really is on the home screen, up to three minutes, saying why when it isn't. */
+void wait_for_home(const std::string &version)
+{
+    const std::string v = version.empty() ? "" : version; /* "Recomp Store 2.2.3 is installed", or no number */
+    bool deferred = false;
+    if (!smp_rescan(true, &deferred))
+    {
+        toast("Recomp Store " + (v.empty() ? "" : v + " ") + "is installed. Start ShadowMountPlus to add it to your home screen.");
+        return;
+    }
+    if (store_on_home())
+    {
+        log_line("the store is on the home screen");
+        toast("Recomp Store " + (v.empty() ? "" : v + " ") + "is installed and on your home screen.");
+        return;
+    }
+    const std::string who = "Recomp Store " + (v.empty() ? "" : v + " ");
+    toast(deferred ? who + "is installed. Close the app that's still open (Options > Close Application) and it appears on your home screen."
+                   : who + "is installed. Adding it to your home screen...");
+    bool told_open = deferred;
+    for (int t = 0; t < 180; t += 3)
+    {
+        sleep(3);
+        if (store_on_home())
+        {
+            log_line("the store is on the home screen after %d s", t + 3);
+            toast("Recomp Store is on your home screen.");
+            return;
+        }
+        if ((t + 3) % 15 == 0)
+        {
+            bool d = false;
+            smp_rescan(false, &d);
+            if (d && !told_open)
+            {
+                told_open = true;
+                toast("Close the app that's still open (Options > Close Application). Recomp Store appears on your home screen right after.");
+            }
+        }
+    }
+    log_line("the store still isn't on the home screen after 3 minutes");
+    toast("Recomp Store is installed but didn't reach your home screen. Restart the PS5, load ShadowMountPlus, and it shows up.");
 }
 
 int open_store()
@@ -697,15 +781,23 @@ int main()
         }
         else
             std::remove(marker.c_str());
-        const bool smp = smp_rescan();
         if (updating)
+        {
+            smp_rescan(false);
             toast("Recomp Store updated to " + v + ".");
+        }
         else
-            toast(smp ? "Recomp Store " + v + " is installed. It shows up on your home screen in a few seconds."
-                      : "Recomp Store " + v + " is installed. Start ShadowMountPlus to add it to your home screen.");
+            wait_for_home(v);
     }
     else if (!newer.empty())
-        toast("Recomp Store is already installed, and it's newer than this installer. Update it from Latest Updates.");
+    {
+        /* (2.2.3 hotfix) Nothing to install, but it may be missing from the home screen. */
+        log_line("nothing installed; making sure the store %s is on the home screen", newer.c_str());
+        if (store_on_home())
+            toast("Recomp Store is already installed, and it's newer than this installer. Update it from Latest Updates.");
+        else
+            wait_for_home("");
+    }
     else
     {
         log_line("failed: %s", why.c_str());
