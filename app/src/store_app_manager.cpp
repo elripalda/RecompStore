@@ -655,9 +655,16 @@ bool Store::update_manage(float dt)
     if (s != mng_sel_) { mng_sel_ = s; play(int(Sfx::Move)); }
     if (pressed(pad::BtnCircle))
     {
-        if (mng_stage_ == 0) mng_ = false;
+        if (mng_stage_ == 0 || mng_direct_) mng_ = false;
         else { mng_stage_ = 0; mng_sel_ = 0; }
+        mng_direct_ = false;
         play(int(Sfx::Back));
+        return true;
+    }
+    if (mng_stage_ == 1 && move_saves_app().size() && pressed(pad::BtnTriangle))
+    {
+        backup_first_ = !backup_first_; /* (2.3.0) Back up saves first */
+        play(int(Sfx::Select));
         return true;
     }
     if (!pressed(pad::BtnCross)) return true;
@@ -726,7 +733,8 @@ bool Store::update_manage(float dt)
     {
         mng_stage_ = 0;
         mng_sel_ = 0;
-        if (pick == "Close") mng_ = false;
+        if (pick == "Close" || mng_direct_) mng_ = false;
+        mng_direct_ = false;
         play(int(Sfx::Back));
         return true;
     }
@@ -736,7 +744,8 @@ bool Store::update_manage(float dt)
     if (mng_stage_ == 1)
     {
         const Place &to = mng_places_[std::size_t(mng_sel_)];
-        started = engine().manage("mmove", c.folder, to.path);
+        const std::string saves_app = move_saves_app(); /* (2.3.0) backed up first, when asked */
+        started = engine().manage("mmove", c.folder, to.path, backup_first_ ? saves_app : std::string());
         lib_note_ = "Moving " + c.name + " to " + to.label + "\xE2\x80\xA6";
     }
     else if (mng_stage_ == 2)
@@ -820,8 +829,9 @@ void Store::draw_manage(Gfx &gfx)
     const auto lines = wrap(gfx, Font::Regular, 20, iw, body, 4);
     const auto buttons = manage_buttons();
     const bool vertical = mng_stage_ == 1;
+    const bool saves_row = mng_stage_ == 1 && !mng_places_.empty() && !move_saves_app().empty(); /* (2.3.0) */
     const float btn_h = vertical ? 64.f * float(buttons.size()) + 12.f * float(buttons.size() - 1) : 64.f;
-    const float bh = pad + 40 + 16 + 30 + 18 + 30 * float(lines.size()) + 34 + btn_h + pad;
+    const float bh = pad + 40 + 16 + 30 + 18 + 30 * float(lines.size()) + 34 + (saves_row ? 56 + 20 : 0) + btn_h + pad;
     const float by = (H - bh) / 2;
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
     float y = by + pad;
@@ -831,6 +841,15 @@ void Store::draw_manage(Gfx &gfx)
     y += 30 + 18;
     y += draw_lines(gfx, Font::Regular, 20, bx + pad, y, 30, C(kSoft), lines);
     y += 34;
+    if (saves_row)
+    {
+        glass(gfx, bx + pad, y, iw, 56, 18, Color{1, 1, 1, 0.05f}, false);
+        gfx.text_mid(Font::SemiBold, 19, bx + pad + 22, y + 28, C(kFrost), Align::Left, "Back up saves first");
+        gfx.text_mid(Font::Regular, 16, bx + pad + 22 + gfx.measure(Font::SemiBold, 19, "Back up saves first") + 14, y + 28, C(kMuted), Align::Left,
+                     "Triangle turns it on or off");
+        draw_switch(gfx, bx + pad + iw - 22 - 52, y + 28, backup_first_, false);
+        y += 56 + 20;
+    }
     const float gap = vertical ? 12.f : 16.f;
     const float w = vertical ? iw : (iw - gap * float(buttons.size() - 1)) / float(buttons.size());
     for (std::size_t i = 0; i < buttons.size(); ++i)
@@ -903,6 +922,37 @@ bool Store::update_drives(float dt, int moves, bool u, bool d)
         return true;
     }
     drv_sel_ = std::clamp(drv_sel_, 0, n - 1);
+    /* (2.3.0) Right: the drive's apps, where Cross moves one (the same Move as On this PS5). */
+    const auto apps = drive_apps(dr[std::size_t(drv_sel_)].homebrew);
+    const bool l = nav(pad::BtnLeft, nav_left_, dt), r = nav(pad::BtnRight, nav_right_, dt);
+    if (drv_col_ == 1)
+    {
+        if (apps.empty() || l) { drv_col_ = 0; if (l) play(int(Sfx::Move)); return true; }
+        drv_app_ = std::clamp(drv_app_ + (d ? 1 : 0) - (u ? 1 : 0), 0, int(apps.size()) - 1);
+        if (u || d) play(int(Sfx::Move));
+        if (pressed(pad::BtnCross))
+        {
+            open_manage(*apps[std::size_t(drv_app_)]);
+            if (mng_)
+            {
+                /* straight to where to move it */
+                mng_places_.clear();
+                places_t_ = -1;
+                for (const Place &p : install_places_now())
+                    if (p.path != mng_app_.root) mng_places_.push_back(p);
+                mng_stage_ = 1;
+                mng_sel_ = 0;
+                mng_direct_ = true;
+                if (mng_places_.empty())
+                {
+                    mng_ = false;
+                    toast("There's no other drive to move it to.");
+                }
+            }
+        }
+        return true;
+    }
+    if (r && !apps.empty()) { drv_col_ = 1; drv_app_ = 0; play(int(Sfx::Move)); return true; }
     if (u)
     {
         if (drv_sel_ == 0) { lib_bar_ = true; play(int(Sfx::Move)); return true; }
@@ -971,15 +1021,36 @@ void Store::draw_drives(Gfx &gfx, float slide)
     const DriveSpace &s = dr[std::size_t(drv_sel_)];
     const float rx = lx + lw + 40, rw = 1824 - rx, rh = kBottom - top - 10;
     glass(gfx, rx, top, rw, rh, 30, C(kMidnight, 0.55f), true);
-    gfx.text_mid(Font::Bold, 15, rx + 32, top + 34, C(kCyan), Align::Left, "WHAT'S ON IT", 2);
-    gfx.text_mid(Font::Regular, 16, rx + rw - 32, top + 34, C(kMuted), Align::Right, "Look only \xC2\xB7 apps move and delete in On this PS5");
+    /* (2.3.0) Its apps first: Right goes to them, Cross moves one. */
+    const auto apps = drive_apps(s.homebrew);
+    float y = top + 34;
+    if (!apps.empty())
+    {
+        gfx.text_mid(Font::Bold, 15, rx + 32, y, C(kCyan), Align::Left, "APPS ON IT", 2);
+        gfx.text_mid(Font::Regular, 16, rx + rw - 32, y, C(kMuted), Align::Right, drv_col_ == 1 ? "Cross moves it" : "Right to move one");
+        y += 26;
+        const int shown = std::min<int>(5, int(apps.size()));
+        const int first = std::clamp(drv_app_ - shown + 1, 0, std::max(0, int(apps.size()) - shown));
+        for (int i = first; i < first + shown; ++i)
+        {
+            const ConsoleApp &c = *apps[std::size_t(i)];
+            const bool on = drv_col_ == 1 && i == drv_app_ && !lib_bar_;
+            if (on) ring(gfx, rx + 18, y + 2, rw - 36, 44, 14, 1.f, true);
+            gfx.text_mid(Font::SemiBold, 19, rx + 32, y + 24, C(kFrost), Align::Left, fit(gfx, Font::SemiBold, 19, rw * 0.6f, c.name.empty() ? c.title_id : c.name));
+            gfx.text_mid(Font::Regular, 17, rx + rw - 32, y + 24, C(0xB9C4D3), Align::Right, c.size > 0 ? size_text(std::uint64_t(c.size)) : std::string("\xE2\x80\xA6"));
+            y += 48;
+        }
+        y += 16;
+    }
+    gfx.text_mid(Font::Bold, 15, rx + 32, y, C(kCyan), Align::Left, "WHAT'S ON IT", 2);
+    gfx.text_mid(Font::Regular, 16, rx + rw - 32, y, C(kMuted), Align::Right, "Look only");
+    y += 36;
     bool looking = false;
     auto items = engine().drive_folders(s.mount, &looking);
     std::stable_sort(items.begin(), items.end(), [](const FolderSize &a, const FolderSize &b) {
         if ((a.size < 0) != (b.size < 0)) return a.size >= 0;
         return a.size > b.size;
     });
-    float y = top + 70;
     const float row = 44;
     long long biggest = 1;
     for (const FolderSize &f : items) biggest = std::max(biggest, f.size);
@@ -1006,6 +1077,26 @@ void Store::draw_drives(Gfx &gfx, float slide)
         }
         y += row;
     }
+}
+
+/* (2.3.0) The apps on a drive (its homebrew folder), biggest first: the Drives view moves them. Never
+ * Recomp Store itself. */
+std::vector<const ConsoleApp *> Store::drive_apps(const std::string &homebrew) const
+{
+    std::vector<const ConsoleApp *> out;
+    for (const ConsoleApp &c : console_)
+        if (c.root == homebrew && c.app && !c.store) out.push_back(&c);
+    std::stable_sort(out.begin(), out.end(), [](const ConsoleApp *a, const ConsoleApp *b) { return a->size > b->size; });
+    return out;
+}
+
+/* (2.3.0) The store app whose saves a Move would carry (its catalog entry lists saves and some are
+ * on the console): "" when none. */
+std::string Store::move_saves_app() const
+{
+    const App *a = catalog_app(catalog_.apps, mng_app_);
+    if (!a || a->saves.empty() || app_folder(a->id) != mng_app_.folder) return "";
+    return engine().saves_here(a->id) ? a->id : std::string();
 }
 
 /* A USB drive plugged in or taken out while the store is open: said, and looked at again. */

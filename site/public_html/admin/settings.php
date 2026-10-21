@@ -104,6 +104,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($r['status'] === 401 ? 'Saved, but GitHub refused it. Make a new token and paste it again.' : 'Saved. GitHub didn\'t answer the check, so it\'s untested.'),
                      $r['status'] === 401 ? 'err' : 'ok');
         }
+    } elseif (($_POST['action'] ?? '') === 'discord') {
+        // (2.3.0) Posts to a Discord channel when a publish goes out. The webhook is a secret: never
+        // shown again in full, never logged, never in the catalog.
+        $hook = trim((string)($_POST['discord_webhook'] ?? ''));
+        if (!empty($_POST['discord_clear'])) {
+            rs_set_setting('discord_webhook', '');
+            rs_log('settings', 'discord', 'webhook removed');
+            rs_flash('The Discord webhook is gone. Publishing doesn\'t post anything now.');
+        } elseif (($_POST['do'] ?? '') === 'test') {
+            $ok = rs_discord_send(['username' => 'Recomp Store', 'embeds' => [['title' => 'Recomp Store is connected', 'description' => 'New apps and updates will be posted here when you publish.', 'color' => 0x35D6F4, 'url' => rs_abs('/')]]], $why, 'test');
+            rs_log('settings', 'discord', $ok ? 'test posted' : 'test not posted: ' . $why);
+            rs_flash($ok ? 'Sent. Look in the Discord channel.' : 'Not sent: ' . $why, $ok ? 'ok' : 'err');
+        } elseif ($hook !== '' && !rs_discord_hook_ok($hook)) {
+            rs_flash('That isn\'t a Discord webhook link. In Discord: the channel\'s settings, Integrations, Webhooks, Copy Webhook URL.', 'err');
+        } else {
+            if ($hook !== '') rs_set_setting('discord_webhook', $hook);
+            $posts = ['new' => !empty($_POST['discord_new']), 'update' => !empty($_POST['discord_update'])];
+            rs_set_setting('discord_posts', json_encode($posts));
+            $what = array_keys(array_filter($posts));
+            rs_log('settings', 'discord', ($hook !== '' ? 'webhook saved; ' : '') . 'posts: ' . ($what ? implode(', ', str_replace(['new', 'update'], ['new apps', 'updates'], $what)) : 'none'));
+            rs_flash(rs_discord_hook_ok(rs_discord_hook()) ? 'Saved. Press Send a test to check it.' : 'Saved. Paste the webhook link to turn the posts on.');
+        }
+        header('Location: settings.php#discord');
+        exit;
     } elseif (($_POST['action'] ?? '') === 'r2') {
         // (2.0.1) Beta zips from Cloudflare R2: the bucket and an API token's keys.
         $acct = strtolower(trim((string)($_POST['r2_account'] ?? '')));
@@ -540,6 +564,20 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <?php $hasTok = trim((string)rs_setting('github_token', '')) !== ''; ?>
     <label><span>GitHub token <span class="muted">(optional)</span></span><input type="text" name="github_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasTok ? 'A token is saved. Paste a new one to replace it.' : 'Paste a token' ?>"><small>Every PS5 asks recompstore.com about releases and custom sources, and the site asks GitHub once for everyone. Without a token GitHub answers 60 questions an hour; with one, 5,000. Make a fine-grained token on GitHub (Settings, Developer settings, Personal access tokens) with read-only access to public repositories, and paste it here.</small></label>
     <div class="actions"><button class="btn">Save the token</button><?php if ($hasTok): ?><label class="check"><input type="checkbox" name="github_clear" value="1"> Remove the saved token</label><?php endif; ?></div>
+  </form>
+</section>
+<section class="card" id="discord">
+  <?php $dHook = rs_discord_hook(); $dOn = rs_discord_hook_ok($dHook); $dPosts = json_decode((string)rs_setting('discord_posts', '{"new":true,"update":true}'), true) ?: []; ?>
+  <h2>Discord posts <?= $dOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <p class="muted">When a publish goes out (once it's signed), the site posts what's new to a Discord channel: new apps and updates, with their icon and a link. At most one post a minute; a post that fails never holds up the publish.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="discord">
+    <label><span>Webhook link</span><input type="text" name="discord_webhook" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $dOn ? h('Saved: ' . rs_discord_hook_shown($dHook) . '. Paste a new one to replace it.') : 'Paste the webhook link' ?>"><small>In Discord: the channel's settings, Integrations, Webhooks, New Webhook, Copy Webhook URL. Keep it to yourself: anyone with it can post in that channel. Only its end is shown here again.</small></label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" name="discord_new" value="1" <?= !empty($dPosts['new']) ? 'checked' : '' ?>> New apps</label>
+      <label class="check"><input type="checkbox" name="discord_update" value="1" <?= !empty($dPosts['update']) ? 'checked' : '' ?>> Updates (a new version)</label>
+    </div>
+    <div class="actions"><button class="btn">Save</button><?php if ($dOn): ?><button class="btn" name="do" value="test">Send a test</button><label class="check"><input type="checkbox" name="discord_clear" value="1"> Remove the webhook</label><?php endif; ?></div>
   </form>
 </section>
 <section class="card" id="r2">

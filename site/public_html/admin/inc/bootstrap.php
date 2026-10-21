@@ -125,6 +125,9 @@ function rs_game_defaults(): array {
         // its page (comma-separated, at most 6: "Recomp, Xbox 360"); and whether the store may install
         // it under a new title ID when its own is taken on a console (off: it expects its own folder).
         'category' => 'games', 'tags' => '', 'can_move' => true,
+        // (2.3.0) What it needs to be ready to play, beyond its file slots (RS_REQUIRES keys), and its
+        // mods: the folder inside its own ('' for mods) and the list, as JSON (rs_mods_clean()).
+        'requires' => [], 'mods_dir' => '', 'mods' => '',
         // (2.0) Testers only: left out of catalog.json and everything public; consoles the admin
         // marked as testers get it in the test catalog (api/catalog.php), marked "testing".
         'testers' => false,
@@ -409,11 +412,18 @@ function rs_clean_sections($in): array {
     $out = [];
     foreach (is_array($in) ? $in : [] as $s) {
         if (!is_array($s) || count($out) >= 32) continue;
-        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight', 'category', 'top', 'trending', 'new', 'updated'], true) ? $s['type'] : null;
+        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight', 'category', 'top', 'trending', 'new', 'updated', 'liked', 'collection'], true) ? $s['type'] : null;
         if (!$type) continue;
         $title = mb_substr(trim((string)($s['title'] ?? '')), 0, 60);
         $id = fn($v) => is_string($v) && preg_match('/^[A-Za-z0-9_-]{3,32}$/', $v) ? $v : null;
-        if (in_array($type, ['top', 'trending', 'new', 'updated'], true)) {
+        if ($type === 'collection') {
+            // (2.3.0) One collection (Admin > Collections) as a row; stores before 2.3 leave it out.
+            $cid = is_string($s['collection'] ?? null) && preg_match('/^[a-z0-9-]{1,48}$/', $s['collection']) ? $s['collection'] : null;
+            $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
+            if ($cid) $out[] = ['type' => 'collection', 'title' => $title, 'layout' => $layout, 'collection' => $cid];
+            continue;
+        }
+        if (in_array($type, ['top', 'trending', 'new', 'updated', 'liked'], true)) {
             // (2.0) The charts (installs counted by the store, and GitHub's releases): filled in by
             // the store and the site from /api/charts.php. Stores before 2.0 leave them out.
             $layout = in_array($s['layout'] ?? '', ['row', 'grid', 'wide'], true) ? $s['layout'] : 'row';
@@ -608,6 +618,14 @@ function rs_app_entry(array $g, int $order): array {
     if (array_key_exists('can_move', $g) && !$g['can_move']) $app['canMove'] = false;
     $min = rs_min_store($g);
     if ($min !== '') $app['minStore'] = $min;
+    // (2.3.0) What it needs to be ready to play, and its mods. Older stores skip them.
+    $req = rs_requires_clean($g['requires'] ?? []);
+    if ($req) $app['requires'] = $req;
+    $mods = rs_mods_clean((string)($g['mods'] ?? ''));
+    if ($mods) {
+        $app['mods'] = $mods;
+        if (($g['mods_dir'] ?? '') !== '' && rs_mods_dir_ok((string)$g['mods_dir'])) $app['modsDir'] = (string)$g['mods_dir'];
+    }
     return $app;
 }
 
@@ -697,7 +715,7 @@ function rs_build_catalog(bool $testing = false): array {
         // (2.1) How each category's page is sorted, and Discover's header; older stores skip them.
         'categories' => array_map(fn($m) => ['sort' => $m], rs_category_sorts()),
         'discover' => ['sections' => $sections, 'header' => rs_discover_header($listed)],
-    ] + rs_catalog_v22();
+    ] + rs_catalog_v22() + rs_catalog_v23($listed);
 }
 
 // (2.2) The store's default tabs (only once set in Settings), the ShadowMountPlus it offers
@@ -710,6 +728,12 @@ function rs_catalog_v22(): array {
     $w = rs_whats_new();
     if ($w) $out['whats_new'] = $w;
     return $out;
+}
+
+// (2.3.0) Collections, with only the apps the catalog lists. Older stores skip them.
+function rs_catalog_v23(array $listed): array {
+    $c = rs_catalog_collections($listed);
+    return $c ? ['collections' => $c] : [];
 }
 
 // (2.1) Discover's header: how the featured games show at the top of the store's Discover.
@@ -1135,3 +1159,5 @@ require __DIR__ . '/sign.php';
 require __DIR__ . '/analytics.php';
 // (2.2) The ShadowMountPlus the store offers.
 require __DIR__ . '/smp.php';
+// (2.3.0) Ready to play, mods, collections, likes, tester feedback, Discord posts, Restore my apps.
+require __DIR__ . '/v23.php';

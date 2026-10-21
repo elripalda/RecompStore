@@ -304,11 +304,11 @@ std::vector<const App *> Store::category_apps(int kind) const
         for (char &c : cat) c = char(std::tolower(static_cast<unsigned char>(c)));
         std::vector<const App *> out, soon;
         for (const App &a : catalog_.apps)
-            if (!a.beta && (cat.empty() || a.category == cat)) out.push_back(&a);
+            if (!a.beta && (cat.empty() || a.category == cat) && search_match(a)) out.push_back(&a); /* (2.3.0) Search */
         static const char *modes[4] = {"az", "installs", "new", "updated"};
         sort_by(modes[std::clamp(prefs_.all_sort, 0, 3)], out);
         for (const App &a : catalog_.soon)
-            if (cat.empty() || a.category == cat) out.push_back(&a);
+            if ((cat.empty() || a.category == cat) && search_match(a)) out.push_back(&a);
         return out;
     }
     const std::string cat = category_of(kind);
@@ -967,19 +967,34 @@ bool Store::update_category(float dt, int moves, bool u, bool d)
     if (cat_on_chips_)
     {
         if (!has_chips) cat_on_chips_ = false;
-        const int last = int(chips.size()) - 1 + (all ? 1 : 0);
-        const int at = cat_sort_on_ ? last : cat_chip_;
+        /* (2.3.0) Library: the parts, then Search, then Sort. */
+        const int last = int(chips.size()) - 1 + (all ? 2 : 0);
+        const int at = cat_sort_on_ ? last : cat_search_on_ ? last - 1 : cat_chip_;
         const int c = std::clamp(at + moves, 0, last);
         if (c != at)
         {
             cat_sort_on_ = all && c == last;
-            if (!cat_sort_on_)
+            cat_search_on_ = all && c == last - 1;
+            if (!cat_sort_on_ && !cat_search_on_)
             {
                 cat_chip_ = c;
                 col_ = 0;
                 cscroll_ = cscroll_to_ = 0;
             }
             play(int(Sfx::Move));
+        }
+        if (cat_search_on_ && pressed(pad::BtnCross))
+        {
+            open_kb(3); /* (2.3.0) the grid follows what's typed */
+            col_ = 0;
+            cscroll_ = cscroll_to_ = 0;
+            return true;
+        }
+        if (cat_search_on_ && pressed(pad::BtnSquare) && !search_.empty())
+        {
+            search_.clear();
+            play(int(Sfx::Back));
+            return true;
         }
         if (cat_sort_on_ && pressed(pad::BtnCross))
         {
@@ -990,7 +1005,7 @@ bool Store::update_category(float dt, int moves, bool u, bool d)
             play(int(Sfx::Select));
             return true;
         }
-        if ((d || pressed(pad::BtnCross)) && n > 0) { cat_on_chips_ = false; cat_sort_on_ = false; play(int(Sfx::Move)); }
+        if ((d || pressed(pad::BtnCross)) && n > 0) { cat_on_chips_ = false; cat_sort_on_ = false; cat_search_on_ = false; play(int(Sfx::Move)); }
         return true;
     }
     if (n == 0)
@@ -1044,6 +1059,16 @@ void Store::draw_category(Gfx &gfx)
         glass(gfx, x, kTop, w, 46, 23, kGlass, false);
         if (on) ring(gfx, x, kTop, w, 46, 23, 1.f, true);
         gfx.text_mid(Font::SemiBold, 18, x + w / 2, kTop + 23, C(kFrost), Align::Center, label);
+        /* (2.3.0) Search, left of Sort: what's typed, or the word. */
+        const std::string sl = search_.empty() ? std::string("Search") : "Search: " + fit(gfx, Font::SemiBold, 18, 260, search_);
+        const float sw = gfx.measure(Font::SemiBold, 18, sl) + 44 + 24, sx = x - 12 - sw;
+        const bool son = cat_on_chips_ && cat_search_on_;
+        if (!search_.empty()) gfx.panel(sx, kTop, sw, 46, C(kCyan, 0.22f), 1.f, 23, C(kCyan, 0.6f), 1.25f);
+        else glass(gfx, sx, kTop, sw, 46, 23, kGlass, false);
+        if (son) ring(gfx, sx, kTop, sw, 46, 23, 1.f, true);
+        gfx.panel(sx + 20, kTop + 15, 12, 12, Color{0, 0, 0, 0}, 1.f, 6, C(kFrost), 2.f); /* a magnifier */
+        gfx.panel(sx + 30, kTop + 27, 7, 2.5f, C(kFrost), 1.f, 1);
+        gfx.text_mid(Font::SemiBold, 18, sx + 44 + (sw - 44) / 2 - 12, kTop + 23, C(kFrost), Align::Center, sl);
     }
     if (chips.size() > 1)
     {
@@ -1051,7 +1076,7 @@ void Store::draw_category(Gfx &gfx)
         float x = 96;
         for (int i = 0; i < int(chips.size()); ++i)
         {
-            const bool picked = i == cat_chip_, on = cat_on_chips_ && picked && !cat_sort_on_;
+            const bool picked = i == cat_chip_, on = cat_on_chips_ && picked && !cat_sort_on_ && !cat_search_on_;
             const float w = gfx.measure(Font::SemiBold, 18, chips[std::size_t(i)]) + 40;
             if (x + w > 1824) break;
             if (picked) gfx.panel(x, kTop, w, 46, C(kFrost), 0.92f, 23);
@@ -1066,7 +1091,8 @@ void Store::draw_category(Gfx &gfx)
         list_top = kTop + 10;
     if (n == 0)
     {
-        gfx.text_mid(Font::Regular, 20, 96, list_top + 30, C(kMuted), Align::Left, "Nothing here yet.");
+        gfx.text_mid(Font::Regular, 20, 96, list_top + 30, C(kMuted), Align::Left,
+                     search_.empty() || tab_ != AllApps ? std::string("Nothing here yet.") : "Nothing matches \"" + search_ + "\". Square on Search clears it.");
         return;
     }
     const float view_h = kBottom - list_top;
@@ -1314,12 +1340,13 @@ std::string Store::cross_hint() const
         if (con_select_) return "Mark";
         return "Manage";
     }
-    if (tab_ == Library && lib_view_ == 4) return engine().drives().empty() ? "" : "Its apps"; /* (2.2.3) Drives */
+    if (tab_ == Library && lib_view_ == 4) return engine().drives().empty() ? "" : drv_col_ == 1 ? "Move" : "Its apps"; /* (2.2.3) Drives; (2.3.0) its apps */
     if (tab_ == Library && lib_view_ == 0 && my_on_row_) return "Choose";
     if (tab_ == Library && lib_view_ == 1) return update_apps().empty() && engine().store_update().empty() ? "" : "Update";
     if (tab_ == Library && lib_view_ == 0 && library_apps().empty()) return "";
     if (is_category(tab_) && cat_on_chips_) return "";
     if (tab_ == Settings && section_ == SecAbout && !in_section_) return "What's new"; /* (2.2.2) */
+    if (tab_ == Discover && on_collection_row()) return "See all"; /* (2.3.0) */
     return tab_ == Settings ? "Select" : "Open";
 }
 } // namespace recomp

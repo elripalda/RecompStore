@@ -324,6 +324,29 @@ std::vector<Store::DLine> Store::discover_lines() const
                         if (a->category == sec.category) items.push_back(a);
                     sort_apps(sec.category, items); /* (2.1) as its tab is sorted */
                 }
+                else if (sec.type == "liked")
+                {
+                    /* (2.3.0) Most liked: the charts' likes, most first; one part of the store's when it says. */
+                    for (const auto &kv : charts_.likes)
+                        for (const App *a : all)
+                            if (a->id == kv.first && items.size() < 21 && (sec.category.empty() || a->category == sec.category))
+                            {
+                                items.push_back(a);
+                                break;
+                            }
+                }
+                else if (sec.type == "collection")
+                {
+                    /* (2.3.0) A collection: its apps in its order; Cross on the row opens it. */
+                    if (const Collection *c = collection(sec.collection))
+                        for (const std::string &id : c->ids)
+                            for (const App *a : all)
+                                if (a->id == id) { items.push_back(a); break; }
+                    const std::size_t before = out.size();
+                    section(sec.layout == "grid" ? 2 : sec.layout == "wide" ? 3 : 1, sec.title.empty() && collection(sec.collection) ? collection(sec.collection)->title : sec.title, items);
+                    for (std::size_t k = before; k < out.size(); ++k) out[k].coll = sec.collection;
+                    continue;
+                }
                 else if (const std::vector<std::string> *chart = charts_.list(sec.type))
                 {
                     /* (2.0) Top, trending, new, recently updated: the charts' order; (2.2.2) only one part
@@ -556,14 +579,18 @@ std::vector<Store::Control> Store::page_controls(const App &a) const
         c.push_back({Control::Delete, -1});
     /* (1.1.0) beside Delete; (2.0) for an app from a custom source, reporting the source instead
      * (its logs would only reach Recomp Store, which didn't make it). */
-    c.push_back({a.custom ? Control::Report : Control::Logs, -1});
+    c.push_back({a.custom ? Control::Report : a.beta ? Control::Feedback /* (2.3.0) a tester's */ : Control::Logs, -1});
     if (has_versions(a))
         c.push_back({Control::Versions, -1}); /* (2.1) after them */
+    if (!a.custom && !a.soon)
+        c.push_back({Control::Like, -1}); /* (2.3.0) */
     c.push_back({Control::Favorite, -1}); /* (2.2.2) the star, at the end of that row */
     if (!inst.empty() && inst != "?" && !(a.beta && a.sig.empty()))
         c.push_back({Control::AutoUpdate, -1}); /* (2.2.2) a row of its own */
     if (!inst.empty() && inst != "?" && !a.saves.empty() && !a.custom)
         c.push_back({Control::Saves, -1}); /* (2.3.0) back up and restore, a row of its own */
+    if (!inst.empty() && inst != "?" && !a.mods.empty())
+        c.push_back({Control::Mods, -1}); /* (2.3.0) a row of its own */
     return c;
 }
 
@@ -1593,7 +1620,8 @@ bool Store::update(const pad::State &p, float dt)
             const int pf = std::clamp(page_focus_, 0, int(row.size()) - 1);
             auto pill = [&](int i) {
                 const Control::Kind k = row[std::size_t(i)].kind;
-                return k == Control::Delete || k == Control::Logs || k == Control::Report || k == Control::Versions || k == Control::Favorite;
+                return k == Control::Delete || k == Control::Logs || k == Control::Report || k == Control::Versions || k == Control::Favorite ||
+                       k == Control::Like || k == Control::Feedback;
             };
             if (pill(pf) && pf > 0 && pill(pf - 1) && nav(pad::BtnLeft, nav_left_, dt))
             {
@@ -1622,7 +1650,8 @@ bool Store::update(const pad::State &p, float dt)
             page_focus_ = std::clamp(page_focus_, 0, n - 1);
             auto row_of = [&](int i) {
                 const Control::Kind k = ctl[std::size_t(i)].kind;
-                return k == Control::Delete || k == Control::Logs || k == Control::Report || k == Control::Versions || k == Control::Favorite ? 1000 : i;
+                return k == Control::Delete || k == Control::Logs || k == Control::Report || k == Control::Versions || k == Control::Favorite ||
+                               k == Control::Like || k == Control::Feedback ? 1000 : i;
             };
             int f = page_focus_;
             if (d)
@@ -1683,6 +1712,17 @@ bool Store::update(const pad::State &p, float dt)
                 toggle_auto(a->id); /* (2.2.2) */
             else if (c.kind == Control::Saves)
                 open_saves(a->id); /* (2.3.0) */
+            else if (c.kind == Control::Mods)
+                open_mods(a->id);
+            else if (c.kind == Control::Feedback)
+                open_feedback(a->id);
+            else if (c.kind == Control::Like)
+            {
+                const bool on = !engine().liked(a->id);
+                engine().like(a->id, on);
+                toast(on ? "You like " + a->name : "Like taken back");
+                play(int(Sfx::Select));
+            }
             else if (c.kind == Control::Delete)
             {
                 if (engine().job().phase == Phase::Working)
@@ -1872,6 +1912,8 @@ bool Store::update(const pad::State &p, float dt)
                 }
             }
         }
+        else if (pressed(pad::BtnCross) && nl > 0 && !lines[std::size_t(row_)].coll.empty())
+            open_collection(lines[std::size_t(row_)].coll); /* (2.3.0) */
         else if (pressed(pad::BtnCross) && !focus_id_.empty() && nl > 0)
             open(focus_id_);
         /* (2.0) Square pins the focused app (not the banner, not a Coming soon entry). */
@@ -3503,8 +3545,9 @@ void Store::draw_page(Gfx &gfx)
      * panels, so what they cover fades out rather than showing through). */
     const float ne = notes_box && notes_t_ > 0.01f ? ease_out(notes_t_) : 0.f, u = 1.f - ne;
     const float desc_y = y;
+    const float rdy_h = ready_height(a); /* (2.3.0) Ready to play */
     {
-        const float room = bottom - y - (notes_box ? nh + 24 : 0) - (ch > 0 ? ch + 24 : 0) - (dh > 0 ? dh + 24 : 0);
+        const float room = bottom - y - (notes_box ? nh + 24 : 0) - (ch > 0 ? ch + 24 : 0) - (dh > 0 ? dh + 24 : 0) - (rdy_h > 0 ? rdy_h + 24 : 0);
         const int lines = std::clamp(int(room / 37.5f), 1, 5);
         y += draw_lines(gfx, Font::Regular, 25, x, y, 37.5f, C(kBody, u), wrap(gfx, Font::Regular, 25, 860, a.description, lines)) + 24;
     }
@@ -3530,6 +3573,11 @@ void Store::draw_page(Gfx &gfx)
     }
     if (notes_box)
         y += nh + 24;
+    if (rdy_h > 0)
+    {
+        draw_ready(gfx, a, x, y, 820, u); /* (2.3.0) */
+        y += rdy_h + 24;
+    }
     if (ch > 0)
     {
         draw_lines(gfx, Font::Regular, 18, x, y, 27, C(0xB9C4D3, u), credits);
@@ -3645,13 +3693,15 @@ void Store::draw_page(Gfx &gfx)
     bool has_auto = false, has_saves = false;
     for (const Control &c : ctl) has_auto = has_auto || c.kind == Control::AutoUpdate;
     for (const Control &c : ctl) has_saves = has_saves || c.kind == Control::Saves;
-    const float del_h = 56 + (has_auto ? 12 + 56 : 0) + (has_saves ? 12 + 56 : 0); /* (2.2.3) the actions' bar; Auto-update's row; (2.3.0) Saves' */
+    bool has_mods = false;
+    for (const Control &c : ctl) has_mods = has_mods || c.kind == Control::Mods;
+    const float del_h = 56 + (has_auto ? 12 + 56 : 0) + (has_saves ? 12 + 56 : 0) + (has_mods ? 12 + 56 : 0); /* (2.2.3) the actions' bar; Auto-update's row; (2.3.0) Saves' */
     float ph = 40 + head_h + 28 + btn_h;
     for (float part : {prog_h, notice_h, setup_h, rows_h, del_h, note_h})
         if (part > 0)
             ph += 28 + part;
     ph += 40;
-    ph = std::min(ph, H - py - (has_auto || has_saves ? 80.f : 40.f)); /* (2.2.2) clear of the hints, with Auto-update's row */
+    ph = std::min(ph, H - py - (has_auto || has_saves || has_mods ? 80.f : 40.f)); /* (2.2.2) clear of the hints, with Auto-update's row */
     glass(gfx, px, py, pw, ph, 34, C(kMidnight, 0.74f), true);
 
     float ry = py + 40;
@@ -3872,8 +3922,13 @@ void Store::draw_page(Gfx &gfx)
         struct Seg { Control::Kind kind; std::string label; float w = 0; };
         std::vector<Seg> segs;
         if (can_delete) segs.push_back({Control::Delete, a.category.empty() || a.category == "games" ? "Delete game" : "Delete app"});
-        segs.push_back({a.custom ? Control::Report : Control::Logs, a.custom ? "Report source" : "Send logs"});
+        segs.push_back({a.custom ? Control::Report : a.beta ? Control::Feedback : Control::Logs, a.custom ? "Report source" : a.beta ? "Feedback" : "Send logs"});
         if (has_versions(a)) segs.push_back({Control::Versions, "Versions"});
+        if (!a.custom && !a.soon) /* (2.3.0) a like, with how many */
+        {
+            const long long n = engine().like_count(a.id);
+            segs.push_back({Control::Like, std::string(engine().liked(a.id) ? "Liked" : "Like") + (n > 0 ? " \xC2\xB7 " + std::to_string(n) : std::string())});
+        }
         segs.push_back({Control::Favorite, ""});
         const float bh = 56, star_w = 72;
         float rest = iw - star_w;
@@ -3926,12 +3981,27 @@ void Store::draw_page(Gfx &gfx)
             gfx.text_mid(Font::SemiBold, 19, ix + 22, ry + bh / 2, C(kFrost), Align::Left, "Saves");
             gfx.text_mid(Font::Regular, 16, ix + 22 + gfx.measure(Font::SemiBold, 19, "Saves") + 14, ry + bh / 2, C(kMuted), Align::Left,
                          "Back up, restore, or keep them on your phone");
-            if (chevron_) gfx.image(chevron_, ix + iw - 22 - 22, ry + bh / 2 - 11, 22, 22, C(kSoft));
+            gfx.text_mid(Font::SemiBold, 17, ix + iw - 22, ry + bh / 2, C(kSoft), Align::Right, "Open");
+            ry += bh;
+        }
+        if (has_mods)
+        {
+            /* (2.3.0) Mods: how many are on. */
+            ry += 12;
+            int on_n = 0;
+            for (const App::Mod &m : a.mods) on_n += engine().mod_state(a, m) == 1;
+            const bool mf = focused(Control::Mods, -1);
+            glass(gfx, ix, ry, iw, bh, 18, mf ? C(kFrost, 0.12f) : Color{1, 1, 1, 0.05f}, false);
+            ring(gfx, ix, ry, iw, bh, 18, mf ? 1.f : 0.f, true);
+            gfx.text_mid(Font::SemiBold, 19, ix + 22, ry + bh / 2, C(kFrost), Align::Left, "Mods");
+            gfx.text_mid(Font::Regular, 16, ix + 22 + gfx.measure(Font::SemiBold, 19, "Mods") + 14, ry + bh / 2, C(kMuted), Align::Left,
+                         std::to_string(on_n) + " of " + std::to_string(a.mods.size()) + " on");
+            gfx.text_mid(Font::SemiBold, 17, ix + iw - 22, ry + bh / 2, C(kSoft), Align::Right, "Open");
             ry += bh;
         }
     }
     ry += 28;
-    if (ry + note_h < py + ph - (has_auto || has_saves ? 30.f : 0.f))
+    if (ry + note_h < py + ph - (has_auto || has_saves || has_mods ? 30.f : 0.f))
     {
         if (a.custom)
         {
@@ -4380,7 +4450,7 @@ bool Store::update_logs(float dt)
     int sel = logs_sel_;
     if (sel == 0)
     {
-        const int c = std::clamp(logs_chip_ + (r ? 1 : 0) - (l ? 1 : 0), 0, 4);
+        const int c = std::clamp(logs_chip_ + (r ? 1 : 0) - (l ? 1 : 0), 0, logs_fb_ ? 3 : 4);
         if (c != logs_chip_) { logs_chip_ = c; play(int(Sfx::Move)); }
         if (d) sel = 1;
     }
@@ -4397,6 +4467,7 @@ bool Store::update_logs(float dt)
     }
     if (sel != logs_sel_) { logs_sel_ = sel; play(int(Sfx::Move)); }
     static const char *kCats[5] = {"bug", "crash", "install", "slow", "other"};
+    static const char *kVerdicts[4] = {"works", "crashes", "slow", "other"}; /* (2.3.0) a tester's Feedback */
     if (pressed(pad::BtnCross))
     {
         if (logs_sel_ == 0)
@@ -4418,7 +4489,8 @@ bool Store::update_logs(float dt)
             logs_sel_ = logs_cat_ < 0 ? 0 : 1;
             play(int(Sfx::Error));
         }
-        else if (engine().send_logs(logs_app_, logs_msg_, kCats[std::clamp(logs_cat_, 0, 4)]))
+        else if (logs_fb_ ? engine().send_logs(logs_app_, logs_msg_, "", kVerdicts[std::clamp(logs_cat_, 0, 3)], inst_v(logs_app_))
+                          : engine().send_logs(logs_app_, logs_msg_, kCats[std::clamp(logs_cat_, 0, 4)]))
         {
             logs_view_ = 1;
             logs_result_.clear();
@@ -4530,7 +4602,7 @@ void Store::draw_logs(Gfx &gfx)
     gfx.set_layer(0, (1 - k) * 20, k);
     const float bw = 860, bx = (W - bw) / 2, pad = 48, iw = bw - pad * 2;
     const std::size_t game_files = logs_files_.empty() ? 0 : logs_files_.size() - 1;
-    const std::string body = "Sends the store's log" +
+    const std::string body = logs_fb_ ? "Tells the maker how this build" + (inst_v(logs_app_).empty() ? std::string() : " (" + inst_v(logs_app_) + ")") + " runs on your PS5. Your logs go with it, so they can see what happened." : "Sends the store's log" +
                              (game_files ? " and " + name + "'s log " + (game_files == 1 ? "file" : "files") : std::string()) +
                              " to Recomp Store, so we can see what went wrong. Your saves and game files aren't sent.";
     const auto lines = wrap(gfx, Font::Regular, 20, iw, body, 4);
@@ -4562,7 +4634,7 @@ void Store::draw_logs(Gfx &gfx)
     const float by = (H - bh) / 2;
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.97f), true);
     float y = by + pad;
-    gfx.text_mid(Font::ExtraBold, 32, bx + pad, y + 22, C(kFrost), Align::Left, "Send logs");
+    gfx.text_mid(Font::ExtraBold, 32, bx + pad, y + 22, C(kFrost), Align::Left, logs_fb_ ? "Tester feedback" : "Send logs");
     y += 44 + 14;
     y += draw_lines(gfx, Font::Regular, 20, bx + pad, y, 30, C(kSoft), lines) + 18;
     for (const std::string &f : files)
@@ -4573,17 +4645,19 @@ void Store::draw_logs(Gfx &gfx)
     y += 26;
     {
         /* (2.3.0) What happened: one of five, picked first. */
-        gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, "WHAT HAPPENED", 2);
+        gfx.text_mid(Font::Bold, 15, bx + pad, y + 11, C(kCyan), Align::Left, logs_fb_ ? "HOW THIS BUILD RUNS" : "WHAT HAPPENED", 2);
         y += 22 + 10;
         static const char *kNames[5] = {"Bug", "Crash", "Won't install", "Slow", "Other"};
-        const float gap = 12, cw = (iw - gap * 4) / 5;
-        for (int i = 0; i < 5; ++i)
+        static const char *kVerdicts[4] = {"Works", "Crashes", "Slow", "Other"}; /* (2.3.0) a tester's */
+        const int nc = logs_fb_ ? 4 : 5;
+        const float gap = 12, cw = (iw - gap * float(nc - 1)) / float(nc);
+        for (int i = 0; i < nc; ++i)
         {
             const float x = bx + pad + float(i) * (cw + gap);
             const bool picked = logs_cat_ == i, on = asking && logs_sel_ == 0 && logs_chip_ == i;
             gfx.panel(x, y, cw, 52, picked ? C(kCyan) : C(kFrost, on ? 0.16f : 0.07f), 1.f, 26, picked || on ? Color{0, 0, 0, 0} : kRim, picked || on ? 0.f : 1.25f);
             ring(gfx, x, y, cw, 52, 26, on ? 1.f : 0.f, true);
-            gfx.text_mid(Font::SemiBold, 19, x + cw / 2, y + 26, picked ? C(kMidnight) : C(kFrost), Align::Center, kNames[i]);
+            gfx.text_mid(Font::SemiBold, 19, x + cw / 2, y + 26, picked ? C(kMidnight) : C(kFrost), Align::Center, logs_fb_ ? kVerdicts[i] : kNames[i]);
         }
         y += 52 + 26;
     }
@@ -4666,13 +4740,20 @@ void Store::draw_keyboard(Gfx &gfx)
     glass(gfx, bx, by, bw, bh, 32, C(0x0E1729, 0.98f), true);
     float y = by + pad;
     const std::string &text = kb_text();
-    const char *title = kb_mode_ == 1 ? "A GitHub repo, or a list's address" : kb_mode_ == 2 ? "What's wrong with this source?" : "Your message";
+    const char *title = kb_mode_ == 1 ? "A GitHub repo, or a list's address" : kb_mode_ == 2 ? "What's wrong with this source?"
+                        : kb_mode_ == 3 ? "Search the store" : "Your message";
     const char *empty = kb_mode_ == 1 ? "owner/name, or https://\xE2\x80\xA6"
                         : kb_mode_ == 2 ? "It's broken, it isn't what it says, or it shouldn't be here\xE2\x80\xA6"
+                        : kb_mode_ == 3 ? "A name, a maker or a label"
                                         : "What were you doing when it went wrong?";
     gfx.text_mid(Font::ExtraBold, 30, bx + pad, y + 20, C(kFrost), Align::Left, title);
-    gfx.text_mid(Font::Regular, 18, bx + bw - pad, y + 20, text.size() >= kMessageMax ? C(0xFFB4A8) : C(kDim), Align::Right,
-                 std::to_string(text.size()) + " / " + std::to_string(kMessageMax));
+    if (kb_mode_ == 3)
+        gfx.text_mid(Font::Regular, 18, bx + bw - pad, y + 20, C(kDim), Align::Right,
+                     engine().link_info().devices.empty() ? std::string("Done shows the results")
+                                                          : std::string("Or type it on your phone: My PS5 > Type on your PS5")); /* (2.3.0) */
+    else
+        gfx.text_mid(Font::Regular, 18, bx + bw - pad, y + 20, text.size() >= kMessageMax ? C(0xFFB4A8) : C(kDim), Align::Right,
+                     std::to_string(text.size()) + " / " + std::to_string(kMessageMax));
     y += 40 + 18;
     {
         /* The text, its last three lines, and where the next letter goes. An address breaks

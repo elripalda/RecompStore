@@ -138,7 +138,19 @@ if ($a === 'state' && $post) {
     if (!is_array($j) || array_is_list($j) && $j !== []) rs_out(422, ['ok' => false, 'error' => 'That isn\'t a state the site can read.']);
     $db->prepare('INSERT INTO link_state (install_id, state, updated) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE state = VALUES(state), updated = NOW()')
        ->execute([$install, json_encode((object)$j, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
+    // (2.3.0) Restore my apps: the store apps on it, kept with each linked device.
+    try { rs_link_apps_save($db, $install, $j); } catch (Throwable $e) {}
     rs_out(200, ['ok' => true]);
+}
+
+// (2.3.0) Restore my apps: the lists the linked devices keep (docs/store-2.3.md, 13).
+if ($a === 'myapps' && $post) {
+    $install = $consoleOf();
+    try {
+        rs_out(200, ['ok' => true, 'lists' => rs_link_apps_lists($db, $install)]);
+    } catch (Throwable $e) {
+        rs_out(503, ['ok' => false, 'error' => 'recompstore.com couldn\'t give the lists right now. Try again later.']);
+    }
 }
 
 // ---- A browser -------------------------------------------------------------------------------

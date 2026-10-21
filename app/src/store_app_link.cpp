@@ -396,6 +396,11 @@ void Store::kb_finished()
         play(int(Sfx::Back));
         return;
     }
+    if (kb_mode_ == 3)
+    {
+        play(int(Sfx::Back)); /* (2.3.0) Search: the grid already shows what matches */
+        return;
+    }
     if (kb_mode_ == 1)
     {
         if (src_text_.empty()) { play(int(Sfx::Back)); return; }

@@ -85,20 +85,25 @@
   }
 
   const NAMES = { games: 'Games', soon: 'Coming soon', spotlight: 'Spotlight', category: 'Category',
-    top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated' };
+    top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated', liked: 'Most liked', collection: 'Collection' };
   const ALL3 = [['row', 'Row'], ['grid', 'Grid'], ['wide', 'Wide tiles']];
   const LAYOUTS = {
     games: ALL3,
     soon: [['row', 'Row'], ['wide', 'Wide tiles']],
-    category: ALL3, top: ALL3, trending: ALL3, new: ALL3, updated: ALL3,
+    category: ALL3, top: ALL3, trending: ALL3, new: ALL3, updated: ALL3, liked: ALL3, collection: ALL3,
   };
   // (2.0) The charts: filled in live by the store and the site (installs, and GitHub's releases).
   const CHARTS = { top: 'The apps on the most consoles.', trending: 'The most new installs in the last 7 days.',
-    new: 'The newest apps, by when you first published them.', updated: 'The apps with the newest releases.' };
+    new: 'The newest apps, by when you first published them.', updated: 'The apps with the newest releases.',
+    liked: 'The apps with the most thumbs-up from consoles (Recomp Store 2.3.0).' };
   const isChart = (t) => Object.prototype.hasOwnProperty.call(CHARTS, t);
   // (2.0) The parts of the store: a category section lists every game in one of them.
   const CATS = S.categories || { games: 'Games', emulators: 'Emulators', apps: 'Apps', tools: 'Tools' };
   const inCat = (c) => listed.filter((g) => (g.category || 'games') === c);
+  // (2.3.0) Collections (Admin > Collections): a section shows one as a row.
+  const COLLS = S.collections || [];
+  const coll = (id) => COLLS.find((c) => c.id === id);
+  const inColl = (id) => ((coll(id) || {}).ids || []).map((x) => listed.find((g) => g.id === x)).filter(Boolean);
 
   function changed(relist) {
     dirty = true;
@@ -122,8 +127,8 @@
       const addable = listed.filter((g) => !(s.games || []).includes(g.id));
       card.innerHTML = `
         <div class="sec-head">
-          <span class="tag${s.type === 'soon' ? ' soon' : s.type === 'spotlight' || s.type === 'category' || isChart(s.type) ? ' cyan' : ''}">${esc(NAMES[s.type])}</span>
-          <span class="sec-title">${esc(s.title || (s.type === 'spotlight' ? (byId(s.game) || {}).name || '' : s.type === 'category' ? CATS[s.category] || '' : ''))}</span>
+          <span class="tag${s.type === 'soon' ? ' soon' : s.type === 'spotlight' || s.type === 'category' || s.type === 'collection' || isChart(s.type) ? ' cyan' : ''}">${esc(NAMES[s.type])}</span>
+          <span class="sec-title">${esc(s.title || (s.type === 'spotlight' ? (byId(s.game) || {}).name || '' : s.type === 'category' ? CATS[s.category] || '' : s.type === 'collection' ? (coll(s.collection) || {}).title || '' : ''))}</span>
           <span class="sec-tools">
             <button type="button" class="icon-btn" data-move="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
             <button type="button" class="icon-btn" data-move="1" aria-label="Move down" ${i === sections.length - 1 ? 'disabled' : ''}>↓</button>
@@ -154,6 +159,9 @@
           <p class="muted small-note">${inCat(s.category).length
             ? `${inCat(s.category).length === 1 ? '1 game' : inCat(s.category).length + ' games'}, in the order of the Games page: ${inCat(s.category).map((g) => esc(g.name)).join(', ')}.`
             : 'Nothing in it yet, so the store leaves it out. Set a game\'s Category on its page.'} Stores before 2.0 leave this section out.</p>` : ''}
+        ${s.type === 'collection' ? (COLLS.length ? `<label>Collection<select data-coll>${COLLS.map((c) => `<option value="${esc(c.id)}" ${s.collection === c.id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></label>
+          <p class="muted small-note">${inColl(s.collection).length ? `${inColl(s.collection).length === 1 ? '1 app' : inColl(s.collection).length + ' apps'}: ${inColl(s.collection).map((g) => esc(g.name)).join(', ')}.` : 'Nothing listed in it yet, so the store leaves it out.'} An empty title uses the collection's name. Cross on the title opens its page in the store, with Install all. Stores before 2.3 leave it out.</p>`
+          : '<p class="muted small-note">No collections yet. Make one on the <a href="collections.php">Collections</a> page.</p>') : ''}
         ${s.type === 'spotlight' ? `<label>Game<select data-spot>${listed.map((g) => `<option value="${esc(g.id)}" ${s.game === g.id ? 'selected' : ''}>${esc(optName(g))}</option>`).join('')}</select></label>
           <p class="muted small-note">A still banner of its backdrop, framed as on the Art card.</p>` : ''}`;
       listEl.appendChild(card);
@@ -190,6 +198,8 @@
       if (spot) spot.addEventListener('change', () => { s.game = spot.value; changed(true); });
       const cat = card.querySelector('[data-cat]');
       if (cat) cat.addEventListener('change', () => { s.category = cat.value; changed(true); });
+      const cl = card.querySelector('[data-coll]');
+      if (cl) cl.addEventListener('change', () => { s.collection = cl.value; changed(true); });
       // (2.2) A chart of one part of the store only.
       const only = card.querySelector('[data-only]');
       if (only) only.addEventListener('change', () => {
@@ -204,6 +214,7 @@
     if (t === 'games') sections.push({ type: 'games', title: '', layout: 'row', all: false, games: [] });
     else if (t === 'soon') sections.push({ type: 'soon', title: 'Coming soon', layout: 'row' });
     else if (t === 'category') sections.push({ type: 'category', title: 'Emulators', layout: 'row', category: 'emulators' });
+    else if (t === 'collection') sections.push({ type: 'collection', title: '', layout: 'row', collection: (COLLS[0] || {}).id || '' });
     else if (isChart(t)) sections.push({ type: t, title: NAMES[t], layout: 'row' });
     else sections.push({ type: 'spotlight', title: '', game: (listed[0] || {}).id || '' });
     changed(true);
@@ -284,14 +295,15 @@
         y += BANNER_H + SEC_GAP;
         return;
       }
-      const items = s.type === 'soon' ? soonGames : s.type === 'category' ? inCat(s.category) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : s.all ? listed : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
+      const items = s.type === 'soon' ? soonGames : s.type === 'category' ? inCat(s.category) : s.type === 'collection' ? inColl(s.collection) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : s.all ? listed : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
       if (!items.length) {
         html += `<div class="d-empty" style="${pos(96, y, 1728, 64)}">${esc(s.title || NAMES[s.type])}: nothing in it, so the store leaves it out</div>`;
         y += 64 + SEC_GAP;
         return;
       }
-      if (s.title) { html += `<div class="d-head" style="${pos(96, y - 2)}">${esc(s.title)}</div>`; y += HEAD; }
-      if ((s.type === 'games' || s.type === 'category' || isChart(s.type)) && s.layout === 'grid') {
+      const head = s.title || (s.type === 'collection' ? (coll(s.collection) || {}).title || '' : '');
+      if (head) { html += `<div class="d-head" style="${pos(96, y - 2)}">${esc(head)}${s.type === 'collection' ? ' <span class="d-more">›</span>' : ''}</div>`; y += HEAD; }
+      if ((s.type === 'games' || s.type === 'category' || s.type === 'collection' || isChart(s.type)) && s.layout === 'grid') {
         for (let i = 0; i < items.length; i += PER) {
           items.slice(i, i + PER).forEach((g, k) => (html += tile(g, 96 + k * (TILE + GAP), y)));
           y += LINE + GRID_GAP;

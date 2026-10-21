@@ -2,7 +2,8 @@
 // Recomp Store admin: page header and footer.
 declare(strict_types=1);
 
-function rs_head(string $title, bool $nav = true): void {
+// (2.3) $css: extra stylesheets for the page (Analytics, the Dashboard, the Games list).
+function rs_head(string $title, bool $nav = true, array $css = []): void {
     $flash = rs_flash();
     ?><!doctype html>
 <html lang="en">
@@ -15,17 +16,20 @@ function rs_head(string $title, bool $nav = true): void {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(RS_ADMIN . '/assets/admin.css') ?>">
+<?php foreach ($css as $c): ?><link rel="stylesheet" href="<?= h($c) ?>?v=<?= (int)@filemtime(RS_ADMIN . '/' . $c) ?>">
+<?php endforeach; ?>
 </head>
 <body>
 <header class="bar">
-  <a class="brand" href="index.php"><img src="/assets/logo-512.png" alt=""><span>Recomp Store</span><em>admin</em></a>
+  <a class="brand" href="dashboard.php"><img src="/assets/logo-512.png" alt=""><span>Recomp Store</span><em>admin</em></a>
   <?php if ($nav): ?>
   <nav>
     <?php
     $here = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
     $inboxNew = rs_inbox_new_count();
-    $links = [['index.php', 'Games', ['edit.php']], ['discover.php', 'Discover', []], ['beta.php', 'Beta', []], ['import.php', 'Import', []],
-        ['inbox.php', 'Inbox' . ($inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : ''), []], ['analytics.php', 'Analytics', ['stats.php']],
+    $links = [['dashboard.php', 'Dashboard', []], ['index.php', 'Games', ['edit.php']], ['discover.php', 'Discover', []], ['collections.php', 'Collections', []], ['beta.php', 'Beta', []],
+        ['feedback.php', 'Feedback', []], ['import.php', 'Import', []],
+        ['inbox.php', 'Inbox' . ($inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : ''), []], ['analytics.php', 'Analytics', ['stats.php', 'app-stats.php']],
         ['settings.php', 'Settings', ['log.php']]];
     foreach ($links as [$href, $label, $also]): ?>
     <a href="<?= h($href) ?>"<?= $here === $href || in_array($here, $also, true) ? ' class="on" aria-current="page"' : '' ?>><?= $label ?></a>
@@ -44,6 +48,8 @@ function rs_head(string $title, bool $nav = true): void {
 }
 
 function rs_foot(array $scripts = []): void {
+    // (2.3) Settings: the jump links down its left side.
+    if (basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'settings.php') $scripts[] = 'assets/settings-nav.js';
     // Each file's own date: a browser never keeps an old copy after an update.
     foreach ($scripts as $s) echo '<script src="' . h($s) . '?v=' . (int)@filemtime(RS_ADMIN . '/' . $s) . '"></script>' . "\n";
     echo "</main>\n</body>\n</html>\n";

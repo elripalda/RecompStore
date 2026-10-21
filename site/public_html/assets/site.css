@@ -435,3 +435,4 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .chip-btn.on{background:rgba(53,214,244,.18);border-color:rgba(53,214,244,.5)}.chip-btn.danger{color:#ff8a80;border-color:rgba(229,72,77,.4)}
 select.chip-btn{appearance:auto;max-width:100%}
 .req-line{display:block;font-size:14px;color:#ffc857;margin-top:2px}.req-line.ok{color:#9ff0c6}.req-line.bad{color:#ffb4a8}
+.dl-bar{display:block;height:6px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:6px;overflow:hidden}.dl-bar i{display:block;height:100%;background:#35d6f4}

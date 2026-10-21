@@ -20,6 +20,9 @@ $slotTemplate = json_encode([
     ['key' => 'update', 'label' => 'Title Update', 'kind' => 'stfs', 'to' => 'update', 'required' => true],
     ['key' => 'dlc', 'label' => 'DLC (optional)', 'kind' => 'stfs', 'to' => 'dlc', 'required' => false, 'multiple' => true],
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+// (2.3.0) What the Mods box shows when it's empty.
+$modsTemplate = json_encode([['id' => 'hd-pack', 'name' => 'HD textures', 'author' => 'someone', 'blurb' => 'Sharper textures.',
+    'repo' => 'owner/name', 'asset' => 'v1.0/hd-pack.zip', 'sha256' => str_repeat('0', 64), 'size' => 1048576, 'target' => 'hd-pack']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
@@ -51,6 +54,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_logs_list($g['logs'], $badLog);
     $badKeep = null;
     rs_keep_list($g['keep'], $badKeep);
+    // (2.3.0) What it needs to be ready to play, and its mods.
+    $g['requires'] = rs_requires_clean((array)($_POST['requires'] ?? []));
+    $g['mods_dir'] = trim((string)($_POST['mods_dir'] ?? ''), " /");
+    $g['mods'] = trim(str_replace("\r\n", "\n", (string)($_POST['mods'] ?? '')));
+    $badMods = null;
+    $cleanMods = rs_mods_clean($g['mods'], $badMods);
+    if ($badMods === null) $g['mods'] = $cleanMods ? json_encode($cleanMods, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '';
     // Extra buttons: rows of text, link and color; an empty row is dropped, a half-filled one is an error.
     $linkRows = [];
     $badLink = '';
@@ -85,6 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($g['source'] === 'github' && !(($g['soon'] || $g['beta']) && $g['repo'] === '') && !preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$#', $g['repo'])) $error = 'Enter the GitHub repo as owner/name, for example elripalda/SvR2011-Recomp-PS5.';
     elseif ($g['source'] === 'url' && !(($g['soon'] || $g['beta']) && $g['url'] === '') && !preg_match('#^https://#', $g['url'])) $error = 'The download link has to start with https://';
     elseif ($badLink !== '') $error = $badLink;
+    elseif ($badMods !== null) $error = $badMods;
+    elseif (!rs_mods_dir_ok($g['mods_dir'])) $error = 'Mods folder: a folder inside the game\'s, like mods or data/mods (no .. and no \\).';
     elseif ($g['beta'] && $g['soon']) $error = 'A game can be Beta or Coming soon, not both.';
     elseif (mb_strlen($g['beta_version']) > 40) $error = 'Keep the beta version short, like 1.2.0-beta1.';
     elseif ($badSave !== null) $error = 'Save folders: "' . $badSave . '" isn\'t a folder inside the game\'s (one per line, like userdata, with no .. or \\).';
@@ -151,10 +163,11 @@ $hero = $g['hero_web'] ?: $g['hero'];
 <section class="head-row">
   <div><a class="back" href="index.php">← Games</a><h1><?= $isNew ? 'Add a game' : h($g['name']) ?></h1></div>
   <?php if (!$isNew): ?>
+  <div class="actions"><a class="btn" href="app-stats.php?id=<?= h(rawurlencode($g['id'])) ?>">Stats</a>
   <form method="post" action="index.php" onsubmit="return confirm('Remove <?= h(addslashes($g['name'])) ?> from the admin?');">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= h($g['id']) ?>">
     <button class="btn danger">Remove game</button>
-  </form>
+  </form></div>
   <?php endif; ?>
 </section>
 <?php if ($error): ?><div class="flash err"><?= h($error) ?></div><?php endif; ?>
@@ -398,6 +411,26 @@ if (!$isNew) {
     <small>The player's own files and folders inside the game's folder, one per line (like Assets, user_data or dbz3.toml). Recomp Store 1.1.2 never writes over them when it installs an update; the release's copy goes in only when the player has none yet.</small></label>
   <label><span>Log files <span class="muted">(optional)</span></span><textarea name="logs" rows="2" class="mono" placeholder="UserData/crashes/*.txt"><?= h($g['logs']) ?></textarea>
     <small>What Send logs in Recomp Store 1.1.0 sends from this game, one per line, inside its folder; * and ? match any characters. Leave it empty and the store finds them itself: any .log file, and .txt files with log, crash or trace in the name. The newest 8 go, with the store's own log.</small></label>
+</section>
+
+<section class="card" data-not-soon>
+  <h2>Ready to play</h2>
+  <p class="muted">Recomp Store 2.3.0 shows a checklist on the game's page: the payload loader, ShadowMountPlus, free space and the game's files are checked for every game. Tick what else it needs; what the store can't check shows as "Needed".</p>
+  <div class="checks">
+    <?php foreach (RS_REQUIRES as $rk => $rl): ?>
+    <label class="check"><input type="checkbox" name="requires[]" value="<?= h($rk) ?>" <?= in_array($rk, (array)$g['requires'], true) ? 'checked' : '' ?>> <?= h($rl) ?></label>
+    <?php endforeach; ?>
+  </div>
+</section>
+
+<section class="card" data-not-soon>
+  <h2>Mods</h2>
+  <p class="muted">Files from GitHub releases the player can install from the game's page (Recomp Store 2.3.0): turned on and off, or removed, only inside the game's mods folder.</p>
+  <div class="grid2">
+    <label><span>Mods folder <span class="muted">(optional)</span></span><input name="mods_dir" value="<?= h($g['mods_dir']) ?>" maxlength="200" placeholder="mods" class="mono"><small>Inside the game's folder. Empty: mods.</small></label>
+    <label class="span2">The mods<textarea name="mods" rows="8" class="mono" placeholder="<?= h($modsTemplate) ?>"><?= h($g['mods']) ?></textarea>
+      <small>A JSON list. Each: <code>id</code> (letters, digits, - _ .), <code>name</code>, <code>author</code>, <code>blurb</code>, <code>repo</code> (owner/name), <code>asset</code> (the release tag and file, <code>v1.0/hd-pack.zip</code>), <code>sha256</code> (needed: the store checks the download), <code>size</code> in bytes, and <code>target</code>, its folder inside the mods folder. A .zip is unpacked into it; any other file is copied there.</small></label>
+  </div>
 </section>
 
 <div class="sticky-save"><button class="primary">Save</button><span class="muted">Saving doesn't publish. Press Publish on the Games page when you're done.</span></div>

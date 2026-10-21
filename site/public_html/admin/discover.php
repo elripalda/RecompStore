@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $n = count($clean);
             // (2.2) The change log says which charts show only one part of the store.
             $only = [];
-            foreach ($clean as $s) if (isset($s['category']) && in_array($s['type'], ['top', 'trending', 'new', 'updated'], true)) $only[] = ($s['title'] !== '' ? $s['title'] : $s['type']) . ': ' . RS_CATEGORIES[$s['category']];
+            foreach ($clean as $s) if (isset($s['category']) && in_array($s['type'], ['top', 'trending', 'new', 'updated', 'liked'], true)) $only[] = ($s['title'] !== '' ? $s['title'] : $s['type']) . ': ' . RS_CATEGORIES[$s['category']];
             rs_log('discover', 'sections', $n . ' section' . ($n === 1 ? '' : 's') . ($only ? '; only one part: ' . implode(', ', $only) : ''));
             rs_flash("Saved Discover ($n " . ($n === 1 ? 'section' : 'sections') . '). Press Publish to send it to the store and the site.');
         }
@@ -53,7 +53,7 @@ foreach (rs_games() as $g) {
     ];
 }
 $state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null, 'categories' => RS_CATEGORIES,
-    'header' => rs_discover_header(), 'headerStyles' => RS_HEADER_STYLES];
+    'header' => rs_discover_header(), 'headerStyles' => RS_HEADER_STYLES, 'collections' => rs_collections()];
 rs_head('Discover');
 ?>
 <section class="head-row">
@@ -87,8 +87,10 @@ rs_head('Discover');
       <button type="button" data-add="trending">Trending</button>
       <button type="button" data-add="new">New</button>
       <button type="button" data-add="updated">Recently updated</button>
+      <button type="button" data-add="liked">Most liked</button>
+      <button type="button" data-add="collection">Collection</button>
     </div>
-    <p class="muted small-note">Games: a row (seven at a time, scrolls sideways), a grid (every one, seven to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Category: every game in one part of the store (Games, Emulators, Apps, Tools), from Recomp Store 2.0; older stores leave it out. Top charts, Trending, New and Recently updated fill themselves in from installs and GitHub's releases (2.0 and newer too). Stores older than 1.0.6 keep their own single row.</p>
+    <p class="muted small-note">Games: a row (seven at a time, scrolls sideways), a grid (every one, seven to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Category: every game in one part of the store (Games, Emulators, Apps, Tools), from Recomp Store 2.0; older stores leave it out. Top charts, Trending, New and Recently updated fill themselves in from installs and GitHub's releases (2.0 and newer too). Most liked fills itself in from thumbs-up, and Collection shows one of your collections (both 2.3.0 and newer). Stores older than 1.0.6 keep their own single row.</p>
   </div>
   <div class="disc-preview">
     <div class="preview-head"><h2>Preview</h2><span class="muted">The store on a TV. Above the dashed line shows first; the rest scrolls up.</span></div>

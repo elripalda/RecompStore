@@ -89,7 +89,7 @@ $where = match ($show) {
     default => "WHERE status <> 'done'",
 };
 // (2.3.0) Logs by what happened: ?show=logs&cat=bug|crash|install|slow|other|none.
-rs_inbox_category_column();
+rs_inbox_feedback_columns();
 $cat = (string)($_GET['cat'] ?? '');
 if ($show === 'logs' && (array_key_exists($cat, RS_LOG_CATEGORIES) || $cat === 'none'))
     $where .= ' AND category = ' . rs_db()->quote($cat === 'none' ? '' : $cat);
@@ -146,11 +146,12 @@ rs_head('Inbox');
 
 <section class="list">
 <?php foreach ($rows as $r): $bug = $r['kind'] === 'bug'; $label = ['bug' => 'Bug', 'submit' => 'Submission', 'message' => 'Message', 'logs' => 'Logs', 'source' => 'Source reported'][$r['kind']] ?? $r['kind']; ?>
-  <article class="msg<?= $r['status'] === 'new' ? ' unread' : '' ?>">
+  <article class="msg<?= $r['status'] === 'new' ? ' unread' : '' ?>" id="m<?= (int)$r['id'] ?>">
     <?php if ($r['kind'] === 'logs'): $fs = $files[(int)$r['id']] ?? []; ?>
     <header>
       <span class="tag cyan">Logs</span>
-      <span class="tag cat-<?= h($r['category'] ?? '') ?>"><?= h(RS_LOG_CATEGORIES[$r['category'] ?? ''] ?? 'No category') ?></span>
+      <?php if (($r['feedback'] ?? '') !== ''): ?><span class="tag fb-<?= h($r['feedback']) ?>" title="Tester feedback<?= ($r['build'] ?? '') !== '' ? ' on ' . h($r['build']) : '' ?>">Feedback · <?= h(RS_VERDICTS[$r['feedback']] ?? 'Other') ?></span>
+      <?php else: ?><span class="tag cat-<?= h($r['category'] ?? '') ?>"><?= h(RS_LOG_CATEGORIES[$r['category'] ?? ''] ?? 'No category') ?></span><?php endif; ?>
       <strong><?= h($names[$r['app_id']] ?? $r['app_id']) ?></strong>
       <span class="muted"><?= $r['version'] !== '' ? 'version ' . h($r['version']) : 'not installed' ?><?= $r['name'] !== '' ? ' · ' . h($r['name']) : '' ?></span>
       <?php if ($r['contact'] !== ''): ?><span class="tag beta" title="Console <?= h($r['contact']) ?>">Beta tester · <?= h(substr($r['contact'], 0, 6)) ?></span><?php endif; ?>

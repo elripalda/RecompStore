@@ -32,6 +32,9 @@ $version = $s('version', 64);
 $message = $s('message', 2000);
 // (2.3.0) What happened, from 2.3.0 stores: one of five; anything else is kept as other.
 $category = isset($_POST['category']) ? (array_key_exists($s('category', 16), RS_LOG_CATEGORIES) ? $s('category', 16) : 'other') : '';
+// (2.3.0) Tester feedback from a beta's page: works, crashes, slow or other, and the build it's about.
+$feedback = isset($_POST['feedback']) ? (array_key_exists($s('feedback', 16), RS_VERDICTS) ? $s('feedback', 16) : 'other') : '';
+$build = $feedback === '' ? '' : $s('build', 40);
 
 // The files: at most 10, each kept to its last 400 KB, 2 MB in all.
 $names = is_array($_POST['name'] ?? null) ? array_values($_POST['name']) : [];
@@ -81,11 +84,11 @@ try {
             $db->query("SELECT RELEASE_LOCK('rs_inbox')");
             rs_reply(429, ['ok' => false, 'error' => 'That\'s a lot of logs at once. Try again in an hour.']);
         }
-        rs_inbox_category_column();
+        rs_inbox_feedback_columns();
         $db->beginTransaction();
-        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category)
-                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?)')
-           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'Recomp Store ' . $store, $console, $version, $message, $ip, $category]);
+        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category, feedback, build)
+                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?, ?, ?)')
+           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'Recomp Store ' . $store, $console, $version, $message, $ip, $category, $feedback, $build]);
         $id = (int)$db->lastInsertId();
         $put = $db->prepare('INSERT INTO inbox_files (inbox_id, name, size, body) VALUES (?, ?, ?, ?)');
         foreach ($files as $f) $put->execute([$id, $f['name'], strlen($f['body']), $f['body']]);
@@ -99,6 +102,6 @@ try {
 } catch (Throwable $e) {
     rs_reply(500, ['ok' => false, 'error' => 'The logs couldn\'t be saved right now. Try again later.']);
 }
-$done = ['ok' => true, 'message' => 'Sent. Thanks for helping.'];
+$done = ['ok' => true, 'message' => $feedback !== '' ? 'Sent. Thanks for testing.' : 'Sent. Thanks for helping.'];
 if (!empty($report)) $done += ['report' => $report, 'url' => rs_abs('/r/' . $report)];
 rs_reply(200, $done);

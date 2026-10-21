@@ -1005,13 +1005,24 @@ std::string link_state_json()
                       d.sized && d.total ? "true" : "false");
         drives += std::string(drives.empty() ? "" : ",") + "{\"label\":\"" + esc(d.label) + "\",\"root\":\"" + esc(d.homebrew) + "\"," + nums + "}";
     }
-    std::string waiting;
-    for (const QueueItem &q : queue) waiting += std::string(waiting.empty() ? "\"" : ",\"") + esc(q.id) + "\"";
+    std::string waiting, names;
+    auto name_of = [&](const std::string &id) {
+        for (const App &a : c.apps)
+            if (a.id == id) return a.name;
+        return id;
+    };
+    for (const QueueItem &q : queue)
+    {
+        waiting += std::string(waiting.empty() ? "\"" : ",\"") + esc(q.id) + "\"";
+        names += std::string(names.empty() ? "\"" : ",\"") + esc(q.id) + "\":\"" + esc(name_of(q.id)) + "\"";
+    }
+    if (job.phase == Phase::Working && !job.app_id.empty() && names.find("\"" + esc(job.app_id) + "\":") == std::string::npos)
+        names += std::string(names.empty() ? "\"" : ",\"") + esc(job.app_id) + "\":\"" + esc(name_of(job.app_id)) + "\"";
     const bool going = job.phase == Phase::Working && (job.kind == "install" || job.kind == "update") && !job.app_id.empty();
     char qnums[96];
     std::snprintf(qnums, sizeof qnums, "\"done\":%llu,\"total\":%llu", (unsigned long long)job.done, (unsigned long long)job.total);
     const std::string q = "{\"now\":\"" + esc(going ? job.app_id : std::string()) + "\",\"step\":\"" + esc(going ? job.step : std::string()) + "\"," +
-                          qnums + ",\"waiting\":[" + waiting + "]}";
+                          qnums + ",\"waiting\":[" + waiting + "],\"names\":{" + names + "}}";
     double free_gb = 0;
     {
         /* (2.3.0) The real figure (real_space), else none. */
@@ -6312,7 +6323,13 @@ static bool smp_api(const char *route, const std::string &body, std::string &rep
 #endif
     sockaddr_in sa{};
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(10101);
+    unsigned short port = 10101;
+#ifdef PORPOISE_DESKTOP
+    /* Desktop tests: a stand-in on another port, so they never touch a real one on 10101. */
+    if (const char *tp = std::getenv("RECOMP_TEST_SMP_PORT"); tp && std::strtol(tp, nullptr, 10) > 0 && std::strtol(tp, nullptr, 10) < 65536)
+        port = static_cast<unsigned short>(std::strtol(tp, nullptr, 10));
+#endif
+    sa.sin_port = htons(port);
     sa.sin_addr.s_addr = htonl(0x7F000001);
     if (connect(fd, reinterpret_cast<sockaddr *>(&sa), sizeof sa) != 0)
     {

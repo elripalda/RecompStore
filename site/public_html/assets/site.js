@@ -1005,10 +1005,15 @@
     const q = st.queue || {};
     const waiting = Array.isArray(q.waiting) ? q.waiting : [];
     if (!q.now && !waiting.length) return '';
-    const nm = (id) => { const a = byId(id); return esc((a && a.name) || id); };
+    // The app's name and icon from the catalog; the PS5's name for it, else its ID, for one that isn't in it.
+    const names = q.names && typeof q.names === 'object' ? q.names : {};
+    const nm = (id) => { const a = byId(id); return esc((a && a.name) || names[id] || id); };
+    const ico = (id) => { const a = byId(id); return a ? iconHTML(a, 48) : `<span class="ico mono">${esc(String(names[id] || id).slice(0, 2))}</span>`; };
+    const pct = Number(q.total) > 0 ? Math.round(100 * Number(q.done) / Number(q.total)) : -1;
     return `<h2 class="my-h2">Downloads</h2><ul class="ps5-apps">
-      ${q.now ? `<li class="glass ps5-app"><span class="ps5-app-words"><strong>${nm(q.now)}</strong><span>${esc(q.step || 'Installing')}${Number(q.total) > 0 ? ' · ' + Math.round(100 * Number(q.done) / Number(q.total)) + '%' : ''}</span></span></li>` : ''}
-      ${waiting.filter((id) => id !== q.now).map((id) => `<li class="glass ps5-app" data-key="${esc(id)}"><span class="ps5-app-words"><strong>${nm(id)}</strong><span>Waiting${reqLine(id) ? '' : ''}</span>${reqLine(id)}</span>
+      ${q.now ? `<li class="glass ps5-app">${ico(q.now)}<span class="ps5-app-words"><strong>${nm(q.now)}</strong><span>${esc(q.step || 'Installing')}${pct >= 0 ? ' · ' + pct + '%' : ''}</span>
+        ${pct >= 0 ? `<span class="dl-bar"><i style="width:${pct}%"></i></span>` : ''}</span></li>` : ''}
+      ${waiting.filter((id) => id !== q.now).map((id) => `<li class="glass ps5-app" data-key="${esc(id)}">${ico(id)}<span class="ps5-app-words"><strong>${nm(id)}</strong><span>Waiting</span>${reqLine(id)}</span>
         <button class="btn small" type="button" data-act="cancel">Cancel</button></li>`).join('')}
     </ul>`;
   }
@@ -1082,6 +1087,12 @@
       ${apps.length ? `<ul class="ps5-apps">${apps.map(appRow).join('')}</ul>`
         : `<p class="muted">${me.state_at ? 'Nothing from Recomp Store is installed on it yet.' : 'Open Recomp Store on your PS5 and what\'s on it shows up here.'}</p>`}
       <div class="my-forms">
+        ${Number(st.v) >= 2 ? `<form class="glass form" data-type-form novalidate>
+          <span class="kicker">Type on your PS5</span>
+          <p class="form-note">Open the keyboard on your PS5 (a search, a message), then type here instead.</p>
+          <label>Text<input name="t" maxlength="200" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="What to type"></label>
+          <div class="form-row"><button class="btn primary" type="submit">Send to the keyboard</button><span class="status" role="status"></span></div>
+        </form>` : ''}
         <form class="glass form" data-send-form novalidate>
           <span class="kicker">Install an app</span>
           <label>App<select name="app"><option value="">Choose an app</option>${sendable.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label>
@@ -1102,6 +1113,21 @@
         </form>
       </div>
       <p class="unlink-row"><button class="linkish" type="button" data-forget>Unlink this ${esc(thisDevice())}</button></p>`;
+    // (2.3.0) Typing on the PS5's open keyboard
+    const tf = box.querySelector('[data-type-form]');
+    if (tf) tf.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = tf.querySelector('.status'), t = tf.querySelector('[name="t"]').value.trim();
+      if (!t) { s.textContent = 'Type something first.'; s.className = 'status bad'; return; }
+      const b = tf.querySelector('button');
+      b.disabled = true; s.textContent = 'Sending…'; s.className = 'status';
+      api('send', { kind: 'text', data: { text: t } }).then((res) => {
+        b.disabled = false;
+        s.textContent = res.ok ? 'Sent. It shows up in the PS5\'s keyboard in a few seconds.' : res.error || 'That didn\'t go through.';
+        s.className = res.ok ? 'status ok' : 'status bad';
+        if (res.ok) tf.querySelector('[name="t"]').value = '';
+      });
+    });
     // Install an app
     const sf = box.querySelector('[data-send-form]');
     sf.addEventListener('submit', (e) => {

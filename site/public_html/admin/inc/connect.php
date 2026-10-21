@@ -905,6 +905,8 @@ function rs_charts(bool $fresh = false): array {
         'community' => array_slice($community, 0, 50),
         // (2.2) People also installed: for each app, others its consoles have (ids only).
         'also' => (object)rs_charts_also($apps, $top, $fresh),
+        // (2.3.0) Thumbs-up counts, for listed apps only (admin/inc/v23.php).
+        'likes' => (object)array_filter(rs_likes_counts(), fn($id) => isset($apps[$id]), ARRAY_FILTER_USE_KEY),
     ];
     rs_kv_put('charts', json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     return $out;

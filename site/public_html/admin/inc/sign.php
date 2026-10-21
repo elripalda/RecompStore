@@ -159,11 +159,14 @@ function rs_publish_signed(string $kind, string $sigText): string {
     if ($sig === null) throw new RuntimeException('That signature isn\'t good for the catalog waiting here (published again since?).');
     $old = rs_sig_parse((string)@file_get_contents(rs_sig_file($kind)));
     if ($old !== null && strcmp($sig['signed'], $old['signed']) < 0) throw new RuntimeException('That signature is older than the one out now.');
+    // (2.3.0) The catalog out until now, for the Discord post (what's new since).
+    $before = $kind === 'catalog' ? (json_decode((string)@file_get_contents(rs_signed_file($kind)), true) ?: []) : [];
     rs_put_atomic(rs_signed_file($kind), $bytes);
     rs_put_atomic(rs_sig_file($kind), $sigText);
     @unlink($p);
     if ($kind === 'catalog') rs_after_publish(json_decode($bytes, true) ?: []);
     rs_log('signed', $kind, 'key ' . $sig['key']);
+    if ($kind === 'catalog') rs_discord_after_publish($before, json_decode($bytes, true) ?: []);
     return $kind === 'catalog' ? 'Published. Every PS5 gets it on its next refresh.' : 'Published to testers.';
 }
 
