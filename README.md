@@ -1,4 +1,11 @@
-# Recomp Store
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://recompstore.com/assets/press/logo-horizontal-white.svg">
+    <img alt="RecompStore" src="https://recompstore.com/assets/press/logo-horizontal-dark.svg" width="420">
+  </picture>
+</p>
+
+# RecompStore
 
 A homebrew app store for jailbroken PS5. It installs and updates native PS5 ports of recompiled games, emulators, apps and tools, and sets each game up from your own disc image.
 
@@ -19,7 +26,7 @@ Website: [recompstore.com](https://recompstore.com) · Report a bug: [recompstor
    ```
    nc -N <your PS5's IP> 9021 < RecompStore-Installer.elf
    ```
-3. A notification tells you when it's done. If ShadowMountPlus is running, Recomp Store shows up on your home screen a few seconds later. If it isn't running, start it.
+3. A notification tells you when it's done. If ShadowMountPlus is running, RecompStore shows up on your home screen a few seconds later. If it isn't running, start it.
 
 The installer downloads the newest release's `PPSA92000.zip` from this repository and checks it against GitHub's SHA-256 (offline, it uses the copy built into it). It unpacks it into `/data/homebrew/PPSA92000`, or into the folder where the store already is, and checks every file as it is written. You only do this once: after that the store updates itself from **Latest Updates**.
 
@@ -71,7 +78,7 @@ Every copy of the store checks this repository's releases when it starts, and ev
 
 ## License and credits
 
-Recomp Store is free software under the [GNU General Public License v3.0 or later](LICENSE).
+RecompStore is free software under the [GNU General Public License v3.0 or later](LICENSE).
 
 - Made by [elripalda](https://www.elripalda.com). Support it on [Ko-fi](https://ko-fi.com/ripalda).
 - Built on [Porpoise](https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5), which builds on Mihawk's PS5 RetroArch port, PS5_Vulkan, and ps5-native-app-boilerplate by BlackBearReloaded.
@@ -80,4 +87,4 @@ Recomp Store is free software under the [GNU General Public License v3.0 or late
 - Uses stb by Sean Barrett. Fonts are under the SIL Open Font License; their license files are in `app/assets/fonts`.
 - Each game's own credits are on its page in the store and in its repository.
 
-Recomp Store and the games listed in it aren't affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, or any game's publisher or developer. All trademarks belong to their owners.
+RecompStore and the games listed in it aren't affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, or any game's publisher or developer. All trademarks belong to their owners.
