@@ -376,7 +376,7 @@
             <p class="lead">${esc(a.description)}</p>
             ${a.news || repoUrl ? `
             <details class="glass news" id="notes">
-              <summary><span class="kicker">What's new${a.version ? ' · ' + esc(a.version) : ''}</span>${a.news ? `<p>${esc(a.news)}</p>` : ''}${repoUrl ? '<span class="more">All patch notes</span>' : ''}</summary>
+              <summary><span class="kicker">What's new<span data-notes-version>${a.version ? ' · ' + esc(a.version) : ''}</span></span>${a.news ? `<p>${esc(a.news)}</p>` : ''}${repoUrl ? '<span class="more">All patch notes</span>' : ''}</summary>
               <div class="notes" data-notes><p class="muted">Loading the notes from GitHub…</p></div>
             </details>` : ''}
             ${a.setup ? setupHTML(a) : ''}
@@ -489,8 +489,13 @@
             link.href = asset.browser_download_url;
             link.textContent = `Download ${asset.name} (${(asset.size / 1048576).toFixed(0)} MB)`;
           }
-          const ver = document.querySelector('[data-version]');
-          if (ver && rel.tag_name) ver.textContent = rel.tag_name.replace(/^v(?=\d)/i, '');
+          if (rel.tag_name) {
+            const version = rel.tag_name.replace(/^v(?=\d)/i, '');
+            const ver = document.querySelector('[data-version]');
+            if (ver) ver.textContent = version;
+            const notesVersion = document.querySelector('[data-notes-version]');
+            if (notesVersion) notesVersion.textContent = ' · ' + version;
+          }
           return;
         }
       })
