@@ -9,11 +9,7 @@
 
 A homebrew app store for jailbroken PS5. It installs and updates native PS5 ports of recompiled games, emulators, apps and tools, and sets each game up from your own disc image.
 
-<p align="center">
-  <a href="https://pump.fun/coin/58gj8ENdAg6pvEuaro6GrgZtRv4tpnsPJJcYMzCpjWmX">
-    <img src="docs/ca.svg" alt="58gj8ENdAg6pvEuaro6GrgZtRv4tpnsPJJcYMzCpjWmX" width="620">
-  </a>
-</p>
+
 <p align="center"><code>58gj8ENdAg6pvEuaro6GrgZtRv4tpnsPJJcYMzCpjWmX</code></p>
 
 **No game files are hosted here or in any repository the store links to.** Every game needs your own legally obtained copy, which the store sets up for you from your disc image.
