@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.2): the ShadowMountPlus the store offers. The admin picks one of
+// RecompStore website (2.2): the ShadowMountPlus the store offers. The admin picks one of
 // drakmor/ShadowMountPlus's releases in Settings; the site downloads it once to work out the
 // .elf's SHA-256 and size, and the catalog (signed like everything else) carries it as "smp".
 // The store downloads it from GitHub itself and checks it against these.

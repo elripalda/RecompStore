@@ -1,0 +1,4 @@
+<IfModule mod_headers.c>
+Header set Cache-Control "no-cache, must-revalidate"
+Header set Access-Control-Allow-Origin "*"
+</IfModule>

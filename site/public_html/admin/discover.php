@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin: Discover, the store's first screen and the site's home page, as
+// RecompStore admin: Discover, the store's first screen and the site's home page, as
 // sections (rows, grids, wide tiles, a spotlight, Coming soon), with a live preview.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
@@ -45,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // What the editor and the preview need of each game.
 $games = [];
+$devPages = rs_developers();
 foreach (rs_games() as $g) {
     $games[] = [
         'id' => $g['id'], 'name' => $g['name'], 'kind' => $g['kind'], 'author' => $g['author'],
@@ -53,12 +54,15 @@ foreach (rs_games() as $g) {
         'x' => (int)$g['focus_x'], 'y' => (int)$g['focus_y'], 'zoom' => (int)$g['zoom'],
         'featured' => (bool)$g['featured'], 'hidden' => (bool)$g['hidden'], 'soon' => (bool)$g['soon'], 'date' => $g['date'],
         'category' => rs_category((string)$g['category']), 'testers' => !empty($g['testers']), 'beta' => !empty($g['beta']),
+        'dev' => rs_dev_for($g, $devPages),
     ];
 }
 $state = ['games' => $games, 'sections' => rs_discover_sections(), 'saved' => rs_setting('discover_sections') !== null, 'categories' => RS_CATEGORIES,
     'header' => rs_discover_header(), 'headerStyles' => RS_HEADER_STYLES, 'collections' => rs_collections(),
     // (2.5) A section's own order: the choices, each part's page order, and what they sort by.
-    'sectionSorts' => RS_SECTION_SORTS, 'pageSorts' => rs_category_sorts(), 'sortNames' => RS_SORTS, 'facts' => rs_sort_facts()];
+    'sectionSorts' => RS_SECTION_SORTS, 'pageSorts' => rs_category_sorts(), 'sortNames' => RS_SORTS, 'facts' => rs_sort_facts(),
+    // (2.7.3) Developer spotlight: the developer pages to pick from.
+    'devs' => array_values(array_map(fn($d) => ['slug' => $d['slug'], 'name' => $d['name'], 'verified' => (bool)$d['verified'], 'avatar' => $d['avatar']], rs_developers()))];
 rs_head('Discover');
 ?>
 <section class="head-row">
@@ -76,7 +80,7 @@ rs_head('Discover');
   <div class="disc-edit">
     <section class="d-header-edit" data-header aria-labelledby="hdr-title">
       <h2 id="hdr-title">Header</h2>
-      <p class="muted">How the featured games show at the top of Discover. Recomp Store 2.1 and newer; older stores keep the carousel.</p>
+      <p class="muted">How the featured games show at the top of Discover. RecompStore 2.1 and newer; older stores keep the carousel.</p>
       <div class="hstyles" role="radiogroup" aria-label="Header style" data-hstyles></div>
       <div class="hgames" data-hgames></div>
       <label class="hint" data-hinterval>Changes every <input type="range" min="4" max="30" step="1" data-interval> <output data-interval-out></output> seconds</label>
@@ -94,8 +98,9 @@ rs_head('Discover');
       <button type="button" data-add="updated">Recently updated</button>
       <button type="button" data-add="liked">Most liked</button>
       <button type="button" data-add="collection">Collection</button>
+      <button type="button" data-add="developer">Developer spotlight</button>
     </div>
-    <p class="muted small-note">Games: a row (seven at a time, scrolls sideways), a grid (every one, seven to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Category: every game in one part of the store (Games, Emulators, Apps, Tools), in the order of its page or one you pick for it. Top charts, Trending, New and Recently updated fill themselves in from installs and GitHub's releases (2.0 and newer too). Most liked fills itself in from thumbs-up, and Collection shows one of your collections (both 2.3.0 and newer). Stores older than 1.0.6 keep their own single row.</p>
+    <p class="muted small-note">Games: a row (seven at a time, scrolls sideways), a grid (every one, seven to a line) or wide tiles (three at a time, the backdrop art). Coming soon: the games marked Coming soon. Spotlight: one game as a still banner. Category: every game in one part of the store (Games, Emulators, Apps, Tools), in the order of its page or one you pick for it. Top charts, Trending, New and Recently updated fill themselves in from installs and GitHub's releases (2.0 and newer too). Most liked fills itself in from thumbs-up, and Collection shows one of your collections (both 2.3.0 and newer). Developer spotlight: one developer's card with their apps, on the website (the store leaves it out for now). Stores older than 1.0.6 keep their own single row.</p>
   </div>
   <div class="disc-preview">
     <div class="preview-head"><h2>Preview</h2><span class="muted">The store on a TV. Above the dashed line shows first; the rest scrolls up.</span></div>

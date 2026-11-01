@@ -1,0 +1,15 @@
+{
+    "ok": true,
+    "platform": "windows",
+    "channel": "beta",
+    "version": "0.75.0-beta.14",
+    "name": "0.75 Beta 14",
+    "notes": "# RecompLauncher 0.75 Beta 14\n\n- **Easy Setup filter.** Discover has a new Easy Setup switch, and Big Picture has an Easy Setup chip, so you can see every recomp the launcher sets up for you in one place.\n- **Cleaner Discover.** The filters now sit in two tidy rows, and Discover shows the recomps made for your PC automatically.\n- **Clear history.** Downloads and Updates each get a Clear history button, so you can start fresh whenever you like.\n- **Smarter setup checks.** When you insert your copy, the launcher now checks it's the right region and that the disc image can actually be read, and tells you right there if it isn't.\n- **Better help when a game closes.**\n  - A game whose files moved now lets you pick the new folder in one click.\n  - Missing system files point you straight to the Visual C++ download.\n  - Graphics hiccups point you to the right switch in Game settings.\n- **More Easy Setup.** Another recomp joins the one-click setup list.\n\nKeep the logs coming from the crash window and Settings \u2192 Beta. Every one helps.",
+    "size": 7224598,
+    "sha256": "6890215d3a654ee26ed60ae7648152026e608b17bb9b4047c18f73aa7f949cbe",
+    "url": "https://recomplauncher.com/api/launcher-update.php?dl=13&s=ff1c14b4e57ad853e324afdd",
+    "published": "2026-10-30T03:46:14+00:00",
+    "date": "2026-10-30",
+    "github": "https://github.com/elripalda/RecompLauncher",
+    "push": "https://ntfy.sh/recomplauncher-16087873f0d60166/sse"
+}

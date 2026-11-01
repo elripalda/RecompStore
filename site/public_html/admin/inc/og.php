@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website: link previews. A game's own link (recompstore.com/game/<ID>) carries
+// RecompStore website: link previews. A game's own link (recompstore.com/game/<ID>) carries
 // its name, blurb and a 1200x630 picture (a JPEG) made from its art, so Discord, X, iMessage and the
 // rest show a card for it. Reads only the published catalog.json and the media folder.
 declare(strict_types=1);
@@ -152,7 +152,7 @@ function rs_og_rounded($dst, $src, int $x, int $y, int $size, int $r): void {
 }
 
 // The card: the game's art across it, darkened toward the left, where its icon, its name (or
-// logo), its blurb and Recomp Store's own mark sit.
+// logo), its blurb and RecompStore's own mark sit.
 function rs_og_render(array $a, bool $soon) {
     $W = RS_OG_W; $H = RS_OG_H;
     $im = imagecreatetruecolor($W, $H);
@@ -193,17 +193,17 @@ function rs_og_render(array $a, bool $soon) {
     $dim = imagecolorallocate($im, 0x95, 0xA2, 0xB4);
     $L = 64;
 
-    // Recomp Store, top left.
+    // RecompStore, top left.
     if ($mark = rs_og_load(rs_og_public() . '/assets/logo-512.png')) {
         imagecopyresampled($im, $mark, $L, 54, 0, 0, 60, 60, imagesx($mark), imagesy($mark));
         imagedestroy($mark);
     }
-    rs_og_text($im, $sora, 25, $L + 78, 74, $white, 'Recomp Store');
+    rs_og_text($im, $sora, 25, $L + 78, 74, $white, 'RecompStore');
 
     // The game's icon, what it is, its logo (or name) and its blurb: laid out first, then
-    // drawn as one block in the middle of the space under Recomp Store's mark.
+    // drawn as one block in the middle of the space under RecompStore's mark.
     $kicker = $soon ? 'COMING SOON' . (($a['date'] ?? '') !== '' ? ' · ' . mb_strtoupper((string)$a['date']) : '')
-                    : (($a['kind'] ?? '') === 'original' ? 'PS5 · RECOMP STORE' : 'PS5' . (($a['author'] ?? '') !== '' ? ' · BY ' . mb_strtoupper((string)$a['author']) : ''));
+                    : (($a['kind'] ?? '') === 'original' ? 'PS5 · RECOMPSTORE' : 'PS5' . (($a['author'] ?? '') !== '' ? ' · BY ' . mb_strtoupper((string)$a['author']) : ''));
     $logo = rs_og_load(rs_og_local($a['logo']['url'] ?? null));
     $iconSize = 116;
     $lw = $lh = 0;

@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.3.0): what testers say about each beta, build by build. Testers send it from
+// RecompStore admin (2.3.0): what testers say about each beta, build by build. Testers send it from
 // the beta's page in the store (Feedback: Works, Crashes, Slow or Other, a note and their logs); each
 // one is also in the Inbox under Logs, with its files.
 declare(strict_types=1);
@@ -48,7 +48,7 @@ rs_head('Feedback');
 <section class="head-row">
   <div>
     <h1>Feedback<?= $app !== '' ? ': ' . h($names[$app] ?? $app) : '' ?></h1>
-    <p class="muted">What testers say about each beta, from the Feedback button on its page in the store (Recomp Store 2.3.0). Each one is in the Inbox too, under Logs, with the files it sent.</p>
+    <p class="muted">What testers say about each beta, from the Feedback button on its page in the store (RecompStore 2.3.0). Each one is in the Inbox too, under Logs, with the files it sent.</p>
   </div>
   <?php if ($app !== ''): ?><div class="actions"><a class="btn" href="feedback.php">Every beta</a></div><?php endif; ?>
 </section>
@@ -61,7 +61,7 @@ rs_head('Feedback');
 <section class="card fb-app">
   <div class="fb-head">
     <h2><?= h($names[$id] ?? $id) ?> <span class="muted"><?= h($id) ?></span></h2>
-    <span class="muted"><?= $x['total'] ?> from testers · last <?= h(date('M j, g:i a', strtotime($x['last']))) ?></span>
+    <span class="muted"><?= $x['total'] ?> from testers · last <?= h(rs_date('M j, g:i a', strtotime($x['last']))) ?></span>
     <?php if ($app === ''): ?><a class="btn" href="feedback.php?app=<?= h(rawurlencode($id)) ?>">Read the notes</a><?php endif; ?>
   </div>
   <table class="fb-table">
@@ -73,7 +73,7 @@ rs_head('Feedback');
         <?php foreach (array_keys(RS_VERDICTS) as $vk): ?>
         <td><span class="fb-n fb-<?= h($vk) ?><?= $c[$vk] ? '' : ' zero' ?>"><?= (int)$c[$vk] ?></span><?php if ($c[$vk]): ?> <span class="muted"><?= round(100 * $c[$vk] / $n) ?>%</span><?php endif; ?></td>
         <?php endforeach; ?>
-        <td class="muted"><?= h(date('M j', strtotime($c['last']))) ?></td>
+        <td class="muted"><?= h(rs_date('M j', strtotime($c['last']))) ?></td>
       </tr>
     <?php endforeach; ?>
     </tbody>
@@ -89,7 +89,7 @@ rs_head('Feedback');
       <span class="tag fb-<?= h($r['feedback']) ?>"><?= h(RS_VERDICTS[$r['feedback']] ?? 'Other') ?></span>
       <span class="mono"><?= h($r['build'] !== '' ? $r['build'] : '(build not given)') ?></span>
       <?php if ($r['contact'] !== ''): ?><span class="tag beta" title="Console <?= h($r['contact']) ?>">Tester · <?= h(substr($r['contact'], 0, 6)) ?></span><?php endif; ?>
-      <span class="muted when"><?= h(date('M j, Y g:i a', strtotime($r['created']))) ?></span>
+      <span class="muted when"><?= h(rs_date('M j, Y g:i a', strtotime($r['created']))) ?></span>
     </header>
     <?php if (trim((string)$r['body']) !== ''): ?><p class="body"><?= nl2br(h($r['body'])) ?></p><?php else: ?><p class="body muted">No note.</p><?php endif; ?>
     <p class="small-note"><a href="inbox.php?show=logs#m<?= (int)$r['id'] ?>">Its logs in the Inbox</a></p>

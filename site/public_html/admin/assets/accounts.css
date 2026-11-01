@@ -1,0 +1,22 @@
+/* (3.0) Accounts */
+.ac-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:10px}
+.ac-list li{display:grid;grid-template-columns:92px minmax(0,1fr);gap:12px;align-items:start}
+.ac-list li .pill{justify-self:start}
+.ac-list .ac-row{grid-column:2;display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+.ac-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ac-setup{display:grid;gap:18px}
+.ac-setup .steps ul{margin:8px 0 0;padding-left:18px;display:grid;gap:8px}
+.ac-setup .copyrow{max-width:520px}
+.ac-setup .check{margin-top:12px}
+.ac-table{width:100%;border-collapse:collapse;font-size:14px}
+.ac-table th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:8px;border-bottom:1px solid var(--line)}
+.ac-table td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ac-table tr.dim{opacity:.55}
+.ac-acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.ac-queue{display:grid;gap:12px}
+.ac-cm{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel)}
+.ac-cm.held{border-color:rgba(255,122,122,.5)}
+.ac-cm-meta{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ac-cm-meta b{color:var(--frost)}
+.ac-cm-body{margin:8px 0 12px;white-space:normal;overflow-wrap:anywhere}
+@media (max-width:720px){.ac-list li{grid-template-columns:1fr}.ac-list .ac-row{grid-column:1}.ac-table{display:block;overflow-x:auto}}

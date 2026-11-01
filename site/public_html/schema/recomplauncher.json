@@ -1,0 +1,418 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://recomplauncher.com/schema/recomplauncher.json",
+  "title": "recomplauncher.json",
+  "description": "How RecompLauncher sets up, starts and configures a recomp. See docs/DEVELOPERS.md.",
+  "type": "object",
+  "required": [
+    "format"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": 1,
+      "description": "Always 1."
+    },
+    "name": {
+      "type": "string",
+      "description": "Your recomp's name, as players see it. The launcher shows it for a build added from a folder (Developer tools); a listed recomp uses its name on recomplauncher.com."
+    },
+    "repo": {
+      "type": "string",
+      "description": "Your GitHub repo, owner/name. Only needed for profiles built into the launcher."
+    },
+    "game": {
+      "type": "object",
+      "description": "The player's own copy of the game.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "iso",
+            "folder",
+            "iso_or_folder"
+          ],
+          "default": "iso"
+        },
+        "label": {
+          "type": "string",
+          "description": "What to ask for. Name the region or serial if only one works."
+        },
+        "check": {
+          "type": "object",
+          "description": "How to tell it's the right game.",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "A file in the game's folder, like default.xex."
+            },
+            "xdvdfs": {
+              "type": "string",
+              "description": "A file on an Xbox 360 disc image."
+            },
+            "iso9660": {
+              "type": "string",
+              "description": "A file in the top folder of a PS2 (or any ISO 9660) disc image."
+            }
+          },
+          "additionalProperties": false
+        },
+        "dumps": {
+          "type": "array",
+          "description": "Known good dumps (from Redump), for the verified badge.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "crc32"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Shown as 'Matches the verified <name> disc'."
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "crc32": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "start": {
+      "type": "object",
+      "required": [
+        "program"
+      ],
+      "properties": {
+        "program": {
+          "$ref": "#/definitions/programs"
+        },
+        "args": {
+          "$ref": "#/definitions/args"
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables for your game, like SDL hints. Paths such as {install} fill in. RECOMPLAUNCHER_ names and system ones like PATH are left out.",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "prepare": {
+      "type": "object",
+      "description": "Your own setup step, run without a window after the copy is checked.",
+      "required": [
+        "program"
+      ],
+      "properties": {
+        "program": {
+          "$ref": "#/definitions/programs"
+        },
+        "args": {
+          "$ref": "#/definitions/args"
+        },
+        "label": {
+          "type": "string",
+          "description": "Shown under 'Getting the extras'."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300,
+          "description": "Seconds."
+        }
+      },
+      "additionalProperties": false
+    },
+    "config": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "format",
+          "file"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "default": "main"
+          },
+          "format": {
+            "enum": [
+              "toml",
+              "ini",
+              "json"
+            ]
+          },
+          "file": {
+            "$ref": "#/definitions/places"
+          },
+          "game_path": {
+            "type": "string",
+            "description": "The key that holds the path to the player's copy."
+          },
+          "ensure": {
+            "$ref": "#/definitions/values",
+            "description": "Set when missing or empty."
+          },
+          "always": {
+            "$ref": "#/definitions/values",
+            "description": "Set on every start."
+          },
+          "new": {
+            "$ref": "#/definitions/values",
+            "description": "Set when the file is created."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "folders": {
+      "type": "object",
+      "description": "Named places. 'saves' and 'logs' are used by the launcher itself.",
+      "additionalProperties": {
+        "$ref": "#/definitions/places"
+      }
+    },
+    "exit_codes": {
+      "type": "object",
+      "description": "Exit code (as a string) to the message shown to the player.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "settings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "choices"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "in": {
+            "type": "string",
+            "default": "main",
+            "description": "A config id, or 'args' for the command line."
+          },
+          "choices": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "set": {
+                  "$ref": "#/definitions/values"
+                },
+                "args": {
+                  "$ref": "#/definitions/args"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "defaults": {
+            "$ref": "#/definitions/values",
+            "description": "The game's own values for keys the file doesn't have yet."
+          },
+          "when": {
+            "$ref": "#/definitions/values",
+            "description": "Greyed out unless these keys have these values."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "saves": {
+      "type": "array",
+      "description": "Where the game keeps its saves: folders, files, or files matching a * pattern. Backups and cloud saves copy these.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "{local}/My Game/saves",
+          "{install}/settings.toml"
+        ]
+      ]
+    },
+    "looks": {
+      "type": "object",
+      "description": "Looks (ReShade filters) for this game. Leave it out and they work with what the launcher works out itself.",
+      "properties": {
+        "allowed": {
+          "type": "boolean",
+          "default": true,
+          "description": "false if your recomp has its own filters, or ReShade doesn't work with it."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Shown to the player when looks are off."
+        },
+        "graphics": {
+          "enum": [
+            "d3d12",
+            "d3d11",
+            "d3d9",
+            "opengl",
+            "vulkan"
+          ],
+          "description": "The graphics API your recomp draws with."
+        },
+        "graphics_key": {
+          "type": "string",
+          "description": "A settings key that holds the graphics API the player picked, in the config named by 'in'."
+        },
+        "in": {
+          "type": "string",
+          "default": "main"
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lines for the CRT looks, when the console's usual number is wrong for your game."
+        }
+      },
+      "additionalProperties": false
+    },
+    "mods": {
+      "type": "object",
+      "description": "Where players get mods for your game. Leave it out if the launcher already knows (Zelda 64: Recompiled, Banjo: Recompiled, Unleashed Recompiled, Marathon Recompiled and the Ship of Harkinian family).",
+      "properties": {
+        "thunderstore": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "description": "Your Thunderstore community, as in thunderstore.io/c/<community>. Needs 'data'."
+        },
+        "data": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._ -]+$",
+          "description": "Your data folder's name (in AppData\\Local on Windows, ~/.config on Linux). Mods go in its mods folder, or in the game's own mods folder when portable.txt is there."
+        },
+        "gamebanana": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Your game's id on GameBanana, as in gamebanana.com/games/<id>. Needs 'loader'."
+        },
+        "loader": {
+          "enum": [
+            "nrm",
+            "otr",
+            "hmm"
+          ],
+          "description": "How your game reads mods: nrm (.nrm files in the data folder's mods folder, needs 'data'), otr (.otr and .o2r files in a mods folder next to the executable) or hmm (Hedge Mod Manager mods with a mod.ini, needs 'user')."
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._ -]+$",
+          "description": "For hmm: your folder in AppData\\Roaming that holds cpkredir.ini."
+        }
+      },
+      "additionalProperties": false
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "open": {
+            "type": "string",
+            "description": "A folder name."
+          },
+          "clear": {
+            "type": "string",
+            "description": "A folder name and subfolder, like saves/cache."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "programs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Paths inside your release, tried in order."
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "values": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Key to value, written exactly as given (TOML strings keep their quotes)."
+    },
+    "places": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "if": {
+            "type": "string",
+            "description": "Used only when this path exists."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

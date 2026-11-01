@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.1): a page of the site was shown (the Analytics page counts them). Sent by
+// RecompStore website (2.1): a page of the site was shown (the Analytics page counts them). Sent by
 // assets/site.js with sendBeacon; nothing is stored about the visitor but a code that changes daily.
 //   POST JSON {p: "/game/PPSA92011", r: "https://www.reddit.com/..."}  -> 204
 declare(strict_types=1);

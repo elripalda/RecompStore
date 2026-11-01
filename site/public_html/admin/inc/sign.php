@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.1): signing with Recomp Store Signer, and the admin's change log.
+// RecompStore website (2.1): signing with RecompStore Signer, and the admin's change log.
 //
 // Once the signer has told the site its public keys (Settings > Signer), Publish no longer writes
 // catalog.json: it writes a waiting copy, and the signer on the owner's PC shows what changed and
@@ -167,6 +167,8 @@ function rs_publish_signed(string $kind, string $sigText): string {
     if ($kind === 'catalog') rs_after_publish(json_decode($bytes, true) ?: []);
     rs_log('signed', $kind, 'key ' . $sig['key']);
     if ($kind === 'catalog') rs_discord_after_publish($before, json_decode($bytes, true) ?: []);
+    if ($kind === 'catalog') rs_indexnow_after_publish($before, json_decode($bytes, true) ?: []);
+    if ($kind === 'catalog') rs_dev_write_public();
     return $kind === 'catalog' ? 'Published. Every PS5 gets it on its next refresh.' : 'Published to testers.';
 }
 
@@ -177,6 +179,10 @@ function rs_after_publish(array $cat): void {
         rs_stats_tables();
         $mark = rs_db()->prepare('INSERT IGNORE INTO app_published (app_id, first_at) VALUES (?, NOW())');
         foreach (array_merge($cat['apps'] ?? [], $cat['newerStoreApps'] ?? [], $cat['v2Apps'] ?? []) as $a) $mark->execute([(string)($a['id'] ?? '')]);
+        // (2.6) The charts are made again on their next request, so what was just published is in
+        // Newest Arrivals straight away instead of up to 10 minutes later.
+        rs_cache_tables();
+        rs_db()->exec("DELETE FROM kv_cache WHERE k = 'charts'");
     } catch (Throwable $e) {
     }
 }
@@ -229,7 +235,7 @@ function rs_beta_builds(array $g): array {
 function rs_beta_builds_unsigned(): array {
     $out = [];
     foreach (rs_games(true) as $g) {
-        if (!$g['beta']) continue;
+        if (!rs_has_beta($g)) continue;
         foreach (rs_beta_builds($g) as $b) {
             if (!preg_match('/^[0-9a-f]{64}$/', $b['sha256']) || rs_sig_for('beta', $b['sha256']) !== '') continue;
             $out[] = ['kind' => 'beta', 'id' => $g['id'], 'name' => $g['name'] . ' ' . $b['version'], 'file' => $b['file'], 'size' => $b['size'],
@@ -244,7 +250,7 @@ function rs_store_beta_sig(string $sigText): string {
     if ($sig === null || $sig['kind'] !== 'beta') throw new RuntimeException('That isn\'t a beta signature.');
     $match = null;
     foreach (rs_games(true) as $g) {
-        if (!$g['beta']) continue;
+        if (!rs_has_beta($g)) continue;
         foreach (rs_beta_builds($g) as $b) {
             if (hash_equals(strtolower($b['sha256']), $sig['sha256'])) { $match = [$g, $b]; break 2; }
         }

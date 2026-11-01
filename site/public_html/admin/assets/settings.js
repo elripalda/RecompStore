@@ -1,4 +1,4 @@
-// Recomp Store admin (2.2): Settings' Store tabs order (up and down), What's new's preview and the
+// RecompStore admin (2.2): Settings' Store tabs order (up and down), What's new's preview and the
 // ShadowMountPlus download's wait.
 (function () {
   'use strict';
@@ -50,7 +50,7 @@
     const draw = () => {
       const v = ver.value.trim() || '…';
       title.placeholder = "What's new in " + (ver.value.trim() || '2.2.2');
-      out.innerHTML = `<span class="wn-kick">Recomp Store ${esc(v)}</span><h3>${esc(title.value.trim() || "What's new in " + v)}</h3>${blocks(body.value) || '<p class="muted">Nothing written yet.</p>'}`;
+      out.innerHTML = `<span class="wn-kick">RecompStore ${esc(v)}</span><h3>${esc(title.value.trim() || "What's new in " + v)}</h3>${blocks(body.value) || '<p class="muted">Nothing written yet.</p>'}`;
       count.textContent = body.value.length.toLocaleString();
     };
     [ver, title, body].forEach((el) => el.addEventListener('input', draw));

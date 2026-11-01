@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.1): the change log. Every change made in the admin, every login and
+// RecompStore admin (2.1): the change log. Every change made in the admin, every login and
 // failed login, and what the signer signed, newest first.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
@@ -30,7 +30,7 @@ rs_head('Change log');
     <tbody>
     <?php foreach ($rows as $r): ?>
       <tr<?= $r['action'] === 'login-failed' ? ' class="warn"' : '' ?>>
-        <td><?= h(date('M j, g:i a', strtotime((string)$r['at']))) ?></td>
+        <td><?= h(rs_date('M j, g:i a', strtotime((string)$r['at']))) ?></td>
         <td><?= h((string)$r['who']) ?></td>
         <td><?= h((string)$r['action']) ?></td>
         <td><?= h((string)$r['target']) ?></td>

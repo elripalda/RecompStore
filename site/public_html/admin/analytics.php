@@ -1,8 +1,8 @@
 <?php
-// Recomp Store admin (2.3): Analytics. Five tabs: Overview (consoles, installs, updates, removals,
+// RecompStore admin (2.3): Analytics. Five tabs: Overview (consoles, installs, updates, removals,
 // beta downloads, visitors, store versions), Apps (every app, sortable, with GitHub's numbers),
 // Downloads (the store's own releases and each app's), Website and Logs. A range of 7, 30 or 90
-// days or all time, and every table as CSV (?export=). Counted by Recomp Store 2.0 and newer and by
+// days or all time, and every table as CSV (?export=). Counted by RecompStore 2.0 and newer and by
 // the website: no cookies, nothing that says who anyone is. GitHub's numbers come from the cache;
 // the page asks for newer ones in the background, at most once an hour per repo.
 declare(strict_types=1);
@@ -206,7 +206,7 @@ if ($tab === 'downloads') {
         $tag = $r['url'] !== '' ? ['v' => $r['tag'], 'h' => '<a href="' . h($r['url']) . '" target="_blank" rel="noopener">' . h($r['tag']) . '</a>' . ($r['pre'] ? ' <span class="tag mini">Pre-release</span>' : '')] : $r['tag'];
         $rel[] = ['release' => $tag, 'date' => ['v' => $r['date'], 'h' => $r['date'] !== '' ? h(gmdate('M j, Y', strtotime($r['date'] . ' 12:00 UTC'))) : ''], 'zip' => $z, 'elf' => $e, 'other' => $o, 'total' => $r['downloads']];
     }
-    $T['store'] = ['Recomp Store releases', ['release' => ['Release', []], 'date' => ['Published', []], 'zip' => [$zipName, ['n' => true]],
+    $T['store'] = ['RecompStore releases', ['release' => ['Release', []], 'date' => ['Published', []], 'zip' => [$zipName, ['n' => true]],
         'elf' => [$elfName, ['n' => true]], 'other' => ['Other files', ['n' => true]], 'total' => ['All files', ['n' => true, 'bar' => true]]], $rel,
         ['empty' => $sg['fetched'] ? 'GitHub lists no releases for ' . $storeRepo . '.' : 'No numbers from GitHub yet. They come in the background; reload in a minute.']];
     $T['store-files'] = ['Every file', ['release' => ['Release', []], 'file' => ['File', []], 'downloads' => ['Downloads', ['n' => true, 'bar' => true]]], $files, []];
@@ -316,7 +316,7 @@ if ($tab === 'logs') {
     $cols = ['app' => ['App', ['group' => '']]] + array_slice($cols, 1, null, true);
     $rows = [];
     foreach ($byApp as $a => $x) {
-        $r = ['app' => $a === 'store' ? 'Recomp Store' : ['v' => $names[$a] ?? $a, 'h' => $appLink($a, $names[$a] ?? $a)], 'all' => $x['all']];
+        $r = ['app' => $a === 'store' ? 'RecompStore' : ['v' => $names[$a] ?? $a, 'h' => $appLink($a, $names[$a] ?? $a)], 'all' => $x['all']];
         foreach (RS_LOG_CATEGORIES as $c => $label) $r['c_' . $c] = $x['cat'][$c] ?? 0;
         $r['c_'] = $x['cat'][''] ?? 0;
         foreach ($verdicts as $v => $label) $r['f_' . $v] = $x['fb'][$v] ?? 0;
@@ -352,7 +352,7 @@ $kpi = fn(string $label, int $v, string $small = '') => '<div class="kpi"><span>
 rs_head('Analytics', true, ['assets/analytics.css']);
 ?>
 <section class="head-row">
-  <div><h1>Analytics</h1><p class="muted">Counted by Recomp Store 2.0 and newer and by the website, in UTC days. No cookies and nothing that says who anyone is.</p></div>
+  <div><h1>Analytics</h1><p class="muted">Counted by RecompStore 2.0 and newer and by the website, in UTC days. No cookies and nothing that says who anyone is.</p></div>
 </section>
 <nav class="tabs an-tabs" aria-label="Analytics">
   <?php foreach (AN_TABS as $tk => $label): ?><a href="<?= h(rs_an_url(['tab' => $tk === 'overview' ? null : $tk])) ?>"<?= $tab === $tk ? ' aria-current="page"' : '' ?>><?= h($label) ?></a><?php endforeach; ?>
@@ -379,7 +379,7 @@ rs_head('Analytics', true, ['assets/analytics.css']);
   <?= $kpi('Website visitors', $k['visitors'], rs_an_fmt($k['views']) . ' page views') ?>
   <?= $kpi('Linked phones and PCs', $k['phones'], 'All time') ?>
 </div>
-<?php $chartCard('consoles', 'Consoles that opened Recomp Store', 'New consoles: the day a console first opened the store.'); ?>
+<?php $chartCard('consoles', 'Consoles that opened RecompStore', 'New consoles: the day a console first opened the store.'); ?>
 <?php $chartCard('installs', 'Installs and updates', 'An install is an app put on a console for the first time; an update, a newer version over one.'); ?>
 <div class="grid2 analytics-pair">
   <?php $chartCard('removals', 'Removals'); ?>
@@ -412,13 +412,13 @@ rs_head('Analytics', true, ['assets/analytics.css']);
 
 <?php if ($tab === 'downloads'): ?>
 <div class="kpis k4">
-  <?= $kpi('Recomp Store downloads', $storeK['total'], 'Every release on GitHub') ?>
+  <?= $kpi('RecompStore downloads', $storeK['total'], 'Every release on GitHub') ?>
   <?= $kpi($storeK['tag'] !== '' ? 'Latest: ' . $storeK['tag'] : 'Latest release', $storeK['latest']) ?>
   <?= $kpi($zipName, $storeK['zip'], 'Every release') ?>
   <?= $kpi($elfName, $storeK['elf'], 'Every release') ?>
 </div>
 <section class="card chart-card">
-  <?= $head('Recomp Store downloads by release', 'store', '<a class="muted an-repo" href="https://github.com/' . h($storeK['repo']) . '/releases" target="_blank" rel="noopener">' . h($storeK['repo']) . '</a>') ?>
+  <?= $head('RecompStore downloads by release', 'store', '<a class="muted an-repo" href="https://github.com/' . h($storeK['repo']) . '/releases" target="_blank" rel="noopener">' . h($storeK['repo']) . '</a>') ?>
   <?php if ($charts['store']['labels']): ?><div class="chart" data-chart="store" tabindex="0" role="img" aria-label="Downloads of each release, the zip and the installer. Use the arrow keys to read each release."></div><?php endif; ?>
   <?= $table('store') ?>
   <?php if ($T['store-files'][2]): ?><details><summary>Every file</summary><div class="an-head an-head-sub"><span></span><?= $csv('store-files') ?></div><?= $table('store-files') ?></details><?php endif; ?>

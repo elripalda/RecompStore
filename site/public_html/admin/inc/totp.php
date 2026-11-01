@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.1): two-step login with an authenticator app (TOTP, RFC 6238: 30-second,
+// RecompStore admin (2.1): two-step login with an authenticator app (TOTP, RFC 6238: 30-second,
 // 6-digit codes, HMAC-SHA1), plus one-time recovery codes for a lost phone.
 declare(strict_types=1);
 
@@ -58,7 +58,7 @@ function rs_new_totp_secret(): string {
 
 function rs_totp_uri(string $secretB32, string $user): string {
     $host = parse_url(rs_setting('site_url', 'https://recompstore.com'), PHP_URL_HOST) ?: 'recompstore.com';
-    return 'otpauth://totp/' . rawurlencode('Recomp Store admin:' . $user . '@' . $host) . '?secret=' . $secretB32 . '&issuer=' . rawurlencode('Recomp Store admin') . '&digits=6&period=30';
+    return 'otpauth://totp/' . rawurlencode('RecompStore admin:' . $user . '@' . $host) . '?secret=' . $secretB32 . '&issuer=' . rawurlencode('RecompStore admin') . '&digits=6&period=30';
 }
 
 // Eight one-time codes for a lost phone: shown once, kept as hashes.

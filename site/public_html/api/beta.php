@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website: beta codes for the PS5 store (Recomp Store 1.1.0 and newer).
+// RecompStore website: beta codes for the PS5 store (RecompStore 1.1.0 and newer).
 //   POST a=redeem   code, [install, token], store  -> unlocks the code's game for this store install
 //   POST a=list     install, token, store          -> the beta games this install has
 //   GET  a=file     id, install, sig [file]        -> a beta game's zip, for an install that has it
@@ -27,7 +27,7 @@ try {
     rs_beta_tables();
     $db = rs_db();
 } catch (Throwable $e) {
-    rs_out(503, ['ok' => false, 'error' => 'Recomp Store can\'t check codes right now. Try again later.']);
+    rs_out(503, ['ok' => false, 'error' => 'RecompStore can\'t check codes right now. Try again later.']);
 }
 
 // The install that sent this, when its ID and token match; null otherwise.
@@ -87,7 +87,7 @@ if ($a === 'redeem' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ((int)$row['revoked']) rs_out(200, ['ok' => false, 'error' => 'That code has been cancelled.']);
     $g = rs_game((string)$row['game_id']);
-    if (!$g) rs_out(200, ['ok' => false, 'error' => 'That code\'s game isn\'t in Recomp Store anymore.']);
+    if (!$g) rs_out(200, ['ok' => false, 'error' => 'That code\'s game isn\'t in RecompStore anymore.']);
 
     // This install, or a new one.
     $install = rs_install($db, $s('install'), $s('token'));
@@ -124,7 +124,7 @@ if ($a === 'list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $apps = [];
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $i => $id) {
         $g = rs_game((string)$id);
-        if (!$g || !$g['beta'] || $g['hidden'] || $g['beta_file'] === '') continue;
+        if (!$g || !rs_has_beta($g) || $g['hidden'] || $g['beta_file'] === '') continue;
         $apps[] = rs_beta_entry($g, $install, 1000 + $i);
     }
     rs_out(200, ['ok' => true, 'apps' => $apps]);
@@ -140,7 +140,7 @@ if ($a === 'file') {
     $st = $db->prepare('SELECT COUNT(*) FROM beta_codes WHERE install_id = ? AND game_id = ? AND revoked = 0');
     $st->execute([$install, $id]);
     $g = rs_game($id);
-    if ((int)$st->fetchColumn() === 0 || !$g || !$g['beta'] || $g['beta_file'] === '') rs_out(403, ['ok' => false, 'error' => 'Not allowed.']);
+    if ((int)$st->fetchColumn() === 0 || !$g || !rs_has_beta($g) || $g['beta_file'] === '') rs_out(403, ['ok' => false, 'error' => 'Not allowed.']);
     if ($file !== '' && !in_array($file, array_column(rs_beta_builds($g), 'file'), true)) rs_out(404, ['ok' => false, 'error' => 'That build isn\'t kept anymore.']);
     $path = rs_beta_dir() . '/' . ($file !== '' ? $file : basename((string)$g['beta_file']));
     if (!is_file($path)) rs_out(404, ['ok' => false, 'error' => 'The beta file is missing.']);

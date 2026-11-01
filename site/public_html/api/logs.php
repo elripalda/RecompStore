@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website: logs a player sends from the PS5 store (Recomp Store 1.1.0 and newer),
+// RecompStore website: logs a player sends from the PS5 store (RecompStore 1.1.0 and newer),
 // from a game's page: the store's log, the game's own log files and an optional message.
 // They land in the admin's Inbox under Logs. Form POST in, JSON out.
 //   app, version (the game's, as installed), store (the store's version), message,
@@ -18,7 +18,7 @@ function rs_reply(int $code, array $body): void {
     exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_reply(405, ['ok' => false, 'error' => 'Send logs from Recomp Store.']);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_reply(405, ['ok' => false, 'error' => 'Send logs from RecompStore.']);
 
 $s = function (string $k, int $max): string {
     $v = isset($_POST[$k]) && is_string($_POST[$k]) ? trim($_POST[$k]) : '';
@@ -26,7 +26,7 @@ $s = function (string $k, int $max): string {
 };
 
 $app = $s('app', 32);
-if ($app !== '' && !preg_match('/^[A-Za-z0-9_-]+$/', $app)) rs_reply(422, ['ok' => false, 'error' => 'That isn\'t a game in Recomp Store.']);
+if ($app !== '' && !preg_match('/^[A-Za-z0-9_-]+$/', $app)) rs_reply(422, ['ok' => false, 'error' => 'That isn\'t a game in RecompStore.']);
 $store = preg_replace('/[^0-9A-Za-z.\-]/', '', $s('store', 32));
 $version = $s('version', 64);
 $message = $s('message', 2000);
@@ -88,7 +88,7 @@ try {
         $db->beginTransaction();
         $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category, feedback, build)
                       VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?, ?, ?)')
-           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'Recomp Store ' . $store, $console, $version, $message, $ip, $category, $feedback, $build]);
+           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'RecompStore ' . $store, $console, $version, $message, $ip, $category, $feedback, $build]);
         $id = (int)$db->lastInsertId();
         $put = $db->prepare('INSERT INTO inbox_files (inbox_id, name, size, body) VALUES (?, ?, ?, ?)');
         foreach ($files as $f) $put->execute([$id, $f['name'], strlen($f['body']), $f['body']]);

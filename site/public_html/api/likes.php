@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.3.0): the thumbs-up on an app's page. One per console and app; the counts
+// RecompStore website (2.3.0): the thumbs-up on an app's page. One per console and app; the counts
 // go out with the charts (api/charts.php, likes: {id: n}).
 //   POST a=like|unlike  install token store app     POST a=mine  install token  -> liked: [ids]
 declare(strict_types=1);
@@ -15,7 +15,7 @@ function rs_out(int $code, array $body): void {
     exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_out(405, ['ok' => false, 'error' => 'From Recomp Store only.']);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_out(405, ['ok' => false, 'error' => 'From RecompStore only.']);
 $s = fn(string $k, int $max): string => isset($_POST[$k]) && is_string($_POST[$k]) ? substr(trim($_POST[$k]), 0, $max) : '';
 $a = $s('a', 16);
 if (!in_array($a, ['like', 'unlike', 'mine'], true)) rs_out(400, ['ok' => false, 'error' => 'Unknown request.']);

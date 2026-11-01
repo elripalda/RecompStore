@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.0): a picture a player added to a bug report on their phone. They're kept
+// RecompStore admin (2.0): a picture a player added to a bug report on their phone. They're kept
 // where the web can't reach them (rs_report_dir); only a logged-in admin sees them, through here.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';

@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin: a beta zip dropped on a game's Beta card, uploaded in pieces so a zip of
+// RecompStore admin: a beta zip dropped on a game's Beta card, uploaded in pieces so a zip of
 // any size gets through (the server's upload limit is per request, not per file).
 //   POST ?a=start   {game, name, size}           -> {token, chunk}
 //   POST ?a=chunk   &token=&offset=  (raw bytes)  -> {received}
@@ -110,7 +110,7 @@ try {
         rs_beta_remember_hash($dir . '/' . $name, $sha);
         $size = (int)$m['size'];
         out(200, ['ok' => true, 'name' => $name, 'size' => $size, 'sha256' => $sha,
-                  'label' => $name . ' (' . rs_human_size($size) . ', ' . date('M j') . ')']);
+                  'label' => $name . ' (' . rs_human_size($size) . ', ' . rs_date('M j') . ')']);
     }
     out(400, ['ok' => false, 'error' => 'Not something this does.']);
 } catch (Throwable $e) {

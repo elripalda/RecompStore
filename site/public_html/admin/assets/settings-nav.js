@@ -1,4 +1,4 @@
-// Recomp Store admin (2.3): jump links down the left of Settings, in groups (Security, Signer,
+// RecompStore admin (2.3): jump links down the left of Settings, in groups (Security, Signer,
 // Store, Discover, Betas, Integrations, Website). Only finds the cards that are there and links to
 // them; nothing on the page works any differently. A card it doesn't know goes under Other. On a
 // phone the links fold into "Jump to" at the top.
@@ -23,13 +23,14 @@
     for (const [id, test] of guess) if (!document.getElementById(id) && test(c)) { c.id = id; return; }
   });
   const GROUPS = [
+    ['Site', [['maintenance', 'Maintenance mode']]],
     ['Security', [['twostep', 'Two-step login'], ['password', 'Admin password']]],
     ['Signer', [['signer', 'Signer']]],
     ['Store', [['general', 'Release and links'], ['tabs', 'Store tabs'], ['smp', 'ShadowMountPlus'], ['title-ids', 'Title IDs taken'], ['blocked', 'Blocked sources']]],
     ['Discover', [['whats-new', 'What\'s new'], ['discover.php', 'Discover page ↗']]],
     ['Betas', [['testers', 'Testers'], ['r2', 'Cloudflare R2']]],
-    ['Integrations', [['github', 'GitHub'], ['discord', 'Discord posts']]],
-    ['Website', [['site-v2', 'Recomp Store 2.0 on the site']]],
+    ['Integrations', [['github', 'GitHub'], ['discord', 'Discord posts'], ['sgdb', 'SteamGridDB'], ['art', 'Art sources']]],
+    ['Website', [['site-v2', 'RecompStore 2.0 on the site']]],
   ];
   const known = new Set();
   GROUPS.forEach(([, items]) => items.forEach(([id]) => known.add(id)));

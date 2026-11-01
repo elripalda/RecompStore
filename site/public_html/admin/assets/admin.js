@@ -1,4 +1,4 @@
-// Recomp Store admin: live previews on the game form.
+// RecompStore admin: live previews on the game form.
 (function () {
   const form = document.querySelector('form.edit');
   if (!form) return;
@@ -111,7 +111,7 @@
         <img class="bg" data-bg alt="" style="filter:blur(40px) saturate(1.4) brightness(.5);transform:scale(1.2)">
         <div class="pic" style="left:600px"><img data-pic alt=""></div>
         <div class="glass"></div>
-        <span class="kick" style="left:64px">FEATURED · NEW ON RECOMP STORE</span>
+        <span class="kick" style="left:64px">FEATURED · NEW ON RECOMPSTORE</span>
         <img class="logo" data-logo alt="" draggable="false">
         <div class="txt" data-blurb style="left:64px;width:488px;font:400 20px/29px Figtree,sans-serif;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(info.blurb)}</div>`;
     } else {
@@ -119,7 +119,7 @@
         <img class="bg" data-pic alt="">
         <div class="shade"></div>
         <div style="position:absolute;left:96px;top:190px;display:flex;gap:12px">
-          <span class="chip ${info.kind === 'original' ? 'cyan' : ''}" style="position:static">${info.kind === 'original' ? 'Recomp Store' : 'By ' + esc(info.author)}</span>
+          <span class="chip ${info.kind === 'original' ? 'cyan' : ''}" style="position:static">${info.kind === 'original' ? 'RecompStore' : 'By ' + esc(info.author)}</span>
           <span class="chip" style="position:static">${esc(info.id || 'PPSA00000')}</span>
           <span class="chip" style="position:static">Needs your ${esc(info.needs || 'own game')}</span>
         </div>
@@ -277,8 +277,12 @@
   if (!box || !fields) return;
   const note = document.querySelector('[data-beta-note]');
   const card = document.querySelector('[data-download-card]');
+  const extra = document.querySelector('[data-beta-extra]'); // (2.7.3) a beta build of a game that's out
+  const extraRow = document.querySelector('[data-beta-extra-row]');
+  if (extra) extra.addEventListener('change', () => sync());
   const sync = () => {
-    fields.hidden = !box.checked;
+    if (extraRow) extraRow.hidden = box.checked;
+    fields.hidden = !box.checked && !(extra && extra.checked);
     // A beta's download is its beta zip: the release fields wait until it's out.
     if (note) note.hidden = !box.checked;
     if (card) card.classList.toggle('waiting', box.checked);

@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.3): several games at once, from the Games list. Tick games, pick what to
+// RecompStore admin (2.3): several games at once, from the Games list. Tick games, pick what to
 // do (show or hide, testers only or not, featured or not, another category) and press Apply: one
 // confirm, then each game is saved as if edited, with a change-log line for each. Nothing is
 // published; Publish still sends it out.

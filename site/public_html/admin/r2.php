@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.0.1): a beta game's zip copied from the beta folder to Cloudflare R2,
+// RecompStore admin (2.0.1): a beta game's zip copied from the beta folder to Cloudflare R2,
 // then checked there (its size and MD5, and a piece read back through a tester's kind of link).
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . $back); exit;
 rs_check_csrf();
 $g = rs_game($id);
 $c = rs_r2();
-if (!$g || !$g['beta'] || $g['beta_file'] === '') { rs_flash('This game has no beta zip yet.', 'err'); header('Location: ' . $back); exit; }
+if (!$g || !rs_has_beta($g) || $g['beta_file'] === '') { rs_flash('This game has no beta zip yet.', 'err'); header('Location: ' . $back); exit; }
 if (!$c) { rs_flash('Set up Cloudflare R2 in Settings first.', 'err'); header('Location: ' . $back); exit; }
 $file = rs_beta_dir() . '/' . basename((string)$g['beta_file']);
 if (!is_file($file)) { rs_flash('The beta zip ' . $g['beta_file'] . ' isn\'t in the beta folder.', 'err'); header('Location: ' . $back); exit; }

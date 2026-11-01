@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.0): a phone or computer linked to a PS5, and the store asking what it
+// RecompStore website (2.0): a phone or computer linked to a PS5, and the store asking what it
 // sent. The store (1.9.1 and newer) posts forms with its install ID and token; a browser is known
 // by its cookie (rs_device). Answers are JSON. The contract: docs/api-2.0.md, sections 0 and 1.
 //   Store:  a=hello | code | poll | unlink | state
@@ -29,10 +29,15 @@ if ($post && str_starts_with(strtolower((string)($_SERVER['CONTENT_TYPE'] ?? '')
 $s = fn(string $k, int $max = 64): string => isset($in[$k]) && is_scalar($in[$k]) ? substr(trim((string)$in[$k]), 0, $max) : '';
 $a = $s('a', 16);
 
+// A browser with no device cookie isn't linked to anything: every page asks this, so it's
+// answered without the database.
+if ($a === 'mine' && !preg_match('/^[0-9a-f]{16}\.[0-9a-f]{32}$/', (string)($_COOKIE[RS_DEVICE_COOKIE] ?? ''))) rs_out(200, ['ok' => true, 'linked' => false]);
+
 try {
     $db = rs_db();
     rs_link_tables();
 } catch (Throwable $e) {
+    rs_errlog('link', $e);
     rs_out(503, ['ok' => false, 'error' => 'recompstore.com can\'t link consoles right now. Try again later.']);
 }
 
@@ -226,7 +231,7 @@ if ($a === 'send' && $post) {
     if (!is_array($data)) $data = [];
     if ($kind === 'install') {
         $app = (string)($data['app'] ?? '');
-        if (!preg_match('/^[A-Za-z0-9_.-]{3,48}$/', $app)) rs_out(422, ['ok' => false, 'error' => 'That isn\'t an app Recomp Store knows.']);
+        if (!preg_match('/^[A-Za-z0-9_.-]{3,48}$/', $app)) rs_out(422, ['ok' => false, 'error' => 'That isn\'t an app RecompStore knows.']);
         $data = ['app' => $app];
     } elseif ($kind === 'source') {
         $repo = rtrim((string)preg_replace('#^https://(www\.)?github\.com/#i', '', trim((string)($data['repo'] ?? ''))), '/');
@@ -271,13 +276,13 @@ if ($a === 'send' && $post) {
     rs_rate_hit('send');
     $st = $db->prepare('SELECT COUNT(*) FROM link_queue WHERE install_id = ? AND taken IS NULL');
     $st->execute([$dev['install_id']]);
-    if ((int)$st->fetchColumn() >= 20) rs_out(200, ['ok' => false, 'error' => 'Your PS5 has 20 things waiting already. Open Recomp Store on it so it can catch up.']);
+    if ((int)$st->fetchColumn() >= 20) rs_out(200, ['ok' => false, 'error' => 'Your PS5 has 20 things waiting already. Open RecompStore on it so it can catch up.']);
     rs_link_queue($db, $dev['install_id'], $dev['device_id'], $kind, $data);
     $req = (int)$db->lastInsertId();
     if (in_array($kind, ['delete', 'move', 'cancel'], true))
         rs_log('phone ' . $kind, (string)($data['app'] ?? $data['folder'] ?? ''), 'console ' . substr((string)$dev['install_id'], 0, 6) . ', device ' . substr((string)$dev['device_id'], 0, 6) . ', request ' . $req . (isset($data['to']) ? ', to ' . $data['to'] : ''));
     rs_out(200, ['ok' => true, 'req' => $req,
-                 'message' => in_array($kind, ['delete', 'move'], true) ? 'Waiting for you to confirm on the PS5.' : 'Sent. Your PS5 picks it up in a few seconds while Recomp Store is open.']);
+                 'message' => in_array($kind, ['delete', 'move'], true) ? 'Waiting for you to confirm on the PS5.' : 'Sent. Your PS5 picks it up in a few seconds while RecompStore is open.']);
 }
 
 if ($a === 'redeem' && $post) {
@@ -300,7 +305,7 @@ if ($a === 'redeem' && $post) {
     if (!$row) $wrong('That code isn\'t right. Check the numbers and try again.');
     if ((int)$row['revoked']) rs_out(200, ['ok' => false, 'error' => 'That code has been cancelled.']);
     $g = rs_game((string)$row['game_id']);
-    if (!$g) rs_out(200, ['ok' => false, 'error' => 'That code\'s game isn\'t in Recomp Store anymore.']);
+    if (!$g) rs_out(200, ['ok' => false, 'error' => 'That code\'s game isn\'t in RecompStore anymore.']);
     $install = (string)$dev['install_id'];
     if ($row['install_id'] !== null && $row['install_id'] !== $install) rs_out(200, ['ok' => false, 'error' => 'That code was already used on another console.']);
     if ($row['install_id'] === null) {
@@ -310,7 +315,7 @@ if ($a === 'redeem' && $post) {
     }
     rs_link_queue($db, $install, $dev['device_id'], 'refresh', []);
     rs_out(200, ['ok' => true, 'game' => ['id' => $g['id'], 'name' => $g['name']],
-                 'message' => $g['beta'] ? $g['name'] . ' is unlocked on your PS5. It shows up in the Library in a few seconds while Recomp Store is open.'
+                 'message' => $g['beta'] ? $g['name'] . ' is unlocked on your PS5. It shows up in the Library in a few seconds while RecompStore is open.'
                                          : $g['name'] . ' is out for everyone now. Find it in the store.']);
 }
 

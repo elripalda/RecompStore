@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.0): whether this browser is logged into the admin. The website asks while
+// RecompStore admin (2.0): whether this browser is logged into the admin. The website asks while
 // its 2.0 side is "Only me" (Settings), to show the admin the preview. Here under /admin because
 // the admin's session cookie only goes to /admin. No session is started for anyone else.
 declare(strict_types=1);

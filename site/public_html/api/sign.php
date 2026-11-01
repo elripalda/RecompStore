@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.1): Recomp Store Signer's side. Answered only with the signer token
+// RecompStore website (2.1): RecompStore Signer's side. Answered only with the signer token
 // (Settings > Signer), which lets the signer see what's waiting and hand signatures over; a
 // signature still has to check out against the keys (here, and in every 2.1 store).
 //   POST a=hello   keys=<public-keys.txt>    -> {ok, message}  (the first keys told are kept)

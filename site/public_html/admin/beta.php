@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin: beta codes. Make codes for a beta game, see who redeemed them, cancel them.
+// RecompStore admin: beta codes. Make codes for a beta game, see who redeemed them, cancel them.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
@@ -9,7 +9,7 @@ $db = rs_db();
 
 $games = rs_games();
 $names = array_column($games, 'name', 'id');
-$betaGames = array_values(array_filter($games, fn($g) => $g['beta']));
+$betaGames = array_values(array_filter($games, fn($g) => rs_has_beta($g)));
 $filter = isset($_GET['game']) && isset($names[$_GET['game']]) ? (string)$_GET['game'] : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -18,12 +18,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $code = preg_replace('/\D/', '', (string)($_POST['code'] ?? ''));
     $back = 'beta.php' . ($filter !== '' ? '?game=' . urlencode($filter) : '');
     try {
-        if ($action === 'make') {
+        if ($action === 'discord') {
+            // (2.7.1) Discord sign-in for recompstore.com/beta. The secret and bot token are never shown again.
+            $id = fn(string $k) => preg_replace('/\D/', '', (string)($_POST[$k] ?? '')) ?? '';
+            rs_set_setting('dc_client_id', $id('dc_client_id'));
+            rs_set_setting('dc_guild_id', $id('dc_guild_id'));
+            rs_set_setting('dc_give_role', $id('dc_give_role'));
+            rs_set_setting('dc_need_role', $id('dc_need_role'));
+            if (trim((string)($_POST['dc_client_secret'] ?? '')) !== '') rs_secret_put('dc_client_secret', trim((string)$_POST['dc_client_secret']));
+            if (trim((string)($_POST['dc_bot_token'] ?? '')) !== '') rs_secret_put('dc_bot_token', trim((string)$_POST['dc_bot_token']));
+            if (!empty($_POST['dc_bot_clear'])) rs_secret_put('dc_bot_token', '');
+            rs_log('settings', 'Discord sign-in', 'saved');
+            rs_flash(rs_dc_ready() ? 'Saved. Open recompstore.com/beta and sign in with Discord to try it.' : 'Saved. It needs the Client ID, the Client Secret and the server ID to work.');
+            $back = 'beta.php#discord';
+        } elseif ($action === 'make') {
             $gid = (string)($_POST['game'] ?? '');
             $n = max(1, min(200, (int)($_POST['count'] ?? 1)));
             $note = mb_substr(trim((string)($_POST['note'] ?? '')), 0, 120);
             $g = rs_game($gid);
-            if (!$g || !$g['beta']) throw new RuntimeException('Pick a game that has Beta ticked.');
+            if (!$g || !rs_has_beta($g)) throw new RuntimeException('Pick a game that has Beta ticked, or a beta build for testers.');
             $made = rs_beta_make_codes($gid, $n, $note);
             $_SESSION['new_codes'] = ['game' => $g['name'], 'codes' => $made];
             $back = 'beta.php?game=' . urlencode($gid);
@@ -54,15 +67,52 @@ $sql .= ' ORDER BY c.created DESC, c.code ASC LIMIT 1000';
 $st = $db->prepare($sql);
 $st->execute($args);
 $rows = $st->fetchAll();
-$when = fn(?string $d) => $d ? date('M j, g:i a', strtotime($d)) : '';
+$when = fn(?string $d) => $d ? rs_date('M j, g:i a', strtotime($d)) : '';
 
 rs_head('Beta codes');
 ?>
 <section class="head-row">
   <div>
     <h1>Beta codes</h1>
-    <p class="muted">Each code unlocks one beta game on one console, in Recomp Store 1.1.0 or newer: Settings, Redeem a code. Codes look like 12-345-678.</p>
+    <p class="muted">Each code unlocks one beta game on one console, in RecompStore 1.1.0 or newer: Settings, Redeem a code. Codes look like 12-345-678.</p>
   </div>
+</section>
+
+<?php $dc = rs_dc_conf(); rs_dc_tables();
+$dcRecent = rs_db()->query('SELECT * FROM beta_discord ORDER BY created DESC LIMIT 15')->fetchAll(); ?>
+<section class="card" id="discord">
+  <h2>Codes through Discord <?= rs_dc_ready() ? '<span class="status-pill used">On</span>' : '<span class="status-pill off">Not set up</span>' ?></h2>
+  <p class="muted">On <a href="/beta" target="_blank">recompstore.com/beta</a> testers sign in with Discord. If they're in your server<?= $dc['need_role'] !== '' ? ' and have the role you picked' : '' ?>, they get a code for an open beta right there, one per Discord account per game. Open a beta on its game page (Beta card): show it on the page, let Discord codes through, and set how many.</p>
+  <details<?= rs_dc_ready() ? '' : ' open' ?>><summary class="muted">How to set it up</summary>
+    <ol class="muted steps">
+      <li>Go to <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">discord.com/developers/applications</a>, New Application, name it RecompStore.</li>
+      <li>OAuth2: copy the Client ID and Client Secret into the boxes below, and under Redirects add <code><?= h(rs_dc_redirect()) ?></code></li>
+      <li>In Discord, turn on Developer Mode (Settings, Advanced), right-click your server, Copy Server ID.</li>
+      <li>Optional, so the site can add people to the server and give them a tester role: in the app's Bot tab, Reset Token and paste it below, then add the bot to your server<?= $dc['client'] !== '' ? ' with <a href="https://discord.com/oauth2/authorize?client_id=' . h(rawurlencode($dc['client'])) . '&amp;scope=bot&amp;permissions=268435457" target="_blank" rel="noopener">this link</a>' : ' (the link shows here once the Client ID is saved)' ?>. In Server Settings, Roles, drag the bot's role above the tester role.</li>
+    </ol>
+  </details>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="discord">
+    <div class="filters">
+      <label>Client ID<input name="dc_client_id" value="<?= h($dc['client']) ?>" inputmode="numeric"></label>
+      <label>Client Secret<input name="dc_client_secret" type="password" autocomplete="new-password" placeholder="<?= $dc['secret'] !== '' ? 'Saved. Paste a new one to change it' : 'From OAuth2' ?>"></label>
+      <label>Server ID<input name="dc_guild_id" value="<?= h($dc['guild']) ?>" inputmode="numeric"></label>
+    </div>
+    <div class="filters">
+      <label>Bot token <span class="muted">(optional)</span><input name="dc_bot_token" type="password" autocomplete="new-password" placeholder="<?= $dc['bot'] !== '' ? 'Saved. Paste a new one to change it' : 'Joins people to the server' ?>"></label>
+      <label>Give this role to testers <span class="muted">(optional)</span><input name="dc_give_role" value="<?= h($dc['give_role']) ?>" inputmode="numeric" placeholder="Role ID"></label>
+      <label>Only people with this role <span class="muted">(optional)</span><input name="dc_need_role" value="<?= h($dc['need_role']) ?>" inputmode="numeric" placeholder="Role ID"></label>
+    </div>
+    <p class="muted">Invite link shown to people who aren't in the server: <?= $dc['invite'] !== '' ? h($dc['invite']) : 'none yet' ?> (Settings, Discord invite).</p>
+    <p><button class="primary">Save</button> <?php if ($dc['bot'] !== ''): ?><label class="check" style="display:inline-flex;margin-left:12px"><input type="checkbox" name="dc_bot_clear" value="1"> Remove the bot token</label><?php endif; ?></p>
+  </form>
+  <?php if ($dcRecent): ?>
+  <h3>Latest codes through Discord</h3>
+  <div class="table-wrap"><table class="codes">
+    <thead><tr><th>Who</th><th>Game</th><th>Code</th><th>When</th></tr></thead>
+    <tbody><?php foreach ($dcRecent as $r): ?><tr><td><?= h($r['username']) ?></td><td><?= h($names[$r['game_id']] ?? $r['game_id']) ?></td><td class="code"><?= h(rs_beta_format($r['code'])) ?></td><td class="muted"><?= h($when($r['created'])) ?></td></tr><?php endforeach; ?></tbody>
+  </table></div>
+  <?php endif; ?>
 </section>
 
 <?php if ($newCodes): ?>

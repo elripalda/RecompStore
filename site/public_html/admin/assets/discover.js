@@ -1,4 +1,4 @@
-// Recomp Store admin: Discover's sections, edited here, with a preview drawn at the store's
+// RecompStore admin: Discover's sections, edited here, with a preview drawn at the store's
 // own sizes (its 1920x1080 screen, scaled to fit): the same banner, titles, tiles and gaps.
 (function () {
   'use strict';
@@ -85,7 +85,7 @@
   }
 
   const NAMES = { games: 'Games', soon: 'Coming soon', spotlight: 'Spotlight', category: 'Category',
-    top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated', liked: 'Most liked', collection: 'Collection' };
+    top: 'Top charts', trending: 'Trending', new: 'New', updated: 'Recently updated', liked: 'Most liked', collection: 'Collection', developer: 'Developer spotlight' };
   const ALL3 = [['row', 'Row'], ['grid', 'Grid'], ['wide', 'Wide tiles']];
   const LAYOUTS = {
     games: ALL3,
@@ -95,7 +95,7 @@
   // (2.0) The charts: filled in live by the store and the site (installs, and GitHub's releases).
   const CHARTS = { top: 'The apps on the most consoles.', trending: 'The most new installs in the last 7 days.',
     new: 'The newest apps, by when you first published them.', updated: 'The apps with the newest releases.',
-    liked: 'The apps with the most thumbs-up from consoles (Recomp Store 2.3.0).' };
+    liked: 'The apps with the most thumbs-up from consoles (RecompStore 2.3.0).' };
   const isChart = (t) => Object.prototype.hasOwnProperty.call(CHARTS, t);
   // (2.0) The parts of the store: a category section lists every game in one of them.
   const CATS = S.categories || { games: 'Games', emulators: 'Emulators', apps: 'Apps', tools: 'Tools' };
@@ -149,6 +149,9 @@
   }
   // (2.3.0) Collections (Admin > Collections): a section shows one as a row.
   const COLLS = S.collections || [];
+  const DEVS = S.devs || [];
+  const devOf = (slug) => DEVS.find((d) => d.slug === slug);
+  const devApps = (slug) => listed.filter((g) => g.dev === slug);
   const coll = (id) => COLLS.find((c) => c.id === id);
   const inColl = (id) => ((coll(id) || {}).ids || []).map((x) => listed.find((g) => g.id === x)).filter(Boolean);
 
@@ -178,8 +181,8 @@
       const addable = listed.filter((g) => !(s.games || []).includes(g.id));
       card.innerHTML = `
         <div class="sec-head">
-          <span class="tag${s.type === 'soon' ? ' soon' : s.type === 'spotlight' || s.type === 'category' || s.type === 'collection' || isChart(s.type) ? ' cyan' : ''}">${esc(NAMES[s.type])}</span>
-          <span class="sec-title">${esc(s.title || (s.type === 'spotlight' ? (byId(s.game) || {}).name || '' : s.type === 'category' ? CATS[s.category] || '' : s.type === 'collection' ? (coll(s.collection) || {}).title || '' : ''))}</span>
+          <span class="tag${s.type === 'soon' ? ' soon' : s.type === 'spotlight' || s.type === 'category' || s.type === 'collection' || s.type === 'developer' || isChart(s.type) ? ' cyan' : ''}">${esc(NAMES[s.type])}</span>
+          <span class="sec-title">${esc(s.title || (s.type === 'spotlight' ? (byId(s.game) || {}).name || '' : s.type === 'category' ? CATS[s.category] || '' : s.type === 'collection' ? (coll(s.collection) || {}).title || '' : s.type === 'developer' ? (devOf(s.dev) || {}).name || '' : ''))}</span>
           <span class="sec-tools">
             <button type="button" class="icon-btn" data-move="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
             <button type="button" class="icon-btn" data-move="1" aria-label="Move down" ${i === sections.length - 1 ? 'disabled' : ''}>↓</button>
@@ -205,12 +208,15 @@
           ? `The ${soonGames.length === 1 ? 'game' : soonGames.length + ' games'} marked Coming soon, in the order of the Games page: ${soonGames.map((g) => esc(g.name)).join(', ')}.`
           : 'No game is marked Coming soon yet, so the store leaves this out. Tick Coming soon on a game to list it here.'}</p>` : ''}
         ${isChart(s.type) ? `<label>Only<select data-only><option value="">Every part of the store</option>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-          <p class="muted small-note">${CHARTS[s.type]} Filled in live, so the preview just shows your ${s.category ? esc((CATS[s.category] || '').toLowerCase()) : 'games'}. From Recomp Store 2.0; older stores leave it out${s.category ? ', and stores before 2.2 show every part in it' : ''}.</p>` : ''}
+          <p class="muted small-note">${CHARTS[s.type]} Filled in live, so the preview just shows your ${s.category ? esc((CATS[s.category] || '').toLowerCase()) : 'games'}. From RecompStore 2.0; older stores leave it out${s.category ? ', and stores before 2.2 show every part in it' : ''}.</p>` : ''}
         ${s.type === 'category' ? `<label>Part of the store<select data-cat>${Object.entries(CATS).map(([v, t]) => `<option value="${esc(v)}" ${s.category === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
           ${orderHTML(s)}` : ''}
         ${s.type === 'collection' ? (COLLS.length ? `<label>Collection<select data-coll>${COLLS.map((c) => `<option value="${esc(c.id)}" ${s.collection === c.id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></label>
           <p class="muted small-note">${inColl(s.collection).length ? `${inColl(s.collection).length === 1 ? '1 app' : inColl(s.collection).length + ' apps'}: ${inColl(s.collection).map((g) => esc(g.name)).join(', ')}.` : 'Nothing listed in it yet, so the store leaves it out.'} An empty title uses the collection's name. Cross on the title opens its page in the store, with Install all. Stores before 2.3 leave it out.</p>`
           : '<p class="muted small-note">No collections yet. Make one on the <a href="collections.php">Collections</a> page.</p>') : ''}
+        ${s.type === 'developer' ? (DEVS.length ? `<label>Developer<select data-dev>${DEVS.map((d) => `<option value="${esc(d.slug)}" ${s.dev === d.slug ? 'selected' : ''}>${esc(d.name)}${d.verified ? ' ✓' : ''}</option>`).join('')}</select></label>
+          <p class="muted small-note">Their picture, name, Verified badge, a line about them and a row of their apps, with a button to their page. On the website for now; the store leaves it out.</p>`
+          : '<p class="muted small-note">No developer pages yet. Make one on the <a href="developers.php">Developers</a> page.</p>') : ''}
         ${s.type === 'spotlight' ? `<label>Game<select data-spot>${listed.map((g) => `<option value="${esc(g.id)}" ${s.game === g.id ? 'selected' : ''}>${esc(optName(g))}</option>`).join('')}</select></label>
           <p class="muted small-note">A still banner of its backdrop, framed as on the Art card.</p>` : ''}`;
       listEl.appendChild(card);
@@ -257,6 +263,8 @@
         if (s.sort === 'custom') s.order = was; else delete s.order;
         changed(true);
       });
+      const dv = card.querySelector('[data-dev]');
+      if (dv) dv.addEventListener('change', () => { s.dev = dv.value; card.querySelector('.sec-title').textContent = s.title || (devOf(s.dev) || {}).name || ''; changed(true); });
       const cl = card.querySelector('[data-coll]');
       if (cl) cl.addEventListener('change', () => { s.collection = cl.value; changed(true); });
       // (2.2) A chart of one part of the store only.
@@ -379,20 +387,24 @@
     else if (t === 'category') sections.push({ type: 'category', title: 'Emulators', layout: 'row', category: 'emulators' });
     else if (t === 'collection') sections.push({ type: 'collection', title: '', layout: 'row', collection: (COLLS[0] || {}).id || '' });
     else if (isChart(t)) sections.push({ type: t, title: NAMES[t], layout: 'row' });
+    else if (t === 'developer') sections.push({ type: 'developer', title: 'Developer spotlight', dev: (DEVS.find((d) => d.verified) || DEVS[0] || {}).slug || '' });
     else sections.push({ type: 'spotlight', title: '', game: (listed[0] || {}).id || '' });
     changed(true);
     listEl.lastElementChild && listEl.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }));
 
   // ---- The preview: the store's Discover, at its own sizes --------------------------
-  // Its numbers (src/store_app.cpp, 2.0): content from y 136; banner 1728x360; the category buttons
-  // under it (88 tall) when two or more parts of the store have apps; a title 50 tall; tiles 216
-  // with 32 between, 7 to a line, a line of them 296; grid lines 18 apart; wide tiles three at a
-  // time, 552x280 (a line 360); 44 between sections; what's shown ends at y 1000.
-  const TILE = 216, GAP = 32, PER = 7, LINE = 296, GRID_GAP = 18, BANNER_H = 360, HEAD = 50, SEC_GAP = 44;
-  const WIDE_W = 552, WIDE_H = 280, WIDE_LINE = 360, WIDE_GAP = (1728 - WIDE_W * 3) / 2, CAT_H = 88;
+  // Its numbers (src/store_layout.hpp, 2.7): one grid 1632 wide from x 144; content from y 132;
+  // banner 1632x330; the category buttons under it (76 tall) when two or more parts of the store
+  // have apps; a title 46 tall; tiles 214 with 22 between, 7 to a line, a line of them 284; grid
+  // lines 16 apart; wide tiles three at a time, 529x270 (a line 340); 28 between sections; below
+  // y 852 the next row peeks up under frosted glass.
+  const L = 144, W = 1632;
+  const TILE = 214, GAP = (W - 214 * 7) / 6, PER = 7, LINE = 284, GRID_GAP = 16, BANNER_H = 330, HEAD = 46, SEC_GAP = 28;
+  const WIDE_W = (W - GAP * 2) / 3, WIDE_H = 270, WIDE_LINE = 340, WIDE_GAP = GAP, CAT_H = 76;
+  const MAIN_W = 1086, SIDE_GAP = 22, CARD_GAP = 14, SPOT_H = 480;
   const pos = (x, y, w, h) => `left:${x}px;top:${y}px${w ? `;width:${w}px` : ''}${h ? `;height:${h}px` : ''}`;
-  const sub = (g) => g.soon ? (g.date || 'Coming soon') : (g.kind === 'original' ? 'Recomp Store' : g.author ? 'By ' + g.author : '');
+  const sub = (g) => g.soon ? (g.date || 'Coming soon') : (g.kind === 'original' ? 'RecompStore' : g.author ? 'By ' + g.author : '');
   const pic = (g) => g.hero ? `<img src="${esc(g.hero)}" alt="" style="object-position:${g.x}% ${g.y}%;transform-origin:${g.x}% ${g.y}%;transform:scale(${Math.max(1, g.zoom / 100)})">` : '';
 
   function tile(g, x, y) {
@@ -406,36 +418,36 @@
       <div class="d-sub" style="${pos(x, y + WIDE_H + 42, WIDE_W)}">${esc(sub(g))}</div>`;
   }
   function banner(g, y, kicker, dots) {
-    return `<div class="d-banner" style="${pos(96, y, 1728, BANNER_H)}">
+    return `<div class="d-banner" style="${pos(L, y, W, BANNER_H)}">
         ${g.hero ? `<img class="blur" src="${esc(g.hero)}" alt="">` : ''}
         <div class="d-pic">${pic(g)}</div>
-        <div class="d-words"><span class="d-kick">${esc(kicker)} · NEW ON RECOMP STORE</span><strong>${esc(g.name)}</strong><span class="d-blurb">${esc(g.blurb || '')}</span></div>
+        <div class="d-words"><span class="d-kick">${esc(kicker)} · NEW ON RECOMPSTORE</span><strong>${esc(g.name)}</strong><span class="d-blurb">${esc(g.blurb || '')}</span></div>
         ${dots > 1 ? `<span class="d-dots">${Array.from({ length: dots }, (_, k) => `<i class="${k === 0 ? 'on' : ''}"></i>`).join('')}</span>` : ''}
       </div>`;
   }
   const arrow = (x, y, dir) => `<span class="d-arrow" style="${pos(x, y)}">${dir > 0 ? '▶' : '◀'}</span>`;
 
   function renderPreview() {
-    let html = `<img class="d-logo" src="/assets/logo-512.png" alt="" style="${pos(96, 50, 52, 52)}"><span class="d-brand" style="${pos(164, 56)}">Recomp Store</span>
-      <div class="d-tabs" style="${pos(640, 46)}"><span class="on">Discover</span><span>Library</span><span>Latest Updates</span><span>Settings</span></div>`;
-    let y = 136;
+    let html = `<img class="d-logo" src="/assets/mark.svg" alt="" style="${pos(L, 50, 52, 52)}"><span class="d-brand" style="${pos(214, 56)}">Recomp<b>Store</b></span>
+      <div class="d-tabs" style="left:50%;top:43px;transform:translateX(-50%)"><span class="on">Discover</span><span>Library</span><span>My Apps</span><span>Settings</span></div>`;
+    let y = 132;
     const slides = headerGames();
     // (2.1) The header, in the style picked (store 2.1 sizes: spotlight 520 tall; split and mosaic
     // a 1150-wide main card with the rest beside it).
     const card = (g, x, yy, w, h, big) => `<div class="d-card" style="${pos(x, yy, w, h)}">${pic(g)}<div class="d-card-words"><strong${big ? ' class="big"' : ''}>${esc(g.name)}</strong>${big ? `<span>${esc(g.blurb || '')}</span>` : ''}</div></div>`;
     if (slides.length && header.style !== 'none') {
       if (header.style === 'spotlight') {
-        html += banner(slides[0], y, 'SPOTLIGHT', 0).replace(`height:${BANNER_H}px`, 'height:520px').replace('class="d-banner"', 'class="d-banner tall"');
-        y += 520 + SEC_GAP;
+        html += banner(slides[0], y, 'SPOTLIGHT', 0).replace(`height:${BANNER_H}px`, `height:${SPOT_H}px`).replace('class="d-banner"', 'class="d-banner tall"');
+        y += SPOT_H + SEC_GAP;
       } else if (header.style === 'split') {
-        html += banner(slides[0], y, 'FEATURED', Math.min(slides.length, 6)).replace('width:1728px', 'width:1150px').replace('class="d-banner"', 'class="d-banner narrow"');
-        const rest = slides.slice(1, 4), ch = (BANNER_H - 2 * 16) / 3;
-        rest.forEach((g, k) => (html += card(g, 96 + 1150 + 24, y + k * (ch + 16), 1728 - 1150 - 24, ch, false)));
+        html += banner(slides[0], y, 'FEATURED', Math.min(slides.length, 6)).replace(`width:${W}px`, `width:${MAIN_W}px`).replace('class="d-banner"', 'class="d-banner narrow"');
+        const rest = slides.slice(1, 4), ch = (BANNER_H - 2 * CARD_GAP) / 3;
+        rest.forEach((g, k) => (html += card(g, L + MAIN_W + SIDE_GAP, y + k * (ch + CARD_GAP), W - MAIN_W - SIDE_GAP, ch, false)));
         y += BANNER_H + SEC_GAP;
       } else if (header.style === 'mosaic') {
-        const m = slides.slice(0, 3), sh = (BANNER_H - 16) / 2;
-        if (m[0]) html += card(m[0], 96, y, 1150, BANNER_H, true);
-        m.slice(1).forEach((g, k) => (html += card(g, 96 + 1150 + 24, y + k * (sh + 16), 1728 - 1150 - 24, sh, false)));
+        const m = slides.slice(0, 3), sh = (BANNER_H - CARD_GAP) / 2;
+        if (m[0]) html += card(m[0], L, y, MAIN_W, BANNER_H, true);
+        m.slice(1).forEach((g, k) => (html += card(g, L + MAIN_W + SIDE_GAP, y + k * (sh + CARD_GAP), W - MAIN_W - SIDE_GAP, sh, false)));
         y += BANNER_H + SEC_GAP;
       } else {
         html += banner(slides[0], y, 'FEATURED', slides.length);
@@ -445,8 +457,8 @@
     // (2.0) The category buttons: the parts of the store that have apps, when two or more do.
     const cats = Object.entries(CATS).filter(([c]) => inCat(c).length);
     if (cats.length >= 2) {
-      const bw = (1728 - 24 * 3) / 4;
-      cats.forEach(([c, name], k) => (html += `<div class="d-cat" style="${pos(96 + k * (bw + 24), y, bw, CAT_H)}"><i></i><span>${esc(name)}</span><b>${inCat(c).length}</b></div>`));
+      const bw = (W - GAP * (cats.length - 1)) / cats.length;
+      cats.forEach(([c, name], k) => (html += `<div class="d-cat" style="${pos(L + k * (bw + GAP), y, bw, CAT_H)}"><img src="/assets/cat/${c}.png" alt=""><span>${esc(name)}</span></div>`));
       y += CAT_H + SEC_GAP;
     }
     const DEFAULT = [{ type: 'games', title: 'Latest games', layout: 'grid', all: true, games: [] }, { type: 'soon', title: 'Coming soon', layout: 'row' }];
@@ -458,32 +470,38 @@
         y += BANNER_H + SEC_GAP;
         return;
       }
+      if (s.type === 'developer') {
+        const d = devOf(s.dev);
+        html += `<div class="d-empty" style="${pos(L, y, W, 64)}">${esc(s.title || NAMES.developer)}: ${d ? esc(d.name) + ' (' + devApps(d.slug).length + ' apps)' : 'pick a developer'}. Shows on the website; the store leaves it out for now</div>`;
+        y += 64 + SEC_GAP;
+        return;
+      }
       const items = s.type === 'soon' ? soonGames : ownOrder(s) ? itemsOf(s) : s.type === 'collection' ? inColl(s.collection) : isChart(s.type) ? (s.category ? inCat(s.category) : listed) : (s.games || []).map((id) => listed.find((g) => g.id === id)).filter(Boolean);
       if (!items.length) {
-        html += `<div class="d-empty" style="${pos(96, y, 1728, 64)}">${esc(s.title || NAMES[s.type])}: nothing in it, so the store leaves it out</div>`;
+        html += `<div class="d-empty" style="${pos(L, y, W, 64)}">${esc(s.title || NAMES[s.type])}: nothing in it, so the store leaves it out</div>`;
         y += 64 + SEC_GAP;
         return;
       }
       const head = s.title || (s.type === 'collection' ? (coll(s.collection) || {}).title || '' : '');
-      if (head) { html += `<div class="d-head" style="${pos(96, y - 2)}">${esc(head)}${s.type === 'collection' ? ' <span class="d-more">›</span>' : ''}</div>`; y += HEAD; }
+      if (head) { html += `<div class="d-head" style="${pos(L, y - 2)}">${esc(head)}${s.type === 'collection' ? ' <span class="d-more">›</span>' : ''}</div>`; y += HEAD; }
       if ((s.type === 'games' || s.type === 'category' || s.type === 'collection' || isChart(s.type)) && s.layout === 'grid') {
         for (let i = 0; i < items.length; i += PER) {
-          items.slice(i, i + PER).forEach((g, k) => (html += tile(g, 96 + k * (TILE + GAP), y)));
+          items.slice(i, i + PER).forEach((g, k) => (html += tile(g, L + k * (TILE + GAP), y)));
           y += LINE + GRID_GAP;
         }
         y += SEC_GAP - GRID_GAP;
       } else if (s.layout === 'wide') {
-        items.slice(0, 3).forEach((g, k) => (html += wide(g, 96 + k * (WIDE_W + WIDE_GAP), y)));
-        if (items.length > 3) html += arrow(1850, y + WIDE_H / 2 - 16, 1);
+        items.slice(0, 3).forEach((g, k) => (html += wide(g, L + k * (WIDE_W + WIDE_GAP), y)));
+        if (items.length > 3) html += arrow(L + W + 40, y + WIDE_H / 2 - 16, 1);
         y += WIDE_LINE + SEC_GAP;
       } else {
-        items.slice(0, PER).forEach((g, k) => (html += tile(g, 96 + k * (TILE + GAP), y)));
-        if (items.length > PER) html += arrow(1850, y + TILE / 2 - 16, 1);
+        items.slice(0, PER).forEach((g, k) => (html += tile(g, L + k * (TILE + GAP), y)));
+        if (items.length > PER) html += arrow(L + W + 40, y + TILE / 2 - 16, 1);
         y += LINE + SEC_GAP;
       }
     });
     const H = Math.max(1080, y - SEC_GAP + 60);
-    html += `<div class="d-fold" style="${pos(0, 1000, 1920)}"><span>Bottom of the TV screen: below here, the player scrolls down</span></div>`;
+    html += `<div class="d-fold" style="${pos(0, 852, 1920)}"><span>Below here, the next row peeks up under frosted glass; the player scrolls down to it</span></div>`;
     let stage = wrap.querySelector('.stage');
     if (!stage) { stage = document.createElement('div'); stage.className = 'stage dstage'; wrap.appendChild(stage); }
     stage.style.width = '1920px';

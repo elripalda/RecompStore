@@ -1,0 +1,172 @@
+{
+  "format": 1,
+  "repo": "HossEz/fifa-world-cup-2014-recompiled",
+  "game": {
+    "kind": "iso_or_folder",
+    "label": "Your copy of 2014 FIFA World Cup Brazil for Xbox 360: its disc image (.iso), or its folder with default.xex.",
+    "check": { "file": "default.xex", "xdvdfs": "default.xex" }
+  },
+  "start": { "program": ["fifawc14.exe"], "args": ["--from_launcher"] },
+  "config": [
+    {
+      "id": "main",
+      "format": "toml",
+      "file": [
+        { "path": "{install}/fifawc14.toml", "if": "{install}/portable.txt" },
+        { "path": "{install}/fifawc14.toml", "if": "{install}/fifawc14.toml" },
+        { "path": "{documents}/2014 FIFA World Cup Brazil/fifawc14.toml" }
+      ],
+      "game_path": "game_data_root",
+      "ensure": {
+        "gpu_plugin": "\"xenos\"",
+        "gpu_allow_invalid_fetch_constants": "true",
+        "readback_resolve": "\"none\"",
+        "protect_zero": "false",
+        "execute_unclipped_draw_vs_on_cpu": "true",
+        "async_shader_compilation": "false",
+        "d3d12_submit_on_primary_buffer_end": "false",
+        "keybind_a": "\"Space,Z\"",
+        "keybind_b": "\"X,Backspace\"",
+        "keybind_x": "\"C\"",
+        "keybind_y": "\"V\"",
+        "keybind_left_shoulder": "\"Q\"",
+        "keybind_right_shoulder": "\"E\"",
+        "keybind_left_trigger": "\"1,Control\"",
+        "keybind_right_trigger": "\"Shift,3\"",
+        "keybind_lstick_up": "\"W\"",
+        "keybind_lstick_down": "\"S\"",
+        "keybind_lstick_left": "\"A\"",
+        "keybind_lstick_right": "\"D\"",
+        "keybind_rstick_up": "\"I\"",
+        "keybind_rstick_down": "\"K\"",
+        "keybind_rstick_left": "\"J\"",
+        "keybind_rstick_right": "\"L\"",
+        "keybind_lstick_press": "\"F\"",
+        "keybind_rstick_press": "\"G\"",
+        "keybind_dpad_up": "\"Up\"",
+        "keybind_dpad_down": "\"Down\"",
+        "keybind_dpad_left": "\"Left\"",
+        "keybind_dpad_right": "\"Right\"",
+        "keybind_start": "\"Return\"",
+        "keybind_back": "\"Tab\"",
+        "quit_hold": "\"Hold\"",
+        "quit_to_quit": "\"to quit\"",
+        "quit_quitting": "\"Quitting\"",
+        "quit_create": "\"Create\""
+      },
+      "always": {
+        "swap_post_effect": "\"none\"",
+        "clear_memory_page_state": "false",
+        "mnk_mode": "true",
+        "mnk_exact_modifiers": "false",
+        "quit_buttons": "\"{pad}\""
+      },
+      "new": {
+        "present_interval_cap": "1",
+        "frame_rate_floor": "60",
+        "anisotropic_override": "5",
+        "log_file": "\"fifawc14.log\"",
+        "log_level": "\"info\""
+      }
+    }
+  ],
+  "folders": {
+    "saves": [
+      { "path": "{install}/saves", "if": "{install}/portable.txt" },
+      { "path": "{documents}/2014 FIFA World Cup Brazil" }
+    ],
+    "logs": [
+      { "path": "{install}", "if": "{install}/portable.txt" },
+      { "path": "{install}", "if": "{install}/fifawc14.toml" },
+      { "path": "{documents}/2014 FIFA World Cup Brazil" }
+    ]
+  },
+  "exit_codes": { "252968961": "It couldn't find your copy of the game. Pick it again on the game's page." },
+  "settings": [
+    {
+      "id": "window", "label": "Window",
+      "help": "Fullscreen fills your screen and lets you switch apps quickly. Exclusive gives the game the screen to itself. Windowed uses Window size.",
+      "choices": [
+        { "label": "Fullscreen", "set": { "fullscreen": "true", "fullscreen_exclusive": "false" } },
+        { "label": "Exclusive", "set": { "fullscreen": "true", "fullscreen_exclusive": "true" } },
+        { "label": "Windowed", "set": { "fullscreen": "false" } }
+      ],
+      "defaults": { "fullscreen": "true", "fullscreen_exclusive": "false" }
+    },
+    {
+      "id": "window_size", "label": "Window size",
+      "help": "The size of the game's window in Windowed mode. Automatic makes it as large as fits your screen.",
+      "choices": [
+        { "label": "Automatic", "set": { "windowed_width": "0", "windowed_height": "0" } },
+        { "label": "1280 x 720", "set": { "windowed_width": "1280", "windowed_height": "720" } },
+        { "label": "1600 x 900", "set": { "windowed_width": "1600", "windowed_height": "900" } },
+        { "label": "1920 x 1080", "set": { "windowed_width": "1920", "windowed_height": "1080" } },
+        { "label": "2560 x 1440", "set": { "windowed_width": "2560", "windowed_height": "1440" } }
+      ],
+      "defaults": { "windowed_width": "0", "windowed_height": "0", "fullscreen": "true" },
+      "when": { "fullscreen": "false" }
+    },
+    {
+      "id": "resolution", "label": "Resolution",
+      "help": "What the game draws at. 720p is the console's own. 1440p is sharp on a 1080p screen. 4K needs a fast graphics card.",
+      "choices": [
+        { "label": "720p", "set": { "resolution_scale": "1" } },
+        { "label": "1440p", "set": { "resolution_scale": "2" } },
+        { "label": "4K", "set": { "resolution_scale": "3" } }
+      ],
+      "defaults": { "resolution_scale": "1" }
+    },
+    {
+      "id": "frame_rate", "label": "Frame rate",
+      "help": "The game holds cutscenes at 40 FPS and many menus at 30, as on the console. 60 everywhere lifts both limits.",
+      "choices": [
+        { "label": "60 everywhere", "set": { "present_interval_cap": "1", "frame_rate_floor": "60" } },
+        { "label": "As on console", "set": { "present_interval_cap": "0", "frame_rate_floor": "0" } }
+      ],
+      "defaults": { "present_interval_cap": "0", "frame_rate_floor": "0" }
+    },
+    {
+      "id": "upscaling", "label": "Upscaling",
+      "help": "FSR sharpens the picture as it's fitted to your screen, most of all at 720p on a 1080p screen.",
+      "choices": [
+        { "label": "Off", "set": { "present_effect": "\"bilinear\"" } },
+        { "label": "FSR", "set": { "present_effect": "\"fsr\"" } }
+      ],
+      "defaults": { "present_effect": "\"bilinear\"" }
+    },
+    {
+      "id": "filtering", "label": "Texture filtering",
+      "help": "Keeps the pitch markings and the stands sharp at shallow angles. Costs next to nothing.",
+      "choices": [
+        { "label": "Game's own", "set": { "anisotropic_override": "-1" } },
+        { "label": "2x", "set": { "anisotropic_override": "2" } },
+        { "label": "4x", "set": { "anisotropic_override": "3" } },
+        { "label": "8x", "set": { "anisotropic_override": "4" } },
+        { "label": "16x", "set": { "anisotropic_override": "5" } }
+      ],
+      "defaults": { "anisotropic_override": "3" }
+    },
+    {
+      "id": "vrr", "label": "Variable refresh",
+      "help": "Shows each frame the moment it's ready: smooth on G-Sync and FreeSync screens. Off waits for the screen's refresh.",
+      "choices": [
+        { "label": "On", "set": { "d3d12_allow_variable_refresh_rate_and_tearing": "true" } },
+        { "label": "Off", "set": { "d3d12_allow_variable_refresh_rate_and_tearing": "false" } }
+      ],
+      "defaults": { "d3d12_allow_variable_refresh_rate_and_tearing": "true" }
+    },
+    {
+      "id": "fps", "label": "Show FPS",
+      "help": "The frame rate in the top left corner of the game.",
+      "choices": [
+        { "label": "Off", "set": { "show_fps": "false" } },
+        { "label": "On", "set": { "show_fps": "true" } }
+      ],
+      "defaults": { "show_fps": "false" }
+    }
+  ],
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your profile, settings and tournament saves.", "open": "saves" },
+    { "id": "cache", "label": "Shader cache", "help": "Shaders the game has built, so later matches don't stutter. Clearing only helps if graphics look wrong after an update.", "clear": "saves/cache" }
+  ]
+}

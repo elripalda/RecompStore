@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.0): a custom source, turned into catalog entries the PS5 store reads
+// RecompStore website (2.0): a custom source, turned into catalog entries the PS5 store reads
 // like its own catalog. A source is a GitHub repo, or a list (a JSON file at an https address
 // naming several repos). Each repo's newest PS5 build is found on its releases; a zip is read
 // on GitHub (its directory and the app's param.json and icon) without downloading it.
@@ -42,7 +42,7 @@ if ($post && $s('a', 16) === 'report') {
     $repo = rtrim((string)preg_replace('#^https://(www\.)?github\.com/#i', '', $value), '/');
     if (rs_repo_ok($repo)) $link = 'https://github.com/' . $repo;
     elseif (preg_match('#^https://[^\s<>"]+$#', $value)) $link = $value;
-    else rs_out(422, ['ok' => false, 'error' => 'That isn\'t a source Recomp Store knows.']);
+    else rs_out(422, ['ok' => false, 'error' => 'That isn\'t a source RecompStore knows.']);
     if (mb_strlen($why) < 5) rs_out(422, ['ok' => false, 'error' => 'Say a few words about what\'s wrong with it.']);
     if (rs_rate_over('srcreport', 5, 3600)) rs_out(429, ['ok' => false, 'error' => 'That\'s a lot of reports at once. Try again in an hour.']);
     rs_rate_hit('srcreport');

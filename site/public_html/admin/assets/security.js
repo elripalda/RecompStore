@@ -1,4 +1,4 @@
-// Recomp Store admin (2.1): copy buttons, and the QR code for two-step login (qrcode.js, MIT).
+// RecompStore admin (2.1): copy buttons, and the QR code for two-step login (qrcode.js, MIT).
 (function () {
   document.querySelectorAll('[data-copy]').forEach(function (b) {
     b.addEventListener('click', function () {

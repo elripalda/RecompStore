@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.0): a bug report finished on a phone. The store sends its logs from a
+// RecompStore website (2.0): a bug report finished on a phone. The store sends its logs from a
 // game's page (api/logs.php) and shows a code; recompstore.com/r/<code> opens a form for what
 // happened and a few pictures, which join those logs in the admin's Inbox.
 //   GET  a=info    code              -> {ok, app:{id,name}, version, sent, finished}
@@ -44,7 +44,7 @@ $find = function (string $code) use ($db): ?array {
     return $r ?: null;
 };
 $appName = function (string $id): string {
-    if ($id === 'store' || $id === '') return 'Recomp Store';
+    if ($id === 'store' || $id === '') return 'RecompStore';
     $g = rs_game($id);
     return $g ? (string)$g['name'] : $id;
 };

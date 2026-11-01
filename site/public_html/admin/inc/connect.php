@@ -1,5 +1,5 @@
 <?php
-// Recomp Store 2.0: the PS5 store and this site talking. A console's identity, the phones and PCs
+// RecompStore 2.0: the PS5 store and this site talking. A console's identity, the phones and PCs
 // linked to it and what they send it, bug reports finished on a phone, GitHub through this site
 // (cached, for rate limits and custom sources), and installs counted for the charts.
 // The contract the store codes against: docs/api-2.0.md in the source.
@@ -331,6 +331,8 @@ function rs_http(string $url, array $o = []): array {
             return strlen($chunk);
         },
     ];
+    // (3.4) A POST with this body (the art picker's IGDB and Twitch calls).
+    if (array_key_exists('post', $o)) { $opts[CURLOPT_POST] = true; $opts[CURLOPT_POSTFIELDS] = (string)$o['post']; }
     $ca = getenv('RS_CA_BUNDLE');
     if (is_string($ca) && $ca !== '' && is_file($ca)) $opts[CURLOPT_CAINFO] = $ca;
     curl_setopt_array($c, $opts);
@@ -670,8 +672,8 @@ function rs_source_repo_build(string $repo, string $asset): array {
     }
     if (!$found) {
         return ['ok' => false, 'error' => $sawPkg
-            ? 'This repo only has a .pkg. Recomp Store can\'t install packages yet.'
-            : 'No PS5 build in this repo\'s releases: Recomp Store needs a .zip or .7z with the app\'s folder (eboot.bin and sce_sys).'];
+            ? 'This repo only has a .pkg. RecompStore can\'t install packages yet.'
+            : 'No PS5 build in this repo\'s releases: RecompStore needs a .zip or .7z with the app\'s folder (eboot.bin and sce_sys).'];
     }
     $r = $found['release'];
     $a = $found['asset'];
@@ -765,7 +767,7 @@ function rs_source_list(string $url, float $deadline): array {
     if ($r['error'] === 'too big') return ['ok' => false, 'error' => 'That list is too big (256 KB at most).'];
     if ($r['status'] !== 200) return ['ok' => false, 'error' => $r['status'] === 404 ? 'Nothing is at that address.' : 'That list couldn\'t be read right now. Try again in a moment.'];
     $j = json_decode($r['body'], true);
-    if (!is_array($j) || !is_array($j['apps'] ?? null)) return ['ok' => false, 'error' => 'That isn\'t a Recomp Store list: it needs a name and apps, each with a GitHub repo.'];
+    if (!is_array($j) || !is_array($j['apps'] ?? null)) return ['ok' => false, 'error' => 'That isn\'t a RecompStore list: it needs a name and apps, each with a GitHub repo.'];
     $clean = fn($v, int $n) => mb_substr(trim(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$v) ?? ''), 0, $n);
     $out = ['ok' => true, 'source' => ['kind' => 'list', 'value' => $url, 'name' => $clean($j['name'] ?? '', 60) ?: 'A list', 'author' => $clean($j['author'] ?? '', 60)],
             'apps' => [], 'errors' => []];
@@ -910,8 +912,20 @@ function rs_charts(bool $fresh = false): array {
         // (2.3.0) Thumbs-up counts, for listed apps only (admin/inc/v23.php).
         'likes' => (object)array_filter(rs_likes_counts(), fn($id) => isset($apps[$id]), ARRAY_FILTER_USE_KEY),
     ];
-    rs_kv_put('charts', json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    $json = json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    rs_kv_put('charts', $json);
+    rs_charts_file_put($json);
     return $out;
+}
+
+// The charts as a file outside the website too, so api/charts.php can answer most visits without
+// the database. Written each time they're made (and so right after each Publish).
+function rs_charts_file(): string {
+    return dirname(RS_PUBLIC) . '/recompstore-private/charts-cache.json';
+}
+function rs_charts_file_put(string $json): void {
+    $f = rs_charts_file();
+    if (@file_put_contents($f . '.' . getmypid(), $json) !== false) @rename($f . '.' . getmypid(), $f);
 }
 
 // (2.5) What Discover's own-order sections sort by: when each app was first published, its newest

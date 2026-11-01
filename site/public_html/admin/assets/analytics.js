@@ -1,4 +1,4 @@
-// Recomp Store admin: the Analytics, App stats and Dashboard pages. Day-by-day line charts and
+// RecompStore admin: the Analytics, App stats and Dashboard pages. Day-by-day line charts and
 // bar charts (2.3): one y-axis, a legend when there are two series, a crosshair or a highlighted
 // bar that snaps to a day or a release, and a tooltip with every series, the same by keyboard (arrow
 // keys) as by pointer. Colors validated on the admin's dark cards: cyan #1fa3c4 and orange #d95926.

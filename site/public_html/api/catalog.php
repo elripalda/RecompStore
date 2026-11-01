@@ -1,10 +1,10 @@
 <?php
-// Recomp Store website (2.0): the test catalog, for consoles the admin marked as testers
+// RecompStore website (2.0): the test catalog, for consoles the admin marked as testers
 // (Settings, Testers). The same JSON as catalog.json, built the same way, but made now from the
 // admin's games as they're saved (no Publish needed) and with the testers-only apps in, each
 // marked "testing": true. The contract: docs/api-2.0.md, section 6.
 //   POST a=test  install token store  -> the catalog, or HTTP 403 {ok:false, tester:false, error}
-//   POST a=testsig (the same)          -> (2.1) its signature from Recomp Store Signer (text)
+//   POST a=testsig (the same)          -> (2.1) its signature from RecompStore Signer (text)
 // (2.1) Once the signer is set up, the testers' catalog is the one last signed (published with
 // Publish like everyone's), not one made now.
 declare(strict_types=1);

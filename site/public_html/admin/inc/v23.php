@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website, 2.3.0's parts (docs/store-2.3.md): what a game needs to be ready to play,
+// RecompStore website, 2.3.0's parts (docs/store-2.3.md): what a game needs to be ready to play,
 // its mods, collections, likes, tester feedback, the Discord posts, and the lists of apps a linked
 // phone keeps for Restore my apps. Loaded by bootstrap.php.
 declare(strict_types=1);
@@ -230,9 +230,70 @@ function rs_discord_after_publish(array $before, array $after): void {
             if (count($embeds) >= 10) break;
         }
         if (!$embeds) return;
-        $ok = rs_discord_send(['username' => 'Recomp Store', 'embeds' => $embeds], $why);
+        $ok = rs_discord_send(['username' => 'RecompStore', 'embeds' => $embeds], $why);
         rs_log('discord', 'post', $ok ? count($embeds) . ' change' . (count($embeds) === 1 ? '' : 's') . ' posted' : 'not posted: ' . $why);
     } catch (Throwable $e) {
         // Never in the way of publishing.
     }
+}
+
+// ---- (2.7.3) Discord: a post when a developer releases a new version on GitHub ------------------
+// Apps on GitHub update in the store straight from their releases, with no publish, so publishing
+// never posts them. This looks at each listed app's latest release about every 3 hours (a few
+// apps a run, from the shared GitHub cache) and posts the new ones: "Updated: Snes9x PS5 2.9".
+// Off until "New releases on GitHub" is ticked in Settings, Discord posts.
+function rs_release_watch(int $budget = 20): int {
+    $want = json_decode((string)rs_setting('discord_posts', '{"new":true,"update":true}'), true) ?: [];
+    if (empty($want['release']) || !rs_discord_hook_ok(rs_discord_hook())) return 0;
+    $start = microtime(true);
+    $seen = json_decode((string)(rs_kv_get('rel_seen')['v'] ?? '{}'), true) ?: [];
+    $games = array_values(array_filter(rs_games(false), fn($g) => (string)$g['repo'] !== '' && !$g['soon'] && empty($g['testers']) && ($g['source'] ?? 'github') === 'github'));
+    // Oldest looked-at first.
+    usort($games, fn($a, $b) => (int)($seen[$a['id']]['at'] ?? 0) <=> (int)($seen[$b['id']]['at'] ?? 0));
+    $embeds = [];
+    foreach ($games as $g) {
+        if (microtime(true) - $start > $budget) break;
+        if (time() - (int)($seen[$g['id']]['at'] ?? 0) < 3 * 3600) continue;
+        $r = rs_gh_releases((string)$g['repo'], 3 * 3600);
+        $seen[$g['id']]['at'] = time();
+        if ($r['status'] !== 200) continue;
+        $latest = null;
+        foreach ((array)json_decode((string)$r['body'], true) as $x) if (is_array($x) && empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
+        if (!$latest) continue;
+        $tag = (string)$latest['tag_name'];
+        $before = $seen[$g['id']]['tag'] ?? null;
+        $seen[$g['id']]['tag'] = $tag;
+        // The first look only remembers; a release from more than 3 days ago isn't news.
+        if ($before === null || $before === $tag || strtotime((string)$latest['published_at']) < time() - 3 * 86400) continue;
+        $notes = trim((string)preg_replace(['/\r\n?/', '/^#+\s*/m', '/\n{3,}/'], ["\n", '', "\n\n"], (string)$latest['body']));
+        $e = ['title' => mb_substr('Updated: ' . $g['name'] . ' ' . rs_tidy_version($tag), 0, 250),
+              'description' => mb_strimwidth($notes, 0, 400, '…'), 'url' => rs_abs('/game/' . rawurlencode((string)$g['id'])), 'color' => 0x5FE3A1];
+        if ((string)$g['icon'] !== '') $e['thumbnail'] = ['url' => rs_abs((string)$g['icon'])];
+        $embeds[] = $e;
+        if (count($embeds) >= 10) break;
+    }
+    rs_kv_put('rel_seen', json_encode($seen, JSON_UNESCAPED_SLASHES));
+    if (!$embeds) return 0;
+    $ok = rs_discord_send(['username' => 'RecompStore', 'embeds' => $embeds], $why);
+    rs_log('discord', 'release', $ok ? count($embeds) . ' new release' . (count($embeds) === 1 ? '' : 's') . ' posted' : 'not posted: ' . $why);
+    return $ok ? count($embeds) : 0;
+}
+
+// From the store's charts call (often) and admin pages: a short run after the answer has gone,
+// at most every 30 minutes.
+function rs_release_watch_maybe(): void {
+    try {
+        $want = json_decode((string)rs_setting('discord_posts', '{}'), true) ?: [];
+        if (empty($want['release'])) return;
+        $last = rs_kv_get('rel_watch_at');
+        if ($last && $last['age'] < 1800) return;
+        rs_kv_put('rel_watch_at', (string)time());
+    } catch (Throwable $e) { return; }
+    register_shutdown_function(function () {
+        if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+        elseif (function_exists('litespeed_finish_request')) @litespeed_finish_request();
+        ignore_user_abort(true);
+        @set_time_limit(60);
+        try { rs_release_watch(); } catch (Throwable $e) { /* next time */ }
+    });
 }

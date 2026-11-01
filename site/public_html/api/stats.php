@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.0): the PS5 store says when it installed or removed an app, so the charts
+// RecompStore website (2.0): the PS5 store says when it installed or removed an app, so the charts
 // can count consoles. Only the console's store ID, the app and its version are kept, once per
 // console and app (a reinstall isn't a new install).
 //   POST a=installed  install token store app version     POST a=removed  install token store app
@@ -16,7 +16,7 @@ function rs_out(int $code, array $body): void {
     exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_out(405, ['ok' => false, 'error' => 'From Recomp Store only.']);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_out(405, ['ok' => false, 'error' => 'From RecompStore only.']);
 $s = fn(string $k, int $max): string => isset($_POST[$k]) && is_string($_POST[$k]) ? substr(trim($_POST[$k]), 0, $max) : '';
 $a = $s('a', 16);
 $app = $s('app', 48);

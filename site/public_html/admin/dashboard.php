@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.3): the Dashboard, where logging in lands. Today's numbers, what's waiting
+// RecompStore admin (2.3): the Dashboard, where logging in lands. Today's numbers, what's waiting
 // (signatures, the Inbox, changes not published yet), the latest changes, and every game one click
 // away.
 declare(strict_types=1);
@@ -31,13 +31,23 @@ $sign = rs_sign_waiting();
 $published = (string)rs_setting('published_at', '');
 $changed = $published !== '' ? rs_an_int('SELECT COUNT(*) FROM games WHERE UNIX_TIMESTAMP(updated) > ?', [(int)strtotime($published)]) : rs_an_int('SELECT COUNT(*) FROM games');
 $wait = [
-    ['n' => $sign, 'label' => $sign === 1 ? 'Thing to sign' : 'Things to sign', 'note' => 'In Recomp Store Signer on your PC. Until then they reach no one.', 'href' => 'settings.php#signer', 'show' => rs_sign_on()],
+    ['n' => $sign, 'label' => $sign === 1 ? 'Thing to sign' : 'Things to sign', 'note' => 'In RecompStore Signer on your PC. Until then they reach no one.', 'href' => 'settings.php#signer', 'show' => rs_sign_on()],
     ['n' => $changed, 'label' => $changed === 1 ? 'Game changed since the last publish' : 'Games changed since the last publish', 'note' => $published !== '' ? 'Last published ' . gmdate('M j, g:i a', (int)strtotime($published)) . ' UTC.' : 'Not published yet.', 'href' => 'index.php', 'show' => true],
-    ['n' => (int)($open['submit'] ?? 0), 'label' => 'Submissions', 'note' => 'Apps people sent in for the store.', 'href' => 'inbox.php?show=submit', 'show' => true],
+    ['n' => (int)($open['submit'] ?? 0), 'label' => 'Submissions', 'note' => 'Apps people sent in for the store.', 'href' => 'submissions.php', 'show' => true],
     ['n' => (int)($open['logs'] ?? 0), 'label' => 'Logs', 'note' => 'Sent from consoles' . (rs_an_has('inbox', 'feedback') ? ', with testers\' feedback' : '') . '.', 'href' => 'inbox.php?show=logs', 'show' => true],
     ['n' => (int)($open['bug'] ?? 0), 'label' => 'Bug reports', 'note' => 'From the website.', 'href' => 'inbox.php?show=bug', 'show' => true],
     ['n' => (int)($open['message'] ?? 0) + (int)($open['source'] ?? 0), 'label' => 'Messages and sources', 'note' => 'Everything else in the Inbox.', 'href' => 'inbox.php', 'show' => true],
 ];
+// (2.6) Listings that need a look, and new apps found (admin/health.php).
+rs_health_maybe();
+$health = rs_health_summary();
+$needLook = $health['bad'] + $health['warn'];
+$newFound = count(rs_found_list()['new']);
+$wait[] = ['n' => $needLook, 'label' => $needLook === 1 ? 'Listing needs a look' : 'Listings need a look', 'note' => 'A renamed repo, a missing zip, a changed title ID or a dead link.', 'href' => 'health.php', 'show' => true];
+$wait[] = ['n' => $newFound, 'label' => $newFound === 1 ? 'New app found' : 'New apps found', 'note' => 'PS5 apps on GitHub and in other catalogs that aren\'t in the store yet.', 'href' => 'health.php#found', 'show' => true];
+// (2.7.3) Title IDs used by two different apps: red, at the top.
+$clashes = [];
+try { $clashes = rs_radar_clashes(); } catch (Throwable $e) { /* next time */ }
 $wait = array_values(array_filter($wait, fn($w) => $w['show']));
 $anyWaiting = array_sum(array_column($wait, 'n')) > 0;
 
@@ -50,7 +60,7 @@ $ago = function (string $at): string {
     if ($s < 60) return 'just now';
     if ($s < 3600) return floor($s / 60) . ' min ago';
     if ($s < 86400) return floor($s / 3600) . ' h ago';
-    return date('M j', $t);
+    return rs_date('M j', $t);
 };
 
 $games = rs_games(true);
@@ -77,10 +87,14 @@ rs_head('Dashboard', true, ['assets/analytics.css']);
     <form method="post" action="index.php"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="publish"><button class="primary">Publish</button></form>
   </div>
 </section>
+<?php if ($clashes): ?>
+<a class="dash-alert" href="health.php#radar"><strong><?= count($clashes) === 1 ? 'Title ID clash' : count($clashes) . ' title ID clashes' ?></strong>
+  <span><?= h(implode(', ', array_keys(array_slice($clashes, 0, 6, true)))) ?><?= count($clashes) > 6 ? ' and more' : '' ?> <?= count($clashes) === 1 ? 'is' : 'are' ?> used by two different apps. On a PS5 one writes over the other.</span><span aria-hidden="true">→</span></a>
+<?php endif; ?>
 <nav class="dash-links" aria-label="Go to">
   <a href="index.php">Games</a><a href="discover.php">Discover</a><a href="beta.php">Beta</a><a href="inbox.php">Inbox</a>
   <a href="analytics.php">Analytics</a><a href="analytics.php?tab=apps">Apps</a><a href="analytics.php?tab=downloads">Downloads</a>
-  <a href="import.php">Import</a><a href="settings.php">Settings</a><a href="log.php">Change log</a><a href="/" target="_blank" rel="noopener">View site</a>
+  <a href="import.php">Import</a><a href="health.php">Health</a><a href="icons.php">Icons</a><a href="settings.php">Settings</a><a href="log.php">Change log</a><a href="/" target="_blank" rel="noopener">View site</a>
 </nav>
 <div class="kpis k6">
   <?= $kpi('Consoles today', $consoles[0], $vs($consoles[0], $consoles[1])) ?>
@@ -105,7 +119,7 @@ rs_head('Dashboard', true, ['assets/analytics.css']);
     <?php if (!$acts): ?><p class="muted">Nothing yet.</p><?php else: ?>
     <ul class="acts">
       <?php foreach ($acts as $r): ?>
-      <li><time datetime="<?= h(date('c', strtotime((string)$r['at']) ?: 0)) ?>" title="<?= h((string)$r['at']) ?>"><?= h($ago((string)$r['at'])) ?></time>
+      <li><time datetime="<?= h(rs_date('c', strtotime((string)$r['at']) ?: 0)) ?>" title="<?= h((string)$r['at']) ?>"><?= h($ago((string)$r['at'])) ?></time>
         <span class="what"><?= h($actNames[(string)$r['action']] ?? ucfirst(str_replace('phone ', 'Phone: ', (string)$r['action']))) ?><?= (string)$r['target'] !== '' ? ': ' . h((string)$r['target']) : '' ?><small><?= h(trim(((string)$r['who'] !== '' ? (string)$r['who'] . ' · ' : '') . mb_strimwidth((string)$r['detail'], 0, 120, '…'), ' ·')) ?></small></span></li>
       <?php endforeach; ?>
     </ul>

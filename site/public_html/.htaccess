@@ -6,20 +6,84 @@ RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
+# (2.9) RecompLauncher: recomplauncher.com is the PC side of this same site (parked on it). Its pages
+# drop the /pc, and the app's page is /get. Anything of RecompStore's opens on recompstore.com.
+RewriteCond %{HTTP_HOST} ^www\.recomplauncher\.com$ [NC]
+RewriteRule ^ https://recomplauncher.com%{REQUEST_URI} [L,R=301]
+# (3.1) RecompLauncher sign-in codes
+RewriteRule ^activate/?$ activate.php [L,QSA]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^((pc/)?launcher|download)/?$ /get [L,R=301]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^pc/?$ / [L,R=301]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^pc/(.+?)/?$ /$1 [L,R=301]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^$ page.php?p=pc [L,QSA]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^get/?$ page.php?p=pc-launcher [L,QSA]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^(all|how|top|new|consoles|press|soon|settings|sdk|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^game/([a-z0-9-]{1,64})/?$ page.php?p=pc-game&id=$1 [L,QSA]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^robots\.txt$ robots-launcher.txt [L]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^sitemap\.xml$ sitemap.php [L]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteRule ^admin(/.*)?$ https://recompstore.com/admin$1 [L,R=301]
+RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
+RewriteCond %{REQUEST_URI} !^/(api|assets|media)/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ https://recompstore.com%{REQUEST_URI} [L,R=301]
+# RecompStore's old PC addresses (/pc, /pc/all, /pc/game/<id>...) forward to RecompLauncher's.
+RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
+RewriteRule ^pc/launcher/?$ https://recomplauncher.com/get [L,R=301]
+RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
+RewriteRule ^pc/?$ https://recomplauncher.com/ [L,R=301]
+RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
+RewriteRule ^pc/(.+?)/?$ https://recomplauncher.com/$1 [L,R=301]
+
 # A game's own link, /game/<ID> (Coming soon: /soon/<ID>), and its preview picture, /og/<ID>.jpg:
 # shared anywhere, the link shows a card with the game's name and art.
 RewriteRule ^(game|soon)/([A-Za-z0-9_-]{1,64})/?$ share.php?kind=$1&id=$2 [L,QSA]
 RewriteRule ^og/([A-Za-z0-9_-]{1,64})\.jpg$ og.php?id=$1 [L,QSA]
 
+# (2.6) The home page and the site's own pages at their own addresses, each with its title, text and
+# links for search engines (page.php puts them in the site's page), and the sitemap.
+RewriteRule ^$ page.php?p=home [L,QSA]
+RewriteRule ^(games|emulators|apps|tools|how|get|about|contact|submit|report|ids|soon|link|my-ps5|press|beta|developers|hub|dmca)/?$ page.php?p=$1 [L,QSA]
+RewriteRule ^dev/([a-z0-9-]{1,40})/?$ page.php?p=dev&slug=$1 [L,QSA]
+# (3.0) Accounts: sign in, your account, your library, Terms and Privacy (the site draws them).
+RewriteRule ^(signin|account|account/reset|library|terms|privacy)/?$ index.html [L,QSA]
+# (2.8) The PC side at /pc, on any other address the site is reached by
+RewriteRule ^pc/?$ page.php?p=pc [L,QSA]
+RewriteRule ^pc/(all|how|top|new|consoles|launcher|sdk|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
+RewriteRule ^pc/game/([a-z0-9-]{1,64})/?$ page.php?p=pc-game&id=$1 [L,QSA]
+RewriteRule ^sitemap\.xml$ sitemap.php [L]
+# (2.7.1) The developer list's confirm and unsubscribe links.
+RewriteRule ^list/(on|off)/([a-f0-9]{32})/?$ list.php?a=$1&t=$2 [L,QSA]
+
 # (2.0) A code a PS5 shows: /l/<code> links this phone to it; /r/<code> finishes a bug report the
 # store sent. The site's own page, which reads the code from the address.
-RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ index.html [L]
+RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ page.php?p=code [L]
 
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "SAMEORIGIN"
+  # (2.7.1) Uploaded pictures (each upload gets a new name) and the site's fonts:
+  # kept for a year.
+  <FilesMatch "(-[0-9a-f]{8}|^[0-9a-f]{40})\.(png|jpe?g|webp|gif)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "\.woff2$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
   # The catalog is read by the PS5 store and the site: always fresh, readable from anywhere.
+  <Files "developers.json">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </Files>
   <Files "catalog.json">
     Header set Cache-Control "no-cache, must-revalidate"
     Header set Access-Control-Allow-Origin "*"

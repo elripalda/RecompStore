@@ -1,34 +1,56 @@
 <?php
-// Recomp Store admin: site-wide settings (store release, links, tagline, password).
+// RecompStore admin: site-wide settings (store release, links, tagline, password).
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 require __DIR__ . '/inc/totp.php';
+require __DIR__ . '/inc/maint.php';
 rs_require_login();
 rs_users_2fa();
 
 $fields = [
     'site_url' => ['Site address', 'https://recompstore.com', 'Used to build full links to images in the catalog.'],
     'tagline' => ['Home page tagline', 'Recompiled games, native on PS5.', 'One line under the logo on the site.'],
-    'store_version' => ['Recomp Store version', RS_VERSION, 'The newest store release. The PS5 store updates itself when this is newer.'],
-    'store_build' => ['Recomp Store build', '1', 'A whole number; raise it with each release.'],
+    'store_version' => ['RecompStore version', RS_VERSION, 'The newest store release. The PS5 store updates itself when this is newer.'],
+    'store_build' => ['RecompStore build', '1', 'A whole number; raise it with each release.'],
     'store_url' => ['Store zip download link', '', 'The RecompStore zip on its GitHub release.'],
     'store_sha256' => ['Store zip SHA-256', '', 'The store checks the download against this before installing.'],
-    'payload_url' => ['Installer payload link', '', 'RecompStore-Installer.elf on the GitHub release, for the site\'s Get Recomp Store steps.'],
+    'payload_url' => ['Installer payload link', '', 'RecompStore-Installer.elf on the GitHub release, for the site\'s Get RecompStore steps.'],
     'discord_url' => ['Discord invite', '', 'Shown on the site and the store\'s About page.'],
+    'discord_beta_url' => ['Discord: beta chat', '', 'RecompLauncher\'s Settings > Beta buttons. A channel link or an invite; empty uses the invite above.'],
+    'discord_bugs_url' => ['Discord: bug reports', '', ''],
+    'discord_ideas_url' => ['Discord: ideas', '', ''],
     'kofi_url' => ['Ko-fi', 'https://ko-fi.com/ripalda', ''],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
-    if ($act === 'sign_token') {
-        // (2.1) The token Recomp Store Signer uses here. Shown once; only its hash is kept.
+    if ($act === 'maint') {
+        // (2.9) Maintenance mode, one side at a time: the PS5 site or the PC site.
+        $side = ($_POST['side'] ?? '') === 'pc' ? 'pc' : 'ps5';
+        $label = $side === 'pc' ? 'RecompLauncher (PC)' : 'RecompStore (PS5)';
+        $st = rs_maint_state();
+        $on = !empty($_POST['on']);
+        $msg = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST['msg'] ?? ''))), 0, 1000);
+        $was = $st[$side]['on'];
+        $st[$side] = ['on' => $on, 'msg' => $msg, 'since' => $on ? ($was ? $st[$side]['since'] : time()) : 0];
+        try {
+            rs_maint_save($st);
+            rs_log('settings', 'maintenance', $label . ($on ? ($was ? ': message changed' : ': taken down') : ($was ? ': back up' : ': message saved')));
+            rs_flash($on ? ($was ? 'Saved. The new message shows now.' : $label . ' is down. Visitors see only the logo and your message.') : ($was ? $label . ' is back up for everyone.' : 'Saved. The message shows when you take it down.'));
+        } catch (Throwable $err) {
+            rs_flash($err->getMessage(), 'err');
+        }
+        header('Location: settings.php#maintenance');
+        exit;
+    } elseif ($act === 'sign_token') {
+        // (2.1) The token RecompStore Signer uses here. Shown once; only its hash is kept.
         $t = bin2hex(random_bytes(32));
         rs_set_setting('signer_token_hash', hash('sha256', $t));
         $_SESSION['signer_token_once'] = $t;
         rs_log('signer', 'token', 'made a new token (the old one stops working)');
-        rs_flash('A new signer token is below. Paste it into Recomp Store Signer on your PC.');
+        rs_flash('A new signer token is below. Paste it into RecompStore Signer on your PC.');
         header('Location: settings.php#signer');
         exit;
     } elseif ($act === 'sign_reset') {
@@ -48,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($act === 'totp_confirm') {
         $secret = (string)($_SESSION['totp_new'] ?? '');
         $step = $secret !== '' ? rs_totp_check($secret, (string)($_POST['code'] ?? ''), 0) : 0;
-        if (!$step) rs_flash('That code didn\'t match. Type the newest code your app shows for Recomp Store admin.', 'err');
+        if (!$step) rs_flash('That code didn\'t match. Type the newest code your app shows for RecompStore admin.', 'err');
         else {
             $codes = rs_new_recovery_codes();
             rs_db()->prepare('UPDATE users SET totp_secret = ?, totp_last = ?, totp_codes = ? WHERE id = ?')
@@ -104,6 +126,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($r['status'] === 401 ? 'Saved, but GitHub refused it. Make a new token and paste it again.' : 'Saved. GitHub didn\'t answer the check, so it\'s untested.'),
                      $r['status'] === 401 ? 'err' : 'ok');
         }
+    } elseif (($_POST['action'] ?? '') === 'translations') {
+        // (2.6) DeepL: descriptions and patch notes in each player's language. The key is a secret:
+        // never shown again, never logged, never in the catalog.
+        require_once __DIR__ . '/inc/translate.php';
+        $key = trim((string)($_POST['deepl_key'] ?? ''));
+        rs_set_setting('tr_on', !empty($_POST['tr_on']) ? '1' : '0');
+        $cap = (int)str_replace([',', '.', ' '], '', (string)($_POST['deepl_cap'] ?? ''));
+        if ($cap >= 1000) rs_set_setting('deepl_cap', (string)min($cap, 100000000));
+        if (!empty($_POST['tr_clear'])) { rs_set_setting('deepl_key', ''); rs_flash('The DeepL key is gone. Descriptions and patch notes show as they were written.'); }
+        elseif ($key === '') rs_flash('Saved.');
+        elseif (!preg_match('/^[0-9a-f-]{20,60}(:fx)?$/i', $key)) rs_flash('That doesn\'t look like a DeepL key. Copy it again from your DeepL account (Account, API Keys).', 'err');
+        else {
+            rs_set_setting('deepl_key', $key);
+            $u = rs_tr_usage();
+            rs_flash($u ? 'Saved. DeepL says this key has used ' . number_format($u[0]) . ' of ' . number_format($u[1]) . ' characters this month.'
+                        : 'Saved, but DeepL didn\'t accept it or didn\'t answer. Check the key and paste it again.', $u ? 'ok' : 'err');
+        }
+    } elseif (($_POST['action'] ?? '') === 'sgdb') {
+        // (2.8) SteamGridDB, for PC recomps' art: a secret, never shown again in full.
+        $key = trim((string)($_POST['sgdb_key'] ?? ''));
+        if (!empty($_POST['sgdb_clear'])) { rs_set_setting('sgdb_key', ''); rs_flash('The SteamGridDB key is gone.'); }
+        elseif ($key !== '' && !preg_match('/^[A-Za-z0-9]{20,64}$/', $key)) rs_flash('That doesn\'t look like a SteamGridDB API key. It\'s on steamgriddb.com, Preferences, API.', 'err');
+        elseif ($key !== '') { rs_set_setting('sgdb_key', $key); rs_log('settings', 'sgdb', 'key saved'); rs_flash('Saved. Add on the PC page now brings art.'); }
+        header('Location: settings.php#sgdb');
+        exit;
+    } elseif (($_POST['action'] ?? '') === 'art') {
+        // (3.4) The art picker's other sources: IGDB (a Twitch app's Client ID and Secret) and
+        // TheGamesDB (an API key). Secrets: never shown again in full, never logged.
+        require_once __DIR__ . '/inc/artsrc.php';
+        $msg = [];
+        if (!empty($_POST['igdb_clear'])) { rs_set_setting('igdb_client_id', ''); rs_set_setting('igdb_client_secret', ''); rs_kv_put('art:igdb-token', '{}'); $msg[] = 'The IGDB keys are gone.'; }
+        else {
+            $id = trim((string)($_POST['igdb_client_id'] ?? '')); $sec = trim((string)($_POST['igdb_client_secret'] ?? ''));
+            if ($id !== '' || $sec !== '') {
+                if (!preg_match('/^[A-Za-z0-9]{20,64}$/', $id ?: rs_art_igdb_id()) || !preg_match('/^[A-Za-z0-9]{20,64}$/', $sec ?: rs_art_igdb_secret())) $msg[] = 'IGDB needs both the Client ID and the Client Secret from your Twitch app (dev.twitch.tv, Your Console, Applications).';
+                else {
+                    if ($id !== '') rs_set_setting('igdb_client_id', $id);
+                    if ($sec !== '') rs_set_setting('igdb_client_secret', $sec);
+                    rs_log('settings', 'igdb', 'keys saved');
+                    $msg[] = rs_art_igdb_token(true) !== '' ? 'IGDB is on: Twitch accepted the keys.' : 'IGDB keys saved, but Twitch didn\'t accept them. Check both and paste them again.';
+                }
+            }
+        }
+        if (!empty($_POST['tgdb_clear'])) { rs_set_setting('tgdb_key', ''); $msg[] = 'The TheGamesDB key is gone.'; }
+        else {
+            $k = trim((string)($_POST['tgdb_key'] ?? ''));
+            if ($k !== '' && !preg_match('/^[A-Za-z0-9]{20,128}$/', $k)) $msg[] = 'That doesn\'t look like a TheGamesDB API key.';
+            elseif ($k !== '') {
+                rs_set_setting('tgdb_key', $k);
+                rs_log('settings', 'tgdb', 'key saved');
+                $j = rs_art_tgdb('/v1/Genres', []);
+                $msg[] = is_array($j) && (int)($j['code'] ?? 0) === 200 ? 'TheGamesDB is on' . (isset($j['remaining_monthly_allowance']) ? ', with ' . number_format((int)$j['remaining_monthly_allowance']) . ' searches left this month.' : '.') : 'TheGamesDB key saved, but TheGamesDB didn\'t accept it. Check it and paste it again.';
+            }
+        }
+        rs_flash($msg ? implode(' ', $msg) : 'Nothing to save. Paste a key first.', $msg && !preg_grep('/didn|doesn|needs/', $msg) ? 'ok' : 'err');
+        header('Location: settings.php#art');
+        exit;
     } elseif (($_POST['action'] ?? '') === 'discord') {
         // (2.3.0) Posts to a Discord channel when a publish goes out. The webhook is a secret: never
         // shown again in full, never logged, never in the catalog.
@@ -113,17 +192,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_log('settings', 'discord', 'webhook removed');
             rs_flash('The Discord webhook is gone. Publishing doesn\'t post anything now.');
         } elseif (($_POST['do'] ?? '') === 'test') {
-            $ok = rs_discord_send(['username' => 'Recomp Store', 'embeds' => [['title' => 'Recomp Store is connected', 'description' => 'New apps and updates will be posted here when you publish.', 'color' => 0x35D6F4, 'url' => rs_abs('/')]]], $why, 'test');
+            $ok = rs_discord_send(['username' => 'RecompStore', 'embeds' => [['title' => 'RecompStore is connected', 'description' => 'New apps and updates will be posted here when you publish.', 'color' => 0x35D6F4, 'url' => rs_abs('/')]]], $why, 'test');
             rs_log('settings', 'discord', $ok ? 'test posted' : 'test not posted: ' . $why);
             rs_flash($ok ? 'Sent. Look in the Discord channel.' : 'Not sent: ' . $why, $ok ? 'ok' : 'err');
         } elseif ($hook !== '' && !rs_discord_hook_ok($hook)) {
             rs_flash('That isn\'t a Discord webhook link. In Discord: the channel\'s settings, Integrations, Webhooks, Copy Webhook URL.', 'err');
         } else {
             if ($hook !== '') rs_set_setting('discord_webhook', $hook);
-            $posts = ['new' => !empty($_POST['discord_new']), 'update' => !empty($_POST['discord_update'])];
+            $posts = ['new' => !empty($_POST['discord_new']), 'update' => !empty($_POST['discord_update']), 'release' => !empty($_POST['discord_release'])];
             rs_set_setting('discord_posts', json_encode($posts));
             $what = array_keys(array_filter($posts));
-            rs_log('settings', 'discord', ($hook !== '' ? 'webhook saved; ' : '') . 'posts: ' . ($what ? implode(', ', str_replace(['new', 'update'], ['new apps', 'updates'], $what)) : 'none'));
+            rs_log('settings', 'discord', ($hook !== '' ? 'webhook saved; ' : '') . 'posts: ' . ($what ? implode(', ', str_replace(['new', 'update', 'release'], ['new apps', 'updates', 'GitHub releases'], $what)) : 'none'));
             rs_flash(rs_discord_hook_ok(rs_discord_hook()) ? 'Saved. Press Send a test to check it.' : 'Saved. Paste the webhook link to turn the posts on.');
         }
         header('Location: settings.php#discord');
@@ -173,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_set_setting('site_v2', $on ? 'all' : 'me');
         try {
             rs_catalog_set_site_v2($on);
-            rs_flash($on ? 'Saved. Everyone sees Recomp Store 2.0 on the website now.' : 'Saved. Only you see 2.0 on the website (while logged in here); everyone else sees it as before.');
+            rs_flash($on ? 'Saved. Everyone sees RecompStore 2.0 on the website now.' : 'Saved. Only you see 2.0 on the website (while logged in here); everyone else sees it as before.');
         } catch (Throwable $e) {
             rs_flash('Saved, but catalog.json couldn\'t be written: ' . $e->getMessage(), 'err');
         }
@@ -291,6 +370,46 @@ rs_head('Settings');
 ?>
 <section class="head-row"><div><h1>Settings</h1></div><a class="btn" href="log.php">Change log</a></section>
 <?php
+// (2.9) Maintenance mode: a switch for each side, its own message, and a preview link that lets this
+// browser see the real site while it's down for everyone else.
+$mt = rs_maint_state();
+$mSides = [
+    'ps5' => ['RecompStore', 'PS5 site', rtrim((string)rs_setting('site_url', 'https://recompstore.com'), '/') ?: 'https://recompstore.com'],
+    'pc' => ['RecompLauncher', 'PC site', 'https://recomplauncher.com'],
+];
+?>
+<section class="card" id="maintenance">
+  <h2>Maintenance mode<?php if ($mt['ps5']['on'] || $mt['pc']['on']): ?> <span class="pill warn">On</span><?php endif; ?></h2>
+  <p class="muted">Takes a site down for a while: every page shows only its logo and your message. The PS5 store and RecompLauncher apps keep reading their catalogs, so installed apps keep working. Search engines are told it's temporary, so the site keeps its place in search.</p>
+  <div class="maint-grid">
+  <?php foreach ($mSides as $side => [$brand, $what, $url]): $m = $mt[$side]; ?>
+    <form method="post" class="maint-box<?= $m['on'] ? ' is-on' : '' ?>" data-maint="<?= h($brand) ?>">
+      <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="maint"><input type="hidden" name="side" value="<?= $side ?>">
+      <div class="maint-head">
+        <h3><?= h($brand) ?> <small><?= h($what) ?> · <?= h(preg_replace('#^https?://#', '', $url)) ?></small></h3>
+        <?= $m['on'] ? '<span class="pill warn">Down</span>' : '<span class="pill ok">Up</span>' ?>
+      </div>
+      <label class="check maint-switch"><input type="checkbox" name="on" value="1" <?= $m['on'] ? 'checked' : '' ?>> <span>Take <?= h($brand) ?> down</span></label>
+      <label>Message
+        <textarea name="msg" rows="4" maxlength="1000" placeholder="We'll be back soon."><?= h($m['msg']) ?></textarea>
+      </label>
+      <small class="muted maint-note"><?php if ($m['on'] && $m['since']): ?>Down since <?= h(rs_date('M j, g:i a', $m['since'])) ?>. <?php endif; ?>Blank lines start a new paragraph; web addresses become links.</small>
+      <div class="maint-actions">
+        <button class="btn<?= $m['on'] ? '' : ' primary' ?>">Save</button>
+        <?php if ($m['on'] && $mt['token'] !== ''): ?><a class="btn" href="<?= h($url . '/?preview=' . $mt['token']) ?>" target="_blank" rel="noopener">See the real site</a><?php endif; ?>
+      </div>
+    </form>
+  <?php endforeach; ?>
+  </div>
+  <?php if ($mt['ps5']['on'] || $mt['pc']['on']): ?><p class="muted maint-foot">"See the real site" lets the browser it's opened in through for 12 hours, with a ribbon at the bottom. Don't share that link.</p><?php endif; ?>
+</section>
+<script>
+document.querySelectorAll('form[data-maint]').forEach((f) => f.addEventListener('submit', (e) => {
+  const on = f.querySelector('input[name=on]'), was = f.classList.contains('is-on');
+  if (on.checked && !was && !confirm('Take ' + f.dataset.maint + ' down? Every page will show only the logo and your message until you turn it back on.')) e.preventDefault();
+}));
+</script>
+<?php
 // (2.1) Security: the signer on the owner's PC, and two-step login.
 $keys = rs_sign_keys();
 $tokenOnce = (string)($_SESSION['signer_token_once'] ?? '');
@@ -309,11 +428,11 @@ unset($_SESSION['recovery_once']);
 <section class="card" id="signer">
   <h2>Signer <?= $keys ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
   <?php if ($keys): ?>
-  <p class="muted">Publish waits for Recomp Store Signer on your PC: it shows what changed, and only what you sign goes out. Beta zips need its signature too. Stores from 2.1 check every signature against your keys, so a break-in here can't push anything to them.</p>
+  <p class="muted">Publish waits for RecompStore Signer on your PC: it shows what changed, and only what you sign goes out. Beta zips need its signature too. Stores from 2.1 check every signature against your keys, so a break-in here can't push anything to them.</p>
   <p>Keys: <?php foreach ($keys as $k): ?><code><?= h($k['name']) ?> <?= h($k['id']) ?></code> <?php endforeach; ?></p>
-  <?php if ($waiting): ?><p class="warn"><?= $waiting === 1 ? '1 thing is' : $waiting . ' things are' ?> waiting for your signature. Open Recomp Store Signer on your PC.</p><?php endif; ?>
+  <?php if ($waiting): ?><p class="warn"><?= $waiting === 1 ? '1 thing is' : $waiting . ' things are' ?> waiting for your signature. Open RecompStore Signer on your PC.</p><?php endif; ?>
   <?php else: ?>
-  <p class="muted">Recomp Store Signer runs on your PC and keeps the signing key there. Make a token here, paste it into the signer (step 3), and from then on Publish waits for your signature.</p>
+  <p class="muted">RecompStore Signer runs on your PC and keeps the signing key there. Make a token here, paste it into the signer (step 3), and from then on Publish waits for your signature.</p>
   <?php endif; ?>
   <?php if ($tokenOnce !== ''): ?>
   <div class="once">
@@ -404,7 +523,21 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
 ?>
 <section class="card" id="whats-new">
   <h2>What's new <?= $wn ? '<span class="pill ok">' . h($wn['version']) . '</span>' : '<span class="pill">Not set</span>' ?></h2>
-  <p class="muted">What the store shows about its newest version, and the site's Get Recomp Store too. Lines starting with "- " are bullets; a blank line starts a new paragraph. It goes out with the signed catalog when you Publish. Recomp Store 2.2 and newer.</p>
+  <?php
+  // The store updates itself from its newest signed release on GitHub (elripalda/RecompStore).
+  $sv = '';
+  try {
+      $rel = rs_gh_releases('elripalda/RecompStore');
+      foreach (($rel['status'] === 200 ? (json_decode($rel['body'], true) ?: []) : []) as $r) {
+          if (!empty($r['draft']) || !empty($r['prerelease'])) continue;
+          $names = array_column((array)($r['assets'] ?? []), 'name');
+          if (in_array('PPSA92000.zip', $names, true) && in_array('PPSA92000.zip.sig', $names, true)) { $sv = ltrim((string)$r['tag_name'], 'vV'); break; }
+      }
+  } catch (Throwable $e) { /* GitHub not reachable: no warning */ }
+  if ($wn && $sv !== '' && ltrim((string)$wn['version'], 'vV') !== $sv): ?>
+  <p class="flash err">This is for <?= h($wn['version']) ?>, but the store's newest version is <?= h($sv) ?>. Players updating to <?= h($sv) ?> see GitHub's notes instead. Write it for <?= h($sv) ?>, or clear it.</p>
+  <?php endif; ?>
+  <p class="muted">What the store shows about its newest version, and the site's Get RecompStore too. Lines starting with "- " are bullets; a blank line starts a new paragraph. It goes out with the signed catalog when you Publish. RecompStore 2.2 and newer.</p>
   <div class="wn">
     <form method="post" class="wn-form" data-wn>
       <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="whats_new">
@@ -426,7 +559,7 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
 </section>
 <section class="card" id="tabs">
   <h2>Store tabs</h2>
-  <p class="muted">The parts of the store that get a tab in the store's top bar, in this order. Discover, Library and Settings are always there, and every part stays on Discover either way. Players can change theirs in the store's Customize. Recomp Store 2.2 and newer.</p>
+  <p class="muted">The parts of the store that get a tab in the store's top bar, in this order. Discover, Library and Settings are always there, and every part stays on Discover either way. Players can change theirs in the store's Customize. RecompStore 2.2 and newer.</p>
   <form method="post" data-tabs>
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="tabs">
     <ol class="tab-order">
@@ -453,7 +586,7 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
   <p class="muted">The store can download ShadowMountPlus for players, so they don't have to find it themselves. Pick the release you've tested: the site downloads it once to note its checksum, and stores take only that file, from drakmor's GitHub. It goes out with the signed catalog when you Publish.</p>
   <?php if ($pin): ?>
   <dl class="smp-pin">
-    <div><dt>Offered</dt><dd><?= h($pin['version']) ?><?= $pin['published'] !== '' ? ' <span class="muted">· released ' . h(date('M j, Y', strtotime($pin['published']))) . '</span>' : '' ?></dd></div>
+    <div><dt>Offered</dt><dd><?= h($pin['version']) ?><?= $pin['published'] !== '' ? ' <span class="muted">· released ' . h(rs_date('M j, Y', strtotime($pin['published']))) . '</span>' : '' ?></dd></div>
     <div><dt>File</dt><dd><code><?= h($pin['asset']) ?></code><?= $pin['elf'] !== '' ? ' › <code>' . h($pin['elf']) . '</code>' : '' ?> <span class="muted">· <?= h(number_format($pin['size'] / 1048576, 1)) ?> MB</span></dd></div>
     <div><dt>SHA-256</dt><dd><code class="hash"><?= h($pin['sha256']) ?></code></dd></div>
   </dl>
@@ -474,7 +607,7 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
       <?php foreach (array_slice($smpList, 0, 12) as $rel): $a = rs_smp_asset($rel); $tag = (string)$rel['tag_name']; $on = $pin && $pin['version'] === $tag; ?>
         <tr<?= $on ? ' class="on"' : '' ?>>
           <td><strong><?= h($tag) ?></strong><?= !empty($rel['prerelease']) ? ' <span class="pill">Pre-release</span>' : '' ?></td>
-          <td class="muted"><?= $rel['published_at'] !== '' ? h(date('M j, Y', strtotime((string)$rel['published_at']))) : '' ?></td>
+          <td class="muted"><?= $rel['published_at'] !== '' ? h(rs_date('M j, Y', strtotime((string)$rel['published_at']))) : '' ?></td>
           <td><?= $a ? '<code>' . h((string)$a['name']) . '</code> <span class="muted">' . h(number_format((int)($a['size'] ?? 0) / 1048576, 1)) . ' MB</span>' : '<span class="muted">No .elf or zip</span>' ?></td>
           <td><?php if ($on): ?><span class="pill ok">Offered</span><?php elseif ($a): ?>
             <form method="post" class="inline" data-smp-pin><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="smp_pin"><input type="hidden" name="tag" value="<?= h($tag) ?>"><button class="btn">Offer this one</button></form>
@@ -494,11 +627,11 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
 </section>
 <?php $v2all = rs_site_v2(); ?>
 <section class="card" id="site-v2">
-  <h2>Recomp Store 2.0 on the website</h2>
+  <h2>RecompStore 2.0 on the website</h2>
   <form method="post" class="choice">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="site_v2">
     <label class="check"><input type="radio" name="site_v2" value="me" <?= $v2all ? '' : 'checked' ?>> <span><strong>Only me (preview)</strong><small>Visitors see the site as it is today: games only, no categories, charts, My PS5 or Title IDs page. You see all of 2.0 while you're logged in here, with a Preview ribbon, and so does a browser linked to a PS5 (it has 2.0). Links from a PS5 (to link a phone or finish a bug report) work for everyone either way.</small></span></label>
-    <label class="check"><input type="radio" name="site_v2" value="all" <?= $v2all ? 'checked' : '' ?>> <span><strong>Everyone</strong><small>Turn this on when Recomp Store 2.0 is out. It changes catalog.json's site.v2 at once: nothing else waiting is published.</small></span></label>
+    <label class="check"><input type="radio" name="site_v2" value="all" <?= $v2all ? 'checked' : '' ?>> <span><strong>Everyone</strong><small>Turn this on when RecompStore 2.0 is out. It changes catalog.json's site.v2 at once: nothing else waiting is published.</small></span></label>
     <button class="btn">Save</button>
   </form>
 </section>
@@ -517,11 +650,11 @@ if ($find !== '') {
         ORDER BY tester DESC, last_seen DESC')->fetchAll();
 }
 $testerCount = (int)rs_db()->query('SELECT COUNT(*) FROM beta_installs WHERE tester = 1')->fetchColumn();
-$when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
+$when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
 ?>
 <section class="card" id="testers">
   <h2>Testers <?php if ($testerCount): ?><span class="count"><?= $testerCount ?></span><?php endif; ?></h2>
-  <p class="muted">A tester's store reads the test catalog: every app <?= rs_sign_on() ? 'as of your last signed Publish' : 'as you save it here, without Publish' ?>, including the ones set to Testers only (marked as testing). Everyone else gets the published catalog. Ask a tester for the Console ID in Recomp Store's Settings, under About.</p>
+  <p class="muted">A tester's store reads the test catalog: every app <?= rs_sign_on() ? 'as of your last signed Publish' : 'as you save it here, without Publish' ?>, including the ones set to Testers only (marked as testing). Everyone else gets the published catalog. Ask a tester for the Console ID in RecompStore's Settings, under About.</p>
   <form method="get" class="find-row" action="settings.php#testers">
     <input name="console" value="<?= h($find) ?>" maxlength="16" placeholder="Find a Console ID" autocomplete="off" spellcheck="false" class="mono">
     <button class="btn">Find</button><?php if ($find !== ''): ?> <a href="settings.php#testers">Show all</a><?php endif; ?>
@@ -530,7 +663,7 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
   <form method="post">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="testers"><input type="hidden" name="console" value="<?= h($find) ?>">
     <div class="table-wrap"><table class="stats testers">
-      <thead><tr><th>Tester</th><th>Console ID</th><th>Recomp Store</th><th>Last seen</th><th>First seen</th></tr></thead>
+      <thead><tr><th>Tester</th><th>Console ID</th><th>RecompStore</th><th>Last seen</th><th>First seen</th></tr></thead>
       <tbody>
       <?php foreach ($consoles as $c): $id = (string)$c['install_id']; ?>
         <tr<?= (int)$c['tester'] ? ' class="on"' : '' ?>>
@@ -546,7 +679,7 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <button class="btn">Save testers</button>
   </form>
   <?php else: ?>
-  <p class="muted"><?= $find !== '' ? 'No console\'s ID starts with ' . h($find) . '.' : 'No consoles yet. A console shows up here once Recomp Store 2.0 opens on it.' ?></p>
+  <p class="muted"><?= $find !== '' ? 'No console\'s ID starts with ' . h($find) . '.' : 'No consoles yet. A console shows up here once RecompStore 2.0 opens on it.' ?></p>
   <?php endif; ?>
 </section>
 <section class="card">
@@ -566,6 +699,51 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <div class="actions"><button class="btn">Save the token</button><?php if ($hasTok): ?><label class="check"><input type="checkbox" name="github_clear" value="1"> Remove the saved token</label><?php endif; ?></div>
   </form>
 </section>
+<section class="card" id="translations">
+  <?php require_once __DIR__ . '/inc/translate.php'; $trKey = rs_tr_key() !== ''; $trOn = rs_tr_on(); $trErr = (string)rs_setting('deepl_last_error', ''); ?>
+  <h2>Translations <?= $trOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <p class="muted">The store and the website show their own words in each player's language. What you and developers write (descriptions, patch notes) can follow too: with a DeepL key, the site translates each text the first time someone asks for it in a language, keeps it, and gives everyone after that the kept copy. Notes written in another language (Chinese patch notes, say) come out in English for English players. This month: <?= number_format(rs_tr_used()) ?> of <?= number_format(rs_tr_cap()) ?> characters.<?= $trErr !== '' ? ' Last problem: ' . h($trErr) . '.' : '' ?></p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="translations">
+    <label><span>DeepL API key</span><input type="text" name="deepl_key" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $trKey ? 'A key is saved. Paste a new one to replace it.' : 'Paste a key' ?>"><small>Make a free DeepL API account (deepl.com/pro-api, the Free plan: 500,000 characters a month), then Account, API Keys, and paste the key here. Keep it to yourself.</small></label>
+    <label>Most characters a month<input name="deepl_cap" value="<?= h(number_format(rs_tr_cap())) ?>" inputmode="numeric" class="mono"><small>The site stops asking DeepL past this, and shows the original text until next month.</small></label>
+    <label class="check"><input type="checkbox" name="tr_on" value="1" <?= rs_setting('tr_on', '1') === '1' ? 'checked' : '' ?>> Translate descriptions and patch notes</label>
+    <div class="actions"><button class="btn">Save</button><?php if ($trKey): ?><label class="check"><input type="checkbox" name="tr_clear" value="1"> Remove the saved key</label><?php endif; ?></div>
+  </form>
+</section>
+<section class="card" id="sgdb">
+  <h2>SteamGridDB <?= rs_sgdb_key() !== '' ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <p class="muted">Cover art, backdrops, logos and icons for PC recomps (the PC page's Add and Get art buttons). Make a free account on steamgriddb.com, then Preferences, API, and paste the key here. Keep it to yourself.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sgdb">
+    <label><span>API key</span><input type="text" name="sgdb_key" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= rs_sgdb_key() !== '' ? 'A key is saved. Paste a new one to replace it.' : 'Paste the key' ?>"></label>
+    <div class="actions"><button class="btn">Save</button><?php if (rs_sgdb_key() !== ''): ?><label class="check"><input type="checkbox" name="sgdb_clear" value="1"> Remove the key</label><?php endif; ?></div>
+  </form>
+</section>
+<?php require_once __DIR__ . '/inc/artsrc.php'; $igOn = rs_art_igdb_id() !== '' && rs_art_igdb_secret() !== ''; $tgOn = rs_art_tgdb_key() !== ''; ?>
+<section class="card" id="art">
+  <h2>Art sources <?= $igOn || $tgOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
+  <p class="muted">More places for the Find art window on the PC and PS5 game pages, next to SteamGridDB. Libretro (retro box art) and Steam (PC releases) need no key and are always on. All of these are free. Keep the keys to yourself.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="art">
+    <div class="grid2">
+      <div>
+        <h3>IGDB <?= $igOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h3>
+        <p class="muted small-note">Official box art, artwork and screenshots, and every version of a game by console. On dev.twitch.tv, sign in, Your Console, Register Your Application (OAuth redirect http://localhost, category Application Integration, Confidential), then copy its Client ID and make a New Secret.</p>
+        <label><span>Client ID</span><input type="text" name="igdb_client_id" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" placeholder="<?= rs_art_igdb_id() !== '' ? 'Saved. Paste a new one to replace it.' : 'Paste the Client ID' ?>"></label>
+        <label><span>Client Secret</span><input type="text" name="igdb_client_secret" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= rs_art_igdb_secret() !== '' ? 'Saved. Paste a new one to replace it.' : 'Paste the Client Secret' ?>"></label>
+        <?php if ($igOn): ?><label class="check"><input type="checkbox" name="igdb_clear" value="1"> Remove the IGDB keys</label><?php endif; ?>
+      </div>
+      <div>
+        <h3>TheGamesDB <?= $tgOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h3>
+        <p class="muted small-note">Front and back box art by region, fanart, banners and clear logos. Make an account on thegamesdb.net and request an API key on its forum. Its keys have a monthly number of searches; the site remembers every answer for a week so a game is only looked up once.</p>
+        <label><span>API key</span><input type="text" name="tgdb_key" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $tgOn ? 'Saved. Paste a new one to replace it.' : 'Paste the key' ?>"></label>
+        <?php if ($tgOn): ?><label class="check"><input type="checkbox" name="tgdb_clear" value="1"> Remove the key</label><?php endif; ?>
+      </div>
+    </div>
+    <div class="actions"><button class="btn">Save</button></div>
+  </form>
+</section>
 <section class="card" id="discord">
   <?php $dHook = rs_discord_hook(); $dOn = rs_discord_hook_ok($dHook); $dPosts = json_decode((string)rs_setting('discord_posts', '{"new":true,"update":true}'), true) ?: []; ?>
   <h2>Discord posts <?= $dOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
@@ -576,6 +754,7 @@ $when = fn(string $t) => date('M j, Y g:i a', strtotime($t));
     <div class="checks">
       <label class="check"><input type="checkbox" name="discord_new" value="1" <?= !empty($dPosts['new']) ? 'checked' : '' ?>> New apps</label>
       <label class="check"><input type="checkbox" name="discord_update" value="1" <?= !empty($dPosts['update']) ? 'checked' : '' ?>> Updates (a new version)</label>
+      <label class="check"><input type="checkbox" name="discord_release" value="1" <?= !empty($dPosts['release']) ? 'checked' : '' ?>> New releases on GitHub, as they come out (no publish needed): a post when a developer releases a new version of an app in the store</label>
     </div>
     <div class="actions"><button class="btn">Save</button><?php if ($dOn): ?><button class="btn" name="do" value="test">Send a test</button><label class="check"><input type="checkbox" name="discord_clear" value="1"> Remove the webhook</label><?php endif; ?></div>
   </form>

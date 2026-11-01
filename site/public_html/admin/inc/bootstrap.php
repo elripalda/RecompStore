@@ -1,8 +1,18 @@
 <?php
-// Recomp Store admin: shared setup for every admin page.
+// RecompStore admin: shared setup for every admin page.
 declare(strict_types=1);
 
 const RS_VERSION = '1.5.0';
+
+// (2.6) Times are kept in UTC (the database's NOW() and PHP's own), and shown in the admin's own
+// time zone: Phoenix, which keeps MST all year. rs_date() is date() in that zone.
+date_default_timezone_set('UTC');
+const RS_TZ = 'America/Phoenix';
+function rs_date(string $format, int|false|null $ts = null): string {
+    static $tz = null;
+    $tz ??= new DateTimeZone(RS_TZ);
+    return (new DateTimeImmutable("@" . (int)($ts ?? time())))->setTimezone($tz)->format($format);
+}
 
 // Where the site's public files live (public_html) and the admin folder.
 define('RS_PUBLIC', dirname(__DIR__, 2));
@@ -27,18 +37,83 @@ function rs_config(): ?array {
     return is_array($c) ? $c : null;
 }
 
+// (3.3) The tables only need making once. "CREATE TABLE IF NOT EXISTS" ran on nearly every request
+// (a dozen or more for the launcher's), each one costly for the host's database; now each one runs
+// once and is remembered in recompstore-private/schema-done.txt (a changed one runs once again).
+final class RsPDO extends PDO {
+    private static ?array $done = null;
+    private static function file(): string { return dirname(RS_PUBLIC) . '/recompstore-private/schema-done.txt'; }
+    public function exec(string $statement): int|false {
+        if (stripos(ltrim($statement), 'CREATE TABLE IF NOT EXISTS') !== 0) return parent::exec($statement);
+        $k = md5((string)preg_replace('/\s+/', ' ', trim($statement)));
+        if (self::$done === null) {
+            self::$done = [];
+            $t = @file_get_contents(self::file());
+            if (is_string($t)) foreach (explode("\n", $t) as $l) if ($l !== '') self::$done[$l] = true;
+        }
+        if (isset(self::$done[$k])) return 0;
+        $r = parent::exec($statement);
+        self::$done[$k] = true;
+        $d = dirname(self::file());
+        if (!is_dir($d)) @mkdir($d, 0755, true);
+        @file_put_contents(self::file(), $k . "\n", FILE_APPEND | LOCK_EX);
+        return $r;
+    }
+}
+
 function rs_db(): PDO {
     static $pdo = null;
     if ($pdo) return $pdo;
     $c = rs_config();
     if (!$c) { header('Location: setup.php'); exit; }
-    $pdo = new PDO(
-        'mysql:host=' . $c['db_host'] . ';dbname=' . $c['db_name'] . ';charset=utf8mb4',
-        $c['db_user'], $c['db_pass'],
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
-    );
-    return $pdo;
+    // The host's database sometimes turns a connection away for a moment ([2002] Operation not
+    // permitted) when the site is busy. A short wait and another try nearly always gets in.
+    // (3.4) Connections are kept open and reused between requests (persistent). The host turns away new
+    // connections opened too fast ([2002] Operation not permitted), but a reused one never needs a new one.
+    $wait = [0, 40000, 120000, 250000, 500000, 900000];
+    $persist = true;
+    foreach ($wait as $i => $us) {
+        if ($us) usleep($us + random_int(0, 30000));
+        try {
+            $pdo = new RsPDO(
+                'mysql:host=' . $c['db_host'] . ';dbname=' . $c['db_name'] . ';charset=utf8mb4',
+                $c['db_user'], $c['db_pass'],
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_TIMEOUT => 5, PDO::ATTR_PERSISTENT => $persist]
+            );
+            if ($persist) {
+                // A reused connection may still hold something from the request before it.
+                $pdo->exec('ROLLBACK');
+                $pdo->exec('DO RELEASE_ALL_LOCKS()');
+            }
+            if ($i > 0 && random_int(1, 20) === 1) rs_errlog('db-retry-ok', 'in after ' . ($i + 1) . ' tries (1 in 20 logged)');
+            return $pdo;
+        } catch (PDOException $e) {
+            $pdo = null;
+            if (in_array((int)$e->getCode(), [1040, 1203], true)) $persist = false; // too many kept open: back to one per request
+            if ($i === count($wait) - 1 || !in_array((int)$e->getCode(), [2002, 2006, 1040, 1203], true)) throw $e;
+        }
+    }
+    throw new RuntimeException('No database connection.');
 }
+
+// What went wrong behind a 5xx, kept outside the website (admin/diag-db.php shows the latest).
+function rs_errlog(string $where, $e): void {
+    try {
+        $f = dirname(RS_PUBLIC) . '/recompstore-private/db-errors.log';
+        if (is_file($f) && filesize($f) > 2000000) @rename($f, $f . '.1');
+        $msg = $e instanceof Throwable ? get_class($e) . ': ' . $e->getMessage() . ' @' . basename($e->getFile()) . ':' . $e->getLine() : (string)$e;
+        @file_put_contents($f, gmdate('c') . ' ' . $where . ' ' . ($_SERVER['REQUEST_METHOD'] ?? '') . ' ' . substr((string)($_SERVER['REQUEST_URI'] ?? ''), 0, 100) . ' | ' . str_replace("\n", ' ', substr($msg, 0, 400)) . "\n", FILE_APPEND | LOCK_EX);
+    } catch (Throwable $x) { /* never in the way */ }
+}
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) rs_errlog('fatal', $e['message'] . ' @' . basename($e['file']) . ':' . $e['line']);
+});
+set_exception_handler(function (Throwable $e) {
+    rs_errlog('uncaught', $e);
+    if (!headers_sent()) http_response_code(500);
+    echo 'Something went wrong. Try again in a moment.';
+});
 
 function rs_session(): void {
     if (session_status() === PHP_SESSION_ACTIVE) return;
@@ -98,11 +173,13 @@ function rs_game_defaults(): array {
         'version' => '', 'build' => 1, 'released' => '', 'size' => '', 'needs' => 'Xbox 360 ISO',
         'source' => 'github', 'repo' => '', 'asset' => '', 'url' => '', 'sha256' => '',
         // When the release only has a bigger zip (a source archive): where the game's own zip
-        // is inside it, its whole name there (* and ? allowed). Needs Recomp Store 1.0.4.
+        // is inside it, its whole name there (* and ? allowed). Needs RecompStore 1.0.4.
         'inside' => '',
         // (2.5.1) The title ID of the app in its zip, when it's another app's (two releases with
         // the same ID): the store installs it under this entry's ID instead. Empty: the same.
         'zip_id' => '',
+        // (2.6) Not plug and play: what the player does by hand (FTP, a PC step), shown on its page.
+        'manual' => '',
         'icon' => '', 'hero' => '', 'hero_web' => '',
         'focus_x' => 50, 'focus_y' => 30, 'zoom' => 100,
         // A logo in place of the name: where it sits on the banner (b) and the game page (p),
@@ -110,7 +187,7 @@ function rs_game_defaults(): array {
         'logo' => '', 'logo_bx' => 0, 'logo_by' => 0, 'logo_bs' => 100, 'logo_px' => 0, 'logo_py' => 0, 'logo_ps' => 100,
         'featured' => false, 'hidden' => false,
         'setup' => false, 'data_dir' => '', 'slots' => '',
-        // The oldest Recomp Store that can install it ('' for any; see rs_min_store()).
+        // The oldest RecompStore that can install it ('' for any; see rs_min_store()).
         'min_store' => '',
         // Coming soon (store 1.0.6): listed, with its art and an optional date, but not installable yet.
         'soon' => false, 'date' => '',
@@ -140,6 +217,14 @@ function rs_game_defaults(): array {
         // (2.1) The current build's notes for testers and when it went up, and the builds before it
         // ([{file, version, sha256, size, notes, at}], newest first) testers can go back to.
         'beta_notes' => '', 'beta_at' => '', 'beta_history' => [],
+        // (2.7.2) A developer's beta from a GitHub pre-release: beta_file is 'gh:<tag>/<asset>', and this its download.
+        'beta_url' => '',
+        // (2.7.1) On recompstore.com/beta (public), testers get a code there by signing in with Discord
+        // (discord), and at most this many codes go out that way (limit; 0: no limit).
+        'beta_public' => false, 'beta_discord' => false, 'beta_limit' => 0, 'beta_extra' => false,
+        // (2.6) Screenshots ([{url, thumb}] in /media), a YouTube video ID, and its developer page:
+        // '' = matched by author, '-' = none, else a developer's slug (admin/inc/pages.php).
+        'screens' => [], 'video' => '', 'dev' => '',
     ];
 }
 
@@ -158,7 +243,7 @@ function rs_clean_links($in): array {
     return $out;
 }
 
-// The oldest Recomp Store a game needs: what the admin set, and at least 1.0.3 when it
+// The oldest RecompStore a game needs: what the admin set, and at least 1.0.3 when it
 // uses something older stores can't do (a zip name with * or ?, a disc image copied as it
 // is), 1.0.4 when its zip is inside the release's zip. Stores before 1.0.3 never see a
 // game that needs 1.0.3 or newer: publish lists those apart, in newerStoreApps, which those
@@ -174,6 +259,7 @@ const RS_7Z_FROM = '1.9.1';
 // (2.0.1) A Title Update copied in as it is (raw), for a port whose own installer reads it (GTA IV).
 const RS_RAW_FROM = '2.0.1';
 const RS_ZIPID_FROM = '2.5.1'; // (2.5.1) installed under another title ID than its zip's
+const RS_FOLDER_FROM = '2.6.0'; // (2.6) a whole folder of the player's as game files
 // (2.0) What only the 2.0 store reads: an app that isn't a game (Emulators, Apps, Tools) needs it,
 // and anything that needs it is published apart, in v2Apps, which 1.x stores never read.
 const RS_V2_FROM = '1.9.1';
@@ -198,6 +284,7 @@ function rs_min_store(array $g): string {
             $kind = $sl['kind'] ?? 'iso';
             if ($kind === 'file') $needs(RS_FILE_FROM);
             elseif ($kind === 'arcade') $needs(RS_ARCADE_FROM);
+            elseif ($kind === 'folder') $needs(RS_FOLDER_FROM); // (2.6)
             elseif (!in_array($kind, ['iso', 'stfs'], true)) $needs(RS_GATED_FROM);
             // A set-up file, or a Title Update the store downloads itself (store 1.0.8).
             if (($sl['ready'] ?? '') !== '' || ($sl['updateSha1'] ?? '') !== '' || ($sl['updateId'] ?? '') !== '') $needs(RS_READY_FROM);
@@ -260,7 +347,7 @@ function rs_clean_tabs($in): array {
     return $out;
 }
 // (2.2) What's new in the store, as the admin writes it in Settings: shown in the store (and on the
-// site's Get Recomp Store) for that version. The body is plain text: lines starting with "- " are
+// site's Get RecompStore) for that version. The body is plain text: lines starting with "- " are
 // bullets, a blank line starts a new paragraph. null when it isn't set.
 const RS_WHATS_NEW_MAX = 4000;
 function rs_whats_new(): ?array {
@@ -359,7 +446,10 @@ function rs_slots_error(array $slots): ?string {
         if (in_array($key, $keys, true)) return "$n: another file already uses the key $key.";
         $keys[] = $key;
         $kind = $sl['kind'] ?? 'iso';
-        if (!in_array($kind, ['iso', 'stfs', 'image', 'file', 'arcade'], true)) return "$n: kind has to be iso, stfs, image, file or arcade.";
+        if (!in_array($kind, ['iso', 'stfs', 'image', 'file', 'arcade', 'folder'], true)) return "$n: kind has to be iso, stfs, image, file, arcade or folder.";
+        // (2.6) A whole folder: pick is one name (a pattern) the right folder has at its top.
+        if ($kind === 'folder' && isset($sl['pick']) && $sl['pick'] !== '' && (!is_string($sl['pick']) || strlen($sl['pick']) > 128 || preg_match('#[/\\\\\x00-\x1f\x7f]#', $sl['pick'])))
+            return "$n: pick is the name of a file the right folder has at its top, like liblist.gam (no / or \\).";
         if (isset($sl['ready']) && $sl['ready'] !== '' && (!is_string($sl['ready']) || strlen($sl['ready']) > 200 || $sl['ready'][0] === '/' || substr($sl['ready'], -1) === '/' || preg_match('#(^|/)\.\.?(/|$)|//|\\\\|[\x00-\x1f\x7f]#', $sl['ready'])))
             return "$n: ready is a file inside the slot's folder, like Default.xexp or Data/GameLogic.dllp.";
         foreach (['updateId', 'updateSha1'] as $f)
@@ -396,6 +486,10 @@ function rs_slots_error(array $slots): ?string {
         if (isset($sl['raw']) && !is_bool($sl['raw'])) return "$n: raw is true or false.";
         if (!empty($sl['raw']) && ($kind !== 'stfs' || !empty($sl['multiple']))) return "$n: raw is for one Title Update (kind stfs): the file is put in as it is, not unpacked.";
         if (!empty($sl['raw']) && isset($sl['name']) && $sl['name'] !== '' && !$leaf($sl['name'])) return "$n: name has to be one file name, with no / or \\ (like TU_1A581VI_000000K000000.0000000000205).";
+        // (2.7.1) The disc release a Title Update has to be for (its header's media ID); store 2.7.1+.
+        if (isset($sl['media']) && $sl['media'] !== '' && (!is_string($sl['media']) || !preg_match('/^[0-9A-Fa-f]{8}$/', $sl['media'])))
+            return "$n: media is the media ID the Title Update has to be for, 8 hex digits (like 6AC07221).";
+        if (isset($sl['media']) && $sl['media'] !== '' && $kind !== 'stfs') return "$n: media is only for a Title Update (kind stfs).";
         if ($kind !== 'file') continue;
         foreach (['name', 'made'] as $f) if (isset($sl[$f]) && $sl[$f] !== '' && !$leaf($sl[$f])) return "$n: $f has to be one file name, with no / or \\ (like DIABDAT.MPQ).";
         foreach (['ext', 'pick', 'also'] as $f) if (isset($sl[$f]) && (!is_string($sl[$f]) || preg_match('#[/\\\\\x00-\x1f\x7f]#', $sl[$f]))) return "$n: $f is names or patterns only, with no / or \\.";
@@ -422,7 +516,7 @@ function rs_clean_sections($in): array {
     $out = [];
     foreach (is_array($in) ? $in : [] as $s) {
         if (!is_array($s) || count($out) >= 32) continue;
-        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight', 'category', 'top', 'trending', 'new', 'updated', 'liked', 'collection'], true) ? $s['type'] : null;
+        $type = in_array($s['type'] ?? '', ['games', 'soon', 'spotlight', 'category', 'top', 'trending', 'new', 'updated', 'liked', 'collection', 'developer'], true) ? $s['type'] : null;
         if (!$type) continue;
         $title = mb_substr(trim((string)($s['title'] ?? '')), 0, 60);
         $id = fn($v) => is_string($v) && preg_match('/^[A-Za-z0-9_-]{3,32}$/', $v) ? $v : null;
@@ -449,6 +543,13 @@ function rs_clean_sections($in): array {
             $row = ['type' => 'category', 'title' => $title, 'layout' => $layout, 'category' => rs_category((string)($s['category'] ?? 'games'))];
             rs_clean_section_sort($s, $row);
             $out[] = $row;
+            continue;
+        }
+        if ($type === 'developer') {
+            // (2.7.3) One developer, as a card with their apps (the site; the store from 2.7.2 on its
+            // developer pages, and older stores leave it out).
+            $dev = is_string($s['dev'] ?? null) && preg_match('/^[a-z0-9-]{1,40}$/', $s['dev']) ? $s['dev'] : null;
+            if ($dev) $out[] = ['type' => 'developer', 'title' => $title, 'dev' => $dev];
             continue;
         }
         if ($type === 'spotlight') {
@@ -570,7 +671,37 @@ function rs_save_game(array $g, ?string $oldId = null): void {
     }
 }
 
+// (3.3) Settings: the admin always reads the database; everything else (the website, the stores,
+// the launchers) reads a copy of the whole table kept on disk for a minute, so most requests don't
+// open a database connection just to read a setting.
+function rs_settings_file(): string { return dirname(RS_PUBLIC) . '/recompstore-private/settings-cache.php'; }
+function rs_settings_cached(): ?array {
+    $all = $GLOBALS['rs_settings_all'] ?? null;
+    if ($all !== null) return $all;
+    if (str_contains((string)($_SERVER['SCRIPT_NAME'] ?? ''), '/admin/') || PHP_SAPI === 'cli') return null;
+    $f = rs_settings_file();
+    $age = is_file($f) ? time() - (int)@filemtime($f) : PHP_INT_MAX;
+    if ($age < 60) {
+        $x = @include $f;
+        if (is_array($x)) return $GLOBALS['rs_settings_all'] = $x;
+    }
+    try {
+        $x = [];
+        foreach (rs_db()->query('SELECT k, v FROM settings') as $r) $x[(string)$r['k']] = (string)$r['v'];
+        $d = dirname($f);
+        if (!is_dir($d)) @mkdir($d, 0755, true);
+        $tmp = $f . '.' . getmypid();
+        if (@file_put_contents($tmp, '<?php return ' . var_export($x, true) . ';') !== false) @rename($tmp, $f);
+        return $GLOBALS['rs_settings_all'] = $x;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+function rs_settings_forget(): void { unset($GLOBALS['rs_settings_all']); @unlink(rs_settings_file()); }
+
 function rs_setting(string $k, ?string $default = null): ?string {
+    $all = rs_settings_cached();
+    if ($all !== null) return array_key_exists($k, $all) ? $all[$k] : $default;
     $st = rs_db()->prepare('SELECT v FROM settings WHERE k = ?');
     $st->execute([$k]);
     $v = $st->fetchColumn();
@@ -579,6 +710,7 @@ function rs_setting(string $k, ?string $default = null): ?string {
 
 function rs_set_setting(string $k, string $v): void {
     rs_db()->prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)')->execute([$k, $v]);
+    rs_settings_forget();
 }
 
 // ---- Images -------------------------------------------------------------------
@@ -672,6 +804,7 @@ function rs_app_entry(array $g, int $order): array {
     }
     if (trim((string)$g['inside']) !== '') $app['source']['inside'] = trim((string)$g['inside']);
     if (($zid = rs_zip_id($g)) !== '') $app['titleId'] = $zid; // (2.5.1)
+    if (trim((string)($g['manual'] ?? '')) !== '') $app['manualSetup'] = mb_substr(trim((string)$g['manual']), 0, 500); // (2.6)
     $links = rs_clean_links($g['links']);
     if ($links) $app['links'] = $links;
     $saves = rs_saves_list((string)$g['saves']);
@@ -695,6 +828,8 @@ function rs_app_entry(array $g, int $order): array {
         $app['mods'] = $mods;
         if (($g['mods_dir'] ?? '') !== '' && rs_mods_dir_ok((string)$g['mods_dir'])) $app['modsDir'] = (string)$g['mods_dir'];
     }
+    // (2.6) Screenshots, a video and its developer page. Older stores and the PS5 store skip them.
+    $app += rs_app_pages($g);
     return $app;
 }
 
@@ -753,6 +888,7 @@ function rs_build_catalog(bool $testing = false): array {
     $sections = [];
     foreach (rs_discover_sections() as $s) {
         if ($s['type'] === 'spotlight' && !in_array($s['game'], $listed, true)) continue;
+        if ($s['type'] === 'developer' && !isset(rs_developers()[$s['dev']])) continue;
         if (isset($s['sort'])) {
             $facts ??= rs_sort_facts();
             $s = rs_section_resolved($s, $pool, $facts);
@@ -772,6 +908,10 @@ function rs_build_catalog(bool $testing = false): array {
             'tagline' => rs_setting('tagline', 'Recompiled games, native on PS5.'),
             'payload' => rs_setting('payload_url', ''),
             'discord' => rs_setting('discord_url', ''),
+            // (3.1g) RecompLauncher's Settings > Beta buttons; the main invite until they're set.
+            'discord_beta' => rs_setting('discord_beta_url', ''),
+            'discord_bugs' => rs_setting('discord_bugs_url', ''),
+            'discord_ideas' => rs_setting('discord_ideas_url', ''),
             'kofi' => rs_setting('kofi_url', 'https://ko-fi.com/ripalda'),
             // (2.0) Whether the website shows its 2.0 side to everyone (true) or only to the
             // logged-in admin as a preview (false). Settings changes it in place, no Publish needed.
@@ -780,7 +920,7 @@ function rs_build_catalog(bool $testing = false): array {
         'featured' => $featured,
         'apps' => $apps,
         'newerStoreApps' => $newer,
-        // Read by Recomp Store 1.0.6 and newer, and the site; older stores skip them.
+        // Read by RecompStore 1.0.6 and newer, and the site; older stores skip them.
         'comingSoon' => $soon,
         // (2.0) Read only by the 2.0 store, and the site when its 2.0 side is on.
         'featuredV2' => $featuredV2,
@@ -789,7 +929,7 @@ function rs_build_catalog(bool $testing = false): array {
         // (2.1) How each category's page is sorted, and Discover's header; older stores skip them.
         'categories' => array_map(fn($m) => ['sort' => $m], rs_category_sorts()),
         'discover' => ['sections' => $sections, 'header' => rs_discover_header($listed)],
-    ] + rs_catalog_v22() + rs_catalog_v23($listed);
+    ] + rs_catalog_v22() + rs_catalog_v23($listed) + rs_catalog_pages();
 }
 
 // (2.2) The store's default tabs (only once set in Settings), the ShadowMountPlus it offers
@@ -862,9 +1002,12 @@ function rs_publish(): int {
         rs_write_pending('catalog-test', rs_build_catalog(true));
         rs_log('publish', 'catalog', 'waiting for the signer');
     } else {
+        $before = json_decode((string)@file_get_contents(RS_CATALOG), true) ?: [];
         rs_write_catalog($cat);
         rs_after_publish($cat);
+        rs_indexnow_after_publish($before, $cat);
         rs_log('publish', 'catalog', 'unsigned (no signer set up)');
+        rs_dev_write_public();
     }
     return count($cat['apps']) + count($cat['newerStoreApps']) + count($cat['v2Apps']);
 }
@@ -916,6 +1059,8 @@ function rs_submission_columns(): void {
     rs_report_tables();
     $db = rs_db();
     if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'data'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN data MEDIUMTEXT NULL');
+    // (2.7.3) Sent in from a developer's hub: their account.
+    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'dev_account'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN dev_account INT NULL, ADD INDEX (dev_account)');
     if (!$db->query("SHOW COLUMNS FROM inbox_pictures LIKE 'role'")->fetch()) $db->exec("ALTER TABLE inbox_pictures ADD COLUMN role VARCHAR(8) NOT NULL DEFAULT ''");
     rs_inbox_category_column();
     $done = true;
@@ -932,10 +1077,11 @@ function rs_inbox_category_column(): void {
     $done = true;
 }
 
-function rs_inbox_new_count(): int {
+// (3.7) Submissions are counted on their own (they live under Developers): $subs = true.
+function rs_inbox_new_count(bool $subs = false): int {
     try {
         rs_inbox_table();
-        return (int)rs_db()->query("SELECT COUNT(*) FROM inbox WHERE status = 'new'")->fetchColumn();
+        return (int)rs_db()->query("SELECT COUNT(*) FROM inbox WHERE status = 'new' AND kind " . ($subs ? "= 'submit'" : "<> 'submit'"))->fetchColumn();
     } catch (Throwable $e) {
         return 0;
     }
@@ -954,7 +1100,7 @@ function rs_ip_hash(): string {
 
 // ---- Beta: games only testers with a code get ---------------------------------------------
 // A beta game is left out of the public catalog. You make codes for it (8 digits, shown as
-// 12-345-678); a console that redeems one in Recomp Store 1.1.0 gets the game in its library,
+// 12-345-678); a console that redeems one in RecompStore 1.1.0 gets the game in its library,
 // and downloads its zip from this site (RS_BETA_DIR), never from a public link. One console
 // per code: the store install that redeems it keeps it, until you cancel the code.
 
@@ -1095,12 +1241,14 @@ function rs_r2_signing_key(array $c, string $day): string {
 
 // A link to GET (or HEAD) an object for $ttl seconds, signed in the address (no headers needed:
 // the PS5's store asks for it in pieces with Range, which isn't signed).
-function rs_r2_presign(array $c, string $method, string $key, int $ttl, ?int $now = null): string {
+function rs_r2_presign(array $c, string $method, string $key, int $ttl, ?int $now = null, array $extra = []): string {
     $now ??= time();
     $amz = gmdate('Ymd\THis\Z', $now);
     $scope = gmdate('Ymd', $now) . '/' . $c['region'] . '/s3/aws4_request';
     $q = ['X-Amz-Algorithm' => 'AWS4-HMAC-SHA256', 'X-Amz-Credential' => $c['key'] . '/' . $scope, 'X-Amz-Date' => $amz,
           'X-Amz-Expires' => (string)$ttl, 'X-Amz-SignedHeaders' => 'host'];
+    // (3.1g) Signed extras, like response-content-disposition for a download's own name.
+    $q += $extra;
     ksort($q, SORT_STRING);
     $qs = implode('&', array_map(fn($k, $v) => rawurlencode($k) . '=' . rawurlencode($v), array_keys($q), $q));
     $path = rs_r2_path($c, $key);
@@ -1180,6 +1328,13 @@ function rs_r2_beta_copy(array $g): ?array {
 }
 
 // A beta game as the store reads it, for one install: downloads come from this site, signed for it.
+// (2.7.3) Whether testers with a code get a beta build of this game: a Beta game (testers only),
+// or a game that's out for everyone with "Also a beta build for testers" ticked (store 2.7.2 offers
+// it in the game's Versions; older stores leave it out).
+function rs_has_beta(array $g): bool {
+    return !empty($g['beta']) || (!empty($g['beta_extra']) && (string)($g['beta_file'] ?? '') !== '');
+}
+
 function rs_beta_entry(array $g, string $install, int $order): array {
     $app = rs_app_entry($g, $order);
     $app['source'] = ['type' => 'url'];
@@ -1189,6 +1344,8 @@ function rs_beta_entry(array $g, string $install, int $order): array {
     $r2 = rs_r2();
     $copy = $r2 && rs_setting('r2_on', '1') === '1' ? rs_r2_beta_copy($g) : null;
     if ($copy) $app['url'] = rs_r2_presign($r2, 'GET', (string)$copy['key'], 43200);
+    // (2.7.2) A developer's beta build from their own GitHub pre-release: straight from GitHub.
+    if (str_starts_with((string)$g['beta_file'], 'gh:') && preg_match('#^https://#', (string)($g['beta_url'] ?? ''))) $app['url'] = (string)$g['beta_url'];
     $app['sha256'] = strtolower((string)$g['beta_sha256']);
     if (trim((string)$g['beta_version']) !== '') $app['version'] = trim((string)$g['beta_version']);
     if ((int)$g['beta_size'] > 0) {
@@ -1227,7 +1384,7 @@ function rs_human_size(int $b): string {
 
 // (2.0) The store and the site talking: consoles, linked phones, reports, GitHub, sources, charts.
 require __DIR__ . '/connect.php';
-// (2.1) Signing with Recomp Store Signer, and the admin's change log.
+// (2.1) Signing with RecompStore Signer, and the admin's change log.
 require __DIR__ . '/sign.php';
 // (2.1) The Analytics page's day-by-day counts.
 require __DIR__ . '/analytics.php';
@@ -1235,3 +1392,31 @@ require __DIR__ . '/analytics.php';
 require __DIR__ . '/smp.php';
 // (2.3.0) Ready to play, mods, collections, likes, tester feedback, Discord posts, Restore my apps.
 require __DIR__ . '/v23.php';
+// (2.6) Listing health and new apps (admin/health.php).
+require __DIR__ . '/health.php';
+
+// (2.7.3) Players' logs: crash signatures and zips of many reports.
+require __DIR__ . '/logs.php';
+
+// (2.8) RecompStore for PC: its own recomps, finder and catalog.
+require __DIR__ . '/pc.php';
+// (3.0) One game, many versions.
+require __DIR__ . '/titles.php';
+// (3.0) Player accounts and comments.
+require __DIR__ . '/accounts.php';
+require __DIR__ . '/comments.php';
+// (2.9) AI-assisted labels and the GitHub check.
+require __DIR__ . '/ai.php';
+
+// (2.6) Screenshots and a video on a game's page, and developer pages.
+require __DIR__ . '/pages.php';
+
+// (2.7.1) New and changed app pages sent to search engines (IndexNow) when a catalog goes out.
+require __DIR__ . '/indexnow.php';
+// (2.7.1) Email from the site's mailbox: Inbox replies and the developer list.
+require __DIR__ . '/mail.php';
+require __DIR__ . '/mailblocks.php';
+// (2.7.1) Beta codes through Discord sign-in (recompstore.com/beta).
+require __DIR__ . '/discord.php';
+// (2.7.2) Developer accounts and the developer hub.
+require __DIR__ . '/devhub.php';

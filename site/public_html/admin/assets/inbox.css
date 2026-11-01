@@ -1,0 +1,38 @@
+/* (3.1) Inbox: pictures that fit, which store each message is for, and messages that fold */
+.list>.msg{min-width:0}
+.msg img{max-width:100%;height:auto}
+.msg .sub{min-width:0}
+.msg .sub .pics{display:flex;gap:10px;flex-wrap:wrap}
+.msg .sub .pics img{width:180px;height:110px;object-fit:cover;border-radius:10px;border:1px solid rgba(244,248,252,.16);display:block}
+.msg .sub .pics a:hover img{border-color:var(--cyan)}
+.msg .sub-hero{max-width:min(640px,100%)}
+.msg .body,.msg .meta,.msg dd{overflow-wrap:anywhere}
+.tag.pf-pc{color:#8fe9fb;background:rgba(52,242,232,.1);border-color:rgba(52,242,232,.45);text-decoration:none}
+.tag.pf-ps5{color:#9cc6ff;background:rgba(55,123,182,.18);border-color:rgba(55,123,182,.6);text-decoration:none}
+.inbox-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;flex-wrap:wrap}
+.inbox-tools .muted{font-size:14px}
+.inbox-tools .btns{display:flex;gap:8px}
+.msg>header{cursor:pointer;user-select:none}
+.msg>header::after{content:"";width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:0 4px 4px 6px;transition:transform .15s;flex:none}
+.msg.folded>header::after{transform:rotate(-45deg);margin-bottom:0}
+.msg .msg-peek{display:none;margin:8px 0 0;color:var(--muted);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg.folded{padding-top:14px;padding-bottom:14px}
+.msg.folded>*:not(header):not(.msg-peek){display:none}
+.msg.folded .msg-peek{display:block}
+
+/* (3.3) Picking logs, who sent them, pages */
+.logs-pick{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:12px 16px;border:1px solid rgba(244,248,252,.12);border-radius:14px;background:rgba(244,248,252,.03)}
+.logs-pick .check{display:flex;align-items:center;gap:8px;margin:0;font-weight:600}
+.logs-pick .small{flex-basis:100%;font-size:13px}
+.msg>header input.log-pick{width:18px;height:18px;margin:0 4px 0 0;flex:none;cursor:pointer;accent-color:var(--cyan)}
+.tag.who{color:#e7d7ff;background:rgba(185,174,255,.12);border-color:rgba(185,174,255,.45)}
+.pager{display:flex;align-items:center;justify-content:center;gap:16px;margin:20px 0 8px}
+
+/* (3.7) A heading per day, picking for every kind, the order chips */
+.day-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:18px 0 8px;padding:0 4px}
+.day-head:first-child{margin-top:0}
+.day-head .check{display:flex;align-items:center;gap:8px;margin:0;font-weight:700;font-size:15px}
+.day-head .check input{width:18px;height:18px;accent-color:var(--cyan)}
+.day-head form{margin:0 0 0 auto}
+.day-head button{padding:6px 12px;font-size:13px}
+.pf-chips .chip-gap{width:1px;align-self:stretch;background:rgba(244,248,252,.16);margin:0 6px}

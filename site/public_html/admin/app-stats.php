@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.3): one app's numbers. Installs, updates and removals day by day, the
+// RecompStore admin (2.3): one app's numbers. Installs, updates and removals day by day, the
 // versions consoles have, GitHub's downloads per release, its beta builds with their downloads and
 // what testers said, and its latest logs. Every table as CSV (?export=). From Analytics' Apps tab
 // and the Stats link on a game's page.
@@ -124,11 +124,11 @@ $rows = [];
 foreach (rs_an_rows("SELECT id, created, category, " . ($hasFeedback ? 'feedback' : "''") . " feedback, " . ($hasBuild ? 'build' : "''") . " build, version, name, body, status FROM inbox WHERE kind = 'logs' AND app_id = ? ORDER BY created DESC, id DESC LIMIT 25", [$id]) as $r) {
     $cat = (string)$r['category'];
     $line = trim((string)strtok((string)$r['body'], "\n"));
-    $rows[] = ['when' => ['v' => (string)$r['created'], 'h' => '<a href="inbox.php?show=' . ($r['status'] === 'done' ? 'done' : 'logs') . '#m' . (int)$r['id'] . '">' . h(date('M j, g:i a', strtotime((string)$r['created']))) . '</a>'],
+    $rows[] = ['when' => ['v' => (string)$r['created'], 'h' => '<a href="inbox.php?show=' . ($r['status'] === 'done' ? 'done' : 'logs') . '#m' . (int)$r['id'] . '">' . h(rs_date('M j, g:i a', strtotime((string)$r['created']))) . '</a>'],
         'category' => ['v' => $cat, 'h' => $cat !== '' ? '<span class="tag cat-' . h($cat) . '">' . h(RS_LOG_CATEGORIES[$cat] ?? $cat) . '</span>' : '<span class="muted">–</span>'],
         'feedback' => ['v' => (string)$r['feedback'], 'h' => (string)$r['feedback'] !== '' ? '<span class="tag fb-' . h((string)$r['feedback']) . '">' . h($verdicts[(string)$r['feedback']] ?? (string)$r['feedback']) . '</span>' : '<span class="muted">–</span>'],
         'version' => (string)$r['build'] !== '' ? (string)$r['build'] : (string)$r['version'],
-        'store' => preg_replace('/^Recomp Store /', '', (string)$r['name']),
+        'store' => preg_replace('/^RecompStore /', '', (string)$r['name']),
         'message' => ['v' => (string)$r['body'], 'h' => $line !== '' ? '<span class="log-line" title="' . h(mb_substr((string)$r['body'], 0, 400)) . '">' . h($line) . '</span>' : '<span class="muted">No message</span>']];
 }
 $T['logs'] = ['Latest logs', $logCols, $rows, ['empty' => 'No logs sent for this app yet.']];

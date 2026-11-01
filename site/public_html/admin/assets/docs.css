@@ -1,0 +1,48 @@
+/* (3.1) Developer docs: the list, the editor and the preview */
+.doc-group{margin:0 0 16px}
+.doc-group h2{display:flex;align-items:baseline;gap:10px;margin:0 0 12px}
+.doc-group h2 .muted{font-size:15px;font-weight:600}
+.doc-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.doc-list li{display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(11,18,32,.35)}
+.doc-n{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;background:rgba(52,242,232,.12);color:var(--cyan);font:700 14px Figtree,sans-serif}
+.doc-words{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.doc-words a{color:inherit;text-decoration:none}
+.doc-words a:hover strong{color:var(--cyan)}
+.doc-words .muted{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-when{font-size:14px;white-space:nowrap}
+.doc-btns{display:flex;gap:8px;flex:none}
+.doc-form{display:flex;flex-direction:column;gap:18px}
+.doc-fields{display:grid;grid-template-columns:2fr 1.3fr 1fr .6fr;gap:12px 14px;align-items:start}
+.doc-fields label{display:flex;flex-direction:column;gap:6px;margin:0}
+.doc-fields small{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.doc-summary{grid-column:1/-1}
+.doc-edit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.doc-pane{display:flex;flex-direction:column;gap:8px;min-width:0}
+.doc-pane-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px}
+.doc-load{cursor:pointer}
+.doc-pane textarea{min-height:62vh;resize:vertical;font:14px/1.55 ui-monospace,Menlo,Consolas,monospace;tab-size:2}
+.doc-preview{min-height:62vh;max-height:62vh;overflow:auto;padding:18px 22px;border-radius:14px;border:1px solid var(--line);background:rgba(11,18,32,.45)}
+.doc-save{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.doc-delete{margin-top:14px;text-align:right}
+@media (max-width:980px){.doc-fields{grid-template-columns:1fr 1fr}.doc-edit{grid-template-columns:1fr}.doc-preview,.doc-pane textarea{min-height:40vh}}
+@media (max-width:640px){.doc-list li{flex-wrap:wrap}.doc-fields{grid-template-columns:1fr}}
+
+/* Rendered Markdown (the same look as the hub's) */
+.md{line-height:1.65;font-size:16px;overflow-wrap:anywhere}
+.md h2{font:700 22px Sora,sans-serif;margin:28px 0 10px}
+.md h2:first-child{margin-top:0}
+.md h3{font:700 18px Sora,sans-serif;margin:22px 0 8px}
+.md h4{font:700 16px Figtree,sans-serif;margin:18px 0 6px}
+.md p{margin:0 0 12px}
+.md ul,.md ol{margin:0 0 12px;padding-inline-start:22px}
+.md li{margin:4px 0}
+.md code{font:13.5px ui-monospace,Menlo,Consolas,monospace;padding:2px 6px;border-radius:6px;background:rgba(244,248,252,.08);border:1px solid rgba(244,248,252,.1)}
+.md pre{margin:0 0 14px;padding:14px 16px;border-radius:12px;background:#070c16;border:1px solid var(--line);overflow:auto}
+.md pre code{padding:0;border:0;background:none;font-size:13px;line-height:1.55;white-space:pre}
+.md .md-table{overflow-x:auto;margin:0 0 14px}
+.md table{border-collapse:collapse;width:100%;font-size:15px}
+.md th,.md td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+.md th{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+.md blockquote{margin:0 0 14px;padding:10px 16px;border-inline-start:3px solid var(--cyan);background:rgba(52,242,232,.06);border-radius:0 12px 12px 0}
+.md hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+.md a{color:var(--cyan)}

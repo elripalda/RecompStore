@@ -1,4 +1,4 @@
-// Recomp Store admin (2.3.0): the Collections page. Each collection is a card: its name, a line about
+// RecompStore admin (2.3.0): the Collections page. Each collection is a card: its name, a line about
 // it, and its apps in order (added from a list, moved up and down, taken out).
 (function () {
   'use strict';

@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin: the games list, ordering, and Publish.
+// RecompStore admin: the games list, ordering, and Publish.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $n = rs_publish();
             $soon = rs_soon_count();
             $t = count(array_filter(rs_games(false), fn($g) => !empty($g['testers'])));
-            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . ($soon ? " and $soon Coming soon" : '') . (rs_sign_on() ? '. It goes out once you sign it in Recomp Store Signer on your PC.' : '; the PS5 store and the site pick it up on their next load.') . ($t ? ' ' . ($t === 1 ? '1 app is' : "$t apps are") . ' for testers only and stay out of it.' : ''));
+            rs_flash("Published. The catalog now lists $n " . ($n === 1 ? 'game' : 'games') . ($soon ? " and $soon Coming soon" : '') . (rs_sign_on() ? '. It goes out once you sign it in RecompStore Signer on your PC.' : '; the PS5 store and the site pick it up on their next load.') . ($t ? ' ' . ($t === 1 ? '1 app is' : "$t apps are") . ' for testers only and stay out of it.' : ''));
         } elseif ($action === 'catsort') {
             // (2.1) How the store and the site sort a category's page.
             $cat = rs_category((string)($_POST['cat'] ?? ''));
@@ -77,7 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         rs_flash($e->getMessage(), 'err');
     }
-    header('Location: index.php');
+    $pc = preg_replace('/[^a-z]/', '', (string)($_POST['cat'] ?? ''));
+    header('Location: index.php' . (in_array($action ?? '', ['order', 'move', 'catsort'], true) ? '?view=order' . ($pc !== '' ? '&cat=' . $pc : '') : ($pc !== '' ? '?cat=' . $pc : '')));
     exit;
 }
 
@@ -88,13 +89,16 @@ $counts = array_fill_keys(array_keys(RS_CATEGORIES), 0);
 foreach ($all as $g) $counts[rs_category((string)$g['category'])]++;
 $games = $cat === '' ? $all : array_values(array_filter($all, fn($g) => rs_category((string)$g['category']) === $cat));
 $sorts = rs_category_sorts();
+// (2.8) Cards to look through by default; the long list only to change the order.
+$view = ($_GET['view'] ?? '') === 'order' ? 'order' : 'cards';
+$q = fn(array $x) => 'index.php?' . http_build_query(array_filter(array_merge(['cat' => $cat, 'view' => $view === 'order' ? 'order' : ''], $x), fn($v) => $v !== ''));
 $published = rs_setting('published_at');
 rs_head('Games', true, ['assets/bulk.css']);
 ?>
 <section class="head-row">
   <div>
     <h1><?= $cat === '' ? 'Everything in the store' : h(RS_CATEGORIES[$cat]) ?></h1>
-    <p class="muted"><?= $published ? 'Last published ' . h(date('M j, Y g:i a', strtotime($published))) : 'Not published yet' ?>. Changes show in the store and on the site after you publish.</p>
+    <p class="muted"><?= $published ? 'Last published ' . h(rs_date('M j, Y g:i a', strtotime($published))) : 'Not published yet' ?>. Changes show in the store and on the site after you publish.</p>
   </div>
   <div class="actions">
     <a class="btn" href="edit.php<?= $cat !== '' ? '?category=' . urlencode($cat) : '' ?>">Add <?= $cat === '' || $cat === 'games' ? 'a game' : 'to ' . h(RS_CATEGORIES[$cat]) ?></a>
@@ -103,11 +107,12 @@ rs_head('Games', true, ['assets/bulk.css']);
 </section>
 
 <nav class="chips" aria-label="Category">
-  <a class="chip<?= $cat === '' ? ' on' : '' ?>" href="index.php"<?= $cat === '' ? ' aria-current="page"' : '' ?>>Everything<span class="n"><?= count($all) ?></span></a>
+  <a class="chip<?= $cat === '' ? ' on' : '' ?>" href="<?= h($q(['cat' => ''])) ?>"<?= $cat === '' ? ' aria-current="page"' : '' ?>>Everything<span class="n"><?= count($all) ?></span></a>
   <?php foreach (RS_CATEGORIES as $k => $label): ?>
-  <a class="chip<?= $cat === $k ? ' on' : '' ?>" href="index.php?cat=<?= h($k) ?>"<?= $cat === $k ? ' aria-current="page"' : '' ?>><?= h($label) ?><span class="n"><?= $counts[$k] ?></span></a>
+  <a class="chip<?= $cat === $k ? ' on' : '' ?>" href="<?= h($q(['cat' => $k])) ?>"<?= $cat === $k ? ' aria-current="page"' : '' ?>><?= h($label) ?><span class="n"><?= $counts[$k] ?></span></a>
   <?php endforeach; ?>
   <label class="find"><span class="sr">Find</span><input type="search" placeholder="Find by name, ID or author" data-find autocomplete="off"></label>
+  <span class="viewpick" role="group" aria-label="View"><a href="<?= h($q(['view' => ''])) ?>"<?= $view === 'cards' ? ' class="on" aria-current="true"' : '' ?>>Cards</a><a href="<?= h($q(['view' => 'order'])) ?>"<?= $view === 'order' ? ' class="on" aria-current="true"' : '' ?>>Change the order</a></span>
 </nav>
 <?php if ($cat !== ''): ?>
 <form method="post" class="sortbar">
@@ -120,6 +125,31 @@ rs_head('Games', true, ['assets/bulk.css']);
   <?php if (($sorts[$cat] ?? 'manual') !== 'manual'): ?><small class="muted">Your order below is kept for when you switch back to Your order.</small><?php endif; ?>
 </form>
 <?php endif; ?>
+<?php if ($view === 'cards'): ?>
+<section class="ggrid">
+<?php foreach ($games as $g): $art = (string)($g['hero_web'] ?: $g['hero']); ?>
+  <article class="gcard<?= $g['hidden'] ? ' dim' : '' ?>" data-id="<?= h($g['id']) ?>" data-find-text="<?= h(mb_strtolower($g['name'] . ' ' . $g['id'] . ' ' . $g['author'])) ?>">
+    <a class="gcard-art" href="edit.php?id=<?= urlencode($g['id']) ?>"<?= $art !== '' ? ' style="background-image:url(\'' . h($art) . '\')"' : '' ?>>
+      <?php if ($g['icon']): ?><img class="icon" src="<?= h($g['icon']) ?>" alt="" loading="lazy"><?php else: ?><span class="icon blank"><?= h(mb_substr($g['name'] ?: '?', 0, 2)) ?></span><?php endif; ?>
+      <?php if ($g['hidden']): ?><span class="gcard-flag">Hidden</span><?php elseif ($g['soon']): ?><span class="gcard-flag soon">Coming soon</span><?php elseif ($g['beta']): ?><span class="gcard-flag beta">Beta</span><?php endif; ?>
+    </a>
+    <div class="gcard-body">
+      <h2 title="<?= h($g['name'] ?: 'Untitled') ?>"><?= h($g['name'] ?: 'Untitled') ?></h2>
+      <p class="muted"><?= h($g['id']) ?><?= $g['soon'] ? '' : ' · ' . h($g['version'] ?: 'no version') ?></p>
+      <p class="gcard-tags">
+        <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'RecompStore' : h($g['author']) ?></span>
+        <?php if ($cat === ''): ?><span class="tag"><?= h(RS_CATEGORIES[rs_category((string)$g['category'])]) ?></span><?php endif; ?>
+        <?php if ($g['featured']): ?><span class="tag">Featured</span><?php endif; ?>
+        <?php if (!empty($g['testers'])): ?><span class="tag test">Testers</span><?php endif; ?>
+      </p>
+      <div class="gcard-foot"><?= rs_bulk_check($g) ?><a class="btn" href="edit.php?id=<?= urlencode($g['id']) ?>">Edit</a></div>
+    </div>
+  </article>
+<?php endforeach; ?>
+</section>
+<?php if (!$games): ?><p class="muted"><?= $cat === '' ? 'No games yet. Add one to get started.' : 'Nothing in ' . h(RS_CATEGORIES[$cat]) . ' yet.' ?></p><?php endif; ?>
+<p class="muted" data-find-none hidden>Nothing matches.</p>
+<?php else: ?>
 <?php if (count($games) > 1): ?><p class="muted order-tip">Drag a game by the handle on its left to move it, or use the arrows, then press Save order.<?= $cat !== '' ? ' Only ' . h(RS_CATEGORIES[$cat]) . ' swap places; the rest stay where they are.' : '' ?></p><?php endif; ?>
 <section class="list" data-order>
 <?php foreach ($games as $i => $g): ?>
@@ -130,7 +160,7 @@ rs_head('Games', true, ['assets/bulk.css']);
     <div class="meta">
       <h2><?= h($g['name'] ?: 'Untitled') ?></h2>
       <p>
-        <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'Recomp Store' : 'By ' . h($g['author']) ?></span>
+        <span class="tag<?= $g['kind'] === 'original' ? ' cyan' : '' ?>"><?= $g['kind'] === 'original' ? 'RecompStore' : 'By ' . h($g['author']) ?></span>
         <?php if ($g['featured']): ?><span class="tag">Featured</span><?php endif; ?>
         <?php if ($g['hidden']): ?><span class="tag">Hidden</span><?php endif; ?>
         <?php if (!empty($g['testers'])): ?><span class="tag test">Testers only</span><?php endif; ?>
@@ -163,5 +193,6 @@ rs_head('Games', true, ['assets/bulk.css']);
   <button type="button" data-order-undo>Undo</button>
   <span class="muted">The new order isn't saved yet. Saving doesn't publish.</span>
 </form>
+<?php endif; ?>
 <?= rs_bulk_bar($cat) ?>
 <?php rs_foot(['assets/games.js', 'assets/bulk.js']);

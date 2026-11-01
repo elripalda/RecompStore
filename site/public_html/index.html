@@ -3,73 +3,117 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Recomp Store</title>
-<meta name="description" content="Recomp Store: native PS5 ports of recompiled games, ready to install on a jailbroken PS5. Bring your own disc.">
+<title>RecompStore — PS5 homebrew and jailbreak app store</title>
+<meta name="description" content="Free PS5 homebrew and jailbreak app store: recompiled games, emulators, apps and tools for jailbroken PS5, installed and kept up to date from your console.">
 <meta name="theme-color" content="#0B1220">
 <link rel="canonical" href="https://recompstore.com/">
+<!--rs:alternates-->
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Recomp Store">
+<meta property="og:site_name" content="RecompStore">
 <meta property="og:url" content="https://recompstore.com/">
-<meta property="og:title" content="Recomp Store">
-<meta property="og:description" content="Native PS5 ports of recompiled games. Bring your own disc.">
+<meta property="og:title" content="RecompStore — PS5 homebrew and jailbreak app store">
+<meta property="og:description" content="Recompiled game ports, emulators, apps and tools for jailbroken PS5, installed and kept up to date from your console.">
 <meta property="og:image" content="https://recompstore.com/assets/card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Recomp Store">
-<meta name="twitter:description" content="Native PS5 ports of recompiled games. Bring your own disc.">
+<meta name="twitter:title" content="RecompStore — PS5 homebrew and jailbreak app store">
+<meta name="twitter:description" content="Recompiled game ports, emulators, apps and tools for jailbroken PS5, installed and kept up to date from your console.">
 <meta name="twitter:image" content="https://recompstore.com/assets/card.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://recompstore.com/#site","name":"RecompStore","alternateName":["Recomp Store","Recomp Store PS5","RecompStore PS5","PS5 homebrew store","PS5 jailbreak app store","PS5 jailbreak marketplace"],"description":"Free PS5 homebrew and jailbreak app store: recompiled games, emulators, apps and tools for jailbroken PS5, installed and kept up to date from your console.","url":"https://recompstore.com/","inLanguage":["en","en-GB","es","es-419","fr","fr-CA","pt","pt-BR","it","de","nl","pl","tr","ru","uk","vi","id","th","ar","ja","zh-Hans","zh-Hant","ko"],"publisher":{"@id":"https://recompstore.com/#org"}},{"@type":"Organization","@id":"https://recompstore.com/#org","name":"RecompStore","url":"https://recompstore.com/","logo":"https://recompstore.com/assets/logo-512.png","email":"info@recompstore.com","sameAs":["https://github.com/elripalda/RecompStore"]},{"@type":"SoftwareApplication","@id":"https://recompstore.com/#app","name":"RecompStore","description":"Free PS5 homebrew and jailbreak app store: recompiled games, emulators, apps and tools for jailbroken PS5, installed and kept up to date from your console.","keywords":"PS5 homebrew, PS5 jailbreak, jailbreak app store, PS5 homebrew store, PS5 jailbreak marketplace, homebrew apps, recompiled games, PS5 emulators","applicationCategory":"UtilitiesApplication","operatingSystem":"PlayStation 5","url":"https://recompstore.com/get","downloadUrl":"https://github.com/elripalda/RecompStore/releases/latest","image":"https://recompstore.com/assets/logo-512.png","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"elripalda","url":"https://github.com/elripalda"},"publisher":{"@id":"https://recompstore.com/#org"}}]}</script>
 <link rel="icon" href="/assets/logo-512.png">
 <link rel="apple-touch-icon" href="/assets/logo-512.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/site.css?v=14">
+<link rel="preload" href="/assets/fonts/figtree-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=100">
+<link rel="stylesheet" href="/assets/hub-ext.css?v=2">
+<script>document.documentElement.classList.add('js')</script>
+<style id="rl-top-kofi">/* (3.1g) RecompLauncher: a Ko-fi heart in the header in place of search and Discord (All Recomps has its own search; Discord is in the footer). */#top-kofi{display:none;align-items:center;gap:7px;height:42px;padding:0 16px 0 13px;border:1px solid rgba(244,248,252,.16);border-radius:12px;background:#141f33;color:#F4F8FC;font:500 15px/1 Figtree,sans-serif;text-decoration:none;white-space:nowrap;transition:border-color .2s,box-shadow .25s,background-color .25s}#top-kofi:hover{border-color:rgba(255,94,120,.7);background:#1f1a2e;color:#F4F8FC;box-shadow:0 0 0 3px rgba(255,94,120,.16),0 0 22px rgba(255,94,120,.38)}#top-kofi svg{width:18px;height:18px;flex:none}/* The account avatar at the far right end, after the buttons (the phone menu button stays last). */.top-actions #top-acct{order:9}.top-actions #menu-open{order:10}/* RecompLauncher: Submit a Game lives in the top menu, so the header button goes. */body[data-platform="pc"] .top-actions .submit-btn:not(.hub-btn){display:none}body[data-platform="pc"] #top-kofi{display:inline-flex}body[data-platform="pc"] #search-open,body[data-platform="pc"] #top-discord{display:none}#top-kofi svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;transition:fill .2s,stroke .2s}#top-kofi:hover svg{fill:#ff5e78;stroke:#ff5e78}</style>
 </head>
 <body>
-<div class="backdrop" aria-hidden="true"><img id="backdrop-img" alt=""></div>
+<div class="backdrop" aria-hidden="true"><img id="backdrop-img" alt=""><img class="backdrop-b" alt=""><span class="glow on"></span><span class="glow"></span></div>
 
-<header class="top">
-  <a class="brand" href="#/"><img src="/assets/logo-512.png" alt=""><span>Recomp Store</span></a>
-  <nav aria-label="Main">
-    <a href="#/" data-nav="home">Games</a>
-    <a href="#/about" data-nav="about">About</a>
-    <a href="#/contact" data-nav="contact">Contact</a>
-    <a href="#/my-ps5" data-nav="my" class="my" hidden>My PS5</a>
-    <a class="get" href="#/get">Get Recomp Store</a>
-  </nav>
+<header class="top" id="top">
+  <div class="top-in">
+    <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="40" height="40"><span>Recomp<b>Store</b></span></a>
+    <div class="plat" role="group" aria-label="Store" data-i18n-attr="aria-label"><a href="/" data-plat="ps5" class="on">PS5</a><a href="/pc" data-plat="pc">PC</a></div>
+    <nav class="main-nav" aria-label="Main" data-i18n-attr="aria-label">
+      <a href="/" data-nav="home" data-i18n="Discover">Discover</a>
+      <a href="/games" data-nav="games" data-cat hidden data-i18n="Games">Games</a>
+      <a href="/emulators" data-nav="emulators" data-cat hidden data-i18n="Emulators">Emulators</a>
+      <a href="/apps" data-nav="apps" data-cat hidden data-i18n="Apps">Apps</a>
+      <a href="/tools" data-nav="tools" data-cat hidden data-i18n="Tools">Tools</a>
+      <a href="/how" data-nav="how" data-i18n="How it works">How it works</a>
+      <a href="/my-ps5" data-nav="my" class="my" hidden data-i18n="My PS5">My PS5</a>
+      <a href="/pc" data-nav="pc" data-pc data-i18n="Discover">Discover</a>
+      <a href="/pc/all" data-nav="pc-all" data-pc data-i18n="All recomps">All Recomps</a>
+      <a href="/pc/top" data-nav="pc-top" data-pc data-i18n="Top charts">Top Charts</a>
+      <a href="/pc/new" data-nav="pc-new" data-pc data-i18n="New">New</a>
+      <a href="/pc/soon" data-nav="pc-soon" data-pc data-i18n="Coming soon">Coming Soon</a>
+      <a href="/submit?platform=pc" data-nav="pc-submit" data-pc data-i18n="Submit a game">Submit a Game</a>
+    </nav>
+    <div class="top-actions">
+      <a id="top-kofi" href="https://ko-fi.com/recomp" target="_blank" rel="noopener" title="Support RecompLauncher on Ko-fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3s-7.6-4.6-7.6-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.6 2.7c0 5.6-7.6 10.2-7.6 10.2z"/></svg><span>Support</span></a>
+      <button type="button" class="icon-btn" id="search-open" aria-label="Search" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+      <a class="icon-btn" id="top-discord" href="/beta" target="_blank" rel="noopener" aria-label="Discord" hidden></a>
+      <div class="lang-chip" id="lang-chip"></div>
+      <a class="submit-btn hub-btn" id="top-hub" href="/hub" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span data-i18n="Developer hub">Developer hub</span></a>
+      <a class="submit-btn" href="/submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl-ps5" data-i18n="Submit an app">Submit an App</span><span class="lbl-pc" data-i18n="Submit a game">Submit a Game</span></a>
+      <a class="get" href="/get" data-i18n="Get RecompStore">Get RecompStore</a>
+      <a class="get get-pc" href="/pc/launcher" data-i18n="Get RecompLauncher">Get RecompLauncher</a>
+      <button type="button" class="icon-btn menu-btn" id="menu-open" aria-label="Menu" data-i18n-attr="aria-label" aria-expanded="false" aria-controls="drawer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    </div>
+  </div>
 </header>
 
-<main id="view" tabindex="-1"></main>
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-in">
+    <div class="drawer-head">
+      <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="40" height="40"><span>Recomp<b>Store</b></span></a>
+      <button type="button" class="icon-btn" data-drawer-close aria-label="Close" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="plat full" role="group" aria-label="Store" data-i18n-attr="aria-label"><a href="/" data-plat="ps5" class="on">PS5</a><a href="/pc" data-plat="pc">PC</a></div>
+    <nav class="drawer-nav" id="drawer-nav" aria-label="Main" data-i18n-attr="aria-label"></nav>
+    <div class="drawer-actions">
+      <a class="submit-btn full hub-btn" id="drawer-hub" href="/hub" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span data-i18n="Developer hub">Developer hub</span></a>
+      <a class="submit-btn full" href="/submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl-ps5" data-i18n="Submit an app">Submit an App</span><span class="lbl-pc" data-i18n="Submit a game">Submit a Game</span></a>
+      <a class="get full" href="/get" data-i18n="Get RecompStore">Get RecompStore</a>
+      <a class="get get-pc full" href="/pc/launcher" data-i18n="Get RecompLauncher">Get RecompLauncher</a>
+      <a class="submit-btn full" id="drawer-discord" href="/beta" target="_blank" rel="noopener" hidden><span data-i18n="Join the Discord">Join the Discord</span></a>
+    </div>
+    <div class="drawer-lang" id="drawer-lang"></div>
+  </div>
+</div>
+
+<div class="search" id="search" hidden>
+  <div class="search-box" role="dialog" aria-modal="true" aria-label="Search" data-i18n-attr="aria-label">
+    <div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search-q" type="search" autocomplete="off" spellcheck="false" placeholder="Search games, emulators, apps and tools" data-i18n-attr="placeholder"><button type="button" class="icon-btn" data-search-close aria-label="Close" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="search-results" id="search-results" role="listbox"></div>
+  </div>
+</div>
+
+<main id="view" tabindex="-1"><!--rs:content--></main>
 
 <footer class="foot">
-  <p><strong>No game files here.</strong> Recomp Store and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.</p>
-  <p class="links" id="foot-links"></p>
-  <p class="small">Not affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, or any game's publisher or developer.</p>
+  <div class="foot-in">
+    <div class="foot-brand">
+      <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="40" height="40"><span>Recomp<b>Store</b></span></a>
+      <p class="ps5-only" data-i18n="The homebrew store for PS5: recompiled games, emulators, apps and tools, installed and kept up to date from your console.">The homebrew store for PS5: recompiled games, emulators, apps and tools, installed and kept up to date from your console.</p>
+      <p class="pc-only" data-i18n="RecompLauncher: console games rebuilt to run natively on Windows, Linux and Mac, straight from their developers.">RecompLauncher: console games rebuilt to run natively on Windows, Linux and Mac, straight from their developers.</p>
+      <div class="foot-social" id="foot-social"></div>
+    </div>
+    <nav class="foot-cols" id="foot-cols" aria-label="Site links" data-i18n-attr="aria-label"></nav>
+  </div>
+  <div class="foot-base">
+    <p><strong data-i18n="No game files here.">No game files here.</strong> <span class="ps5-only" data-i18n="RecompStore and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.">RecompStore and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.</span> <span class="pc-only" data-i18n="RecompLauncher and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.">RecompLauncher and the GitHub repositories it links to host only the ports and their tools. Every game needs your own copy.</span></p>
+    <p class="small" data-i18n="Not affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, Nintendo, or any game's publisher or developer.">Not affiliated with or endorsed by Sony Interactive Entertainment, Microsoft, Nintendo, or any game's publisher or developer.</p>
+    <p class="lang-row" id="lang-row"></p>
+  </div>
 </footer>
 
-<dialog id="get" aria-labelledby="get-title">
-  <div class="dlg">
-    <div class="dlg-head">
-      <img src="/assets/logo-512.png" alt="">
-      <div><h2 id="get-title">Get Recomp Store</h2><p>Installs once, then keeps itself and your games up to date.</p></div>
-      <button class="close" data-close aria-label="Close">✕</button>
-    </div>
-    <ol class="steps">
-      <li><strong>Jailbreak your PS5 and start your payload loader.</strong> Any loader on port 9021 works, such as etaHEN's or elfldr. You'll also need kstuff and ShadowMountPlus 1.7 Beta 5 or newer.</li>
-      <li><strong>Download the installer payload.</strong>
-        <span class="payload" id="payload-slot"></span></li>
-      <li><strong>Send it to your PS5.</strong> Use any payload sender, or from a computer on the same network:
-        <code class="cmd" id="send-cmd">nc -N &lt;your PS5's IP&gt; 9021 &lt; RecompStore-Installer.elf</code>
-        <button class="copy" data-copy="#send-cmd">Copy</button></li>
-      <li><strong>Open Recomp Store from your home screen.</strong> The installer has ShadowMountPlus add it. From then on the store updates itself.</li>
-    </ol>
-    <details class="manual">
-      <summary>Install by hand instead</summary>
-      <p>Download the Recomp Store zip from <a href="https://github.com/elripalda/RecompStore/releases/latest" target="_blank" rel="noopener">its GitHub releases</a>, unzip it, and copy the folder into <code>/data/homebrew/</code> on your PS5 over FTP. Then register it the way you register your other homebrew.</p>
-    </details>
-  </div>
-</dialog>
 
-<script src="/assets/site.js?v=14"></script>
+<script src="/assets/site.js?v=104"></script>
+<script src="/assets/hub-ext.js?v=2" defer></script>
+<script src="/assets/beta-gate.js?v=4" defer></script>
 </body>
 </html>

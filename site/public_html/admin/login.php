@@ -77,7 +77,7 @@ rs_head('Log in', false);
   <form method="post">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>">
     <?php if ($step2): ?>
-    <p class="muted">Open your authenticator app and type the 6-digit code for Recomp Store admin. Lost your phone? Type one of your recovery codes instead.</p>
+    <p class="muted">Open your authenticator app and type the 6-digit code for RecompStore admin. Lost your phone? Type one of your recovery codes instead.</p>
     <label>Code<input name="code" required autofocus autocomplete="one-time-code" inputmode="numeric" maxlength="11" spellcheck="false" class="mono"></label>
     <button class="primary" type="submit">Log in</button>
     <p class="muted"><a href="logout.php">Start over</a></p>

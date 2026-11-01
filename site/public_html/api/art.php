@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.0): several pictures from /media in one answer, for the PS5 store.
+// RecompStore website (2.0): several pictures from /media in one answer, for the PS5 store.
 // On a PS5 each request costs about as much as a small picture, so a new store asking for 60
 // icons one at a time waited a minute for them.
 //

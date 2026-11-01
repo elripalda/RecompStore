@@ -1,0 +1,287 @@
+<?php
+// (3.1) Player reports, for every version of every game: PC recomps and PS5 apps alike.
+// Anyone can post one: signed in it shows their name and picture, as a guest it says Guest (and
+// passes the bot check). One per person per version; a new one replaces theirs. Each says how
+// it plays, on what, how far they got, how it runs, what went wrong and what fixed it.
+// The older, simpler reports (RecompLauncher's pc_feedback, the website's ps5_feedback) are
+// copied in as they come, so nothing is lost and the launcher's old endpoint keeps working.
+// From all of it: a score for each version (0-100), on each system, and badges for each game.
+declare(strict_types=1);
+
+const RS_PLAY_VERDICTS = ['runs' => 'Plays great', 'issues' => 'Has problems', 'broken' => 'Won\'t run'];
+const RS_PLAY_PC_SYS = ['windows' => 'Windows', 'linux' => 'Linux', 'macos' => 'macOS', 'deck' => 'Steam Deck'];
+const RS_PLAY_PROGRESS = ['boots' => 'It starts', 'menus' => 'Menus', 'ingame' => 'In game', 'half' => 'Halfway', 'done' => 'Finished it'];
+const RS_PLAY_FPS = ['u20' => 'Under 20', '20' => '20-30', '30' => '30-45', '45' => '45-60', '60' => '60', '60p' => 'Over 60'];
+const RS_PLAY_RES = ['720' => '720p', '1080' => '1080p', '1440' => '1440p', '4k' => '4K', 'other' => 'Other'];
+const RS_PLAY_PROBLEMS = ['crash' => 'Crashes', 'graphics' => 'Graphics', 'audio' => 'Audio', 'controls' => 'Controls',
+    'saves' => 'Saves', 'performance' => 'Performance', 'cutscenes' => 'Cutscenes', 'online' => 'Online'];
+const RS_PLAY_SEVERITY = [1 => 'Minor', 2 => 'Annoying', 3 => 'Game-breaking'];
+const RS_PLAY_FLAGS = ['spam' => 'Spam', 'rude' => 'Rude', 'files' => 'Links to game files', 'wrong' => 'Wrong game or nonsense'];
+
+function rs_play_tables(): void {
+    static $done = false;
+    if ($done) return;
+    $db = rs_db();
+    $db->exec('CREATE TABLE IF NOT EXISTS play_reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        kind VARCHAR(4) NOT NULL,
+        app VARCHAR(64) NOT NULL,
+        who CHAR(64) NOT NULL,
+        account_id INT NULL,
+        show_name TINYINT NOT NULL DEFAULT 1,
+        verdict VARCHAR(8) NOT NULL,
+        sys VARCHAR(12) NOT NULL DEFAULT \'\',
+        version VARCHAR(40) NOT NULL DEFAULT \'\',
+        progress VARCHAR(8) NOT NULL DEFAULT \'\',
+        fps VARCHAR(4) NOT NULL DEFAULT \'\',
+        res VARCHAR(6) NOT NULL DEFAULT \'\',
+        problems VARCHAR(400) NOT NULL DEFAULT \'\',
+        gpu VARCHAR(80) NOT NULL DEFAULT \'\',
+        cpu VARCHAR(80) NOT NULL DEFAULT \'\',
+        ram SMALLINT NOT NULL DEFAULT 0,
+        fix VARCHAR(600) NOT NULL DEFAULT \'\',
+        note VARCHAR(1200) NOT NULL DEFAULT \'\',
+        helpful INT NOT NULL DEFAULT 0,
+        flags INT NOT NULL DEFAULT 0,
+        hidden TINYINT NOT NULL DEFAULT 0,
+        source VARCHAR(8) NOT NULL DEFAULT \'site\',
+        legacy_id INT NULL,
+        created DATETIME NOT NULL,
+        updated DATETIME NOT NULL,
+        UNIQUE KEY one (kind, app, who),
+        UNIQUE KEY legacy (source, legacy_id),
+        KEY version (kind, app, hidden, updated),
+        KEY author (account_id)
+    ) CHARACTER SET utf8mb4');
+    $db->exec('CREATE TABLE IF NOT EXISTS play_votes (
+        report_id INT NOT NULL,
+        who CHAR(64) NOT NULL,
+        PRIMARY KEY (report_id, who)
+    ) CHARACTER SET utf8mb4');
+    $db->exec('CREATE TABLE IF NOT EXISTS play_flags (
+        report_id INT NOT NULL,
+        who CHAR(64) NOT NULL,
+        reason VARCHAR(8) NOT NULL,
+        created DATETIME NOT NULL,
+        PRIMARY KEY (report_id, who)
+    ) CHARACTER SET utf8mb4');
+    $done = true;
+}
+
+// ---- The older reports, copied in as they arrive ------------------------------------------------
+function rs_play_sync_legacy(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    rs_play_tables();
+    $db = rs_db();
+    // At most once a minute is plenty.
+    $last = (int)rs_setting('play_legacy_at', '0');
+    if (time() - $last < 60) return;
+    rs_set_setting('play_legacy_at', (string)time());
+    $tables = array_column($db->query('SHOW TABLES')->fetchAll(PDO::FETCH_NUM), 0);
+    // RecompLauncher's (pc_feedback): one per connection, stamped in the server's own clock.
+    if (in_array('pc_feedback', $tables, true)) {
+        $db->exec("INSERT INTO play_reports (kind, app, who, account_id, verdict, sys, version, note, hidden, source, legacy_id, created, updated)
+            SELECT 'pc', f.app, f.ip_hash, NULL, f.verdict, f.sys, f.version, f.note, f.hidden, 'pcfb', f.id,
+                   DATE_SUB(f.created, INTERVAL TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) SECOND),
+                   DATE_SUB(f.created, INTERVAL TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) SECOND)
+            FROM pc_feedback f
+            ON DUPLICATE KEY UPDATE verdict = IF(play_reports.source = 'pcfb', VALUES(verdict), play_reports.verdict),
+                sys = IF(play_reports.source = 'pcfb', VALUES(sys), play_reports.sys),
+                version = IF(play_reports.source = 'pcfb', VALUES(version), play_reports.version),
+                note = IF(play_reports.source = 'pcfb', VALUES(note), play_reports.note),
+                hidden = IF(play_reports.source = 'pcfb', VALUES(hidden), play_reports.hidden),
+                updated = IF(play_reports.source = 'pcfb', GREATEST(play_reports.updated, VALUES(updated)), play_reports.updated)");
+    }
+    // The website's PS5 ones (ps5_feedback, 3.0): already UTC, and may belong to an account.
+    if (in_array('ps5_feedback', $tables, true)) {
+        $db->exec("INSERT INTO play_reports (kind, app, who, account_id, verdict, sys, version, note, hidden, source, legacy_id, created, updated)
+            SELECT 'ps5', f.app, f.who, f.account_id, f.verdict, f.fw, f.version, f.note, f.hidden, 'ps5fb', f.id, f.created, f.created
+            FROM ps5_feedback f
+            ON DUPLICATE KEY UPDATE verdict = IF(play_reports.source = 'ps5fb', VALUES(verdict), play_reports.verdict),
+                sys = IF(play_reports.source = 'ps5fb', VALUES(sys), play_reports.sys),
+                note = IF(play_reports.source = 'ps5fb', VALUES(note), play_reports.note),
+                hidden = IF(play_reports.source = 'ps5fb', VALUES(hidden), play_reports.hidden),
+                updated = IF(play_reports.source = 'ps5fb', GREATEST(play_reports.updated, VALUES(updated)), play_reports.updated)");
+    }
+}
+
+// ---- Reading and writing ---------------------------------------------------------------------------
+function rs_play_problems_decode(string $s): array {
+    $out = [];
+    foreach (explode(',', $s) as $p) {
+        [$k, $v] = array_pad(explode(':', $p, 2), 2, '1');
+        if (isset(RS_PLAY_PROBLEMS[$k])) $out[$k] = max(1, min(3, (int)$v));
+    }
+    return $out;
+}
+function rs_play_problems_encode(array $p): string {
+    $out = [];
+    foreach ($p as $k => $v) if (isset(RS_PLAY_PROBLEMS[$k])) $out[] = $k . ':' . max(1, min(3, (int)$v));
+    return implode(',', $out);
+}
+
+// Who's posting: their account, else this connection.
+function rs_play_who(?array $me): string {
+    return $me ? hash('sha256', 'acct|' . $me['id']) : rs_ip_hash();
+}
+
+// $r: verdict sys version progress fps res problems(array) gpu cpu ram fix note show_name. -> report id
+function rs_play_save(string $kind, string $app, ?array $me, array $r, string $source = 'site'): int {
+    rs_play_tables();
+    $who = rs_play_who($me);
+    $db = rs_db();
+    // A guest who signs in later: their guest report on this connection becomes theirs.
+    if ($me) $db->prepare('DELETE FROM play_reports WHERE kind = ? AND app = ? AND who = ? AND account_id IS NULL AND source = \'site\'')->execute([$kind, $app, rs_ip_hash()]);
+    $db->prepare('INSERT INTO play_reports (kind, app, who, account_id, show_name, verdict, sys, version, progress, fps, res, problems, gpu, cpu, ram, fix, note, source, created, updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), show_name = VALUES(show_name), verdict = VALUES(verdict), sys = VALUES(sys),
+            version = VALUES(version), progress = VALUES(progress), fps = VALUES(fps), res = VALUES(res), problems = VALUES(problems),
+            gpu = VALUES(gpu), cpu = VALUES(cpu), ram = VALUES(ram), fix = VALUES(fix), note = VALUES(note), source = VALUES(source),
+            hidden = 0, flags = 0, updated = UTC_TIMESTAMP()')
+        ->execute([$kind, $app, $who, $me ? (int)$me['id'] : null, !empty($r['show_name']) ? 1 : 0, $r['verdict'], $r['sys'], $r['version'],
+            $r['progress'], $r['fps'], $r['res'], rs_play_problems_encode($r['problems']), $r['gpu'], $r['cpu'], (int)$r['ram'],
+            $r['fix'], $r['note'], $source]);
+    $st = $db->prepare('SELECT id FROM play_reports WHERE kind = ? AND app = ? AND who = ?');
+    $st->execute([$kind, $app, $who]);
+    rs_play_scores_forget();
+    return (int)$st->fetchColumn();
+}
+
+function rs_play_item(array $x, ?string $myWho, array $voted): array {
+    $named = $x['account_id'] !== null && (int)$x['show_name'] === 1 && $x['username'] !== null;
+    return [
+        'id' => (int)$x['id'], 'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'], 'version' => (string)$x['version'],
+        'progress' => (string)$x['progress'], 'fps' => (string)$x['fps'], 'res' => (string)$x['res'],
+        'problems' => (object)rs_play_problems_decode((string)$x['problems']),
+        'gpu' => (string)$x['gpu'], 'cpu' => (string)$x['cpu'], 'ram' => (int)$x['ram'],
+        'fix' => (string)$x['fix'], 'note' => (string)$x['note'], 'helpful' => (int)$x['helpful'],
+        'user' => $named ? (string)$x['username'] : null,
+        'avatar' => $named && function_exists('rs_acct_avatar_url') ? rs_acct_avatar_url(['avatar' => $x['avatar']]) : '',
+        'signed' => $x['account_id'] !== null, 'app' => $x['source'] === 'pcfb' ? 'launcher' : 'site',
+        'mine' => $myWho !== null && hash_equals((string)$x['who'], $myWho), 'voted' => isset($voted[(int)$x['id']]),
+        'when' => gmdate('c', strtotime((string)$x['updated'] . ' UTC')),
+    ];
+}
+
+// Every report on a version, with its summary. $sort: helpful | new. $sys: one system, or ''.
+function rs_play_list(string $kind, string $app, ?array $me, string $sort = 'helpful', string $sys = '', int $limit = 80): array {
+    rs_play_sync_legacy();
+    $db = rs_db();
+    $myWho = rs_play_who($me);
+    $where = 'r.kind = ? AND r.app = ? AND (r.hidden = 0 OR r.who = ?)';
+    $args = [$kind, $app, $myWho];
+    if ($sys !== '') { $where .= ' AND r.sys = ?'; $args[] = $sys; }
+    $order = $sort === 'new' ? 'r.updated DESC' : '(r.helpful + IF(r.fix <> \'\', 2, 0) + IF(r.note <> \'\', 1, 0)) DESC, r.updated DESC';
+    $st = $db->prepare("SELECT r.*, a.username, a.avatar FROM play_reports r LEFT JOIN accounts a ON a.id = r.account_id WHERE $where ORDER BY $order LIMIT " . max(1, min(200, $limit)));
+    $st->execute($args);
+    $rows = $st->fetchAll();
+    $voted = [];
+    if ($rows) {
+        $v = $db->prepare('SELECT report_id FROM play_votes WHERE who = ? AND report_id IN (' . implode(',', array_map(fn($r) => (int)$r['id'], $rows)) . ')');
+        $v->execute([$myWho]);
+        foreach ($v->fetchAll() as $r) $voted[(int)$r['report_id']] = true;
+    }
+    return array_map(fn($x) => rs_play_item($x, $myWho, $voted), $rows);
+}
+
+// ---- Scores ---------------------------------------------------------------------------------------
+// A report's points: Plays great 100, Has problems 70 down to 30 by how bad its problems are,
+// Won't run 0. Its weight: newer counts more (half every 120 days), signed in a little more,
+// a detailed one a little more, helpful votes a little more.
+function rs_play_points(array $r): float {
+    if ($r['verdict'] === 'runs') {
+        $worst = 0;
+        foreach (rs_play_problems_decode((string)$r['problems']) as $v) $worst = max($worst, $v);
+        return $worst >= 3 ? 75.0 : ($worst === 2 ? 90.0 : 100.0);
+    }
+    if ($r['verdict'] === 'broken') return 0.0;
+    $p = rs_play_problems_decode((string)$r['problems']);
+    if (!$p) return 55.0;
+    $worst = max($p);
+    return $worst >= 3 ? 30.0 : ($worst === 2 ? 50.0 : 70.0);
+}
+function rs_play_weight(array $r, int $now): float {
+    $age = max(0, $now - (int)strtotime((string)$r['updated'] . ' UTC')) / 86400;
+    $w = pow(0.5, $age / 120);
+    if ($r['account_id'] !== null) $w *= 1.25;
+    $detail = ($r['progress'] !== '' ? 1 : 0) + ($r['fps'] !== '' ? 1 : 0) + ($r['problems'] !== '' || $r['verdict'] === 'runs' ? 1 : 0) + ($r['gpu'] !== '' ? 1 : 0) + ($r['fix'] !== '' || $r['note'] !== '' ? 1 : 0);
+    $w *= 1 + 0.06 * $detail;
+    $w *= 1 + min(0.5, 0.1 * (int)$r['helpful']);
+    return $w;
+}
+
+function rs_play_scores_forget(): void { rs_set_setting('play_scores_at', '0'); }
+
+// Every version's score: [kind => [app => [score, n, w, verdicts, sys => [sys => [score, n]], problems => [k => share], recent => n30, trend]]]
+// Kept for five minutes; a new report clears it.
+function rs_play_scores(): array {
+    rs_play_sync_legacy();
+    $cacheAt = (int)rs_setting('play_scores_at', '0');
+    if (time() - $cacheAt < 300) {
+        $c = json_decode((string)rs_setting('play_scores', ''), true);
+        if (is_array($c)) return $c;
+    }
+    $now = time();
+    $acc = [];
+    $st = rs_db()->query('SELECT kind, app, account_id, verdict, sys, progress, fps, problems, gpu, fix, note, helpful, updated FROM play_reports WHERE hidden = 0');
+    while ($r = $st->fetch()) {
+        $k = $r['kind']; $a = $r['app'];
+        $pts = rs_play_points($r); $w = rs_play_weight($r, $now);
+        $age = ($now - (int)strtotime((string)$r['updated'] . ' UTC')) / 86400;
+        $e = &$acc[$k][$a];
+        $e ??= ['sw' => 0.0, 'w' => 0.0, 'n' => 0, 'v' => ['runs' => 0, 'issues' => 0, 'broken' => 0], 'sys' => [], 'pr' => [], 'n30' => 0, 'new' => [0.0, 0.0], 'old' => [0.0, 0.0]];
+        $e['sw'] += $pts * $w; $e['w'] += $w; $e['n']++;
+        if (isset($e['v'][$r['verdict']])) $e['v'][$r['verdict']]++;
+        if ($r['sys'] !== '') { $s = &$e['sys'][$r['sys']]; $s ??= [0.0, 0.0, 0]; $s[0] += $pts * $w; $s[1] += $w; $s[2]++; unset($s); }
+        foreach (array_keys(rs_play_problems_decode((string)$r['problems'])) as $p) $e['pr'][$p] = ($e['pr'][$p] ?? 0) + 1;
+        if ($age <= 30) { $e['n30']++; $e['new'][0] += $pts; $e['new'][1]++; } else { $e['old'][0] += $pts; $e['old'][1]++; }
+        unset($e);
+    }
+    // A Bayesian average: a version with few reports leans toward the middle until more come in.
+    $prior = 60.0; $pw = 1.5;
+    $out = [];
+    foreach ($acc as $k => $apps) foreach ($apps as $a => $e) {
+        $sys = [];
+        foreach ($e['sys'] as $s => [$sw, $w, $n]) $sys[$s] = ['score' => (int)round(($sw + $prior * $pw) / ($w + $pw)), 'n' => $n];
+        arsort($e['pr']);
+        $pr = [];
+        foreach (array_slice($e['pr'], 0, 4, true) as $p => $n) $pr[$p] = round($n / $e['n'], 2);
+        $trend = ($e['new'][1] >= 2 && $e['old'][1] >= 2) ? (int)round($e['new'][0] / $e['new'][1] - $e['old'][0] / $e['old'][1]) : 0;
+        $out[$k][$a] = ['score' => (int)round(($e['sw'] + $prior * $pw) / ($e['w'] + $pw)), 'n' => $e['n'], 'verdicts' => $e['v'],
+            'sys' => $sys, 'problems' => $pr, 'recent' => $e['n30'], 'trend' => $trend];
+    }
+    rs_set_setting('play_scores', json_encode($out, JSON_UNESCAPED_SLASHES));
+    rs_set_setting('play_scores_at', (string)time());
+    return $out;
+}
+
+// ---- Versions of one game, side by side, with their badges and where they came from -----------------
+// A repo's fork parent, from GitHub (kept a day).
+function rs_play_fork_of(string $repo): string {
+    if (!function_exists('rs_gh_cached') || !rs_repo_ok($repo)) return '';
+    $r = rs_gh_cached($repo . '#fork', rs_gh_api() . '/repos/' . $repo, 86400, fn(array $j): array => [
+        'fork' => (bool)($j['fork'] ?? false), 'parent' => (string)($j['parent']['full_name'] ?? ''), 'source' => (string)($j['source']['full_name'] ?? ''),
+    ]);
+    if ($r['status'] !== 200) return '';
+    $j = json_decode($r['body'], true);
+    return is_array($j) && !empty($j['fork']) ? (string)($j['parent'] ?? '') : '';
+}
+
+// Badges for the versions of a game. $rows: [id => [score, n, downloads, released, updated(ts)]]
+function rs_play_badges(array $rows): array {
+    $b = array_fill_keys(array_keys($rows), []);
+    if (count($rows) < 2) return $b;
+    $top = null; $most = null; $active = null;
+    foreach ($rows as $id => $r) {
+        if ($r['n'] >= 3 && ($top === null || $r['score'] > $rows[$top]['score'])) $top = $id;
+        if ($r['downloads'] > 0 && ($most === null || $r['downloads'] > $rows[$most]['downloads'])) $most = $id;
+        if ($r['updated'] > 0 && ($active === null || $r['updated'] > $rows[$active]['updated'])) $active = $id;
+        if ($r['released'] > 0 && time() - $r['released'] < 75 * 86400 && $r['n'] >= 2 && $r['score'] >= 70) $b[$id][] = 'rising';
+    }
+    if ($top !== null) $b[$top][] = 'top';
+    if ($most !== null) $b[$most][] = 'played';
+    if ($active !== null && time() - $rows[$active]['updated'] < 45 * 86400) $b[$active][] = 'active';
+    return $b;
+}

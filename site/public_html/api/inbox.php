@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website: takes a bug report or a recomp submission and files it in the
+// RecompStore website: takes a bug report or a recomp submission and files it in the
 // admin's Inbox. JSON in, JSON out. Nothing is emailed or shown publicly.
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
@@ -37,9 +37,10 @@ $str = function (string $k, int $max) use ($in): string {
 if ($str('website', 200) !== '') rs_reply(200, ['ok' => true]);
 
 $kind = $str('kind', 16);
-if (!in_array($kind, ['bug', 'submit', 'message'], true)) rs_reply(400, ['ok' => false, 'error' => 'Choose a form.']);
+if (!in_array($kind, ['bug', 'submit', 'message', 'copyright'], true)) rs_reply(400, ['ok' => false, 'error' => 'Choose a form.']);
 
 $row = ['kind' => $kind, 'app_id' => '', 'name' => '', 'contact' => '', 'repo' => '', 'version' => '', 'body' => ''];
+$data = null;
 if ($kind === 'bug') {
     $row['app_id'] = $str('app', 64);
     $row['version'] = $str('version', 64);
@@ -47,6 +48,28 @@ if ($kind === 'bug') {
     $row['body'] = $str('body', 5000);
     if ($row['app_id'] === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $row['app_id'])) rs_reply(422, ['ok' => false, 'error' => 'Choose the game the bug is in.']);
     if (mb_strlen($row['body']) < 10) rs_reply(422, ['ok' => false, 'error' => 'Tell us a little more about what happened.']);
+} elseif ($kind === 'copyright') {
+    // (2.9) A copyright notice or a counter-notice (the DMCA page): kept with every statement as sent.
+    $notice = $str('notice', 16) === 'counter' ? 'counter' : 'takedown';
+    $row['name'] = $str('name', 120);
+    $row['contact'] = $str('email', 200);
+    $row['repo'] = $str('url', 255);
+    $row['version'] = $notice;
+    $data = ['notice' => $notice, 'company' => $str('company', 200), 'address' => $str('address', 500), 'work' => $str('work', 2000),
+        'details' => $str('body', 5000), 'signature' => $str('signature', 120),
+        'good_faith' => $str('good_faith', 4) === '1', 'accurate' => $str('accurate', 4) === '1', 'mistake' => $str('mistake', 4) === '1', 'consent' => $str('consent', 4) === '1'];
+    if ($row['name'] === '') rs_reply(422, ['ok' => false, 'error' => 'Add your full name.']);
+    if (!filter_var($row['contact'], FILTER_VALIDATE_EMAIL)) rs_reply(422, ['ok' => false, 'error' => 'Add an email address we can reply to.']);
+    if (!preg_match('#^https?://(www\.)?(recompstore\.com|recomplauncher\.com)/#i', $row['repo'])) rs_reply(422, ['ok' => false, 'error' => 'Add the link to the listing on recompstore.com or recomplauncher.com.']);
+    if ($data['signature'] === '') rs_reply(422, ['ok' => false, 'error' => 'Type your full name as your signature.']);
+    if ($notice === 'takedown' && ($data['work'] === '' || !$data['good_faith'] || !$data['accurate'])) rs_reply(422, ['ok' => false, 'error' => 'Describe the work and tick both statements.']);
+    if ($notice === 'counter' && ($data['address'] === '' || !$data['mistake'] || !$data['consent'])) rs_reply(422, ['ok' => false, 'error' => 'Add your address and phone, and tick both statements.']);
+    // Which listing: a PC recomp (recomplauncher.com/game/<id>, or the old /pc/game/<id>) or a PS5 app.
+    $host = strtolower((string)parse_url($row['repo'], PHP_URL_HOST));
+    $path = (string)parse_url($row['repo'], PHP_URL_PATH);
+    if (preg_match('#^/(?:pc/)?game/([a-z0-9-]{1,60})/?$#', $path, $m) && (str_contains($host, 'recomplauncher') || str_starts_with($path, '/pc/'))) $row['app_id'] = 'pc:' . $m[1];
+    elseif (preg_match('#^/(?:game|soon)/([A-Za-z0-9_-]{1,64})/?$#', $path, $m)) $row['app_id'] = $m[1];
+    $row['body'] = ($notice === 'counter' ? "Counter-notice\n" : "Copyright notice\n") . ($data['work'] !== '' ? "Work: " . $data['work'] . "\n" : '') . $data['details'];
 } elseif ($kind === 'message') {
     // Contact: a question or anything else, answered by email.
     $row['name'] = $str('name', 120);
@@ -85,6 +108,12 @@ try {
             $db->query("SELECT RELEASE_LOCK('rs_inbox')");
             rs_reply(429, ['ok' => false, 'error' => 'That\'s a lot of messages at once. Try again in an hour.']);
         }
+        if ($data !== null) {
+            rs_submission_columns();
+            $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, data, status, ip_hash, created)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'new\', ?, NOW())')
+               ->execute([$row['kind'], $row['app_id'], $row['name'], $row['contact'], $row['repo'], $row['version'], $row['body'], json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $ip]);
+        } else
         $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created)
                       VALUES (?, ?, ?, ?, ?, ?, ?, \'new\', ?, NOW())')
            ->execute([$row['kind'], $row['app_id'], $row['name'], $row['contact'], $row['repo'], $row['version'], $row['body'], $ip]);

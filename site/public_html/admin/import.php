@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.0): import apps from a JSON file (a list made for another store, say):
+// RecompStore admin (2.0): import apps from a JSON file (a list made for another store, say):
 //   { "apps": [ { id?, name, author, category, tags, blurb, description, repo, asset, icon, hero, canMove? } ] }
 // A preview first: what's new, what's already here (by title ID or repo) and skipped, and what
 // needs a title ID or a zip name before it can go in. What's imported is set to Testers only:

@@ -1,14 +1,20 @@
 <?php
-// Recomp Store website (2.1): a developer submits a game port, emulator, app or tool for the store,
+// RecompStore website (2.1): a developer submits a game port, emulator, app or tool for the store,
 // with its GitHub repo, the details for its page and, if they want, its pictures. It lands in the
 // admin's Inbox under Submissions, where it can be added to the store as a hidden draft.
 //   POST multipart: kind, name, author, contact, repo, asset, title_id, version, blurb, description,
 //   needs, credits, link1..3, notes, rights=1, website (honeypot), icon, hero, logo, shots[] (up to 4)
 //   -> {ok, message} or {ok:false, error}
 declare(strict_types=1);
-require dirname(__DIR__) . '/admin/inc/bootstrap.php';
+require_once dirname(__DIR__) . '/admin/inc/bootstrap.php';
+// (2.7.3) From a developer's hub, api/dev.php (a=submit) runs this with RS_SUB_ACCOUNT set: the
+// submission is theirs, shown in their hub and marked in the Inbox.
 
 header('Cache-Control: no-store');
+if (!function_exists('rs_sub_fix_key')) {
+    // (3.6) The key in a "fix and send it again" link for submission <id>.
+    function rs_sub_fix_key(int $id): string { return substr(hash_hmac('sha256', "sub-fix|$id", rs_mail_key()), 0, 24); }
+}
 header('X-Content-Type-Options: nosniff');
 
 function rs_sub_out(int $code, array $body): void {
@@ -18,10 +24,30 @@ function rs_sub_out(int $code, array $body): void {
     exit;
 }
 
+// (3.6) A submission sent back for changes: the link in our email opens it again, filled in.
+//   GET fix=<id>&t=<key> -> {ok, data, reason, shots}
+$fixRow = null;
+$fixIn = (int)($_GET['fix'] ?? $_POST['fix'] ?? 0);
+if ($fixIn > 0) {
+    $key = (string)($_GET['t'] ?? $_POST['t'] ?? '');
+    $st = rs_db()->prepare("SELECT * FROM inbox WHERE id = ? AND kind = 'submit'");
+    $st->execute([$fixIn]);
+    $fixRow = $st->fetch() ?: null;
+    $fd = $fixRow ? json_decode((string)$fixRow['data'], true) : null;
+    if (!$fixRow || !is_array($fd) || empty($fd['declined']) || !hash_equals(rs_sub_fix_key($fixIn), $key))
+        rs_sub_out(404, ['ok' => false, 'error' => 'That link has run out or was already used. Send it again from the start.']);
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+        $sh = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'shot'");
+        $sh->execute([$fixIn]);
+        $out = array_diff_key($fd, array_flip(['account', 'account_name', 'verified', 'declined', 'declined_at', 'resubmitted']));
+        rs_sub_out(200, ['ok' => true, 'data' => $out, 'reason' => (string)($fd['declined']['reason'] ?? ''), 'shots' => (int)$sh->fetchColumn()]);
+    }
+}
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_sub_out(405, ['ok' => false, 'error' => 'Send the form.']);
 $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
 $host = (string)($_SERVER['HTTP_HOST'] ?? '');
 if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('http://' . $host, PHP_URL_HOST)) rs_sub_out(403, ['ok' => false, 'error' => 'Send it from recompstore.com.']);
+$subAcc = defined('RS_SUB_ACCOUNT') ? RS_SUB_ACCOUNT : null;
 if (empty($_POST) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) rs_sub_out(413, ['ok' => false, 'error' => 'The pictures are too big together. Send smaller ones.']);
 
 $s = function (string $k, int $max): string {
@@ -40,6 +66,43 @@ $d = [
     'blurb' => $s('blurb', 160), 'description' => $s('description', 6000), 'needs' => $s('needs', 160),
     'credits' => $s('credits', 1000), 'notes' => $s('notes', 2000), 'links' => [],
 ];
+// (2.8) A PC recomp (recompstore.com/pc): always a game, no title ID or PS5 release file.
+if ($s('platform', 8) === 'pc') { $d['platform'] = 'pc'; $d['category'] = 'games'; $d['title_id'] = ''; $d['asset'] = ''; }
+// (3.6) A PC recomp says where it runs (and its file on each), the game, whether it works with
+// RecompLauncher's SDK, whether it needs steps before the first play, and what it has: everything
+// the admin's Approve needs to put it live in one click.
+if (($d['platform'] ?? '') === 'pc') {
+    $d['assets'] = [];
+    foreach (['win', 'mac', 'linux'] as $k) {
+        if (($_POST['sys_' . $k] ?? '') !== '1') continue;
+        $pat = $s('asset_' . $k, 160);
+        if ($pat === '' || !preg_match('/^[A-Za-z0-9 ._*?+()\[\]~-]{1,160}$/', $pat)) rs_sub_out(422, ['ok' => false, 'error' => 'Name the release file for each system, like MyRecomp-*-Windows-x64.zip.']);
+        $d['assets'][$k] = $pat;
+    }
+    if (!$d['assets']) rs_sub_out(422, ['ok' => false, 'error' => 'Switch on at least one system it runs on.']);
+    $og = $s('origin', 16);
+    $d['origin'] = isset(RS_PC_ORIGINS[$og]) ? $og : '';
+    if ($d['origin'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Pick the console the game is from.']);
+    $d['disc'] = $s('disc', 120);
+    $yn = fn(string $k, array $ok) => in_array($v = $s($k, 8), $ok, true) ? $v : '';
+    $d['rl_quick'] = $yn('rl_quick', ['yes', 'no', 'setup']);
+    $d['rl_settings'] = $yn('rl_settings', ['yes', 'no']);
+    $d['rl_future'] = $d['rl_quick'] !== 'yes' && $d['rl_settings'] === 'no' ? $yn('rl_future', ['yes', 'maybe', 'no']) : '';
+    if ($d['rl_quick'] === '' || $d['rl_settings'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Answer the two Works with RecompLauncher questions.']);
+    // "It needs to be built or set up first" is quick install's third answer: its steps become Set Up.
+    $d['setup'] = $d['rl_quick'] === 'setup' ? 'yes' : 'no';
+    $d['setup_steps'] = $d['setup'] === 'yes' ? $s('setup_steps', 2000) : '';
+    if ($d['setup'] === 'yes' && trim($d['setup_steps']) === '') rs_sub_out(422, ['ok' => false, 'error' => 'Write the steps players need to follow.']);
+    $d['features'] = array_values(array_intersect(['Online', 'Multiplayer', 'Widescreen', 'High FPS', 'Mods', 'Controller'], array_map('strval', (array)($_POST['features'] ?? []))));
+    if ($d['version'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Add the version.']);
+    if (mb_strlen($d['needs']) < 3) rs_sub_out(422, ['ok' => false, 'error' => 'Say what players need, like their own copy of the game.']);
+}
+// (2.9) Whether AI helped make it, in the developer's own words: shown on its page as AI-assisted.
+$aiIn = $s('platform', 8) === 'pc' ? $s('ai', 4) : '';
+$d['ai'] = in_array($aiIn, ['yes', 'no'], true) ? $aiIn : '';
+$d['ai_uses'] = $d['ai'] === 'yes' ? (rs_ai_uses_clean((array)($_POST['ai_uses'] ?? [])) ?: ['code']) : [];
+$d['ai_note'] = $d['ai'] === 'yes' ? $s('ai_note', 200) : '';
+if ($subAcc) { $d['account'] = (int)$subAcc['id']; $d['account_name'] = rs_dev_label($subAcc); $d['verified'] = !empty($subAcc['verified']); }
 foreach (['link1', 'link2', 'link3'] as $k) {
     $l = $s($k, 300);
     if ($l === '') continue;
@@ -54,6 +117,7 @@ if (mb_strlen($d['contact']) < 3) rs_sub_out(422, ['ok' => false, 'error' => 'Le
 if (!preg_match('#^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$#', $d['repo'])) rs_sub_out(422, ['ok' => false, 'error' => 'The GitHub repo goes like github.com/you/your-app.']);
 if ($d['title_id'] !== '' && !preg_match('/^[A-Z]{4}\d{5}$/', $d['title_id'])) rs_sub_out(422, ['ok' => false, 'error' => 'A title ID is four letters and five numbers, like PPSA12345. Leave it empty if you don\'t have one yet.']);
 if ($d['asset'] !== '' && !preg_match('/\.(zip|7z)$/i', $d['asset'])) rs_sub_out(422, ['ok' => false, 'error' => 'The release file is the .zip or .7z on your GitHub release, like MyApp-*.zip.']);
+if ($d['ai'] === '' && ($d['platform'] ?? '') === 'pc') rs_sub_out(422, ['ok' => false, 'error' => 'Say whether AI tools helped make it (yes or no).']);
 if (mb_strlen($d['description']) < 20) rs_sub_out(422, ['ok' => false, 'error' => 'Tell players a bit more about it in the description.']);
 if (($_POST['rights'] ?? '') !== '1') rs_sub_out(422, ['ok' => false, 'error' => 'Tick the box to confirm you made it or may submit it.']);
 
@@ -71,6 +135,14 @@ $take = function (string $role, string $tmp, int $err, int $size) use (&$pics) {
         || $info[0] < 16 || $info[1] < 16 || $info[0] > 12000 || $info[1] > 12000) rs_sub_out(422, ['ok' => false, 'error' => 'Pictures have to be PNG, JPEG or WebP.']);
     $pics[] = ['role' => $role, 'tmp' => $tmp, 'mime' => $mime, 'ext' => $types[$mime], 'size' => $size, 'w' => (int)$info[0], 'h' => (int)$info[1]];
 };
+// (3.6) A PC recomp needs at least one screenshot of it running.
+if (($d['platform'] ?? '') === 'pc') {
+    $sf = $_FILES['shots'] ?? null;
+    $has = false;
+    if (is_array($sf) && is_array($sf['error'] ?? null)) foreach ($sf['error'] as $er) if ((int)$er !== UPLOAD_ERR_NO_FILE) $has = true;
+    if (!$has && $fixRow) { $sh = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'shot'"); $sh->execute([(int)$fixRow['id']]); $has = (int)$sh->fetchColumn() > 0; }
+    if (!$has) rs_sub_out(422, ['ok' => false, 'error' => 'Add at least one screenshot of it running.']);
+}
 foreach (['icon', 'hero', 'logo'] as $role) {
     $f = $_FILES[$role] ?? null;
     if (is_array($f) && !is_array($f['name'] ?? null)) $take($role, (string)$f['tmp_name'], (int)$f['error'], (int)$f['size']);
@@ -100,10 +172,27 @@ try {
 
     $dir = $pics ? rs_report_dir_ready() : '';
     $db->beginTransaction();
-    $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, data) VALUES (\'submit\', ?, ?, ?, ?, ?, ?, \'new\', ?, NOW(), ?)')
+    if ($fixRow) {
+        // (3.6) Fixed and sent again: the same submission, back in the Inbox as new, with its pictures.
+        $id = (int)$fixRow['id'];
+        $d['resubmitted'] = gmdate('c');
+        $d['was_declined'] = (json_decode((string)$fixRow['data'], true) ?: [])['declined'] ?? null;
+        if (empty($d['account']) && !empty($fixRow['dev_account'])) $d['account'] = (int)$fixRow['dev_account'];
+        $db->prepare("UPDATE inbox SET app_id = ?, name = ?, contact = ?, repo = ?, version = ?, body = ?, status = 'new', data = ? WHERE id = ?")
+           ->execute([$d['title_id'], $d['name'], $d['contact'], 'https://github.com/' . $d['repo'], $d['version'], $d['description'],
+               json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $id]);
+        // New pictures replace the old ones in the same role.
+        $roles = array_values(array_unique(array_column($pics, 'role')));
+        if ($roles) {
+            $in = implode(',', array_fill(0, count($roles), '?'));
+            $db->prepare("DELETE FROM inbox_pictures WHERE inbox_id = ? AND role IN ($in)")->execute(array_merge([$id], $roles));
+        }
+    } else {
+    $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, data, dev_account) VALUES (\'submit\', ?, ?, ?, ?, ?, ?, \'new\', ?, NOW(), ?, ?)')
        ->execute([$d['title_id'], $d['name'], $d['contact'], 'https://github.com/' . $d['repo'], $d['version'], $d['description'], $ip,
-           json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
+           json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $subAcc ? (int)$subAcc['id'] : null]);
     $id = (int)$db->lastInsertId();
+    }
     $put = $db->prepare('INSERT INTO inbox_pictures (inbox_id, file, mime, size, w, h, created, role) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)');
     foreach ($pics as $k => $p) {
         $file = 'sub' . $id . '-' . $p['role'] . '-' . $k . '-' . bin2hex(random_bytes(6)) . '.' . $p['ext'];
@@ -112,6 +201,15 @@ try {
     }
     $db->commit();
     $db->query("SELECT RELEASE_LOCK('rs_inbox')");
+    if ($subAcc) {
+        try {
+            if (rs_mail_ready()) rs_mail_send(rs_mail_get('mail_from'), 'New app from ' . $d['account_name'] . ': ' . $d['name'],
+                $d['account_name'] . ($d['verified'] ? ' (verified developer)' : '') . ' sent in ' . $d['name'] . ' (github.com/' . $d['repo'] . ') from their developer hub.'
+                . "\n\nSee it in Submissions: " . rs_abs('/admin/submissions.php#m' . $id));
+        } catch (Throwable $e) { /* it's in the Inbox either way */ }
+        rs_sub_out(200, ['ok' => true, 'hub' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. You can follow it in your developer hub, and you\'ll hear back at ' . $d['contact'] . '.']);
+    }
+    if ($fixRow) rs_sub_out(200, ['ok' => true, 'message' => 'Thanks! Your changes to ' . $d['name'] . ' are in, and it\'s back in line for review. You\'ll hear back at ' . $d['contact'] . '.']);
     rs_sub_out(200, ['ok' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. If it fits the store, it\'s added with your details, and you\'ll hear back at ' . $d['contact'] . '.']);
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) $db->rollBack();

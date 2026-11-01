@@ -1,5 +1,5 @@
 <?php
-// Recomp Store website (2.1): what the Analytics page counts, day by day. Consoles that opened the
+// RecompStore website (2.1): what the Analytics page counts, day by day. Consoles that opened the
 // store, installs, updates and removals per app, beta downloads, and the website's visits. No
 // cookies and no third parties: a website visitor is a code made from their address and browser
 // with a salt that changes every day, so the same person can't be followed from one day to the next.
@@ -83,17 +83,81 @@ function rs_count_visit(string $path, string $ref): void {
     }
     $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
     $vhash = substr(hash('sha256', $salt . '|' . $ip . '|' . $ua), 0, 16);
-    try {
-        rs_analytics_tables();
-        $db = rs_db();
-        $st = $db->prepare('INSERT INTO site_visitors (day, vhash, device, ref, hits) VALUES (UTC_DATE(), ?, ?, ?, 1) ON DUPLICATE KEY UPDATE hits = hits + 1');
-        $st->execute([$vhash, rs_device_kind($ua), substr($host, 0, 80)]);
-        $h = $db->prepare('SELECT hits FROM site_visitors WHERE day = UTC_DATE() AND vhash = ?');
-        $h->execute([$vhash]);
-        if ((int)$h->fetchColumn() > 500) return; // one visitor hammering the site counts once it calms down
-        $db->prepare('INSERT INTO site_pages (day, path, views) VALUES (UTC_DATE(), ?, 1) ON DUPLICATE KEY UPDATE views = views + 1')->execute([$path]);
-    } catch (Throwable $e) {
+    // (3.3) Into a file, not the database: the views are written in one go about once a minute.
+    $d = rs_hits_dir();
+    if (!is_dir($d)) @mkdir($d, 0755, true);
+    @file_put_contents("$d/buffer.log", json_encode([gmdate('Y-m-d'), $vhash, rs_device_kind($ua), substr($host, 0, 80), $path]) . "\n", FILE_APPEND | LOCK_EX);
+    rs_hits_flush_later();
+}
+
+function rs_hits_dir(): string { return dirname(RS_PUBLIC) . '/recompstore-private/hits'; }
+
+// After the answer has gone out: at most once a minute, the waiting views into the database.
+function rs_hits_flush_later(): void {
+    static $set = false;
+    if ($set) return;
+    $set = true;
+    $d = rs_hits_dir();
+    $stamp = "$d/flush.stamp";
+    if (is_file($stamp) && time() - (int)@filemtime($stamp) < 60) return;
+    register_shutdown_function(function () use ($d, $stamp) {
+        if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+        elseif (function_exists('litespeed_finish_request')) @litespeed_finish_request();
+        $lock = @fopen("$d/flush.lock", 'c');
+        if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return;
+        try {
+            @touch($stamp);
+            rs_hits_flush();
+        } catch (Throwable $e) {
+            rs_errlog('hits', $e);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    });
+}
+
+function rs_hits_flush(): int {
+    $d = rs_hits_dir();
+    $buf = "$d/buffer.log";
+    // Leftovers from a flush that didn't finish go first.
+    $work = glob("$d/work-*.log") ?: [];
+    if (is_file($buf) && filesize($buf) > 0) {
+        $w = "$d/work-" . getmypid() . '-' . time() . '.log';
+        if (@rename($buf, $w)) $work[] = $w;
     }
+    if (!$work) return 0;
+    $visitors = []; $pages = [];
+    foreach ($work as $w) {
+        foreach (file($w, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) {
+            $r = json_decode($l, true);
+            if (!is_array($r) || count($r) < 5) continue;
+            [$day, $vh, $dev, $ref, $path] = $r;
+            $k = "$day|$vh";
+            if (!isset($visitors[$k])) $visitors[$k] = [$day, $vh, $dev, $ref, 0];
+            $visitors[$k][4]++;
+            // One visitor hammering the site: their page views stop counting past 500 a day.
+            if ($visitors[$k][4] <= 500) $pages["$day|$path"] = ($pages["$day|$path"] ?? 0) + 1;
+        }
+    }
+    rs_analytics_tables();
+    $db = rs_db();
+    foreach (array_chunk(array_values($visitors), 200) as $chunk) {
+        $sql = 'INSERT INTO site_visitors (day, vhash, device, ref, hits) VALUES ' . implode(',', array_fill(0, count($chunk), '(?, ?, ?, ?, ?)')) . ' ON DUPLICATE KEY UPDATE hits = hits + VALUES(hits)';
+        $args = [];
+        foreach ($chunk as $v) array_push($args, ...$v);
+        $db->prepare($sql)->execute($args);
+    }
+    $rows = [];
+    foreach ($pages as $k => $n) { [$day, $path] = explode('|', $k, 2); $rows[] = [$day, $path, $n]; }
+    foreach (array_chunk($rows, 200) as $chunk) {
+        $sql = 'INSERT INTO site_pages (day, path, views) VALUES ' . implode(',', array_fill(0, count($chunk), '(?, ?, ?)')) . ' ON DUPLICATE KEY UPDATE views = views + VALUES(views)';
+        $args = [];
+        foreach ($chunk as $v) array_push($args, ...$v);
+        $db->prepare($sql)->execute($args);
+    }
+    foreach ($work as $w) @unlink($w);
+    return count($visitors);
 }
 
 // ---- What the Analytics page reads -----------------------------------------------------------
@@ -276,7 +340,7 @@ function rs_an_gh_refresh(array $repos, int $max = 5): array {
 // How long ago a unix time was, short: "just now", "12 min ago", "3 h ago", "Oct 19".
 function rs_an_ago(int $t): string {
     $s = time() - $t;
-    return $s < 90 ? 'just now' : ($s < 3600 ? round($s / 60) . ' min ago' : ($s < 86400 ? round($s / 3600) . ' h ago' : gmdate('M j', $t)));
+    return $s < 90 ? 'just now' : ($s < 3600 ? round($s / 60) . ' min ago' : ($s < 86400 ? round($s / 3600) . ' h ago' : rs_date('M j', $t)));
 }
 
 // "as of" for GitHub's numbers: the oldest of the times given (unix), in UTC.
@@ -284,7 +348,7 @@ function rs_an_asof(array $times): string {
     $times = array_filter($times, fn($t) => $t > 0);
     if (!$times) return 'GitHub numbers: none fetched yet.';
     $t = min($times);
-    return 'GitHub numbers as of ' . gmdate('M j, g:i a', $t) . ' UTC (' . rs_an_ago($t) . '). Asked again at most once an hour.';
+    return 'GitHub numbers as of ' . rs_date('M j, g:i a', $t) . ' (' . rs_an_ago($t) . '). Asked again at most once an hour.';
 }
 
 // ---- Tables: drawn on the page and handed over as CSV --------------------------------------------

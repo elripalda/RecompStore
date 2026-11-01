@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "repo": "luckvj/streetball-revival",
+  "game": {
+    "kind": "iso",
+    "label": "Your disc image (.iso) of the USA PlayStation 2 release, serial SLUS-20651.",
+    "check": { "iso9660": "SLUS_206.51" }
+  },
+  "start": {
+    "program": ["bin/street-game.exe", "street-game.exe", "bin/street-game", "street-game"],
+    "args": ["--iso", "{game}"]
+  },
+  "config": [
+    {
+      "id": "launcher",
+      "format": "json",
+      "file": [{ "path": "{documents}/Streetball Revival/launcher.json" }],
+      "game_path": "disc"
+    }
+  ],
+  "folders": {
+    "saves": [{ "path": "{documents}/Streetball Revival" }]
+  },
+  "settings": [
+    {
+      "id": "picture", "label": "Picture", "in": "args",
+      "help": "The shape of the picture. Wide keeps the court's height and adds the sides on a widescreen.",
+      "choices": [
+        { "label": "Game's option", "args": [] },
+        { "label": "4:3", "args": ["--widescreen", "off"] },
+        { "label": "16:9", "args": ["--widescreen", "on"] },
+        { "label": "Wide", "args": ["--widescreen", "wide"] }
+      ]
+    },
+    {
+      "id": "intro", "label": "Boot movies", "in": "args",
+      "help": "The logos and the intro when the game starts.",
+      "choices": [
+        { "label": "Play them", "args": [] },
+        { "label": "Skip them", "args": ["--no-intro"] }
+      ]
+    },
+    {
+      "id": "loading", "label": "Loading times", "in": "args",
+      "help": "Quick, or as long as on the PlayStation 2.",
+      "choices": [
+        { "label": "Quick", "args": [] },
+        { "label": "Like the original", "args": ["--original-load-times"] }
+      ]
+    }
+  ],
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your save and the launcher's settings.", "open": "saves" }
+  ]
+}

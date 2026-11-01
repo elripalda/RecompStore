@@ -1,4 +1,4 @@
-// Recomp Store admin (2.3): the Games list's tick boxes and the bar that does several games at
+// RecompStore admin (2.3): the Games list's tick boxes and the bar that does several games at
 // once (admin/inc/bulk.php). The bar shows while any game is ticked; Apply asks once.
 (function () {
   'use strict';

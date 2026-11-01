@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin: first-run setup. Saves the database login and creates the admin account.
+// RecompStore admin: first-run setup. Saves the database login and creates the admin account.
 // Once the config exists, this page refuses to run again.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $config = "<?php\n// Recomp Store database login. Written by admin/setup.php. Keep this file private.\nreturn " . var_export([
+            $config = "<?php\n// RecompStore database login. Written by admin/setup.php. Keep this file private.\nreturn " . var_export([
                 'db_host' => $v['db_host'], 'db_name' => $v['db_name'], 'db_user' => $v['db_user'], 'db_pass' => $dbPass,
             ], true) . ";\n";
             $path = rs_config_path();
@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 rs_head('Setup', false);
 ?>
 <section class="card narrow">
-  <h1>Set up Recomp Store</h1>
+  <h1>Set up RecompStore</h1>
   <p class="muted">This runs once. It connects the site to the database you made in hPanel and creates your admin login.</p>
   <?php if ($error): ?><div class="flash err"><?= h($error) ?></div><?php endif; ?>
   <form method="post" autocomplete="off">

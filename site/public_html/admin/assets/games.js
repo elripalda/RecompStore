@@ -1,4 +1,4 @@
-// Recomp Store admin: the Games list's order. Drag a game by its handle (mouse, pen or touch),
+// RecompStore admin: the Games list's order. Drag a game by its handle (mouse, pen or touch),
 // or use the arrows (and the arrow keys, Home and End on a focused handle); nothing is saved
 // until Save order, which sends the whole list.
 (function () {

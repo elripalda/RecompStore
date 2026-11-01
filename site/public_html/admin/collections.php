@@ -1,5 +1,5 @@
 <?php
-// Recomp Store admin (2.3.0): collections, a name, a line about it and apps in order. The store shows
+// RecompStore admin (2.3.0): collections, a name, a line about it and apps in order. The store shows
 // one as a Discover row (a Collection section) and as its own page with Install all.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
@@ -46,7 +46,7 @@ rs_head('Collections');
 <section class="head-row">
   <div>
     <h1>Collections</h1>
-    <p class="muted">Apps that go together, like "Racing night" or "Start here". The store shows a collection as a row on Discover and as its own page, where Install all puts every one the player doesn't have in the queue. Recomp Store 2.3.0 and newer.</p>
+    <p class="muted">Apps that go together, like "Racing night" or "Start here". The store shows a collection as a row on Discover and as its own page, where Install all puts every one the player doesn't have in the queue. RecompStore 2.3.0 and newer.</p>
   </div>
   <div class="actions">
     <a class="btn" href="discover.php">Discover</a>
