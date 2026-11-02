@@ -724,6 +724,38 @@ function rs_pc_unlist_one(string $id): bool {
     return rs_pc_write_files($cat);
 }
 
+// (3.5) When a developer renames their download (a date or "-x86_64" added, a new version scheme),
+// the saved file pattern stops matching and the launcher says there's no build for that system.
+// If the newest release has a file for that system, the pattern follows it.
+function rs_pc_pattern(string $name, string $tag): string {
+    $p = rs_asset_pattern($name, $tag);
+    // A build date or commit in the name changes every release too.
+    $p = preg_replace('/(?<=[-_.+])(?:\d{8}(?:[-_]\d{4,6})?|g?[0-9a-f]{7,12})(?=[-_.])/i', '*', $p) ?? $p;
+    if ($p !== $name) return preg_replace('/\*(?:[-_.]?\*)+/', '*', $p) ?? $p;
+    // No tag in the name: the version-looking part (1.2.3, v0.4-beta, a build date) becomes *.
+    $p = preg_replace('/(?<![A-Za-z0-9])v?\d+(?:[._]\d+)+(?:[-_.]?(?:alpha|beta|rc|pre|preview)[\w.]*)?(?:[-_]\d{8}(?:[-_]\d{4,6})?)?/i', '*', $name, 1) ?? $name;
+    return $p !== $name ? $p : $name;
+}
+function rs_pc_heal_assets(array $a, array $r): array {
+    $rel = rs_gh_releases($a['repo'], 3600);
+    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    $latest = null;
+    foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
+    if (!$latest) return $a;
+    $names = array_map(fn($x) => (string)$x['name'], (array)$latest['assets']);
+    foreach (['win' => 'asset_win', 'linux' => 'asset_linux', 'mac' => 'asset_mac'] as $sys => $k) {
+        $p = trim((string)$a[$k]);
+        $new = (string)($r['assets'][$sys] ?? '');
+        if ($p === '' || $new === '') continue;
+        $hit = false;
+        foreach ($names as $n) if (rs_pattern_matches($p, $n)) { $hit = true; break; }
+        if ($hit) continue;
+        $np = rs_pc_pattern($new, (string)$latest['tag_name']);
+        if ($np !== '' && $np !== $p) { $a[$k] = $np; rs_log('pc-asset', $a['id'], "$sys: $p -> $np"); }
+    }
+    return $a;
+}
+
 // (3.5) Each listed recomp's release as GitHub has it now: version, size, downloads. Oldest checked
 // first, and only for as long as $seconds allows, so Publish never waits minutes on GitHub (the
 // server's own refresh, tools/vps/pc-refresh.php, keeps the rest up to date in the background).
@@ -743,6 +775,7 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         if (!$a) continue;
         foreach (['features', 'features_read', 'features_v'] as $k) if (array_key_exists($k, $f)) $a[$k] = $f[$k];
         $a['gh_at'] = time();
+        if (!empty($r['ok'])) $a = rs_pc_heal_assets($a, $r);
         if (empty($r['ok']) || $r['version'] === '') { rs_pc_save($a); continue; }
         if (!empty($r['license'])) $a['license'] = (string)$r['license'];
         $a['issues'] = (int)($r['issues'] ?? 0); $a['releases'] = (int)($r['releases'] ?? 0); $a['first'] = (string)($r['first'] ?? '');

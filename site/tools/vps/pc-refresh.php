@@ -11,5 +11,5 @@ chdir('/var/www/recompstore/public_html');
 require 'admin/inc/bootstrap.php';
 require_once 'admin/inc/pc.php';
 $t = microtime(true);
-$n = rs_pc_refresh_github(1500);
+$n = rs_pc_refresh_github(1500, in_array('--all', $argv, true) ? 0 : 1800); // --all: every recomp now
 echo gmdate('c') . ' checked ' . $n . ' in ' . round(microtime(true) - $t) . "s\n";
