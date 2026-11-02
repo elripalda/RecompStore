@@ -11,7 +11,7 @@ cat > /root/b2-copy-run.sh <<'RUN'
 #!/bin/bash
 source /root/.b2env
 export RCLONE_CONFIG_OLDS_TYPE=sftp RCLONE_CONFIG_OLDS_SSH="ssh -p 65002 -o ControlPath=/tmp/hostinger-%r u880103508@156.67.76.103"
-rclone copy olds:domains/recompstore.com/recompstore-private/cloud-saves "b2:$B2_BUCKET/cloud-saves" --transfers 16 --checkers 32 --stats 30s --stats-one-line --log-file /root/b2-copy.log --log-level NOTICE
+rclone copy olds:domains/recompstore.com/recompstore-private/cloud-saves "b2:$B2_BUCKET/cloud-saves" --transfers 16 --checkers 32 --stats 30s --stats-one-line --stats-log-level NOTICE --log-file /root/b2-copy.log --log-level NOTICE
 echo "EXIT $?" >> /root/b2-copy.log
 RUN
 chmod 700 /root/b2-copy-run.sh
