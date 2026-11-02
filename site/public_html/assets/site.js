@@ -2,43 +2,6 @@
 (function () {
   'use strict';
 
-  // ---- (2.7) The boot, once a visit, as the store's: the logo builds itself on the aurora (arrow,
-  // bowl, leg), the name comes in under it, then the logo flies up into the bar as the page shows.
-  // A click skips it; it doesn't play with reduced motion, or for search engines' previews.
-  (function boot() {
-    try {
-      if (sessionStorage.getItem('rs-booted')) return;
-      sessionStorage.setItem('rs-booted', '1');
-    } catch (e) { return; }
-    if (!window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    if (/bot|crawl|spider|preview/i.test(navigator.userAgent || '')) return;
-    const el = document.createElement('div');
-    el.className = 'boot';
-    el.setAttribute('aria-hidden', 'true');
-    el.innerHTML = '<div class="boot-bg"></div><div class="boot-in"><svg class="boot-mark" viewBox="0 0 256 256" width="200" height="200">' +
-      '<defs><linearGradient id="boot-g" x1="0" y1="38" x2="0" y2="218" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#34f2e8"/><stop offset="1" stop-color="#377bb6"/></linearGradient></defs>' +
-      '<g fill="url(#boot-g)" transform="translate(4 -2)"><path d="M40 40H88V168H116L64 220L12 168H40Z"/><path d="M104 40H172L216 84V116L180 152H104V116H164L180 100V92L164 76H104Z"/><path d="M132 168H184L236 220H184Z"/></g></svg>' +
-      '<div class="boot-word">Recomp<b>' + (/(^|\.)recomplauncher\./i.test(location.hostname) ? 'Launcher' : 'Store') + '</b></div></div>';
-    document.documentElement.classList.add('booting');
-    document.body.appendChild(el);
-    let gone = false;
-    const fly = () => {
-      if (gone) return;
-      gone = true;
-      const mark = el.querySelector('.boot-mark');
-      const target = document.querySelector('.top .brand img');
-      if (mark && target) {
-        const a = mark.getBoundingClientRect(), b = target.getBoundingClientRect();
-        if (a.width > 0 && b.width > 0)
-          mark.style.transform = `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${b.width / a.width})`;
-      }
-      el.classList.add('fly');
-      setTimeout(() => { document.documentElement.classList.remove('booting'); el.remove(); }, 820);
-    };
-    el.addEventListener('click', fly);
-    setTimeout(fly, 1750);
-  })();
-
   // ---- (2.6) The site in the visitor's language ----------------------------------------------
   // Every English text is written here and passed through t(), tf() or tn(); assets/i18n/<code>.json
   // holds a language's {"English": "translation"} (tools/make-site-i18n.py lists what's to translate).
@@ -1847,8 +1810,11 @@
     nes: 'NES', gbc: 'Game Boy Color', '3ds': 'Nintendo 3DS', vb: 'Virtual Boy', ps5: 'PlayStation 5', genesis: 'Genesis', s32x: '32X', gg: 'Game Gear', arcade: 'Arcade', cdi: 'CD-i', amiga: 'Amiga', other: N_('Other') };
   const SYS_NAMES = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
   let pcCat = null, pcLoading = null;
-  const pcLoad = () => pcCat ? Promise.resolve(pcCat) : (pcLoading || (pcLoading = fetch('/pc-catalog.json' + (VER ? '?v=' + Math.floor(Date.now() / 120000) : ''), { cache: 'no-cache' })
-    .then((r) => (r.ok ? r.json() : { apps: [] })).catch(() => ({ apps: [] })).then((c) => {
+  // (3.5) The website's lighter copy of the list (pc-catalog-web.json: everything but what only a
+  // game's own page shows), the whole one if it isn't there. A game's page gets the rest (pcFull).
+  const pcFetch = (f) => fetch(f + (VER ? '?v=' + Math.floor(Date.now() / 120000) : ''), { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  const pcLoad = () => pcCat ? Promise.resolve(pcCat) : (pcLoading || (pcLoading = pcFetch('/pc-catalog-web.json')
+    .catch(() => pcFetch('/pc-catalog.json')).catch(() => ({ apps: [] })).then((c) => {
       pcCat = Object.assign({ apps: [], origins: [], developers: [] }, c);
       pcCat.all = pcCat.apps;
       pcFilter();
@@ -1879,6 +1845,24 @@
   };
   const titleVersions = (tt) => (tt.pc || []).filter((id) => ((pcCat && pcCat.listed) || []).some((a) => a.id === id)).length + (tt.ps5 || []).length;
   const pcById = (id) => (pcCat ? pcCat.all.find((a) => a.id === id) : null);
+  // (3.5) A game's whole entry (the original game's details, "What's in it"), asked for once and kept.
+  // Pointing at or touching a game's link starts it early, so the page usually has it on arrival.
+  const pcFullAsked = {};
+  function pcFull(id) {
+    const a = pcById(id);
+    if (!a || !a.lite) return Promise.resolve(a);
+    return pcFullAsked[id] || (pcFullAsked[id] = fetch('/api/pc.php?a=app&id=' + encodeURIComponent(id)).then((r) => r.json())
+      .then((j) => { if (j && j.ok && j.app) { Object.assign(a, j.app); delete a.lite; } return a; })
+      .catch(() => { delete pcFullAsked[id]; return a; }));
+  }
+  const pcWarm = (e) => {
+    const l = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    const m = l && (l.getAttribute('href') || '').match(/^\/(?:pc\/)?game\/([a-z0-9-]{1,64})(?:[?#]|$)/);
+    if (m && pcCat) pcFull(m[1]);
+  };
+  document.addEventListener('pointerover', pcWarm, { passive: true });
+  document.addEventListener('touchstart', pcWarm, { passive: true });
+  document.addEventListener('focusin', pcWarm);
   const originName = (k) => (k === 'other' ? t('Other') : PC_ORIGINS[k] || k);
   const myOS = () => { const u = navigator.userAgent; return /Windows/i.test(u) ? 'windows' : /Mac OS X|Macintosh/i.test(u) ? 'macos' : /Linux|X11/i.test(u) ? 'linux' : 'windows'; };
   let pcTitle = '';
@@ -2112,11 +2096,12 @@
       .catch(() => { doc.innerHTML = `<p class="muted">${t('The guide didn\'t load. Try again in a moment.')}</p>`; });
   }
 
+  let pcCountsTried = false;
   function pcRoute(h) {
     setBackdrop(null);
     setAccent(null);
-    view.innerHTML = `<p class="muted pc-loading">${t('Loading…')}</p>`;
-    Promise.all([pcLoad(), Promise.race([pcCountsLoad(), new Promise((ok) => setTimeout(ok, 700))])]).then(() => {
+    // (3.5) Once the list is here, every PC page is drawn at once (no "Loading…" between pages).
+    const go = () => {
       if (!h.startsWith('/pc') || current() !== h) return;
       const g = h.match(/^\/pc\/game\/([a-z0-9-]{1,64})$/);
       const c = h.match(PC_CAT_RE);
@@ -2134,7 +2119,10 @@
       else pcHome();
       document.title = pcTitle;
       enhanceRows(view);
-    });
+    };
+    if (pcCat && pcCountsTried) { go(); return; }
+    view.innerHTML = `<p class="muted pc-loading">${t('Loading…')}</p>`;
+    Promise.all([pcLoad(), Promise.race([pcCountsLoad(), new Promise((ok) => setTimeout(ok, 700))])]).then(() => { pcCountsTried = true; go(); });
   }
 
   // (2.8) Each PC category's own picture, for its button under the banner.
@@ -2607,6 +2595,11 @@
 
   function pcGame(id) {
     const a = pcById(id);
+    // Drawn now from the list; once the rest of its entry is here, drawn again in place.
+    if (a && a.lite) {
+      const here = current();
+      pcFull(id).then((x) => { if (x && !x.lite && current() === here) { const y = window.scrollY; pcGame(id); enhanceRows(view); window.scrollTo({ top: y, behavior: 'instant' }); } });
+    }
     if (!a) { pcTitle = 'RecompLauncher'; view.innerHTML = `<article class="page"><h1>${t('That page isn\'t here.')}</h1><p><a href="/pc">${t('Back to all PC recomps')}</a></p></article>`; return; }
     pcTitle = `${tf('{name} — PC recomp of {game}', { name: a.name, game: a.game || a.name })} · RecompLauncher`;
     if (a.hero) setBackdrop({ hero: a.hero });

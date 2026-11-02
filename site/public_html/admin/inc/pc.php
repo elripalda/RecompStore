@@ -657,12 +657,37 @@ function rs_pc_banner_save(array $ids): array {
     }
     return $ids;
 }
+// (3.5) The published catalog, written in one line (the launcher reads it), and next to it the
+// website's lighter copy: the same list without what only a game's own page shows (the original
+// game's details, the launch settings, "What's in it"). The site asks for those one game at a time.
+function rs_pc_write_files(array $cat): bool {
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    $json = json_encode($cat, $flags);
+    $tmp = RS_PC_CATALOG . '.tmp';
+    if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG)) return false;
+    rs_pc_write_web($cat);
+    return true;
+}
+function rs_pc_web_copy(array $cat): array {
+    foreach ($cat['apps'] as &$a) {
+        $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
+        unset($a['about'], $a['boot'], $a['features']);
+        if ($series !== '') $a['about'] = ['series' => $series];
+        $a['lite'] = true;
+    }
+    unset($a);
+    return $cat;
+}
+function rs_pc_write_web(array $cat): void {
+    $f = RS_PUBLIC . '/pc-catalog-web.json';
+    $json = json_encode(rs_pc_web_copy($cat), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json !== false && file_put_contents($f . '.tmp', $json . "\n") !== false) @rename($f . '.tmp', $f);
+}
+
 // Writes pc-catalog.json from what's saved, without asking GitHub again (seconds, not minutes).
 function rs_pc_write_catalog(): int {
     $cat = rs_pc_catalog();
-    $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    $tmp = RS_PC_CATALOG . '.tmp';
-    if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG))
+    if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json.');
     return count($cat['apps']);
 }
@@ -678,9 +703,7 @@ function rs_pc_publish_one(string $id): bool {
     foreach ($cat['apps'] as $i => $e) if (($e['id'] ?? '') === $id && $fresh) { $fresh['order'] = $e['order'] ?? $fresh['order']; $cat['apps'][$i] = $fresh; $hit = true; }
     if (!$hit) return false;
     $cat['updated'] = gmdate('c');
-    $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    $tmp = RS_PC_CATALOG . '.tmp';
-    return $json !== false && file_put_contents($tmp, $json . "\n") !== false && rename($tmp, RS_PC_CATALOG);
+    return rs_pc_write_files($cat);
 }
 
 // (2.9) Takes one recomp off pc-catalog.json at once (a copyright notice), without a full Publish.
@@ -691,9 +714,7 @@ function rs_pc_unlist_one(string $id): bool {
     $cat['apps'] = array_values(array_filter($cat['apps'], fn($e) => ($e['id'] ?? '') !== $id));
     if (count($cat['apps']) === $before) return true;
     $cat['updated'] = gmdate('c');
-    $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    $tmp = RS_PC_CATALOG . '.tmp';
-    return $json !== false && file_put_contents($tmp, $json . "\n") !== false && rename($tmp, RS_PC_CATALOG);
+    return rs_pc_write_files($cat);
 }
 
 function rs_pc_publish(): int {
@@ -711,9 +732,7 @@ function rs_pc_publish(): int {
         rs_pc_save($a);
     }
     $cat = rs_pc_catalog();
-    $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    $tmp = RS_PC_CATALOG . '.tmp';
-    if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG))
+    if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json. Check that public_html is writable.');
     rs_log('publish', 'pc-catalog', count($cat['apps']) . ' apps');
     return count($cat['apps']);

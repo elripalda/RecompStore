@@ -844,26 +844,6 @@ dialog.quick.closing::backdrop{animation:fade-out .18s ease-in both}
   .backdrop img{filter:blur(32px) saturate(130%) brightness(.42)}
 }
 
-/* (2.7) The boot: the logo builds itself on the aurora (arrow, bowl, leg), the name comes in under it,
-   then the logo flies up into the bar as the page shows. Once a visit; skipped with reduced motion. */
-.boot{position:fixed;inset:0;z-index:200;display:grid;place-items:center;cursor:pointer}
-.boot-bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 120%,#0b1d2e 0%,#000 60%);transition:opacity .6s ease}
-.boot-bg::before,.boot-bg::after{content:"";position:absolute;inset:-10%;pointer-events:none;opacity:0;animation:boot-light 1.6s ease forwards}
-.boot-bg::before{background:radial-gradient(40% 45% at 30% 70%,rgba(52,242,232,.22),transparent 70%),radial-gradient(35% 40% at 72% 62%,rgba(55,123,182,.26),transparent 70%)}
-.boot-bg::after{background:radial-gradient(30% 35% at 55% 85%,rgba(52,242,232,.14),transparent 70%);animation-delay:.3s}
-@keyframes boot-light{to{opacity:1}}
-.boot-in{position:relative;display:grid;justify-items:center;gap:22px}
-.boot-mark{width:clamp(120px,16vw,200px);height:auto;overflow:visible;transform-origin:0 0;transition:transform .8s cubic-bezier(.65,0,.2,1)}
-.boot-mark path{opacity:0;filter:blur(8px);animation:boot-piece .7s ease forwards}
-.boot-mark path:nth-child(1){animation-delay:.25s}.boot-mark path:nth-child(2){animation-delay:.45s}.boot-mark path:nth-child(3){animation-delay:.65s}
-@keyframes boot-piece{to{opacity:1;filter:blur(0)}}
-.boot-word{font:700 clamp(30px,4vw,48px) Archivo,sans-serif;letter-spacing:-.5px;color:var(--frost);opacity:0;filter:blur(8px);animation:boot-piece .7s ease 1s forwards;font-stretch:108%}
-.boot-word b{font-weight:inherit;background:var(--brand);-webkit-background-clip:text;background-clip:text;color:transparent}
-.boot.fly .boot-bg{opacity:0}
-.boot.fly .boot-word{animation:none;opacity:0;transition:opacity .25s}
-html.booting .top .brand img{visibility:hidden}
-@media (prefers-reduced-motion:reduce){.boot{display:none}}
-
 /* (2.7.1) Press kit */
 .press-page section{margin-top:28px}
 .press-page h2{font-size:clamp(22px,2.4vw,30px)}
@@ -2615,3 +2595,9 @@ ol.launch-list li::marker{color:var(--cyan);font-weight:700}
 .launch-gh{display:inline-flex;align-items:center;gap:8px;font-size:14px;padding:9px 16px;white-space:nowrap}
 .launch-gh svg{width:18px;height:18px}
 @media (max-width:760px){.launch-src{flex-direction:column;align-items:stretch}.launch-gh{justify-content:center}}
+
+/* (3.5) Phones: the Ko-fi heart without its word, so the header fits on the smallest screens. */
+@media (max-width:520px){
+  body[data-platform="pc"] #top-kofi{width:42px;padding:0;justify-content:center}
+  body[data-platform="pc"] #top-kofi span{display:none}
+}

@@ -2,6 +2,7 @@
 // RecompStore for PC (2.8): a recomp's README, and what players say about how it runs.
 //   GET  ?a=readme&id=<app>            -> {md, raw, blob, url}   (the developer's README, cached a day)
 //   GET  ?a=feedback&id=<app>          -> {counts: {runs, issues, broken}, items: [...]}
+//   GET  ?a=app&id=<app>              -> {app: {...}}            (one recomp's whole entry, for its page)
 //   GET  ?a=counts                     -> {counts: {app: {runs, issues, broken}}}
 //   POST a=feedback id verdict sys note version   (one per player and recomp: a new one replaces theirs)
 declare(strict_types=1);
@@ -33,6 +34,7 @@ try {
     if ($a === 'counts' && !$post) rs_pc_out(200, ['ok' => true, 'counts' => (object)rs_pc_feedback_counts()], 120);
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);
+    if ($a === 'app' && !$post) rs_pc_out(200, ['ok' => true, 'app' => $app], 120);
     if ($a === 'readme' && !$post) {
         $r = rs_pc_readme((string)$app['repo']);
         if ($r['status'] !== 200) rs_pc_out($r['status'] === 404 ? 404 : 503, ['ok' => false, 'error' => $r['status'] === 404 ? 'No README on its GitHub.' : 'GitHub didn\'t answer. Try again in a moment.']);
