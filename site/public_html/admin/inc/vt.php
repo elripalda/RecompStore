@@ -207,32 +207,14 @@ function rs_vt_discover(bool $force = false): void {
         $pats = ($d['platform'] ?? '') === 'pc' ? array_values((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
         foreach (rs_vt_pick((array)$r['assets'], $pats) as $a) rs_vt_add($repo, (string)$r['tag_name'], $a, 'submission', 'm' . $s['id'], 2);
     }
-    // PC recomps: the newest release (a held one first), and what's out now.
+    // (3.8) Only what's new: a PC recomp's held update. What's already in the stores isn't checked
+    // in bulk; "Check again" or "Check a link" checks any one of them.
     foreach (rs_pc_apps() as $a) {
-        if ($a['repo'] === '') continue;
-        $list = rs_vt_peek_releases($a['repo']);
-        if (!$list) continue;
-        $pats = array_filter([$a['asset_win'], $a['asset_linux'], $a['asset_mac']]);
-        $tags = array_filter([(string)($a['pending']['tag'] ?? ''), (string)($a['ok_tag'] ?? '')]);
-        if (!$tags && ($r = rs_vt_newest($list, false))) $tags[] = (string)$r['tag_name'];
-        foreach (array_unique($tags) as $i => $tag) {
-            foreach ($list as $r) {
-                if ((string)$r['tag_name'] !== $tag) continue;
-                $isNew = $tag === (string)($a['pending']['tag'] ?? '');
-                foreach (rs_vt_pick((array)$r['assets'], $pats) as $f) rs_vt_add($a['repo'], $tag, $f, $isNew ? 'update' : 'store', 'pc:' . $a['id'], $isNew ? 3 : 5);
-            }
-        }
-    }
-    // PS5 apps from GitHub.
-    foreach (rs_games() as $g) {
-        if (($g['source'] ?? '') !== 'github' || !rs_repo_ok((string)$g['repo']) || (string)$g['asset'] === '') continue;
-        $list = rs_vt_peek_releases((string)$g['repo']);
-        foreach ($list as $r) {
-            if (!empty($r['draft'])) continue;
-            $hit = rs_vt_pick((array)$r['assets'], [(string)$g['asset']]);
-            if (!$hit) continue;
-            foreach ($hit as $f) rs_vt_add((string)$g['repo'], (string)$r['tag_name'], $f, 'store', 'ps5:' . $g['id'], 5);
-            break;
+        $tag = (string)($a['pending']['tag'] ?? '');
+        if ($a['repo'] === '' || $tag === '') continue;
+        foreach (rs_vt_peek_releases($a['repo']) as $r) {
+            if ((string)$r['tag_name'] !== $tag) continue;
+            foreach (rs_vt_pick((array)$r['assets'], array_filter([$a['asset_win'], $a['asset_linux'], $a['asset_mac']])) as $f) rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
         }
     }
     rs_vt_promote();

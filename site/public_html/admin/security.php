@@ -105,7 +105,7 @@ rs_head('Security', true, ['assets/vt.css']);
 <section class="head-row">
   <div>
     <h1>Security</h1>
-    <p class="muted">Every download RecompStore and RecompLauncher point at is checked with VirusTotal: submissions as they arrive, new releases, and everything already in the stores. A new release from a developer who isn't verified waits until it's checked.</p>
+    <p class="muted">New downloads are checked with VirusTotal: submissions as they arrive, and new releases of the games in the stores. A new release from a developer who isn't verified waits until it's checked. Paste any link below to check it.</p>
   </div>
   <div class="vt-state <?= $on ? 'on' : '' ?>"><i></i><?= $on ? 'VirusTotal connected · ' . max(0, RS_VT_PER_DAY - rs_vt_today()) . ' checks left today' : 'VirusTotal not connected' ?></div>
 </section>
