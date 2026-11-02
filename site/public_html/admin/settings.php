@@ -234,6 +234,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($h['status'] === 404 ? 'Saved, but there\'s no bucket called ' . $bucket . ' on that account.' : 'Saved, but Cloudflare answered HTTP ' . $h['status'] . '.'))),
                      $h['status'] === 200 ? 'ok' : 'err');
         }
+    } elseif (($_POST['action'] ?? '') === 'b2') {
+        // (3.5) Cloud saves on Backblaze B2: the bucket and an application key.
+        require_once __DIR__ . '/inc/discord.php';
+        require_once __DIR__ . '/inc/b2.php';
+        $endpoint = strtolower(trim((string)preg_replace('#^https?://#i', '', (string)($_POST['b2_endpoint'] ?? ''))), '/ ');
+        $bucket = trim((string)($_POST['b2_bucket'] ?? ''));
+        $kid = trim((string)($_POST['b2_key_id'] ?? ''));
+        $key = trim((string)($_POST['b2_key'] ?? ''));
+        if (!empty($_POST['b2_clear'])) {
+            foreach (['b2_endpoint', 'b2_bucket', 'b2_key_id', 'b2_key'] as $k) rs_set_setting($k, '');
+            rs_flash('Backblaze is off and its keys are forgotten.');
+        } elseif (!preg_match('/^s3\.[a-z0-9-]+\.backblazeb2\.com$/', $endpoint)) rs_flash('The endpoint looks like s3.us-west-004.backblazeb2.com (on the bucket\'s card).', 'err');
+        elseif (!preg_match('/^[a-z0-9][a-z0-9-]{4,62}$/', $bucket)) rs_flash('That isn\'t a bucket name.', 'err');
+        elseif (($kid === '' && trim((string)rs_setting('b2_key_id', '')) === '') || ($key === '' && rs_secret_get('b2_key') === '')) rs_flash('Paste the keyID and the applicationKey too.', 'err');
+        else {
+            rs_set_setting('b2_endpoint', $endpoint);
+            rs_set_setting('b2_bucket', $bucket);
+            if ($kid !== '') rs_set_setting('b2_key_id', $kid);
+            if ($key !== '') rs_secret_put('b2_key', $key);
+            $why = rs_b2_test();
+            rs_flash($why === '' ? 'Saved and checked: a test file went up to Backblaze, came back down and was removed.' : 'Saved, but the check didn\'t pass. ' . $why, $why === '' ? 'ok' : 'err');
+        }
+        header('Location: settings.php#b2');
+        exit;
     } elseif (($_POST['action'] ?? '') === 'blocked') {
         // (2.0) Custom sources taken down: one repo (owner/name) or list address per line.
         $lines = [];
@@ -771,6 +795,19 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <label>Secret access key<input type="text" name="r2_secret" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasSecret ? 'Saved. Paste a new one to replace it.' : 'Shown once, when you make the token' ?>"></label>
     <label class="check span2"><input type="checkbox" name="r2_on" value="1" <?= rs_setting('r2_on', '1') === '1' ? 'checked' : '' ?>> Testers download beta zips from R2 (untick to send them back to this site, for example if a PS5 can't reach Cloudflare)</label>
     <div class="actions span2"><button class="btn">Save and check</button><?php if ($r2): ?><label class="check"><input type="checkbox" name="r2_clear" value="1"> Turn R2 off and forget the keys</label><?php endif; ?></div>
+  </form>
+</section>
+<section class="card" id="b2">
+  <h2>Cloud saves on Backblaze B2</h2>
+  <?php require_once __DIR__ . '/inc/discord.php'; $b2Key = rs_secret_get('b2_key') !== ''; $b2Id = trim((string)rs_setting('b2_key_id', '')) !== ''; ?>
+  <p class="muted">Players' cloud saves are kept on Backblaze instead of this server. Uploads go up from here, and downloads come straight from Backblaze through a link that works for 10 minutes. Make a private bucket, then an application key with Read and Write on just that bucket, and fill these in.</p>
+  <form method="post" class="grid2">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="b2">
+    <label>Endpoint<input name="b2_endpoint" value="<?= h((string)rs_setting('b2_endpoint', 's3.us-west-004.backblazeb2.com')) ?>" maxlength="80" autocomplete="off" spellcheck="false" class="mono"><small>On the bucket's card.</small></label>
+    <label>Bucket<input name="b2_bucket" value="<?= h((string)rs_setting('b2_bucket', 'recompstore-saves')) ?>" maxlength="63" autocomplete="off" spellcheck="false" class="mono"></label>
+    <label>keyID<input type="text" name="b2_key_id" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" placeholder="<?= $b2Id ? 'Saved. Paste a new one to replace it.' : 'From Application Keys' ?>"></label>
+    <label>applicationKey<input type="text" name="b2_key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $b2Key ? 'Saved. Paste a new one to replace it.' : 'Shown once, when you make the key' ?>"></label>
+    <div class="actions span2"><button class="btn">Save and check</button><?php if ($b2Key): ?><label class="check"><input type="checkbox" name="b2_clear" value="1"> Turn Backblaze off and forget the keys</label><?php endif; ?></div>
   </form>
 </section>
 <section class="card">

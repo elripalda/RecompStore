@@ -10,6 +10,13 @@ function rs_b2_cfg(): ?array {
     if ($c !== false) return $c;
     $f = dirname(RS_PUBLIC) . '/recompstore-b2.php';
     $x = is_file($f) ? require $f : null;
+    // Or what was saved in admin, Settings, Cloud saves (the key locked like the site's other secrets).
+    if (!is_array($x) && function_exists('rs_setting')) {
+        require_once __DIR__ . '/mail.php';
+        require_once __DIR__ . '/discord.php';
+        $x = ['endpoint' => trim((string)rs_setting('b2_endpoint', '')), 'bucket' => trim((string)rs_setting('b2_bucket', '')),
+              'key_id' => trim((string)rs_setting('b2_key_id', '')), 'key' => rs_secret_get('b2_key')];
+    }
     $ok = is_array($x) && !empty($x['endpoint']) && !empty($x['bucket']) && !empty($x['key_id']) && !empty($x['key']);
     if ($ok) {
         $x['endpoint'] = preg_replace('#^https?://#', '', rtrim((string)$x['endpoint'], '/'));
@@ -105,4 +112,27 @@ function rs_b2_link(string $key, string $filename, int $ttl = 600): string {
     $sts = "AWS4-HMAC-SHA256\n$now\n$scope\n" . hash('sha256', $canon);
     $sig = hash_hmac('sha256', $sts, rs_b2_sign_key($c['key'], $date, $c['region']));
     return 'https://' . $c['endpoint'] . $path . '?' . $qs . '&X-Amz-Signature=' . $sig;
+}
+
+// Settings' check: a small file up, read back through a link, and removed. -> '' when it all worked.
+function rs_b2_test(): string {
+    if (!rs_b2_on()) return 'Fill in all four boxes first.';
+    $t = tempnam(sys_get_temp_dir(), 'b2t');
+    $word = 'recomp check ' . bin2hex(random_bytes(4));
+    file_put_contents($t, $word);
+    try {
+        [$code, $body] = rs_b2_request('PUT', 'check/hello.txt', $t, ['content-type' => 'text/plain']);
+        if ($code < 200 || $code >= 300) {
+            if (preg_match('#<Message>(.*?)</Message>#s', $body, $m)) return 'Backblaze said: ' . trim($m[1]);
+            return 'Backblaze answered HTTP ' . $code . ($code === 0 ? ' (it couldn\'t be reached)' : '') . '.';
+        }
+        $ch = curl_init(rs_b2_link('check/hello.txt', 'hello.txt', 60));
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20]);
+        $got = (string)curl_exec($ch);
+        $gc = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        rs_b2_delete('check/hello.txt');
+        if ($gc !== 200 || $got !== $word) return 'The upload worked, but reading it back through a link answered HTTP ' . $gc . '.';
+        return '';
+    } finally { @unlink($t); }
 }
