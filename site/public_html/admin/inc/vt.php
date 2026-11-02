@@ -196,8 +196,8 @@ function rs_vt_discover(bool $force = false): void {
     rs_kv_put('vt_discover', '1');
     rs_vt_tables();
     $db = rs_db();
-    // Submissions waiting for you.
-    foreach ($db->query("SELECT id, repo, data FROM inbox WHERE kind = 'submit' AND status = 'new' AND created > DATE_SUB(NOW(), INTERVAL 30 DAY)")->fetchAll() as $s) {
+    // Submissions waiting for you (opened or not: opening the Inbox marks them read).
+    foreach ($db->query("SELECT id, repo, data FROM inbox WHERE kind = 'submit' AND status IN ('new', 'read') AND created > DATE_SUB(NOW(), INTERVAL 30 DAY)")->fetchAll() as $s) {
         $d = json_decode((string)$s['data'], true) ?: [];
         $repo = (string)($d['repo'] ?? '');
         if (!rs_repo_ok($repo)) continue;
