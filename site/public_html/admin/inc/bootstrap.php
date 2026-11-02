@@ -1420,3 +1420,5 @@ require __DIR__ . '/mailblocks.php';
 require __DIR__ . '/discord.php';
 // (2.7.2) Developer accounts and the developer hub.
 require __DIR__ . '/devhub.php';
+// (3.8) Security: VirusTotal checks of every download the stores point at (admin/security.php).
+require __DIR__ . '/vt.php';

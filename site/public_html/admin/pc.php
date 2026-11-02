@@ -157,7 +157,7 @@ $published = is_file(RS_PC_CATALOG) ? (int)filemtime(RS_PC_CATALOG) : 0;
 // (3.5) The list shows small copies of the covers (made once, then kept), not the full pictures.
 $thumb = fn(string $u, int $w): string => preg_match('#/media/([A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(jpe?g|png|webp))$#i', $u, $m) ? '/api/thumb.php?f=' . rawurlencode($m[1]) . '&w=' . $w : $u;
 
-rs_head('PC', true, ['assets/health.css', 'assets/artpick.css']);
+rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']);
 ?>
 <section class="head-row">
   <div>
@@ -172,6 +172,11 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css']);
 <?php if ($edit): $a = $edit; ?>
 <section class="card" id="edit">
   <div class="an-head"><h2><?= h($a['name']) ?></h2><a class="an-csv an-plain" href="pc.php">All PC recomps</a></div>
+  <?php // (3.8) Its release files, as VirusTotal saw them, and a held update.
+  if (function_exists('rs_vt_on') && rs_vt_on()): $vb = rs_vt_repo_badge($a['repo'], (string)($a['pending']['tag'] ?? ($a['ok_tag'] ?? ''))); ?>
+  <p class="vt-line"><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>Not checked yet</span>' ?>
+    <?php if (!empty($a['pending']['tag'])): ?> <a href="security.php">Update to <?= h($a['pending']['version'] ?: $a['pending']['tag']) ?> is on hold</a><?php endif; ?></p>
+  <?php endif; ?>
   <form method="post" enctype="multipart/form-data" class="grid2">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
     <label>Name<input name="name" value="<?= h($a['name']) ?>" maxlength="120"><small>The project's name, like Zelda 64: Recompiled.</small></label>

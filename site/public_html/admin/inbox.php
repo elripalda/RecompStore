@@ -407,7 +407,7 @@ $replyHello = function (array $r): string {
     return 'Hi' . ($who !== '' ? ' ' . $who : '') . ",\n\n";
 };
 
-rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css']);
+rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.css']);
 ?>
 <section class="head-row">
   <div>
@@ -538,6 +538,10 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css']);
             <?php if ($latest): ?><br><span class="muted">Newest release <?= h((string)$latest['tag_name']) ?><?= !empty($latest['published_at']) ? ', ' . h(rs_date('M j, Y', strtotime((string)$latest['published_at']))) : '' ?>: <?= h(implode(', ', array_map(fn($a) => (string)$a['name'], array_slice((array)($latest['assets'] ?? []), 0, 6))) ?: 'no files') ?></span>
             <?php elseif ($rel['status'] === 404): ?><br><span class="warn">GitHub can't find it (private or misspelled?)</span>
             <?php elseif ($rel['status'] === 200): ?><br><span class="warn">No releases yet</span><?php endif; ?></dd>
+          <?php // (3.8) What VirusTotal says about its release files.
+          if (function_exists('rs_vt_on') && rs_vt_on() && $latest): $vb = rs_vt_repo_badge((string)$d['repo'], (string)$latest['tag_name']); ?>
+          <dt>Security</dt><dd><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>In line for a VirusTotal check</span>' ?></dd>
+          <?php endif; ?>
           <?php if (($d['platform'] ?? '') === 'pc' && is_array($d['assets'] ?? null)): // (3.6) its files, checked against the newest release
             $relNames = $latest ? array_map(fn($x) => (string)$x['name'], (array)($latest['assets'] ?? [])) : [];
             $globOk = fn(string $g) => (bool)array_filter($relNames, fn($n) => fnmatch($g, $n, FNM_CASEFOLD)); ?>

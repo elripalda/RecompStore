@@ -7,6 +7,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/lstats.php';
+if (function_exists('rs_vt_after')) rs_vt_after(); // (3.8) security checks take a turn after the answer
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');

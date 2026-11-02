@@ -31,6 +31,7 @@ require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/totp.php';
 // (3.1) Every page view asks who's signed in: a good moment to send a few waiting emails, after the answer.
 if (function_exists('rs_mailq_after')) rs_mailq_after();
+if (function_exists('rs_vt_after')) rs_vt_after(); // (3.8)
 
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');

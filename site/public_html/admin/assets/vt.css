@@ -1,0 +1,80 @@
+/* (3.8) Security page and the VirusTotal badges on other admin pages. */
+:root{--vt-green:#5FE3A1;--vt-yellow:#FFD166;--vt-red:#ff7a7a;--vt-grey:#a7b3c4}
+.vt-state{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:rgba(244,248,252,.04);font:600 14px Figtree,sans-serif;color:var(--muted)}
+.vt-state i{width:9px;height:9px;border-radius:50%;background:var(--vt-grey)}
+.vt-state.on{color:var(--frost)}.vt-state.on i{background:var(--vt-green);box-shadow:0 0 0 4px rgba(95,227,161,.16)}
+
+.vt-steps{list-style:none;margin:6px 0 18px;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.vt-steps li{display:flex;gap:12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(244,248,252,.03)}
+.vt-steps li>span{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--cyan);color:var(--midnight);font:700 14px Figtree,sans-serif}
+.vt-steps strong{display:block}.vt-steps small{color:var(--muted);line-height:1.45}
+.vt-keyform,.vt-checkform{display:flex;gap:10px;margin-top:12px}
+.vt-keyform input,.vt-checkform input{flex:1;min-width:0}
+.vt-checkform input{font-size:16px;padding:14px 16px}
+
+.vt-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+.vt-tile{margin:0;display:flex;flex-direction:column;gap:4px;padding:20px}
+.vt-tile span{font:700 12px Figtree,sans-serif;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.vt-tile b{font:700 34px Sora,sans-serif;line-height:1.1}
+.vt-tile small{color:var(--muted)}
+.vt-tile.red{border-color:rgba(255,122,122,.55);box-shadow:inset 3px 0 0 var(--vt-red)}
+.vt-tile.red b{color:var(--vt-red)}
+
+.vt-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.vt-head h2{margin:0}
+.vt-empty{color:var(--muted);margin:6px 0 0;padding:18px;border:1px dashed var(--line);border-radius:14px;text-align:center}
+.vt-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.vt-row{display:grid;grid-template-columns:minmax(0,1fr) 170px 210px 260px;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:rgba(244,248,252,.03)}
+.vt-row.red{border-color:rgba(255,122,122,.45);background:rgba(255,122,122,.05)}
+.vt-list.compact .vt-row{padding:9px 14px}
+.vt-what{min-width:0}.vt-what strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vt-what small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vt-what small.vt-engines{color:var(--vt-red);white-space:normal}
+.vt-what small.vt-err{color:var(--vt-yellow);white-space:normal}
+.vt-src{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.vt-src small{font-size:12px}
+.vt-chip{display:inline-block;font:600 12px Figtree,sans-serif;padding:3px 10px;border-radius:999px;background:rgba(244,248,252,.08);color:var(--frost)}
+.vt-acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.vt-acts form{margin:0}
+.vt-acts button,.vt-acts .button{padding:7px 12px;font-size:13px}
+button.ghost{background:none;border-color:var(--line);color:var(--muted)}button.ghost:hover{color:var(--frost);border-color:var(--frost)}
+a.button{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:12px;color:var(--frost);text-decoration:none;font-weight:600}
+
+.vt-badge{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 5px;border-radius:999px;font:600 13px Figtree,sans-serif;text-decoration:none;border:1px solid transparent;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.vt-badge .vt-dot{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:800 11px Figtree,sans-serif;color:var(--midnight)}
+.vt-badge.green{background:rgba(95,227,161,.12);color:var(--vt-green);border-color:rgba(95,227,161,.35)}.vt-badge.green .vt-dot{background:var(--vt-green)}
+.vt-badge.yellow{background:rgba(255,209,102,.12);color:var(--vt-yellow);border-color:rgba(255,209,102,.35)}.vt-badge.yellow .vt-dot{background:var(--vt-yellow)}
+.vt-badge.red{background:rgba(255,122,122,.12);color:var(--vt-red);border-color:rgba(255,122,122,.45)}.vt-badge.red .vt-dot{background:var(--vt-red)}
+.vt-badge.grey{background:rgba(244,248,252,.06);color:var(--vt-grey);border-color:var(--line)}.vt-badge.grey .vt-dot{background:rgba(244,248,252,.18);color:var(--frost)}
+a.vt-badge:hover{filter:brightness(1.15)}
+
+/* Check a link: the rundown */
+.vt-result{margin-top:16px;border:1px solid var(--line);border-radius:18px;padding:18px;background:rgba(244,248,252,.03)}
+.vt-sum{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.vt-sum h3{margin:0;font:700 20px Sora,sans-serif}
+.vt-sum small{display:block;color:var(--muted);margin-top:2px}
+.vt-big{display:inline-flex;align-items:center;gap:10px;padding:10px 16px;border-radius:14px;font:700 16px Figtree,sans-serif}
+.vt-big.green{background:rgba(95,227,161,.12);color:var(--vt-green)}.vt-big.yellow{background:rgba(255,209,102,.12);color:var(--vt-yellow)}
+.vt-big.red{background:rgba(255,122,122,.14);color:var(--vt-red)}.vt-big.grey{background:rgba(244,248,252,.06);color:var(--vt-grey)}
+.vt-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}
+.vt-facts div{padding:12px;border:1px solid var(--line);border-radius:12px}
+.vt-facts dt{font:700 11px Figtree,sans-serif;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.vt-facts dd{margin:4px 0 0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vt-notes{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.vt-note{padding:6px 12px;border-radius:10px;font-size:13px;background:rgba(244,248,252,.06)}
+.vt-note.warn{background:rgba(255,209,102,.12);color:var(--vt-yellow)}.vt-note.ok{background:rgba(95,227,161,.1);color:var(--vt-green)}
+.vt-spin{width:14px;height:14px;border:2px solid rgba(244,248,252,.25);border-top-color:var(--cyan);border-radius:50%;animation:vt-spin .8s linear infinite;display:inline-block}
+@keyframes vt-spin{to{transform:rotate(360deg)}}
+
+.vt-settings{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.vt-settings label{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:14px}
+.vt-settings label>span:first-child{font-weight:700}
+.vt-settings small{color:var(--muted);line-height:1.4}
+.vt-num{display:flex;align-items:center;gap:8px;color:var(--muted)}.vt-num input{width:90px}
+.vt-settings .vt-toggle{grid-column:1/-1;flex-direction:row;align-items:center;gap:12px}
+.vt-toggle span{display:flex;flex-direction:column}
+.vt-save{grid-column:1/-1;display:flex;justify-content:flex-end}
+
+@media (max-width:1100px){.vt-row{grid-template-columns:minmax(0,1fr) auto;}.vt-row .vt-res,.vt-row .vt-acts{grid-column:span 1}.vt-acts{justify-content:flex-start}}
+@media (max-width:860px){.vt-tiles,.vt-facts{grid-template-columns:repeat(2,1fr)}.vt-steps,.vt-settings{grid-template-columns:1fr}.vt-checkform,.vt-keyform{flex-direction:column}}
+.vt-line{margin:0 0 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}

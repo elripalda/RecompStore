@@ -596,6 +596,9 @@ function rs_pc_catalog(): array {
             'genre' => isset(RS_PC_GENRES[$a['genre']]) ? $a['genre'] : 'other', 'media' => rs_pc_media_links((string)$a['media']),
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
+        // (3.8) The release that's out (the launcher installs this one) and its checked files.
+        if ((string)($a['ok_tag'] ?? '') !== '') $e['tag'] = (string)$a['ok_tag'];
+        if (function_exists('rs_vt_catalog_files') && ($vf = rs_vt_catalog_files($a))) $e['files'] = $vf;
         if ($a['featured']) $e['featured'] = true;
         if (!empty($a['soon'])) $e['soon'] = true;
         if (!empty($a['about']) && is_array($a['about'])) $e['about'] = $a['about'];
@@ -756,6 +759,14 @@ function rs_pc_heal_assets(array $a, array $r): array {
     return $a;
 }
 
+// The release rs_pc_read_repo goes by: the newest that isn't a draft or a pre-release, else the newest.
+function rs_pc_latest_release(string $repo): ?array {
+    $rel = rs_gh_releases($repo, 3600);
+    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) return $x;
+    return $list[0] ?? null;
+}
+
 // (3.5) Each listed recomp's release as GitHub has it now: version, size, downloads. Oldest checked
 // first, and only for as long as $seconds allows, so Publish never waits minutes on GitHub (the
 // server's own refresh, tools/vps/pc-refresh.php, keeps the rest up to date in the background).
@@ -779,8 +790,18 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         if (empty($r['ok']) || $r['version'] === '') { rs_pc_save($a); continue; }
         if (!empty($r['license'])) $a['license'] = (string)$r['license'];
         $a['issues'] = (int)($r['issues'] ?? 0); $a['releases'] = (int)($r['releases'] ?? 0); $a['first'] = (string)($r['first'] ?? '');
-        $a['version'] = $r['version']; $a['released'] = $r['released']; $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'];
-        if ($r['size']) $a['size'] = rs_human_size((int)$r['size']);
+        $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'];
+        // (3.8) A new release goes out at once when security checks are off, the first time a recomp is
+        // seen, or when it's the release that's out already; otherwise it's held until it's checked.
+        $latest = rs_pc_latest_release($a['repo']);
+        $tag = $latest ? (string)$latest['tag_name'] : '';
+        $okTag = (string)($a['ok_tag'] ?? '');
+        if (!function_exists('rs_vt_on') || !rs_vt_on() || $tag === '' || $okTag === '' || $tag === $okTag) {
+            $a['version'] = $r['version']; $a['released'] = $r['released'];
+            if ($r['size']) $a['size'] = rs_human_size((int)$r['size']);
+            if ($tag !== '') $a['ok_tag'] = $tag;
+            unset($a['pending']);
+        } else $a = rs_vt_hold($a, $latest, $r);
         rs_pc_save($a);
     }
     return $n;

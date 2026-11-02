@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 // (2.3) $css: extra stylesheets for the page (Analytics, the Dashboard, the Games list).
 function rs_head(string $title, bool $nav = true, array $css = []): void {
+    if ($nav && function_exists('rs_vt_after')) rs_vt_after(); // (3.8)
     $flash = rs_flash();
     ?><!doctype html>
 <html lang="en">
@@ -58,7 +59,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ['developers.php', 'Developers' . (($devWait = rs_dev_waiting() + rs_inbox_new_count(true)) ? ' <span class="count">' . $devWait . '</span>' : ''), in_array($here, ['developers.php', 'submissions.php', 'dev-accounts.php', 'docs.php'], true)],
         ['messages.php', 'Messages' . (($msgNew = rs_dev_admin_unread()) ? ' <span class="count">' . $msgNew . '</span>' : ''), $here === 'messages.php'],
         ['accounts.php', 'Accounts', $here === 'accounts.php'], ['inbox.php', 'Inbox' . ($inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : ''), $here === 'inbox.php'], ['mail.php', 'Mail', $here === 'mail.php'],
-        ['analytics.php', 'Analytics', in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Status', in_array($here, ['status.php', 'diag-db.php'], true)], ['settings.php', 'Settings', in_array($here, ['settings.php', 'log.php'], true)]];
+        ['analytics.php', 'Analytics', in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['security.php', 'Security' . (($vtNeed = function_exists('rs_vt_need_count') ? rs_vt_need_count() : 0) ? ' <span class="count">' . $vtNeed . '</span>' : ''), $here === 'security.php'], ['status.php', 'Status', in_array($here, ['status.php', 'diag-db.php'], true)], ['settings.php', 'Settings', in_array($here, ['settings.php', 'log.php'], true)]];
     foreach ($links as [$href, $label, $on]): ?>
     <a href="<?= h($href) ?>"<?= $on ? ' class="on" aria-current="page"' : '' ?>><?= $label ?></a>
     <?php endforeach; ?>
