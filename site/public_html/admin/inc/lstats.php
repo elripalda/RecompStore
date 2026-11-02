@@ -160,7 +160,16 @@ function rs_ls_live(): array {
     return ['open' => $open, 'playing' => array_sum(array_map(fn($g) => (int)$g['n'], $games)), 'games' => $games, 'os' => $os, 'at' => gmdate('c')];
 }
 
+// (3.5) The page's numbers, worked out at most once a minute (counting across every install and
+// session took seconds; the "right now" numbers above stay live).
 function rs_ls_summary(): array {
+    $c = function_exists('rs_kv_get') ? rs_kv_get('ls_summary') : null;
+    if ($c && $c['age'] < 60 && is_array($x = json_decode($c['v'], true))) return $x;
+    $x = rs_ls_summary_now();
+    if (function_exists('rs_kv_put')) rs_kv_put('ls_summary', (string)json_encode($x));
+    return $x;
+}
+function rs_ls_summary_now(): array {
     rs_ls_tables();
     $db = rs_db();
     $one = fn(string $sql) => (int)$db->query($sql)->fetchColumn();

@@ -169,8 +169,8 @@ rs_head('Versions', true, ['assets/titles.css']);
           </tbody>
         </table>
         <div class="tt-add">
-          <select name="add_pc"><?= $pcOptions() ?></select>
-          <select name="add_ps5"><?= $ps5Options() ?></select>
+          <select name="add_pc" data-opts="tt-pc"><option value="">Add a PC recomp…</option></select>
+          <select name="add_ps5" data-opts="tt-ps5"><option value="">Add a PS5 app…</option></select>
           <button class="primary">Save</button>
         </div>
       </form>
@@ -184,4 +184,19 @@ rs_head('Versions', true, ['assets/titles.css']);
   <?php endforeach; ?>
   </div>
 </section>
+<?php // (3.5) Each game's two "Add" lists are filled from one copy when first opened, instead of the
+// whole list of recomps being written out again for every game (that made this page megabytes). ?>
+<template id="tt-pc"><?= $pcOptions() ?></template>
+<template id="tt-ps5"><?= $ps5Options() ?></template>
+<script>
+(function () {
+  const fill = (e) => {
+    const s = e.target.closest && e.target.closest('select[data-opts]');
+    if (!s || s.dataset.filled) return;
+    s.dataset.filled = '1';
+    s.innerHTML = document.getElementById(s.dataset.opts).innerHTML;
+  };
+  ['pointerdown', 'focusin', 'keydown'].forEach((t) => document.addEventListener(t, fill, true));
+})();
+</script>
 <?php rs_foot();

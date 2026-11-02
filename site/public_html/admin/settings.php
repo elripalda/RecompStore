@@ -551,7 +551,7 @@ if ($wn && !$wnDraft && $wnForm['title'] === "What's new in " . $wnForm['version
   // The store updates itself from its newest signed release on GitHub (elripalda/RecompStore).
   $sv = '';
   try {
-      $rel = rs_gh_releases('elripalda/RecompStore');
+      $rel = rs_gh_releases('elripalda/RecompStore', 3600);
       foreach (($rel['status'] === 200 ? (json_decode($rel['body'], true) ?: []) : []) as $r) {
           if (!empty($r['draft']) || !empty($r['prerelease'])) continue;
           $names = array_column((array)($r['assets'] ?? []), 'name');
