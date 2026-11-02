@@ -78,3 +78,19 @@ a.vt-badge:hover{filter:brightness(1.15)}
 @media (max-width:1100px){.vt-row{grid-template-columns:minmax(0,1fr) auto;}.vt-row .vt-res,.vt-row .vt-acts{grid-column:span 1}.vt-acts{justify-content:flex-start}}
 @media (max-width:860px){.vt-tiles,.vt-facts{grid-template-columns:repeat(2,1fr)}.vt-steps,.vt-settings{grid-template-columns:1fr}.vt-checkform,.vt-keyform{flex-direction:column}}
 .vt-line{margin:0 0 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* (3.8) Submission pre-check, and the Found list's notes */
+.pre-check{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 14px;background:rgba(244,248,252,.03)}
+.pre-check strong{display:block;margin-bottom:6px}
+.pre-check.ready{border-color:rgba(95,227,161,.45)}.pre-check.ready strong{color:var(--vt-green)}
+.pre-check.check{border-color:rgba(255,209,102,.4)}.pre-check.check strong{color:var(--vt-yellow)}
+.pre-check.stop{border-color:rgba(255,122,122,.5)}.pre-check.stop strong{color:var(--vt-red)}
+.pre-check ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 14px}
+.pre-check li{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.pre-check li span{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font:800 10px Figtree,sans-serif;color:var(--midnight)}
+.pre-check li.ok span{background:var(--vt-green)}.pre-check li.warn span{background:var(--vt-yellow)}.pre-check li.bad span{background:var(--vt-red)}
+.pre-check li.bad{color:var(--frost)}
+.ftr .ft-notes{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 4px 44px}
+.ft-notes .fn{font-style:normal;font-size:12px;padding:3px 9px;border-radius:999px;background:rgba(244,248,252,.06);color:var(--muted)}
+.ft-notes .fn.ok{background:rgba(95,227,161,.1);color:var(--vt-green)}.ft-notes .fn.warn{background:rgba(255,209,102,.1);color:var(--vt-yellow)}.ft-notes .fn.bad{background:rgba(255,122,122,.12);color:var(--vt-red)}
+.ft-notes .vt-badge{font-size:12px;padding:2px 9px 2px 3px}.ft-notes .vt-badge .vt-dot{width:15px;height:15px}

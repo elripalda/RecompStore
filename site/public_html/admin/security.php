@@ -87,7 +87,7 @@ $recent = $db->query("SELECT * FROM vt_files WHERE status <> 'new' OR source IN 
 $names = [];
 foreach (rs_pc_apps() as $x) $names['pc:' . $x['id']] = $x['name'];
 foreach (rs_games() as $g) $names['ps5:' . $g['id']] = $g['name'];
-$srcLabel = ['link' => 'Link', 'submission' => 'Submission', 'update' => 'Update', 'store' => 'In the store'];
+$srcLabel = ['link' => 'Link', 'submission' => 'Submission', 'update' => 'Update', 'store' => 'In the store', 'finder' => 'GitHub find'];
 $stLabel = ['new' => 'In line', 'upload' => 'Sending', 'analyzing' => 'Scanning', 'big' => 'Too big to send', 'error' => 'Couldn\'t check'];
 $when = function (string $t): string {
     $s = time() - (int)strtotime($t . ' UTC');

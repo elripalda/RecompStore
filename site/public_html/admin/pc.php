@@ -257,7 +257,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="find"><button>Look again</button></form>
     </div>
   </div>
-  <p class="muted small-note">Repos that look like PC recomps, with a download in their latest release. Looked for twice a week<?= $lastFind ? ', last ' . h(rs_date('M j, g:i a', (int)$lastFind['v'])) : '' ?>. Check each one is the developer's own build with no game files in it, and that it plays well, before you add it.</p>
+  <p class="muted small-note">Repos that look like PC recomps, with a download in their latest release. Looked for every morning<?= $lastFind ? ', last ' . h(rs_date('M j, g:i a', (int)$lastFind['v'])) : '' ?>. Check each one is the developer's own build with no game files in it, and that it plays well, before you add it.</p>
   <?php if (!$found): ?><p class="muted">Nothing waiting.</p><?php else: ?>
   <div class="ftable" role="table">
     <div class="ftr fth" role="row"><span>Project</span><span>Console</span><span>Release</span><span>Stars</span><span></span></div>
@@ -271,6 +271,10 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="add"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><button class="primary">Add</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="skip"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><button title="Not a PC recomp, or not good enough">Skip</button></form>
       </span>
+      <?php // (3.8) Pre-checked: VirusTotal, already listed, game data, how recent.
+      $fn = function_exists('rs_auto_find_notes') ? rs_auto_find_notes($f) : []; $fb = function_exists('rs_vt_repo_badge') && rs_vt_on() ? rs_vt_repo_badge((string)$f['repo']) : null; if ($fn || $fb): ?>
+      <span class="ft-notes"><?= $fb ? rs_vt_badge_html($fb) : '' ?><?php foreach ($fn as [$k, $t]): ?><em class="fn <?= $k ?>"><?= h($t) ?></em><?php endforeach; ?></span>
+      <?php endif; ?>
     </div>
     <?php endforeach; ?>
   </div>

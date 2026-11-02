@@ -809,6 +809,7 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
 
 function rs_pc_publish(): int {
     rs_pc_refresh_github(20);
+    if (function_exists('rs_titles_autogroup')) rs_titles_autogroup(); // (3.8) one game, one listing
     $cat = rs_pc_catalog();
     if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json. Check that public_html is writable.');

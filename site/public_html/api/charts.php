@@ -37,8 +37,8 @@ try {
     // (2.7.3) The listings' health and the daily look for new PS5 apps (and title IDs), even on
     // days nobody opens the admin.
     rs_health_maybe();
-    // (2.8) PC recomps on GitHub, twice a week.
-    rs_pc_find_maybe();
+    // (3.8) Every morning: PC recomps on GitHub (pre-checked), PS5 renamed downloads, versions.
+    rs_auto_morning_maybe();
 } catch (Throwable $e) {
     rs_errlog('charts', $e);
     // The last charts there are, rather than none.

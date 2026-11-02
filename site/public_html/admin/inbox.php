@@ -530,6 +530,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
       <span class="muted when"><?= h(rs_date('M j, Y g:i a', strtotime($r['created']))) ?></span>
     </header>
     <div class="sub">
+      <?= function_exists('rs_sub_precheck_html') ? rs_sub_precheck_html($d, $latest, (int)$rel['status']) : '' // (3.8) ?>
       <?php if ($i = $byRole('hero')): ?><div class="sub-hero"><img src="picture.php?id=<?= (int)$i[0]['id'] ?>" alt="Backdrop"><?php if ($l = $byRole('logo')): ?><img class="sub-logo" src="picture.php?id=<?= (int)$l[0]['id'] ?>" alt="Logo"><?php endif; ?></div><?php endif; ?>
       <div class="sub-top">
         <?php if ($i = $byRole('icon')): ?><img class="sub-icon" src="picture.php?id=<?= (int)$i[0]['id'] ?>" alt="Icon"><?php endif; ?>

@@ -1422,3 +1422,5 @@ require __DIR__ . '/discord.php';
 require __DIR__ . '/devhub.php';
 // (3.8) Security: VirusTotal checks of every download the stores point at (admin/security.php).
 require __DIR__ . '/vt.php';
+// (3.8) Mornings: GitHub finds, PS5 renamed downloads, versions grouping; submission pre-checks.
+require __DIR__ . '/autopilot.php';
