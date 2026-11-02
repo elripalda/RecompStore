@@ -97,6 +97,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         header('Location: settings.php#twostep');
         exit;
+    } elseif ($act === 'keep_clear') {
+        rs_keep_table();
+        rs_db()->prepare('DELETE FROM admin_keep WHERE uid = ?')->execute([(int)$_SESSION['uid']]);
+        rs_keep_cookie('', time() - 3600);
+        unset($_SESSION['keep']);
+        rs_log('login', 'devices', 'signed out everywhere');
+        rs_flash('Every device is signed out. This one stays logged in until you close the browser.');
+        header('Location: settings.php#devices');
+        exit;
     } elseif ($act === 'totp_cancel') {
         unset($_SESSION['totp_new']);
         header('Location: settings.php#twostep');
@@ -516,6 +525,31 @@ unset($_SESSION['recovery_once']);
   <?php else: ?>
   <p class="muted">With it on, your password alone isn't enough to log in: a code from your phone is needed too. Strongly recommended, since this admin decides what every PS5 installs.</p>
   <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_start"><button class="btn primary">Set up two-step login</button></form>
+  <?php endif; ?>
+</section>
+<?php
+// (3.8) Devices that stay signed in ("Keep me signed in" on the login page).
+rs_keep_table();
+$kst = rs_db()->prepare('SELECT selector, ua, used FROM admin_keep WHERE uid = ? AND expires > ? ORDER BY used DESC');
+$kst->execute([(int)$_SESSION['uid'], time()]);
+$keepRows = $kst->fetchAll();
+$keepName = function (string $ua): string {
+    $b = preg_match('/Edg\//', $ua) ? 'Edge' : (preg_match('/Chrome\//', $ua) ? 'Chrome' : (preg_match('/Firefox\//', $ua) ? 'Firefox' : (preg_match('/Safari\//', $ua) ? 'Safari' : 'A browser')));
+    $o = preg_match('/Windows/', $ua) ? 'Windows' : (preg_match('/iPhone|iPad/', $ua) ? 'iPhone or iPad' : (preg_match('/Android/', $ua) ? 'Android' : (preg_match('/Mac OS X/', $ua) ? 'Mac' : (preg_match('/Linux/', $ua) ? 'Linux' : ''))));
+    return $b . ($o !== '' ? ' on ' . $o : '');
+};
+?>
+<style>.keep-list{list-style:none;padding:0;margin:8px 0 14px;display:flex;flex-direction:column;gap:6px}.keep-list li{padding:10px 12px;border:1px solid var(--line);border-radius:12px}</style>
+<section class="card" id="devices">
+  <h2>Signed-in devices <?php if ($keepRows): ?><span class="count"><?= count($keepRows) ?></span><?php endif; ?></h2>
+  <?php if (!$keepRows): ?>
+  <p class="muted">None. Tick "Keep me signed in" when you log in, and that browser stays signed in for 30 days.</p>
+  <?php else: ?>
+  <p class="muted">These stay signed in for 30 days after they were last used. Changing your password or two-step login signs them all out.</p>
+  <ul class="keep-list">
+    <?php foreach ($keepRows as $k): ?><li><strong><?= h($keepName((string)$k['ua'])) ?></strong><?= ($_SESSION['keep'] ?? '') === $k['selector'] ? ' <span class="pill ok">This one</span>' : '' ?> <span class="muted">· last used <?= h(rs_date('M j, g:i a', (int)$k['used'])) ?></span></li><?php endforeach; ?>
+  </ul>
+  <form method="post" onsubmit="return confirm('Sign out every device? You stay logged in here until you close the browser.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="keep_clear"><button class="btn danger">Sign out everywhere</button></form>
   <?php endif; ?>
 </section>
 <section class="card">

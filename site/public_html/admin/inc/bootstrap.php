@@ -123,6 +123,84 @@ function rs_session(): void {
         'httponly' => true, 'samesite' => 'Strict',
     ]);
     session_start();
+    // (3.8) "Keep me signed in": a remembered device gets its session back without a new login.
+    if (empty($_SESSION['uid']) && !empty($_COOKIE['rs_keep'])) {
+        try { rs_keep_restore(); } catch (Throwable $e) { rs_errlog('keep', $e); }
+    }
+}
+
+// ---- (3.8) Keep me signed in --------------------------------------------------------------------
+// A random token per device, kept 30 days and pushed forward while it's used. Only its SHA-256 is
+// stored. It stops working when the password or two-step login changes, on Log out on that device,
+// and on "Sign out everywhere" in Settings.
+const RS_KEEP_DAYS = 30;
+
+function rs_keep_table(): void {
+    static $done = false;
+    if ($done) return;
+    rs_db()->exec('CREATE TABLE IF NOT EXISTS admin_keep (
+        id INT AUTO_INCREMENT PRIMARY KEY, selector CHAR(24) NOT NULL, hash CHAR(64) NOT NULL, uid INT NOT NULL,
+        pw CHAR(16) NOT NULL, ua VARCHAR(200) NOT NULL DEFAULT \'\', created INT NOT NULL, used INT NOT NULL, expires INT NOT NULL,
+        UNIQUE KEY selector (selector), KEY uid (uid)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    $done = true;
+}
+
+function rs_keep_cookie(string $value, int $expires): void {
+    if (headers_sent()) return;
+    setcookie('rs_keep', $value, ['expires' => $expires, 'path' => '/admin', 'secure' => !empty($_SERVER['HTTPS']), 'httponly' => true, 'samesite' => 'Lax']);
+}
+
+// Changes when the password or two-step login changes, so old devices have to log in again.
+function rs_keep_pw(int $uid): string {
+    $st = rs_db()->prepare('SELECT pass_hash, totp_secret FROM users WHERE id = ?');
+    $st->execute([$uid]);
+    $u = $st->fetch();
+    return $u ? substr(hash('sha256', $u['pass_hash'] . '|' . ($u['totp_secret'] ?? '')), 0, 16) : '';
+}
+
+function rs_keep_issue(int $uid): void {
+    rs_keep_table();
+    $sel = bin2hex(random_bytes(12));
+    $val = bin2hex(random_bytes(32));
+    $exp = time() + RS_KEEP_DAYS * 86400;
+    rs_db()->prepare('INSERT INTO admin_keep (selector, hash, uid, pw, ua, created, used, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$sel, hash('sha256', $val), $uid, rs_keep_pw($uid), mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 200), time(), time(), $exp]);
+    rs_db()->prepare('DELETE FROM admin_keep WHERE expires < ?')->execute([time()]);
+    $_SESSION['keep'] = $sel;
+    rs_keep_cookie($sel . ':' . $val, $exp);
+}
+
+function rs_keep_restore(): bool {
+    $c = (string)($_COOKIE['rs_keep'] ?? '');
+    if (!preg_match('/^([0-9a-f]{24}):([0-9a-f]{64})$/', $c, $m)) { rs_keep_cookie('', time() - 3600); return false; }
+    rs_keep_table();
+    $st = rs_db()->prepare('SELECT * FROM admin_keep WHERE selector = ?');
+    $st->execute([$m[1]]);
+    $r = $st->fetch();
+    if (!$r || (int)$r['expires'] < time() || !hash_equals((string)$r['hash'], hash('sha256', $m[2])) || !hash_equals((string)$r['pw'], rs_keep_pw((int)$r['uid']))) {
+        if ($r && (int)$r['expires'] < time()) rs_db()->prepare('DELETE FROM admin_keep WHERE id = ?')->execute([$r['id']]);
+        rs_keep_cookie('', time() - 3600);
+        return false;
+    }
+    // Pushed forward at most once an hour; the token itself stays, so the admin's parallel requests all work.
+    if (time() - (int)$r['used'] > 3600) {
+        $exp = time() + RS_KEEP_DAYS * 86400;
+        rs_db()->prepare('UPDATE admin_keep SET used = ?, expires = ? WHERE id = ?')->execute([time(), $exp, $r['id']]);
+        rs_keep_cookie($c, $exp);
+    }
+    session_regenerate_id(true);
+    $_SESSION['uid'] = (int)$r['uid'];
+    $_SESSION['keep'] = $m[1];
+    return true;
+}
+
+// Log out on this device: its token goes too.
+function rs_keep_forget(): void {
+    $c = (string)($_COOKIE['rs_keep'] ?? '');
+    if (preg_match('/^([0-9a-f]{24}):/', $c, $m)) {
+        try { rs_keep_table(); rs_db()->prepare('DELETE FROM admin_keep WHERE selector = ?')->execute([$m[1]]); } catch (Throwable $e) { /* gone anyway */ }
+    }
+    rs_keep_cookie('', time() - 3600);
 }
 
 function rs_require_login(): void {

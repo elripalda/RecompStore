@@ -32,8 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($step || $recovery) {
             if ($step) rs_db()->prepare('UPDATE users SET totp_last = ? WHERE id = ?')->execute([$step, $uid]);
             session_regenerate_id(true);
-            unset($_SESSION['pending_uid'], $_SESSION['pending_at']);
+            $keep = !empty($_SESSION['pending_keep']);
+            unset($_SESSION['pending_uid'], $_SESSION['pending_at'], $_SESSION['pending_keep']);
             $_SESSION['uid'] = $uid;
+            if ($keep) rs_keep_issue($uid);
             $_SESSION['tries'] = 0;
             rs_log('login', (string)$u['username'], $recovery ? 'with a recovery code' : 'with the authenticator');
             if ($recovery) rs_flash('You logged in with a recovery code. It won\'t work again. If your phone is lost, turn two-step login off and on again in Settings.', 'err');
@@ -53,12 +55,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 session_regenerate_id(true);
                 $_SESSION['pending_uid'] = (int)$u['id'];
                 $_SESSION['pending_at'] = time();
+                $_SESSION['pending_keep'] = !empty($_POST['keep']);
                 header('Location: login.php');
                 exit;
             }
             session_regenerate_id(true);
             $_SESSION['uid'] = (int)$u['id'];
             $_SESSION['tries'] = 0;
+            if (!empty($_POST['keep'])) rs_keep_issue((int)$u['id']);
             rs_log('login', $name, 'password only');
             header('Location: dashboard.php'); // (2.3) the Dashboard first
             exit;
@@ -84,6 +88,7 @@ rs_head('Log in', false);
     <?php else: ?>
     <label>Username<input name="username" required autofocus autocomplete="username"></label>
     <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <label class="check"><input type="checkbox" name="keep" value="1" checked> Keep me signed in on this device for 30 days</label>
     <button class="primary" type="submit">Log in</button>
     <?php endif; ?>
   </form>
