@@ -134,6 +134,13 @@ function rs_ls_ping(array $in): int {
 const RS_LS_OSK = "CASE WHEN i.os LIKE 'win%' THEN 'windows' WHEN i.os LIKE '%linux%' OR i.os LIKE '%steam%' THEN 'linux' WHEN i.os LIKE 'mac%' OR i.os LIKE 'darwin%' THEN 'macos' ELSE 'other' END";
 // Launchers by system: open now, active today, this week, and ever.
 function rs_ls_by_os(): array {
+    $c = function_exists('rs_kv_get') ? rs_kv_get('ls_by_os') : null;
+    if ($c && $c['age'] < 60 && is_array($x = json_decode($c['v'], true))) return $x;
+    $x = rs_ls_by_os_now();
+    if (function_exists('rs_kv_put')) rs_kv_put('ls_by_os', (string)json_encode($x));
+    return $x;
+}
+function rs_ls_by_os_now(): array {
     rs_ls_tables();
     $db = rs_db();
     $k = RS_LS_OSK;
