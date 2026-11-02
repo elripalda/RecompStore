@@ -57,6 +57,8 @@ try {
     }
     rs_rl_tables();
     $space = fn(array $acc) => ['used' => rs_rl_used((int)$acc['id']), 'quota' => RS_RL_QUOTA];
+    // Cloud saves are paused while they move to their new storage.
+    if (in_array($a, ['cloud', 'cloud-get', 'cloud-delete', 'saves', 'save-put', 'save-get', 'save-delete'], true)) rs_rl_err(503, 'Cloud saves are paused while we move them to a new home. Your saves on this PC are safe.');
 
     // ---- the account page (cookie) ----
     if (in_array($a, ['pcs', 'pc-remove', 'cloud', 'cloud-get', 'cloud-delete', 'send-pcs', 'send', 'my-betas', 'web-beta-join', 'web-beta-leave'], true)) {

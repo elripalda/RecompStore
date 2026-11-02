@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 const RS_RL_QUOTA = 150 * 1024 * 1024;
 const RS_RL_KEEP = 5;
+require_once __DIR__ . '/b2.php';
 const RS_RL_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 // Never in a save upload: game files, programs, archives.
 const RS_RL_NOT_SAVES = ['iso', 'bin', 'cue', 'chd', 'cso', 'gcm', 'rvz', 'wbfs', 'wad', 'nsp', 'xci', 'xex', 'xbe', 'z64', 'n64', 'v64', 'sfc', 'smc',
@@ -193,6 +194,9 @@ function rs_rl_device_remove(int $accountId, int $id): void {
 
 function rs_rl_game_ok(string $g): bool { return (bool)preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/', $g); }
 
+// Where a copy sits on Backblaze: the same layout the server's folder had.
+function rs_rl_key(array $a, string $game, string $v): string { return 'cloud-saves/' . $a['uid'] . '/' . $game . '/' . $v . '.zip'; }
+
 function rs_rl_dir(array $a, string $game = ''): string {
     $d = dirname(RS_PUBLIC) . '/recompstore-private/cloud-saves/' . $a['uid'];
     return $game === '' ? $d : $d . '/' . $game;
@@ -271,10 +275,14 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
     $drop = count($have) >= RS_RL_KEEP ? array_slice($have, RS_RL_KEEP - 1) : [];
     $after = rs_rl_used($id) - array_sum(array_column($drop, 'size')) + $size;
     if ($after > RS_RL_QUOTA) throw new RangeException('Your cloud saves are full (150 MB). Delete some on your account page at recomplauncher.com.');
-    $dir = rs_rl_dir($a, $game);
-    if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
     $v = bin2hex(random_bytes(8));
-    if (!rename($file, "$dir/$v.zip") && !copy($file, "$dir/$v.zip")) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
+    if (rs_b2_on()) {
+        rs_b2_put(rs_rl_key($a, $game, $v), $file);
+    } else {
+        $dir = rs_rl_dir($a, $game);
+        if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
+        if (!rename($file, "$dir/$v.zip") && !copy($file, "$dir/$v.zip")) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
+    }
     $db->prepare('INSERT INTO cloud_saves (account_id, game, v, hash, size, made, device, played, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
         ->execute([$id, $game, $v, $hash, $size, $made, rs_rl_clean($device, 64), $played]);
     foreach ($drop as $old) rs_rl_delete($a, $game, $old['v']);
@@ -286,18 +294,26 @@ function rs_rl_file(array $a, string $game, string $v): ?string {
     rs_rl_tables();
     $st = rs_db()->prepare('SELECT 1 FROM cloud_saves WHERE account_id = ? AND game = ? AND v = ?');
     $st->execute([(int)$a['id'], $game, $v]);
+    if (!$st->fetchColumn()) return null;
+    if (rs_b2_on()) return 'b2:' . rs_rl_key($a, $game, $v);
     $f = rs_rl_dir($a, $game) . "/$v.zip";
-    return $st->fetchColumn() && is_file($f) ? $f : null;
+    return is_file($f) ? $f : null;
 }
 
 function rs_rl_delete(array $a, string $game, string $v): void {
     if (!rs_rl_game_ok($game) || !preg_match('/^[0-9a-f]{16}$/', $v)) return;
     rs_db()->prepare('DELETE FROM cloud_saves WHERE account_id = ? AND game = ? AND v = ?')->execute([(int)$a['id'], $game, $v]);
+    if (rs_b2_on()) rs_b2_delete(rs_rl_key($a, $game, $v));
     @unlink(rs_rl_dir($a, $game) . "/$v.zip");
     @rmdir(rs_rl_dir($a, $game));
 }
 
 function rs_rl_send(string $file, string $name): void {
+    if (str_starts_with($file, 'b2:')) {
+        header('Cache-Control: no-store');
+        header('Location: ' . rs_b2_link(substr($file, 3), $name), true, 302);
+        exit;
+    }
     header('Content-Type: application/zip');
     header('Content-Length: ' . filesize($file));
     header('Content-Disposition: attachment; filename="' . preg_replace('/[^A-Za-z0-9._-]/', '_', $name) . '"');
@@ -310,6 +326,11 @@ function rs_rl_forget(array $a): void {
     rs_rl_tables();
     $db = rs_db();
     $id = (int)$a['id'];
+    if (rs_b2_on()) {
+        $st = $db->prepare('SELECT game, v FROM cloud_saves WHERE account_id = ?');
+        $st->execute([$id]);
+        foreach ($st->fetchAll() as $r) rs_b2_delete(rs_rl_key($a, (string)$r['game'], (string)$r['v']));
+    }
     $db->prepare('DELETE FROM launcher_devices WHERE account_id = ?')->execute([$id]);
     $db->prepare('DELETE FROM launcher_links WHERE account_id = ?')->execute([$id]);
     $db->prepare('DELETE FROM cloud_saves WHERE account_id = ?')->execute([$id]);
