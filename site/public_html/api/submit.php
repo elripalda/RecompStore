@@ -201,16 +201,32 @@ try {
     }
     $db->commit();
     $db->query("SELECT RELEASE_LOCK('rs_inbox')");
+    // (3.8) A confirmation to the developer: it arrived, how long a review takes, and where to ask.
+    try {
+        if (filter_var($d['contact'], FILTER_VALIDATE_EMAIL) && function_exists('rs_mailq_add') && rs_mail_ready()) {
+            $pc = ($d['platform'] ?? '') === 'pc';
+            $store = $pc ? 'RecompLauncher' : 'RecompStore';
+            $invite = trim((string)rs_setting('discord_url', ''));
+            $txt = 'Hi ' . ($d['author'] !== '' ? $d['author'] : 'there') . ",\n\n"
+                . 'Thanks for sending ' . $d['name'] . ' to ' . $store . '. It came through' . ($fixRow ? ' with your changes' : '') . ' and it\'s in line for review.' . "\n\n"
+                . 'Every submission is looked at by hand. It can take 24 to 48 hours, but most get an answer within a day. We\'ll write to you at this address either way.' . "\n\n"
+                . ($subAcc ? 'You can follow it in your developer hub: https://recompstore.com/hub' . "\n\n"
+                    : 'Tip: a free developer account lets you follow your submission, update your listing yourself and answer players. Make one here: https://recompstore.com/developers?signup=1' . "\n\n")
+                . ($invite !== '' ? 'Questions in the meantime? Come say hi on our Discord: ' . $invite . "\n\n" : '')
+                . 'Ripalda' . "\n" . $store;
+            rs_mailq_add($d['contact'], 'We got your submission: ' . $d['name'], $txt, ['kind' => 'submit-confirm'], 2, true);
+        }
+    } catch (Throwable $e) { /* the submission is in either way */ }
     if ($subAcc) {
         try {
             if (rs_mail_ready()) rs_mail_send(rs_mail_get('mail_from'), 'New app from ' . $d['account_name'] . ': ' . $d['name'],
                 $d['account_name'] . ($d['verified'] ? ' (verified developer)' : '') . ' sent in ' . $d['name'] . ' (github.com/' . $d['repo'] . ') from their developer hub.'
                 . "\n\nSee it in Submissions: " . rs_abs('/admin/submissions.php#m' . $id));
         } catch (Throwable $e) { /* it's in the Inbox either way */ }
-        rs_sub_out(200, ['ok' => true, 'hub' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. You can follow it in your developer hub, and you\'ll hear back at ' . $d['contact'] . '.']);
+        rs_sub_out(200, ['ok' => true, 'hub' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. Reviews take 24 to 48 hours, usually less than a day. You can follow it in your developer hub, and you\'ll hear back at ' . $d['contact'] . '.']);
     }
     if ($fixRow) rs_sub_out(200, ['ok' => true, 'message' => 'Thanks! Your changes to ' . $d['name'] . ' are in, and it\'s back in line for review. You\'ll hear back at ' . $d['contact'] . '.']);
-    rs_sub_out(200, ['ok' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. If it fits the store, it\'s added with your details, and you\'ll hear back at ' . $d['contact'] . '.']);
+    rs_sub_out(200, ['ok' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. Reviews take 24 to 48 hours, usually less than a day. ' . (filter_var($d['contact'], FILTER_VALIDATE_EMAIL) ? 'We sent a confirmation to ' . $d['contact'] . ', and you\'ll hear back there.' : 'You\'ll hear back at ' . $d['contact'] . '.')]);
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) $db->rollBack();
     rs_sub_out(503, ['ok' => false, 'error' => 'It didn\'t go through. Try again in a moment.']);
