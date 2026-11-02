@@ -238,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // (3.5) Cloud saves on Backblaze B2: the bucket and an application key.
         require_once __DIR__ . '/inc/discord.php';
         require_once __DIR__ . '/inc/b2.php';
-        $endpoint = strtolower(trim((string)preg_replace('#^https?://#i', '', (string)($_POST['b2_endpoint'] ?? ''))), '/ ');
+        $endpoint = strtolower(trim((string)preg_replace('#^https?://#i', '', (string)($_POST['b2_endpoint'] ?? '')), '/ '));
         $bucket = trim((string)($_POST['b2_bucket'] ?? ''));
         $kid = trim((string)($_POST['b2_key_id'] ?? ''));
         $key = trim((string)($_POST['b2_key'] ?? ''));
