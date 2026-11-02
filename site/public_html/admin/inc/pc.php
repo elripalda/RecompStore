@@ -87,8 +87,15 @@ function rs_pc_apps(bool $includeHidden = true): array {
 }
 
 function rs_pc_app(string $id): ?array {
-    foreach (rs_pc_apps() as $a) if ($a['id'] === $id) return $a;
-    return null;
+    rs_pc_tables();
+    $st = rs_db()->prepare('SELECT id, data, sort FROM pc_apps WHERE id = ?');
+    $st->execute([$id]);
+    $r = $st->fetch();
+    if (!$r) return null;
+    $a = array_merge(rs_pc_defaults(), json_decode((string)$r['data'], true) ?: []);
+    $a['id'] = (string)$r['id'];
+    $a['sort'] = (int)$r['sort'];
+    return $a;
 }
 
 function rs_pc_save(array $a): void {
@@ -717,20 +724,37 @@ function rs_pc_unlist_one(string $id): bool {
     return rs_pc_write_files($cat);
 }
 
-function rs_pc_publish(): int {
-    // Each listed recomp's release as GitHub has it now (cached an hour): version, size, downloads.
-    foreach (rs_pc_apps() as $a) {
-        if ($a['repo'] === '') continue;
-        $before = json_encode($a);
-        $a = rs_pc_fill_features($a);
+// (3.5) Each listed recomp's release as GitHub has it now: version, size, downloads. Oldest checked
+// first, and only for as long as $seconds allows, so Publish never waits minutes on GitHub (the
+// server's own refresh, tools/vps/pc-refresh.php, keeps the rest up to date in the background).
+// Ones checked in the last $fresh seconds are skipped. -> how many were checked.
+function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
+    $until = microtime(true) + $seconds;
+    $apps = array_values(array_filter(rs_pc_apps(), fn($a) => $a['repo'] !== '' && time() - (int)($a['gh_at'] ?? 0) >= $fresh));
+    usort($apps, fn($x, $y) => (int)($x['gh_at'] ?? 0) <=> (int)($y['gh_at'] ?? 0));
+    $n = 0;
+    foreach ($apps as $a) {
+        if (microtime(true) > $until) break;
+        $f = rs_pc_fill_features($a);
         $r = rs_pc_read_repo($a['repo']);
-        if (empty($r['ok']) || $r['version'] === '') { if (json_encode($a) !== $before) rs_pc_save($a); continue; }
+        $n++;
+        // What GitHub says goes onto the recomp as it is now (an edit saved meanwhile stays).
+        $a = rs_pc_app($a['id']);
+        if (!$a) continue;
+        foreach (['features', 'features_read', 'features_v'] as $k) if (array_key_exists($k, $f)) $a[$k] = $f[$k];
+        $a['gh_at'] = time();
+        if (empty($r['ok']) || $r['version'] === '') { rs_pc_save($a); continue; }
         if (!empty($r['license'])) $a['license'] = (string)$r['license'];
         $a['issues'] = (int)($r['issues'] ?? 0); $a['releases'] = (int)($r['releases'] ?? 0); $a['first'] = (string)($r['first'] ?? '');
         $a['version'] = $r['version']; $a['released'] = $r['released']; $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'];
         if ($r['size']) $a['size'] = rs_human_size((int)$r['size']);
         rs_pc_save($a);
     }
+    return $n;
+}
+
+function rs_pc_publish(): int {
+    rs_pc_refresh_github(20);
     $cat = rs_pc_catalog();
     if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json. Check that public_html is writable.');

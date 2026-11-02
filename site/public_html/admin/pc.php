@@ -154,6 +154,8 @@ $edit = $editId !== '' ? rs_pc_app($editId) : null;
 $origin = fn(string $k) => RS_PC_ORIGINS[$k] ?? 'Other';
 $sys = fn(array $a) => implode(' · ', array_keys(array_filter(['Windows' => $a['asset_win'], 'Linux' => $a['asset_linux'], 'macOS' => $a['asset_mac']])));
 $published = is_file(RS_PC_CATALOG) ? (int)filemtime(RS_PC_CATALOG) : 0;
+// (3.5) The list shows small copies of the covers (made once, then kept), not the full pictures.
+$thumb = fn(string $u, int $w): string => preg_match('#/media/([A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(jpe?g|png|webp))$#i', $u, $m) ? '/api/thumb.php?f=' . rawurlencode($m[1]) . '&w=' . $w : $u;
 
 rs_head('PC', true, ['assets/health.css', 'assets/artpick.css']);
 ?>
@@ -232,7 +234,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css']);
   <div class="pc-cards">
     <?php foreach ($apps as $a): $c = $counts[$a['id']] ?? []; $n = array_sum($c); ?>
     <a class="pc-card<?= $a['hidden'] ? ' dim' : '' ?>" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>#edit" data-text="<?= h(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'])) ?>">
-      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($a['cover']) . '" alt="" loading="lazy">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?></span>
+      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?></span>
       <span class="pc-card-words"><strong><?= h($a['name']) ?></strong><small><?= h($a['game'] ?: '?') ?></small>
         <small class="muted"><?= h($origin($a['origin'])) ?> · <?= h(RS_PC_GENRES[$a['genre']] ?? 'No kind yet') ?></small>
         <small class="muted"><?= h($a['version'] ?: 'no release') ?><?= $n ? ' · ' . $n . ($n === 1 ? ' report' : ' reports') : '' ?></small></span>
