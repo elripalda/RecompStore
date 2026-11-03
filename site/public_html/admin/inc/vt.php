@@ -85,10 +85,9 @@ function rs_clam_scan(string $file): array {
     fclose($pipes[1]); fclose($pipes[2]);
     $code = proc_close($p);
     if ($code === 0) return ['ok' => true, 'found' => '', 'err' => ''];
-    if ($code === 1) {
-        $sig = preg_match('/:\s*(.+?)\s+FOUND/', (string)$out, $m) ? $m[1] : 'found something';
-        return ['ok' => true, 'found' => mb_substr($sig, 0, 200), 'err' => ''];
-    }
+    // Only a named find counts. A bare exit 1 with no FOUND line is treated as a failed check and tried again.
+    if ($code === 1 && preg_match('/:\s*(.+?)\s+FOUND/', (string)$out, $m)) return ['ok' => true, 'found' => mb_substr($m[1], 0, 200), 'err' => ''];
+    if ($code === 1) return ['ok' => false, 'found' => '', 'err' => mb_substr('ClamAV gave no answer: ' . trim((string)$out . ' ' . (string)$err), 0, 200)];
     return ['ok' => false, 'found' => '', 'err' => mb_substr(trim((string)$err) ?: 'ClamAV error ' . $code, 0, 200)];
 }
 // ClamAV's answer saved like VirusTotal's: a find holds the update for you (red).
