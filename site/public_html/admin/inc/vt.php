@@ -63,7 +63,8 @@ function rs_vt_tables(): void {
 // ---- (3.8) ClamAV on this server ------------------------------------------------------------------
 // Updates and GitHub finds are looked up on VirusTotal by their SHA-256 (one request). When
 // VirusTotal doesn't know the file, or the day's requests are used up, ClamAV checks it here instead
-// of uploading it: no limit. Submissions and "Check a link" still get the full VirusTotal scan.
+// of uploading it: no limit. Submissions and "Check a link" get the full VirusTotal scan while the
+// day allows it; with "ClamAV for submissions too" on, ClamAV takes them once the day's requests run out.
 function rs_clam_bin(): string {
     foreach (['/usr/bin/clamdscan', '/usr/local/bin/clamdscan'] as $b) if (is_file($b) && is_executable($b)) return $b;
     return '';
@@ -117,6 +118,7 @@ function rs_vt_cfg(): array {
         'hold_verified' => max(0, min(168, (int)rs_setting('vt_hold_verified', '0'))),
         'red_at' => max(1, min(20, (int)rs_setting('vt_red_at', '3'))),
         'auto' => rs_setting('vt_auto', '1') === '1',
+        'clam_subs' => rs_setting('vt_clam_subs', '1') === '1',
     ];
 }
 
@@ -337,8 +339,9 @@ function rs_vt_step(array $f): bool {
             $f['sha256'] = hash_file('sha256', $tmp);
             rs_vt_save($id, ['sha256' => $f['sha256'], 'size' => (int)filesize($tmp)]);
         }
+        $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on(); // a submission: ClamAV only when VirusTotal is out for the day
         $clam = $low && rs_clam_on();
-        if (!rs_vt_budget(true, false, false, $low)) return $clam ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV
+        if (!rs_vt_budget(true, false, false, $low)) return ($clam || $sub) ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
             rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
@@ -346,13 +349,17 @@ function rs_vt_step(array $f): bool {
             return true;
         }
         if ($code === 404 && $clam) return rs_clam_check($f, $tmp); // new to VirusTotal: ClamAV here instead of an upload
+        if ($code === 404 && $sub && !rs_vt_budget(false, false, false, false)) return rs_clam_check($f, $tmp); // no room left to upload it today
         if ($code === 404) { rs_vt_save($id, ['status' => (int)$f['size'] > RS_VT_MAX_BYTES ? 'big' : 'upload']); return true; }
         if ($code === 429) return false;
         rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => 'VirusTotal answered HTTP ' . $code, 'status' => (int)$f['tries'] >= 3 ? 'error' : 'new']);
         return true;
     }
     if ($f['status'] === 'upload') {
-        if (!rs_vt_budget(false, true, $backfill, $low)) return false;
+        if (!rs_vt_budget(false, true, $backfill, $low)) {
+            $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on();
+            return $sub ? rs_clam_check($f, $tmp) : false; // waiting for an upload VirusTotal can't take today
+        }
         if (!is_file($tmp)) {
             $why = rs_vt_fetch($f, $tmp);
             if ($why === 'big') { rs_vt_save($id, ['status' => 'big']); return true; }
@@ -403,9 +410,10 @@ function rs_vt_run(float $seconds = 20): int {
         rs_vt_discover();
         // (3.8) When VirusTotal can't take more, the files ClamAV can check here still go on.
         $onlyClam = false;
+        $subsToo = rs_vt_cfg()['clam_subs'];
         while (microtime(true) < $until) {
             $f = rs_db()->query("SELECT * FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND (next_at IS NULL OR next_at <= UTC_TIMESTAMP())"
-                . ($onlyClam ? " AND status = 'new' AND prio BETWEEN 3 AND 4" : '') . ' ORDER BY prio, created LIMIT 1')->fetch();
+                . ($onlyClam ? ($subsToo ? " AND status IN ('new', 'upload') AND prio <= 4" : " AND status = 'new' AND prio BETWEEN 3 AND 4") : '') . ' ORDER BY prio, created LIMIT 1')->fetch();
             if (!$f) break;
             if (!rs_vt_step($f)) {
                 if ($onlyClam || !rs_clam_on()) break;

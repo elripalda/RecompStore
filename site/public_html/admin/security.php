@@ -49,6 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_set_setting('vt_hold_verified', (string)max(0, min(168, (int)($_POST['hold_verified'] ?? 0))));
             rs_set_setting('vt_red_at', (string)max(1, min(20, (int)($_POST['red_at'] ?? 3))));
             rs_set_setting('vt_auto', !empty($_POST['auto']) ? '1' : '0');
+            rs_set_setting('vt_clam_subs', !empty($_POST['clam_subs']) ? '1' : '0');
             rs_flash('Saved.', 'ok');
         } elseif ($act === 'approve' || $act === 'block') {
             $app = $byId((string)($_POST['id'] ?? ''));
@@ -227,9 +228,10 @@ rs_head('Security', true, ['assets/vt.css']);
     <label><span>Hold for verified developers</span><span class="vt-num"><input type="number" name="hold_verified" min="0" max="168" value="<?= $cfg['hold_verified'] ?>"> hours</span><small>0: out as soon as it's checked.</small></label>
     <label><span>Hold for you when flagged by</span><span class="vt-num"><input type="number" name="red_at" min="1" max="20" value="<?= $cfg['red_at'] ?>"> engines</span><small>Unsigned programs often get 1 or 2 flags that mean nothing. Those show yellow and don't hold anything.</small></label>
     <label class="vt-toggle"><input type="checkbox" name="auto" value="1"<?= $cfg['auto'] ? ' checked' : '' ?>><span><strong>Let clean updates out on their own</strong><small>Off: every held update waits for Let it out now.</small></span></label>
+    <label class="vt-toggle"><input type="checkbox" name="clam_subs" value="1"<?= $cfg['clam_subs'] ? ' checked' : '' ?><?= $clam ? '' : ' disabled' ?>><span><strong>ClamAV for submissions too</strong><small>When the day's VirusTotal checks run out, submissions and pasted links are checked by ClamAV instead of waiting for tomorrow.</small></span></label>
     <div class="vt-save"><button class="primary">Save</button></div>
   </form>
-  <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'Updates and GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
+  <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'Updates and GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead' . ($cfg['clam_subs'] ? ', and so are submissions' : '') . '. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
   <?php if ($on): ?>
   <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key"><input type="hidden" name="back" value="settings">
     <input type="text" name="vt_key" placeholder="Saved. Paste a new key to replace it." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc">
