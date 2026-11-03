@@ -17,6 +17,8 @@ declare(strict_types=1);
 const RS_VT_API = 'https://www.virustotal.com/api/v3';
 const RS_VT_PER_MIN = 4;
 const RS_VT_PER_DAY = 480;           // a little under the free key's 500
+const RS_VT_KEEP_FOR_NEW = 100;      // (3.8) of those, kept for submissions and "Check a link": updates stop before
+const RS_VT_GREY_HOURS = 12;         // (3.8) a held update the line couldn't reach in this long goes out anyway
 const RS_VT_BACKFILL_UPLOADS = 60;   // a day, for files already in the stores (new ones go first)
 const RS_VT_MAX_BYTES = 650 << 20;   // VirusTotal's largest upload
 const RS_VT_FILE_RE = '/\.(zip|7z|rar|exe|msi|appimage|dmg|deb|rpm|tar\.gz|tgz|tar\.xz|tar\.zst|pkg|elf|bin)$/i';
@@ -80,7 +82,7 @@ function rs_vt_link(array $f): string { return !empty($f['sha256']) ? 'https://w
 
 // ---- What VirusTotal allows -----------------------------------------------------------------------
 
-function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill = false): bool {
+function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill = false, bool $low = false): bool {
     $c = rs_kv_get('vt_calls');
     $now = time();
     $x = $c ? (json_decode($c['v'], true) ?: []) : [];
@@ -90,6 +92,7 @@ function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill =
     $hold = (int)($x['hold'] ?? 0);
     if ($hold > $now) return false; // VirusTotal said "too many" a moment ago
     if (count($min) >= RS_VT_PER_MIN || $day >= RS_VT_PER_DAY) return false;
+    if ($low && $day >= RS_VT_PER_DAY - RS_VT_KEEP_FOR_NEW) return false;
     if ($backfill && $upload && $up >= RS_VT_BACKFILL_UPLOADS) return false;
     if ($take) {
         $min[] = $now;
@@ -163,6 +166,15 @@ function rs_vt_add(string $repo, string $tag, array $asset, string $source, stri
         $done ? (int)$done['malicious'] : 0, $done ? (int)$done['suspicious'] : 0, $done ? (int)$done['engines'] : 0, $done ? (string)$done['flagged_by'] : '']);
 }
 
+// (3.8) The one file worth checking for a recomp's release: its Windows download when it has one
+// (where nearly everyone plays), else Linux, else macOS. The free key's day can't cover every system.
+function rs_vt_main_patterns(array $patterns): array {
+    foreach (['windows', 'win', 'asset_win', 'linux', 'asset_linux', 'macos', 'mac', 'asset_mac'] as $k)
+        if (isset($patterns[$k]) && trim((string)$patterns[$k]) !== '') return [(string)$patterns[$k]];
+    $list = array_values(array_filter(array_map('strval', $patterns), fn($p) => trim($p) !== ''));
+    return $list ? [$list[0]] : [];
+}
+
 // The release files a listing points at: matching its patterns, else every download-looking file.
 function rs_vt_pick(array $assets, array $patterns): array {
     $out = [];
@@ -204,7 +216,7 @@ function rs_vt_discover(bool $force = false): void {
         $rel = rs_gh_releases($repo, 3600);
         $r = rs_vt_newest($rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []);
         if (!$r) continue;
-        $pats = ($d['platform'] ?? '') === 'pc' ? array_values((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
+        $pats = ($d['platform'] ?? '') === 'pc' ? rs_vt_main_patterns((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
         foreach (rs_vt_pick((array)$r['assets'], $pats) as $a) rs_vt_add($repo, (string)$r['tag_name'], $a, 'submission', 'm' . $s['id'], 2);
     }
     // (3.8) Only what's new: a PC recomp's held update. What's already in the stores isn't checked
@@ -214,7 +226,7 @@ function rs_vt_discover(bool $force = false): void {
         if ($a['repo'] === '' || $tag === '') continue;
         foreach (rs_vt_peek_releases($a['repo']) as $r) {
             if ((string)$r['tag_name'] !== $tag) continue;
-            foreach (rs_vt_pick((array)$r['assets'], array_filter([$a['asset_win'], $a['asset_linux'], $a['asset_mac']])) as $f) rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
+            foreach (rs_vt_pick((array)$r['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f) rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
         }
     }
     rs_vt_promote();
@@ -263,6 +275,7 @@ function rs_vt_results(array $attr, string $statsKey): array {
 function rs_vt_step(array $f): bool {
     $id = (int)$f['id'];
     $backfill = (int)$f['prio'] >= 5;
+    $low = (int)$f['prio'] >= 3; // updates and finds: they leave room in the day for submissions
     $tmp = rs_vt_tmp($id);
     if ($f['status'] === 'new') {
         if (empty($f['sha256'])) {
@@ -273,7 +286,7 @@ function rs_vt_step(array $f): bool {
             $f['sha256'] = hash_file('sha256', $tmp);
             rs_vt_save($id, ['sha256' => $f['sha256'], 'size' => (int)filesize($tmp)]);
         }
-        if (!rs_vt_budget(true)) return false;
+        if (!rs_vt_budget(true, false, false, $low)) return false;
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
             rs_vt_save($id, ['status' => 'done', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
@@ -286,7 +299,7 @@ function rs_vt_step(array $f): bool {
         return true;
     }
     if ($f['status'] === 'upload') {
-        if (!rs_vt_budget(false, true, $backfill)) return false;
+        if (!rs_vt_budget(false, true, $backfill, $low)) return false;
         if (!is_file($tmp)) {
             $why = rs_vt_fetch($f, $tmp);
             if ($why === 'big') { rs_vt_save($id, ['status' => 'big']); return true; }
@@ -295,15 +308,15 @@ function rs_vt_step(array $f): bool {
         $size = (int)filesize($tmp);
         $url = '/files';
         if ($size > (32 << 20)) {
-            if (!rs_vt_budget(true, false, $backfill)) return false;
+            if (!rs_vt_budget(true, false, $backfill, $low)) return false;
             [$c, $u] = rs_vt_call('GET', '/files/upload_url');
             if ($c !== 200 || empty($u['data'])) { rs_vt_save($id, ['err' => 'No upload link from VirusTotal (HTTP ' . $c . ')', 'tries' => (int)$f['tries'] + 1]); return $c !== 429; }
             $url = (string)$u['data'];
         }
-        if (!rs_vt_budget(true, true, $backfill)) return false;
+        if (!rs_vt_budget(true, true, $backfill, $low)) return false;
         [$code, $j] = rs_vt_call('POST', $url, ['file' => new CURLFile($tmp, 'application/octet-stream', (string)$f['name'])]);
         if ($code === 200 && !empty($j['data']['id'])) {
-            rs_vt_save($id, ['status' => 'analyzing', 'analysis' => (string)$j['data']['id'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 60), 'err' => '']);
+            rs_vt_save($id, ['status' => 'analyzing', 'analysis' => (string)$j['data']['id'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 150), 'err' => '']); // most are done in two or three minutes
             @unlink($tmp);
             return true;
         }
@@ -311,14 +324,14 @@ function rs_vt_step(array $f): bool {
         return $code !== 429;
     }
     if ($f['status'] === 'analyzing') {
-        if (!rs_vt_budget(true)) return false;
+        if (!rs_vt_budget(true, false, false, $low)) return false;
         [$code, $j] = rs_vt_call('GET', '/analyses/' . rawurlencode((string)$f['analysis']));
         $attr = (array)($j['data']['attributes'] ?? []);
         if ($code === 200 && ($attr['status'] ?? '') === 'completed') {
             rs_vt_save($id, ['status' => 'done'] + rs_vt_results($attr, 'stats'));
             return true;
         }
-        rs_vt_save($id, ['next_at' => gmdate('Y-m-d H:i:s', time() + 90)]);
+        rs_vt_save($id, ['next_at' => gmdate('Y-m-d H:i:s', time() + 120)]);
         return $code !== 429;
     }
     return true;
@@ -394,7 +407,7 @@ function rs_vt_hold(array $a, array $latest, array $r): array {
     if ($tag === (string)($a['blocked_tag'] ?? '')) return $a;
     $a['pending'] = ['tag' => $tag, 'version' => (string)$r['version'], 'released' => (string)$r['released'],
         'size' => $r['size'] ? rs_human_size((int)$r['size']) : '', 'since' => (string)($a['pending']['tag'] ?? '') === $tag ? (string)$a['pending']['since'] : gmdate('c')];
-    foreach (rs_vt_pick((array)$latest['assets'], array_filter([$a['asset_win'], $a['asset_linux'], $a['asset_mac']])) as $f)
+    foreach (rs_vt_pick((array)$latest['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f)
         rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
     return $a;
 }
@@ -418,9 +431,14 @@ function rs_vt_promote(): void {
             }
             continue;
         }
-        if ($v === 'grey' || !$cfg['auto']) continue;
+        if (!$cfg['auto']) continue;
         $hours = rs_vt_trusted($a) ? $cfg['hold_verified'] : $cfg['hold'];
-        if (time() - (int)strtotime((string)$p['since']) < $hours * 3600) continue;
+        $waited = time() - (int)strtotime((string)$p['since']);
+        // (3.8) Not checked yet: it waits, but not forever. A busy day can use up the free key, and
+        // players shouldn't be stuck on an old version because of that; it's still checked afterwards.
+        if ($v === 'grey' && $waited < max($hours, RS_VT_GREY_HOURS) * 3600) continue;
+        if ($waited < $hours * 3600) continue;
+        if ($v === 'grey') rs_log('security', $a['id'], 'let out unchecked after ' . RS_VT_GREY_HOURS . ' h: ' . $p['tag']);
         rs_vt_release_go($a);
     }
 }
