@@ -62,7 +62,13 @@ final class RsPDO extends PDO {
 }
 
 function rs_db(): PDO {
-    static $pdo = null;
+    static $pdo = null, $last = 0;
+    // (3.8) A request that waited a long time (a big cloud save arriving, an upload to B2) can find
+    // its connection closed by the database (wait_timeout, 2 minutes): checked and opened again.
+    if ($pdo && time() - $last > 45) {
+        try { $pdo->query('SELECT 1'); } catch (PDOException $e) { $pdo = null; }
+    }
+    $last = time();
     if ($pdo) return $pdo;
     $c = rs_config();
     if (!$c) { header('Location: setup.php'); exit; }

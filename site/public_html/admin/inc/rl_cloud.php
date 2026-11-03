@@ -265,7 +265,6 @@ function rs_rl_check_zip(string $file): ?string {
 // Keeps an uploaded copy. -> ['v' => ..., 'same' => bool] or throws with a reason for the player.
 function rs_rl_put(array $a, string $game, string $file, string $hash, int $made, int $played, string $device): array {
     rs_rl_tables();
-    $db = rs_db();
     $id = (int)$a['id'];
     $size = (int)filesize($file);
     $have = rs_rl_versions($id, $game);
@@ -283,7 +282,7 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
         if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
         if (!rename($file, "$dir/$v.zip") && !copy($file, "$dir/$v.zip")) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
     }
-    $db->prepare('INSERT INTO cloud_saves (account_id, game, v, hash, size, made, device, played, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
+    rs_db()->prepare('INSERT INTO cloud_saves (account_id, game, v, hash, size, made, device, played, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
         ->execute([$id, $game, $v, $hash, $size, $made, rs_rl_clean($device, 64), $played]);
     foreach ($drop as $old) rs_rl_delete($a, $game, $old['v']);
     return ['v' => $v, 'same' => false];
