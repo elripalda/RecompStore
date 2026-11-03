@@ -73,17 +73,21 @@ function rs_pc_defaults(): array {
         'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => ''];
 }
 
+// (3.8) Read once per request: pages that ask for the list for every row (submissions, the Inbox)
+// don't decode all 600+ recomps each time. Saving one clears the copy.
 function rs_pc_apps(bool $includeHidden = true): array {
-    rs_pc_tables();
-    $out = [];
-    foreach (rs_db()->query('SELECT id, data, sort FROM pc_apps ORDER BY sort, id')->fetchAll() as $r) {
-        $a = array_merge(rs_pc_defaults(), json_decode((string)$r['data'], true) ?: []);
-        $a['id'] = (string)$r['id'];
-        $a['sort'] = (int)$r['sort'];
-        if (!$includeHidden && $a['hidden']) continue;
-        $out[] = $a;
+    if (!isset($GLOBALS['rs_pc_apps_cache'])) {
+        rs_pc_tables();
+        $all = [];
+        foreach (rs_db()->query('SELECT id, data, sort FROM pc_apps ORDER BY sort, id')->fetchAll() as $r) {
+            $a = array_merge(rs_pc_defaults(), json_decode((string)$r['data'], true) ?: []);
+            $a['id'] = (string)$r['id'];
+            $a['sort'] = (int)$r['sort'];
+            $all[] = $a;
+        }
+        $GLOBALS['rs_pc_apps_cache'] = $all;
     }
-    return $out;
+    return $includeHidden ? $GLOBALS['rs_pc_apps_cache'] : array_values(array_filter($GLOBALS['rs_pc_apps_cache'], fn($a) => !$a['hidden']));
 }
 
 function rs_pc_app(string $id): ?array {
@@ -99,6 +103,7 @@ function rs_pc_app(string $id): ?array {
 }
 
 function rs_pc_save(array $a): void {
+    unset($GLOBALS['rs_pc_apps_cache']);
     rs_pc_tables();
     $db = rs_db();
     $data = $a; unset($data['id'], $data['sort']);

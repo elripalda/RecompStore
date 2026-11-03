@@ -53,7 +53,58 @@ function rs_vt_tables(): void {
         KEY status (status, prio, created),
         KEY sha (sha256)
     ) CHARACTER SET utf8mb4');
+    // (3.8) Who answered: VirusTotal, or ClamAV on this server.
+    try {
+        if (!rs_db()->query("SHOW COLUMNS FROM vt_files LIKE 'scanner'")->fetch()) rs_db()->exec("ALTER TABLE vt_files ADD COLUMN scanner VARCHAR(12) NOT NULL DEFAULT 'vt'");
+    } catch (Throwable $e) { /* next time */ }
     $done = true;
+}
+
+// ---- (3.8) ClamAV on this server ------------------------------------------------------------------
+// Updates and GitHub finds are looked up on VirusTotal by their SHA-256 (one request). When
+// VirusTotal doesn't know the file, or the day's requests are used up, ClamAV checks it here instead
+// of uploading it: no limit. Submissions and "Check a link" still get the full VirusTotal scan.
+function rs_clam_bin(): string {
+    foreach (['/usr/bin/clamdscan', '/usr/local/bin/clamdscan'] as $b) if (is_file($b) && is_executable($b)) return $b;
+    return '';
+}
+function rs_clam_on(): bool {
+    static $on = null;
+    if ($on !== null) return $on;
+    if (rs_clam_bin() === '' || !function_exists('proc_open')) return $on = false;
+    return $on = is_file('/run/clamav/clamd.ctl') || is_file('/var/run/clamav/clamd.ctl') || file_exists('/run/clamav/clamd.ctl');
+}
+// -> ['ok' => bool, 'found' => '' or the signature, 'err' => '']
+function rs_clam_scan(string $file): array {
+    $bin = rs_clam_bin();
+    if ($bin === '') return ['ok' => false, 'found' => '', 'err' => 'ClamAV isn\'t installed.'];
+    $p = proc_open([$bin, '--no-summary', '--fdpass', '--infected', $file], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (!is_resource($p)) return ['ok' => false, 'found' => '', 'err' => 'ClamAV couldn\'t start.'];
+    $out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]);
+    fclose($pipes[1]); fclose($pipes[2]);
+    $code = proc_close($p);
+    if ($code === 0) return ['ok' => true, 'found' => '', 'err' => ''];
+    if ($code === 1) {
+        $sig = preg_match('/:\s*(.+?)\s+FOUND/', (string)$out, $m) ? $m[1] : 'found something';
+        return ['ok' => true, 'found' => mb_substr($sig, 0, 200), 'err' => ''];
+    }
+    return ['ok' => false, 'found' => '', 'err' => mb_substr(trim((string)$err) ?: 'ClamAV error ' . $code, 0, 200)];
+}
+// ClamAV's answer saved like VirusTotal's: a find holds the update for you (red).
+function rs_clam_check(array $f, string $tmp): bool {
+    $id = (int)$f['id'];
+    if (!is_file($tmp)) {
+        $why = rs_vt_fetch($f, $tmp);
+        if ($why === 'big') { rs_vt_save($id, ['status' => 'big']); return true; }
+        if ($why !== '') { rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => $why, 'status' => (int)$f['tries'] >= 3 ? 'error' : 'new']); return true; }
+    }
+    $r = rs_clam_scan($tmp);
+    @unlink($tmp);
+    if (!$r['ok']) { rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => $r['err'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 600)]); return true; }
+    $red = rs_vt_cfg()['red_at'];
+    rs_vt_save($id, ['status' => 'done', 'scanner' => 'clamav', 'err' => '', 'engines' => 1, 'suspicious' => 0,
+        'malicious' => $r['found'] !== '' ? $red : 0, 'flagged_by' => $r['found'] !== '' ? 'ClamAV: ' . $r['found'] : '']);
+    return true;
 }
 
 // ---- Settings -----------------------------------------------------------------------------------
@@ -286,13 +337,15 @@ function rs_vt_step(array $f): bool {
             $f['sha256'] = hash_file('sha256', $tmp);
             rs_vt_save($id, ['sha256' => $f['sha256'], 'size' => (int)filesize($tmp)]);
         }
-        if (!rs_vt_budget(true, false, false, $low)) return false;
+        $clam = $low && rs_clam_on();
+        if (!rs_vt_budget(true, false, false, $low)) return $clam ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
-            rs_vt_save($id, ['status' => 'done', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
+            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
             @unlink($tmp);
             return true;
         }
+        if ($code === 404 && $clam) return rs_clam_check($f, $tmp); // new to VirusTotal: ClamAV here instead of an upload
         if ($code === 404) { rs_vt_save($id, ['status' => (int)$f['size'] > RS_VT_MAX_BYTES ? 'big' : 'upload']); return true; }
         if ($code === 429) return false;
         rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => 'VirusTotal answered HTTP ' . $code, 'status' => (int)$f['tries'] >= 3 ? 'error' : 'new']);
@@ -328,7 +381,7 @@ function rs_vt_step(array $f): bool {
         [$code, $j] = rs_vt_call('GET', '/analyses/' . rawurlencode((string)$f['analysis']));
         $attr = (array)($j['data']['attributes'] ?? []);
         if ($code === 200 && ($attr['status'] ?? '') === 'completed') {
-            rs_vt_save($id, ['status' => 'done'] + rs_vt_results($attr, 'stats'));
+            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt'] + rs_vt_results($attr, 'stats'));
             return true;
         }
         rs_vt_save($id, ['next_at' => gmdate('Y-m-d H:i:s', time() + 120)]);
@@ -348,11 +401,17 @@ function rs_vt_run(float $seconds = 20): int {
     $n = 0;
     try {
         rs_vt_discover();
+        // (3.8) When VirusTotal can't take more, the files ClamAV can check here still go on.
+        $onlyClam = false;
         while (microtime(true) < $until) {
-            $f = rs_db()->query("SELECT * FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND (next_at IS NULL OR next_at <= UTC_TIMESTAMP())
-                ORDER BY prio, created LIMIT 1")->fetch();
+            $f = rs_db()->query("SELECT * FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND (next_at IS NULL OR next_at <= UTC_TIMESTAMP())"
+                . ($onlyClam ? " AND status = 'new' AND prio BETWEEN 3 AND 4" : '') . ' ORDER BY prio, created LIMIT 1')->fetch();
             if (!$f) break;
-            if (!rs_vt_step($f)) break;
+            if (!rs_vt_step($f)) {
+                if ($onlyClam || !rs_clam_on()) break;
+                $onlyClam = true;
+                continue;
+            }
             $n++;
         }
         if ($n) rs_vt_promote();
@@ -520,7 +579,7 @@ function rs_vt_rows(string $repo, string $tag, array $names): array {
     $st = rs_db()->prepare("SELECT * FROM vt_files WHERE repo = ? AND tag = ? AND name IN ($in) ORDER BY name");
     $st->execute(array_merge([$repo, $tag], $names));
     return array_map(fn($r) => ['name' => $r['name'], 'size' => (int)$r['size'], 'status' => $r['status'], 'verdict' => rs_vt_verdict($r),
-        'malicious' => (int)$r['malicious'], 'suspicious' => (int)$r['suspicious'], 'engines' => (int)$r['engines'], 'flagged_by' => $r['flagged_by'],
+        'malicious' => (int)$r['malicious'], 'suspicious' => (int)$r['suspicious'], 'engines' => (int)$r['engines'], 'flagged_by' => $r['flagged_by'], 'scanner' => (string)($r['scanner'] ?? 'vt'),
         'err' => $r['err'], 'link' => rs_vt_link($r)], $st->fetchAll());
 }
 
@@ -541,8 +600,10 @@ function rs_vt_repo_badge(string $repo, string $tag = ''): ?array {
     $bad = 0; $eng = 0; $link = '';
     foreach ($rows as $r) { $bad = max($bad, (int)$r['malicious'] + (int)$r['suspicious']); $eng = max($eng, (int)$r['engines']); $link = $link ?: rs_vt_link($r); }
     $waiting = count(array_filter($rows, fn($r) => in_array($r['status'], ['new', 'upload', 'analyzing'], true)));
+    $clamOnly = $rows && !array_filter($rows, fn($r) => ($r['scanner'] ?? 'vt') !== 'clamav');
     $text = $waiting ? 'Checking ' . count($rows) . ($waiting === 1 && count($rows) === 1 ? ' file' : ' files') . '…'
-        : ($v === 'green' ? 'Clean' . ($eng ? ' (0 of ' . $eng . ')' : '') : ($bad . ' of ' . $eng . ' engines flagged'));
+        : ($clamOnly ? ($v === 'green' ? 'Clean (ClamAV)' : 'ClamAV found something')
+        : ($v === 'green' ? 'Clean' . ($eng ? ' (0 of ' . $eng . ')' : '') : ($bad . ' of ' . $eng . ' engines flagged')));
     return [$waiting ? 'grey' : $v, $text . ' · ' . $tag, $link];
 }
 

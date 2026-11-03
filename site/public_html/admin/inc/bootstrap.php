@@ -714,15 +714,18 @@ function rs_discover_sections(): array {
 }
 
 function rs_games(bool $includeHidden = true): array {
-    $rows = rs_db()->query('SELECT id, data, sort FROM games ORDER BY sort ASC, id ASC')->fetchAll();
-    $out = [];
-    foreach ($rows as $r) {
-        $g = array_merge(rs_game_defaults(), json_decode($r['data'], true) ?: []);
-        $g['id'] = $r['id'];
-        $g['sort'] = (int)$r['sort'];
-        if (!$includeHidden && $g['hidden']) continue;
-        $out[] = $g;
+    // (3.8) Read once per request; saving one clears the copy.
+    if (!isset($GLOBALS['rs_games_cache'])) {
+        $all = [];
+        foreach (rs_db()->query('SELECT id, data, sort FROM games ORDER BY sort ASC, id ASC')->fetchAll() as $r) {
+            $g = array_merge(rs_game_defaults(), json_decode($r['data'], true) ?: []);
+            $g['id'] = $r['id'];
+            $g['sort'] = (int)$r['sort'];
+            $all[] = $g;
+        }
+        $GLOBALS['rs_games_cache'] = $all;
     }
+    $out = $includeHidden ? $GLOBALS['rs_games_cache'] : array_values(array_filter($GLOBALS['rs_games_cache'], fn($g) => !$g['hidden']));
     return $out;
 }
 
@@ -738,6 +741,7 @@ function rs_game(string $id): ?array {
 }
 
 function rs_save_game(array $g, ?string $oldId = null): void {
+    unset($GLOBALS['rs_games_cache']);
     $db = rs_db();
     $data = $g; unset($data['id'], $data['sort']);
     $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

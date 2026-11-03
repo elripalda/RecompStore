@@ -171,23 +171,34 @@ $cmCount = (int)$db->query('SELECT COUNT(*) FROM comments WHERE removed = 0')->f
 $queue = $db->query("SELECT c.*, a.username FROM comments c LEFT JOIN accounts a ON a.id = c.account_id WHERE c.removed = 0 AND (c.hidden = 1 OR c.reports > 0) ORDER BY c.hidden DESC, c.reports DESC, c.created DESC LIMIT 100")->fetchAll();
 $reasons = [];
 if ($queue) foreach ($db->query('SELECT comment_id, reason, COUNT(*) n FROM comment_reports GROUP BY comment_id, reason')->fetchAll() as $r) $reasons[(int)$r['comment_id']][] = $r['reason'] . ($r['n'] > 1 ? ' ×' . $r['n'] : '');
-$lists = ['weekly' => 0, 'launcher' => 0, 'updates' => 0];
-foreach ($db->query("SELECT prefs FROM accounts WHERE email_ok = 1 AND banned = 0 AND prefs IS NOT NULL")->fetchAll() as $r) {
-    $p = json_decode((string)$r['prefs'], true) ?: [];
-    foreach ($lists as $k => $n) if (!empty($p[$k])) $lists[$k]++;
+// (3.8) The mailing-list numbers read every account: counted at most every 10 minutes.
+$counts = rs_kv_get('acct_page_counts');
+$counts = $counts && $counts['age'] < 600 ? (json_decode($counts['v'], true) ?: null) : null;
+if ($counts === null) {
+    $lists = ['weekly' => 0, 'launcher' => 0, 'updates' => 0];
+    foreach ($db->query("SELECT prefs FROM accounts WHERE email_ok = 1 AND banned = 0 AND prefs IS NOT NULL")->fetchAll() as $r) {
+        $p = json_decode((string)$r['prefs'], true) ?: [];
+        foreach ($lists as $k => $n) if (!empty($p[$k])) $lists[$k]++;
+    }
+    rs_pmail_tables();
+    rs_lbeta_tables();
+    $counts = ['lists' => $lists, 'audience' => ['weekly' => count(rs_pmail_audience('weekly')), 'launcher' => count(rs_pmail_audience('launcher')), 'beta' => count(rs_lbeta_audience())]];
+    rs_kv_put('acct_page_counts', (string)json_encode($counts));
 }
+$lists = $counts['lists'];
 rs_pmail_tables();
 rs_ps5fb_tables();
 $draft = isset($_GET['draft']) ? rs_pmail_weekly_draft() : null;
 $mails = $db->query('SELECT * FROM player_mail ORDER BY id DESC LIMIT 10')->fetchAll();
 rs_lbeta_tables();
-$audience = ['weekly' => count(rs_pmail_audience('weekly')), 'launcher' => count(rs_pmail_audience('launcher')), 'beta' => count(rs_lbeta_audience())];
+$audience = $counts['audience'];
 $betaRows = $db->query('SELECT b.*, a.username FROM launcher_beta b LEFT JOIN accounts a ON a.id = b.account_id ORDER BY b.id DESC LIMIT 60')->fetchAll();
 $betaWaiting = (int)$db->query('SELECT COUNT(*) FROM launcher_beta WHERE confirmed = 0 AND off = 0')->fetchColumn();
 $mq = rs_mailq_stats();
 $betaOn = rs_lbeta_on();
 $updatesDue = count(rs_pmail_updates_due());
-rs_play_sync_legacy();
+$sync = rs_kv_get('play_sync_at');
+if (!$sync || $sync['age'] > 300) { rs_play_sync_legacy(); rs_kv_put('play_sync_at', '1'); } // (3.8) every 5 minutes, not every view
 // Flagged ones first, then the newest.
 $ps5fb = $db->query('SELECT r.*, a.username FROM play_reports r LEFT JOIN accounts a ON a.id = r.account_id ORDER BY (r.flags > 0) DESC, r.updated DESC LIMIT 60')->fetchAll();
 $fbFlagged = (int)$db->query('SELECT COUNT(*) FROM play_reports WHERE flags > 0')->fetchColumn();

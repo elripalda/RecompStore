@@ -62,6 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'recheck') {
             rs_db()->prepare("UPDATE vt_files SET status = 'new', tries = 0, err = '', next_at = NULL, prio = LEAST(prio, 2) WHERE id = ?")->execute([(int)($_POST['fid'] ?? 0)]);
             rs_flash('It\'s back in line.', 'ok');
+        } elseif ($act === 'clear-line') {
+            // (3.8) Empties the line. Held updates and waiting submissions come back on their own
+            // (one file each), so only what still matters gets checked.
+            $n = rs_db()->exec("DELETE FROM vt_files WHERE status IN ('new', 'upload', 'analyzing')");
+            rs_kv_put('vt_discover', '0'); // looked at again on the next turn
+            rs_flash('Cleared ' . (int)$n . ' from the line. Updates still on hold and waiting submissions come back in by themselves.', 'ok');
+        } elseif ($act === 'clear-list') {
+            rs_set_setting('vt_list_from', gmdate('Y-m-d H:i:s'));
+            rs_flash('Latest checks cleared. New ones show up here as they finish.', 'ok');
         } elseif ($act === 'run') {
             session_write_close();
             rs_vt_discover(true);
@@ -83,7 +92,11 @@ $red = $db->prepare("SELECT * FROM vt_files WHERE status = 'done' AND malicious 
 $red->execute([$cfg['red_at']]);
 $red = $red->fetchAll();
 $held = array_values(array_filter(rs_pc_apps(), fn($x) => !empty($x['pending']['tag'])));
-$recent = $db->query("SELECT * FROM vt_files WHERE status <> 'new' OR source IN ('submission', 'update', 'link') ORDER BY updated DESC LIMIT 40")->fetchAll();
+$listFrom = (string)rs_setting('vt_list_from', '');
+$recent = $db->prepare("SELECT * FROM vt_files WHERE (status <> 'new' OR source IN ('submission', 'update', 'link')) AND updated > ? ORDER BY updated DESC LIMIT 40");
+$recent->execute([$listFrom !== '' ? $listFrom : '2000-01-01']);
+$recent = $recent->fetchAll();
+$clam = rs_clam_on();
 $names = [];
 foreach (rs_pc_apps() as $x) $names['pc:' . $x['id']] = $x['name'];
 foreach (rs_games() as $g) $names['ps5:' . $g['id']] = $g['name'];
@@ -96,6 +109,7 @@ $when = function (string $t): string {
 $fileBadge = function (array $f) use ($stLabel): string {
     $v = rs_vt_verdict($f);
     if ($f['status'] !== 'done') return '<span class="vt-badge grey"><span class="vt-dot">…</span>' . h($stLabel[$f['status']] ?? $f['status']) . '</span>';
+    if (($f['scanner'] ?? 'vt') === 'clamav') return rs_vt_badge_html([$v, $v === 'green' ? 'Clean · ClamAV' : 'ClamAV found something', '']);
     $txt = $v === 'green' ? 'Clean' : (((int)$f['malicious'] + (int)$f['suspicious']) . ' of ' . (int)$f['engines']);
     return rs_vt_badge_html([$v, $txt . ($v === 'green' && $f['engines'] ? ' · 0 of ' . (int)$f['engines'] : ''), rs_vt_link($f)]);
 };
@@ -186,7 +200,11 @@ rs_head('Security', true, ['assets/vt.css']);
 
 <section class="card">
   <div class="vt-head"><h2>Latest checks</h2>
-    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="run"><button<?= $on ? '' : ' disabled' ?>>Check now</button></form></div>
+    <div class="vt-acts">
+      <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="run"><button<?= $on ? '' : ' disabled' ?>>Check now</button></form>
+      <form method="post" onsubmit="return confirm('Clear the list? The checks themselves are kept.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="clear-list"><button class="ghost">Clear list</button></form>
+      <form method="post" onsubmit="return confirm('Empty the line of <?= (int)$waiting ?> files waiting to be checked? Held updates and waiting submissions come back in by themselves.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="clear-line"><button class="ghost"<?= $waiting ? '' : ' disabled' ?>>Clear the line (<?= (int)$waiting ?>)</button></form>
+    </div></div>
   <?php if (!$recent): ?><p class="vt-empty">Nothing checked yet. <?= $on ? 'The first checks start within a few minutes.' : 'Connect VirusTotal above to start.' ?></p><?php else: ?>
   <div class="vt-list compact">
     <?php foreach ($recent as $f): ?>
@@ -211,6 +229,7 @@ rs_head('Security', true, ['assets/vt.css']);
     <label class="vt-toggle"><input type="checkbox" name="auto" value="1"<?= $cfg['auto'] ? ' checked' : '' ?>><span><strong>Let clean updates out on their own</strong><small>Off: every held update waits for Let it out now.</small></span></label>
     <div class="vt-save"><button class="primary">Save</button></div>
   </form>
+  <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'Updates and GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
   <?php if ($on): ?>
   <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key"><input type="hidden" name="back" value="settings">
     <input type="text" name="vt_key" placeholder="Saved. Paste a new key to replace it." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc">

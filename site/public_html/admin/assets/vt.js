@@ -13,7 +13,8 @@
     var labels = { 'new': 'In line', upload: 'Sending to VirusTotal', analyzing: 'Scanning', big: 'Too big to send (650 MB max)', error: 'Couldn\'t check' };
     if (r.status !== 'done') return '<span class="vt-badge grey"><span class="vt-dot">' + (r.status === 'big' || r.status === 'error' ? '–' : '<i class="vt-spin"></i>') + '</span>' + esc(labels[r.status] || r.status) + '</span>';
     var n = r.malicious + r.suspicious;
-    var t = r.verdict === 'green' ? 'Clean · 0 of ' + r.engines : n + ' of ' + r.engines + ' engines flagged';
+    var t = r.scanner === 'clamav' ? (r.verdict === 'green' ? 'Clean · ClamAV' : 'ClamAV found something')
+      : r.verdict === 'green' ? 'Clean · 0 of ' + r.engines : n + ' of ' + r.engines + ' engines flagged';
     var i = { green: '✓', yellow: '!', red: '✕' }[r.verdict] || '…';
     return '<a class="vt-badge ' + r.verdict + '" href="' + esc(r.link) + '" target="_blank" rel="noopener"><span class="vt-dot">' + i + '</span>' + esc(t) + '</a>';
   };
