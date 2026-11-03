@@ -2601,3 +2601,10 @@ ol.launch-list li::marker{color:var(--cyan);font-weight:700}
   body[data-platform="pc"] #top-kofi{width:42px;padding:0;justify-content:center}
   body[data-platform="pc"] #top-kofi span{display:none}
 }
+/* (3.8) A PC recomp's pictures in the hub: four even boxes (two by two on phones) */
+.hub-pc-pics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:4px 0 10px}
+.hub-pc-pics .hub-pic-box{aspect-ratio:auto;height:140px;max-width:none}
+.hub-pc-pics .hub-pic-box img{object-fit:contain;padding:6px}
+.hub-pc-pics .hub-pic-art .hub-pic-box img{object-fit:cover;padding:0}
+.hub-pc-pics .tag{font-size:11px}
+@media (max-width:640px){.hub-pc-pics{grid-template-columns:1fr 1fr}}

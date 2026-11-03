@@ -161,6 +161,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'We couldn\'t confirm that ' . ($g['name'] ?? $cl['app_id']) . ' is yours, so it stays as it is for now. Reply here if we got it wrong.');
             rs_flash($action === 'claim-ok' ? ($g['name'] ?? $cl['app_id']) . ' is on ' . ($acc['name'] ?: rs_dev_label($acc)) . '\'s page now.' . (str_starts_with((string)$cl['app_id'], 'pc:') ? '' : ' Press Publish when you\'re ready.') : 'Turned down. They got a message in their hub.');
             $back = 'dev-accounts.php#claims';
+        } elseif ($action === 'edit-undo') {
+            // (3.8) Undo a change a developer made: what was there before goes back on the page.
+            $st = $db->prepare("SELECT * FROM dev_changes WHERE id = ? AND status IN ('live', 'approved')");
+            $st->execute([$id]);
+            $ch = $st->fetch();
+            if (!$ch) throw new RuntimeException('That change was already undone.');
+            $data = json_decode((string)$ch['data'], true) ?: [];
+            $before = (array)($data['_before'] ?? []);
+            if (!$before) throw new RuntimeException('That change is from before Undo was there, so there\'s nothing to put back. Change it on its edit page.');
+            $pc = str_starts_with((string)$ch['app_id'], 'pc:');
+            $g = $appOf((string)$ch['app_id']);
+            if (!$g || !$pc) throw new RuntimeException('That recomp isn\'t in the admin anymore.');
+            foreach (RS_DEV_PC_FIELDS as $k => $max) if (array_key_exists($k, $before)) $g[$k] = (string)$before[$k];
+            foreach ((array)($before['art'] ?? []) as $k => $path) if (in_array($k, RS_DEV_PC_ART, true)) $g[$k] = (string)$path;
+            rs_pc_save($g);
+            rs_pc_publish_one($g['id']);
+            $db->prepare("UPDATE dev_changes SET status = 'undone', decided = NOW() WHERE id = ?")->execute([$id]);
+            rs_log('developers', 'undo', 'undid ' . implode(', ', array_keys(array_diff_key($data, ['_before' => 1]))) . ' on ' . $g['id']);
+            rs_flash('Undone. ' . $g['name'] . '\'s page is back to how it was.');
+            $back = 'dev-accounts.php#edits';
         } elseif ($action === 'change-ok' || $action === 'change-no') {
             $st = $db->prepare("SELECT * FROM dev_changes WHERE id = ? AND status = 'pending'");
             $st->execute([$id]);
@@ -176,6 +196,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // A PC recomp's change goes on its page straight away.
                     foreach (RS_DEV_PC_FIELDS as $k => $max) if (array_key_exists($k, $data)) $g[$k] = mb_substr((string)$data[$k], 0, $max);
                     if (array_key_exists('features', $data)) { $g['features_read'] = true; $g['features_v'] = 2; }
+                    // (3.8) Their new pictures. The old ones are kept in the change, so Undo can put them back.
+                    $was = [];
+                    foreach ((array)($data['art'] ?? []) as $k => $path) {
+                        if (!in_array($k, RS_DEV_PC_ART, true) || !preg_match('#^/media/pc-#', (string)$path)) continue;
+                        $was[$k] = (string)($g[$k] ?? '');
+                        $g[$k] = (string)$path;
+                        $g[$k . '_src'] = 'developer';
+                    }
+                    if ($was) $db->prepare('UPDATE dev_changes SET data = ? WHERE id = ?')->execute([json_encode($data + ['_before' => ['art' => $was]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $id]);
                     rs_pc_save($g);
                     rs_pc_publish_one($g['id']);
                 } else {
@@ -184,8 +213,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 rs_log('developers', 'change', 'applied ' . implode(', ', array_keys($data)) . ' for ' . $g['id'] . ' from ' . ($acc ? rs_dev_label($acc) : '?'));
             }
+            if ($action === 'change-no') rs_dev_pc_art_drop((array)((json_decode((string)$ch['data'], true) ?: [])['art'] ?? []));
             $db->prepare('UPDATE dev_changes SET status = ?, decided = NOW() WHERE id = ?')->execute([$action === 'change-ok' ? 'approved' : 'rejected', $id]);
-            if ($acc && $action === 'change-ok') $tell($acc, 'Your changes to ' . ($g['name'] ?? $ch['app_id']) . ' are approved', [
+            // (3.8) Pictures: they hear back in their hub's messages either way.
+            if ($acc && $pc && !empty((json_decode((string)$ch['data'], true) ?: [])['art'])) rs_dev_msg_add('dm', (int)$acc['id'], true, $action === 'change-ok'
+                ? 'Your new pictures for ' . ($g['name'] ?? $ch['app_id']) . ' are on its page now.'
+                : 'We didn\'t use the new pictures you sent for ' . ($g['name'] ?? $ch['app_id']) . '. Reply here if you\'d like to know why or try others.');
+            if ($acc && $action === 'change-ok' && !($pc && !empty((json_decode((string)$ch['data'], true) ?: [])['art']))) $tell($acc, 'Your changes to ' . ($g['name'] ?? $ch['app_id']) . ' are approved', [
                 ['t' => 'text', 'text' => "Hi {name},\n\nYour changes to " . ($g['name'] ?? $ch['app_id']) . "'s page are approved. They show up in the store and on the site with the next update."],
             ]);
             rs_flash($action === 'change-ok' ? 'Applied to ' . ($g['name'] ?? $ch['app_id']) . ($pc ? '. It\'s on its page now.' : '. Press Publish when you\'re ready.') : 'Turned down.');
@@ -204,7 +238,7 @@ $pending = array_values(array_filter($rows, fn($r) => $r['status'] === 'pending'
 $approved = array_values(array_filter($rows, fn($r) => $r['status'] === 'approved'));
 $invites = $db->query('SELECT i.*, a.gh_login, a.email AS acc_email FROM dev_invites i LEFT JOIN dev_accounts a ON a.id = i.used_by ORDER BY i.id DESC LIMIT 50')->fetchAll();
 $changes = $db->query("SELECT c.*, a.gh_login, a.name FROM dev_changes c JOIN dev_accounts a ON a.id = c.account_id WHERE c.status = 'pending' ORDER BY c.id")->fetchAll();
-$edits = $db->query("SELECT c.*, a.gh_login, a.name, a.email FROM dev_changes c JOIN dev_accounts a ON a.id = c.account_id WHERE c.status = 'live' ORDER BY c.id DESC LIMIT 30")->fetchAll();
+$edits = $db->query("SELECT c.*, a.gh_login, a.name, a.email FROM dev_changes c JOIN dev_accounts a ON a.id = c.account_id WHERE c.status = 'live' OR (c.status = 'approved' AND c.app_id LIKE 'pc:%' AND c.data LIKE '%\"_before\"%') ORDER BY c.id DESC LIMIT 30")->fetchAll();
 $claims = $db->query("SELECT c.*, a.gh_login, a.name, a.slug, a.status AS acc_status FROM dev_claims c JOIN dev_accounts a ON a.id = c.account_id WHERE c.status = 'pending' ORDER BY c.id")->fetchAll();
 $plats = fn(array $r) => implode('', array_map(fn($p) => '<span class="pill">' . h($p) . '</span>', rs_dev_platform_labels((string)($r['platforms'] ?? ''))));
 $gh = rs_gh_oauth();
@@ -217,7 +251,7 @@ $pic = fn(array $r, int $n) => (string)$r['avatar'] !== ''
     ? '<img class="dev-req-pic" src="' . h((string)$r['avatar']) . '" alt="" width="' . $n . '" height="' . $n . '">'
     : '<span class="dev-req-pic dev-req-letter" style="width:' . $n . 'px;height:' . $n . 'px">' . h(mb_strtoupper(mb_substr((string)($r['name'] ?: $r['email']), 0, 1))) . '</span>';
 $when = fn(?string $d) => $d ? rs_date('M j, Y', strtotime($d)) : '';
-$fieldNames = ['blurb' => 'One-line summary', 'description' => 'Description', 'news' => 'What\'s new', 'needs' => 'What players need', 'credits' => 'Credits', 'video' => 'Video', 'features' => 'What\'s in it', 'media' => 'Around the web'];
+$fieldNames = ['name' => 'Name', 'tags' => 'Tags', 'setup_steps' => 'Setup steps', 'art' => 'Pictures', 'blurb' => 'One-line summary', 'description' => 'Description', 'news' => 'What\'s new', 'needs' => 'What players need', 'credits' => 'Credits', 'video' => 'Video', 'features' => 'What\'s in it', 'media' => 'Around the web'];
 
 rs_head('Developer accounts');
 ?>
@@ -275,7 +309,13 @@ rs_head('Developer accounts');
   <div class="dev-change">
     <p><strong><?= h($g['name'] ?? $c['app_id']) ?></strong><?= str_starts_with((string)$c['app_id'], 'pc:') ? ' <span class="pill">PC</span>' : '' ?> <span class="muted">from <?= h($c['name'] ?: $c['gh_login']) ?> · <?= h($when($c['created'])) ?></span></p>
     <?php if (trim((string)$c['message']) !== ''): ?><p class="body"><em><?= nl2br(h((string)$c['message'])) ?></em></p><?php endif; ?>
-    <?php foreach ($data as $k => $v): ?>
+    <?php foreach ($data as $k => $v): if ($k === '_before') continue; ?>
+    <?php if ($k === 'art'): foreach ((array)$v as $ak => $path): ?>
+    <div class="dev-diff"><span class="lbl"><?= h(['cover' => 'Cover', 'hero' => 'Backdrop', 'logo' => 'Logo', 'icon' => 'Icon'][$ak] ?? $ak) ?></span>
+      <div class="dev-diff-cols"><div><span class="muted">Now</span><p><?= (string)($g[$ak] ?? '') !== '' ? '<img class="dev-art dev-art-' . h($ak) . '" src="' . h((string)$g[$ak]) . '" alt="">' : '<span class="muted">none</span>' ?></p></div>
+        <div><span class="muted">New</span><p><a href="<?= h((string)$path) ?>" target="_blank"><img class="dev-art dev-art-<?= h($ak) ?>" src="<?= h((string)$path) ?>" alt=""></a></p></div></div>
+    </div>
+    <?php endforeach; continue; endif; ?>
     <div class="dev-diff"><span class="lbl"><?= h($fieldNames[$k] ?? $k) ?></span>
       <div class="dev-diff-cols"><div><span class="muted">Now</span><p><?= nl2br(h((string)($g[$k] ?? ''))) ?: '<span class="muted">empty</span>' ?></p></div><div><span class="muted">Suggested</span><p><?= nl2br(h((string)$v)) ?: '<span class="muted">empty</span>' ?></p></div></div>
     </div>
@@ -306,12 +346,28 @@ rs_head('Developer accounts');
 
 <section class="card" id="edits">
   <h2>Changes developers made</h2>
-  <p class="muted">Verified developers change their own app pages: words, pictures, screenshots and video. You get an email for each one, and they go out with your next Publish. Want something done differently? Send them a note.</p>
+  <p class="muted">Verified developers change their own app pages. On PS5 apps: words, pictures, screenshots and video, out with your next Publish. On PC recomps: the words go live at once, and new pictures wait under App page changes to review until you approve them. You get an email for each one. PC changes can be undone here. Want something done differently? Send them a note.</p>
+<style>.dev-art{max-width:100%;max-height:180px;border-radius:8px;background:rgba(255,255,255,.04)}.dev-art-cover{max-height:220px}.dev-art-icon{max-height:96px}</style>
   <?php if (!$edits): ?><p class="muted">Nothing yet.</p><?php endif; ?>
   <?php foreach ($edits as $c): $g = $appOf((string)$c['app_id']); $data = json_decode((string)$c['data'], true) ?: []; ?>
   <div class="dev-change">
     <p><strong><a href="<?= h($appEdit((string)$c['app_id'])) ?>"><?= h($g['name'] ?? $c['app_id']) ?></a></strong><?= str_starts_with((string)$c['app_id'], 'pc:') ? ' <span class="pill">PC</span>' : '' ?> <span class="muted">by <?= h($c['name'] ?: $c['gh_login']) ?> · <?= h($when($c['created'])) ?> · <a href="<?= h($appPage((string)$c['app_id'])) ?>" target="_blank">its page</a></span></p>
-    <p class="muted"><?= h(implode(', ', array_map(fn($k) => $fieldNames[$k] ?? ['icon' => 'Icon', 'hero' => 'Backdrop', 'logo' => 'Logo', 'screens' => 'Screenshots'][$k] ?? $k, array_keys($data)))) ?></p>
+    <p class="muted"><?= h(implode(', ', array_map(fn($k) => $fieldNames[$k] ?? ['icon' => 'Icon', 'hero' => 'Backdrop', 'logo' => 'Logo', 'screens' => 'Screenshots'][$k] ?? $k, array_keys(array_diff_key($data, ['_before' => 1]))))) ?></p>
+    <?php if (!empty($data['_before'])): ?>
+    <details><summary>What changed</summary>
+      <?php foreach (array_diff_key($data, ['_before' => 1, 'art' => 1]) as $k => $v): ?>
+      <div class="dev-diff"><span class="lbl"><?= h($fieldNames[$k] ?? $k) ?></span>
+        <div class="dev-diff-cols"><div><span class="muted">Before</span><p><?= nl2br(h((string)($data['_before'][$k] ?? ''))) ?: '<span class="muted">empty</span>' ?></p></div><div><span class="muted">Now</span><p><?= nl2br(h((string)$v)) ?: '<span class="muted">empty</span>' ?></p></div></div>
+      </div>
+      <?php endforeach; ?>
+      <?php foreach ((array)($data['art'] ?? []) as $ak => $path): ?>
+      <div class="dev-diff"><span class="lbl"><?= h(['cover' => 'Cover', 'hero' => 'Backdrop', 'logo' => 'Logo', 'icon' => 'Icon'][$ak] ?? $ak) ?></span>
+        <div class="dev-diff-cols"><div><span class="muted">Before</span><p><?= (string)($data['_before']['art'][$ak] ?? '') !== '' ? '<img class="dev-art dev-art-' . h($ak) . '" src="' . h((string)$data['_before']['art'][$ak]) . '" alt="">' : '<span class="muted">none</span>' ?></p></div><div><span class="muted">Now</span><p><img class="dev-art dev-art-<?= h($ak) ?>" src="<?= h((string)$path) ?>" alt=""></p></div></div>
+      </div>
+      <?php endforeach; ?>
+    </details>
+    <form method="post" onsubmit="return confirm('Put this page back to how it was before this change?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><button name="action" value="edit-undo" class="danger">Undo this change</button></form>
+    <?php endif; ?>
     <?php if (trim((string)$c['message']) !== ''): ?><p class="body"><em><?= nl2br(h(trim((string)$c['message']))) ?></em></p><?php endif; ?>
     <details><summary>Send them a note</summary>
       <form method="post" class="dev-note"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>">

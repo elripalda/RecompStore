@@ -350,7 +350,37 @@ function rs_dev_apps(array $acc): array {
 
 // (2.8) Their PC recomps: the repo's owner is them or one of their orgs, or it's on their page.
 // What they can change on its page; a verified developer's change goes out straight away.
-const RS_DEV_PC_FIELDS = ['blurb' => 160, 'description' => 8000, 'features' => 1200, 'media' => 5000, 'needs' => 200, 'credits' => 1000];
+const RS_DEV_PC_FIELDS = ['name' => 120, 'blurb' => 160, 'description' => 8000, 'features' => 1200, 'media' => 5000, 'needs' => 200, 'credits' => 1000,
+    'tags' => 300, 'setup_steps' => 2000];
+// (3.8) Their PC recomp's pictures: new ones wait for you to look at them before they go on its page.
+const RS_DEV_PC_ART = ['cover_file' => 'cover', 'hero_file' => 'hero', 'logo_file' => 'logo', 'icon_file' => 'icon'];
+
+// A picture they sent for a PC recomp, made ready (sized, saved under /media) but not on its page yet.
+function rs_dev_pc_art_save(array $file, string $kind, string $id): string {
+    if ($kind === 'cover') return (string)(rs_pc_media_file((string)$file['tmp_name'], $id)['cover'] ?? '');
+    $out = rs_save_image($file, $kind, 'pc-' . rs_pc_slug($id));
+    return (string)($kind === 'hero' ? ($out['hero_web'] ?? $out['hero'] ?? '') : ($out[$kind] ?? ''));
+}
+
+// Pictures waiting for a look, by PC recomp id: ['id' => ['cover' => '/media/..', ...]].
+function rs_dev_pc_art_waiting(int $accountId): array {
+    $st = rs_db()->prepare("SELECT app_id, data FROM dev_changes WHERE account_id = ? AND status = 'pending' AND app_id LIKE 'pc:%' ORDER BY id");
+    $st->execute([$accountId]);
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $d = json_decode((string)$r['data'], true) ?: [];
+        foreach ((array)($d['art'] ?? []) as $k => $v) $out[substr((string)$r['app_id'], 3)][$k] = (string)$v;
+    }
+    return $out;
+}
+
+// Pictures that were never used (turned down, or replaced before you looked): their files go.
+function rs_dev_pc_art_drop(array $art): void {
+    foreach ($art as $path) {
+        $path = (string)$path;
+        if (preg_match('#^/media/pc-[A-Za-z0-9_.-]+$#', $path)) @unlink(RS_MEDIA . '/' . basename($path));
+    }
+}
 function rs_dev_pc_apps(array $acc): array {
     $owners = rs_dev_owners($acc);
     $out = [];
@@ -739,16 +769,20 @@ function rs_dev_invite_send(array $inv): void {
 }
 
 // (2.7.3) An email to you when a verified developer changes one of their app pages.
-function rs_dev_edit_notify(array $acc, array $g, array $what): void {
+function rs_dev_edit_notify(array $acc, array $g, array $what, bool $pc = false, bool $waiting = false): void {
     try {
         if (!rs_mail_ready()) return;
         $names = ['blurb' => 'one-line summary', 'description' => 'description', 'news' => 'what\'s new', 'needs' => 'what players need',
-            'credits' => 'credits', 'video' => 'video', 'icon' => 'icon', 'hero' => 'backdrop', 'logo' => 'logo', 'screens' => 'screenshots'];
+            'credits' => 'credits', 'video' => 'video', 'icon' => 'icon', 'hero' => 'backdrop', 'logo' => 'logo', 'screens' => 'screenshots',
+            'name' => 'name', 'features' => 'what\'s in it', 'media' => 'links around the web', 'tags' => 'tags', 'setup_steps' => 'setup steps', 'cover' => 'cover'];
         $list = implode(', ', array_map(fn($k) => $names[$k] ?? $k, $what));
-        rs_mail_send(rs_mail_get('mail_from'), ($acc['name'] ?: rs_dev_label($acc)) . ' changed ' . $g['name'],
-            ($acc['name'] ?: rs_dev_label($acc)) . ' changed the ' . $list . ' on ' . $g['name'] . ".\n\nSee it in the admin: " . rs_abs('/admin/edit.php?id=' . rawurlencode((string)$g['id']))
-            . "\nSend them a note, or see all recent changes: " . rs_abs('/admin/dev-accounts.php#edits')
-            . "\n\nIt goes out to the store and the site with your next Publish.");
+        $who = $acc['name'] ?: rs_dev_label($acc);
+        $edit = $pc ? '/admin/pc.php?edit=' . rawurlencode((string)$g['id']) . '#edit' : '/admin/edit.php?id=' . rawurlencode((string)$g['id']);
+        rs_mail_send(rs_mail_get('mail_from'), $waiting ? $who . ' sent new pictures for ' . $g['name'] : $who . ' changed ' . $g['name'],
+            ($waiting ? $who . ' sent a new ' . $list . ' for ' . $g['name'] . ". They wait for you: approve or turn them down here:\n" . rs_abs('/admin/dev-accounts.php#changes')
+                : $who . ' changed the ' . $list . ' on ' . $g['name'] . ".\n\nSee it in the admin: " . rs_abs($edit)
+                . "\nUndo it, send them a note, or see all recent changes: " . rs_abs('/admin/dev-accounts.php#edits'))
+            . ($pc || $waiting ? '' : "\n\nIt goes out to the store and the site with your next Publish."));
     } catch (Throwable $e) { /* the change is saved either way */ }
 }
 

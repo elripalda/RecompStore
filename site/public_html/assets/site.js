@@ -4178,10 +4178,25 @@
     };
 
     // (2.8) Their PC recomps: downloads, what players say, and the words on each page.
-    const PC_FIELDS = [['blurb', t('One-line summary'), 160], ['description', t('Description'), 8000], ['features', t("What's in it"), 1200, t('One per line')],
-      ['media', t('Around the web'), 5000, t('YouTube, Reddit or X links, one per line')], ['needs', t('What players need'), 200], ['credits', t('Credits'), 1000]];
+    const PC_FIELDS = [['name', t('Name'), 120], ['blurb', t('One-line summary'), 160], ['description', t('Description'), 8000], ['features', t("What's in it"), 1200, t('One per line')],
+      ['media', t('Around the web'), 5000, t('YouTube, Reddit or X links, one per line')], ['needs', t('What players need'), 200], ['credits', t('Credits'), 1000],
+      ['tags', t('Tags'), 300, t('Up to 8, separated by commas, like Widescreen, 60 FPS, Mods')], ['setup_steps', t('Setup steps'), 2000, t('Only if players set something up before the first play. One step per line.')]];
+    // (3.8) Its pictures: new ones wait for a quick look before they go on its page.
+    const PC_PICS = [['cover', 'cover_file', t('Cover'), t('Portrait, 600×900')], ['art', 'hero_file', t('Backdrop'), t('Wide, 1920×620 or bigger')],
+      ['logo', 'logo_file', t('Logo'), t('PNG with a see-through background')], ['icon', 'icon_file', t('Icon'), t('Square, 512×512')]];
+    const WAIT_KEY = { art: 'hero' };
+    const pcPicsHtml = (a) => `<div class="hub-pics hub-pc-pics">${PC_PICS.map(([k, field, n, hint]) => {
+      const waiting = (a.waiting || {})[WAIT_KEY[k] || k];
+      const now = waiting || a[k];
+      return `<label class="hub-pic-pick hub-pic-${k === 'art' ? 'art' : k}"><span class="hub-pic-box">${now ? `<img src="${esc(now)}" alt="">` : `<span class="muted">${t('None yet')}</span>`}</span>
+        <strong>${n}</strong><small>${waiting ? `<span class="tag">${t('Waiting for a look')}</span>` : hint}</small><input type="file" name="${field}" accept="image/png,image/jpeg,image/webp"></label>`;
+    }).join('')}</div>`;
     const pcFieldsHtml = (a) => PC_FIELDS.map(([k, n, max, hint]) => `<label>${n}${max > 300 ? `<textarea name="${k}" rows="${k === 'description' ? 7 : 4}" maxlength="${max}">${esc((a.fields || {})[k] || '')}</textarea>`
       : `<input name="${k}" maxlength="${max}" value="${esc((a.fields || {})[k] || '')}">`}${hint ? `<small>${hint}</small>` : ''}</label>`).join('');
+    const wirePics = (f) => f.querySelectorAll('.hub-pc-pics input[type=file]').forEach((inp) => inp.addEventListener('change', () => {
+      const box = inp.closest('label').querySelector('.hub-pic-box');
+      if (inp.files[0]) box.innerHTML = `<img src="${URL.createObjectURL(inp.files[0])}" alt="">`;
+    }));
     const showPc = () => {
       const list = data.pcApps || [];
       pane().innerHTML = list.length ? `<div class="hub-apps">${list.map((a) => `
@@ -4195,7 +4210,7 @@
               <div><dt>${t('Has problems')}</dt><dd>${num(a.stats.issues)}</dd></div><div><dt>${t("Won't run")}</dt><dd>${num(a.stats.broken)}</dd></div></dl>
             <details><summary>${data.canEdit ? t('Edit its page') : t('Suggest changes to its page')}</summary>
               <form class="form hub-change" data-pc="${esc(a.id)}" novalidate>
-                ${data.canEdit ? `<p class="muted">${t('Your changes go on its page right away.')}</p>` : ''}
+                ${data.canEdit ? `<p class="muted">${t('Your words go on its page right away. New pictures wait for a quick look first, usually within a day.')}</p>${pcPicsHtml(a)}` : ''}
                 ${pcFieldsHtml(a)}
                 ${data.canEdit ? '' : `<label>${t('A note for us')} <span class="opt">${t('optional')}</span><input name="message" maxlength="1000"></label>`}
                 <div class="form-row"><button class="btn primary" type="submit">${data.canEdit ? t('Save changes') : t('Send for review')}</button><span class="status" role="status"></span></div>
@@ -4211,13 +4226,27 @@
         const fields = {};
         PC_FIELDS.forEach(([k]) => { fields[k] = f[k].value; });
         btn.disabled = true; st.textContent = t('Saving…'); st.className = 'status';
-        (data.canEdit ? call('pc-edit', { app: a.id, fields }) : call('change', { app: 'pc:' + a.id, fields, message: f.message.value })).then((res) => {
+        let send;
+        if (data.canEdit) {
+          const fd = new FormData();
+          fd.append('a', 'pc-edit'); fd.append('app', a.id);
+          PC_FIELDS.forEach(([k]) => fd.append(`fields[${k}]`, f[k].value));
+          PC_PICS.forEach(([, field]) => { if (f[field] && f[field].files[0]) fd.append(field, f[field].files[0]); });
+          send = fetch('/api/dev.php', { method: 'POST', credentials: 'same-origin', body: fd }).then((r) => r.json())
+            .catch(() => ({ ok: false, error: t('That didn\'t go through. Check your connection and try again.') }));
+        } else send = call('change', { app: 'pc:' + a.id, fields, message: f.message.value });
+        send.then((res) => {
           btn.disabled = false;
           say(st, res);
           if (res.ok && res.fields) a.fields = res.fields;
+          if (res.ok && res.waiting) {
+            a.waiting = Object.fromEntries(Object.entries(res.waiting).map(([k, v]) => [k, /^https?:/.test(v) ? v : location.origin + v]));
+            const box = f.querySelector('.hub-pc-pics'); if (box) { const tmp = document.createElement('div'); tmp.innerHTML = pcPicsHtml(a); box.replaceWith(tmp.firstElementChild); wirePics(f); }
+          }
           if (res.ok && !data.canEdit) data.changes.unshift({ status: 'pending' });
         });
       }));
+      pane().querySelectorAll('form[data-pc]').forEach(wirePics);
     };
 
     // Your page: name, about, links; Discord

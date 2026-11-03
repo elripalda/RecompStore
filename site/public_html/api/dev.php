@@ -274,10 +274,13 @@ try {
                 'repo' => $g['repo'], 'beta' => (bool)$g['beta'], 'soon' => (bool)$g['soon'], 'category' => $g['category'],
                 
                 'fields' => array_intersect_key($g, RS_DEV_CHANGE_FIELDS), 'stats' => $stats[$g['id']] ?? null], $apps),
-            'pcApps' => (function () use ($pcApps): array {
+            'pcApps' => (function () use ($pcApps, $acc): array {
                 $fb = rs_pc_feedback_counts();
+                $artWaiting = $pcApps ? rs_dev_pc_art_waiting((int)$acc['id']) : [];
                 return array_map(fn($a) => ['id' => $a['id'], 'name' => $a['name'], 'game' => $a['game'], 'version' => $a['version'], 'repo' => $a['repo'],
                     'cover' => $a['cover'] !== '' ? rs_abs($a['cover']) : '', 'art' => $a['hero'] !== '' ? rs_abs($a['hero']) : '',
+                    'logo' => (string)($a['logo'] ?? '') !== '' ? rs_abs($a['logo']) : '', 'icon' => (string)($a['icon'] ?? '') !== '' ? rs_abs($a['icon']) : '',
+                    'waiting' => array_map('rs_abs', $artWaiting[$a['id']] ?? []),
                     'fields' => array_intersect_key($a, RS_DEV_PC_FIELDS),
                     'ai' => ['v' => (string)($a['ai'] ?? ''), 'uses' => rs_ai_uses_clean($a['ai_uses'] ?? []), 'note' => (string)($a['ai_note'] ?? ''), 'by' => (string)($a['ai_by'] ?? '')], 
                     'stats' => ['downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'runs' => (int)($fb[$a['id']]['runs'] ?? 0),
@@ -404,7 +407,9 @@ try {
         rs_dev_out(200, ['ok' => true, 'ai' => ['v' => $x['ai'], 'uses' => $x['ai_uses'], 'note' => $x['ai_note'], 'by' => $x['ai_by']],
             'message' => $pc ? 'Saved. Its page shows it now.' : 'Saved. It shows on its page with the next store update, usually within a day.']);
     }
-    // (2.8) Verified developers change their PC recomps' pages straight away too.
+    // (2.8) Verified developers change their PC recomps' pages straight away too. (3.8) Pictures
+    // (cover, backdrop, logo, icon) wait for you to look at them; the words go live, and you're emailed
+    // about each change and can undo it. The GitHub repo isn't theirs to change here.
     if ($a === 'pc-edit' && $post) {
         if (!$verified) rs_dev_out(200, ['ok' => false, 'error' => 'Only verified developers can change their pages straight away. Suggest the change instead.']);
         $id = (string)($in['app'] ?? '');
@@ -412,22 +417,58 @@ try {
         if (rs_rate_over('devedit', 40, 3600)) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of changes in an hour. Try again a bit later.']);
         rs_rate_hit('devedit');
         $p = rs_pc_app($id);
-        $what = [];
+        $what = []; $before = [];
         $f = is_array($in['fields'] ?? null) ? $in['fields'] : [];
         foreach (RS_DEV_PC_FIELDS as $k => $max) {
             if (!array_key_exists($k, $f)) continue;
             $v = mb_substr(trim(str_replace("\r\n", "\n", (string)$f[$k])), 0, $max);
-            if ($v !== trim((string)($p[$k] ?? ''))) { $p[$k] = $v; $what[$k] = $v; }
+            if ($k === 'name' && $v === '') continue; // a page always has a name
+            if ($k === 'tags') $v = implode(', ', array_slice(array_values(array_unique(array_filter(array_map(fn($x) => mb_substr(trim($x), 0, 24), explode(',', $v))))), 0, 8));
+            if ($v !== trim((string)($p[$k] ?? ''))) { $before[$k] = (string)($p[$k] ?? ''); $p[$k] = $v; $what[$k] = $v; }
         }
-        if (!$what) rs_dev_out(200, ['ok' => false, 'error' => 'Nothing changed.']);
-        if (isset($what['features'])) { $p['features_read'] = true; $p['features_v'] = 2; } // theirs now: the README doesn't write over it
-        rs_pc_save($p);
-        $live = rs_pc_publish_one($id);
-        $db->prepare("INSERT INTO dev_changes (account_id, app_id, data, message, status, created, decided) VALUES (?, ?, ?, '', 'live', NOW(), NOW())")
-           ->execute([$acc['id'], 'pc:' . $id, json_encode($what, JSON_UNESCAPED_UNICODE)]);
-        rs_log('developers', 'edit', rs_dev_label($acc) . ' changed PC ' . $id . ' (' . implode(', ', array_keys($what)) . ')');
-        rs_dev_out(200, ['ok' => true, 'message' => $live ? 'Saved. It\'s on its page now.' : 'Saved. It shows on its page with RecompStore\'s next update.',
-            'fields' => array_intersect_key($p, RS_DEV_PC_FIELDS)]);
+        // New pictures: made ready now, put on the page once you approve them.
+        $art = [];
+        try {
+            foreach (RS_DEV_PC_ART as $field => $kind) {
+                if (empty($_FILES[$field]['name'])) continue;
+                if ((int)($_FILES[$field]['size'] ?? 0) > 15 << 20) throw new RuntimeException('Pictures can be 15 MB at most.');
+                $path = rs_dev_pc_art_save($_FILES[$field], $kind, $id);
+                if ($path !== '') $art[$kind] = $path;
+            }
+        } catch (RuntimeException $e) {
+            rs_dev_pc_art_drop($art);
+            rs_dev_out(200, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        if (!$what && !$art) rs_dev_out(200, ['ok' => false, 'error' => 'Nothing changed.']);
+        if ($what) {
+            if (isset($what['features'])) { $p['features_read'] = true; $p['features_v'] = 2; } // theirs now: the README doesn't write over it
+            rs_pc_save($p);
+            $live = rs_pc_publish_one($id);
+            $db->prepare("INSERT INTO dev_changes (account_id, app_id, data, message, status, created, decided) VALUES (?, ?, ?, '', 'live', NOW(), NOW())")
+               ->execute([$acc['id'], 'pc:' . $id, json_encode($what + ['_before' => $before], JSON_UNESCAPED_UNICODE)]);
+            rs_log('developers', 'edit', rs_dev_label($acc) . ' changed PC ' . $id . ' (' . implode(', ', array_keys($what)) . ')');
+            rs_dev_edit_notify($acc, $p, array_keys($what), true);
+        }
+        if ($art) {
+            // One waiting set per recomp: newer pictures take the place of ones you haven't looked at yet.
+            $old = $db->prepare("SELECT id, data FROM dev_changes WHERE account_id = ? AND app_id = ? AND status = 'pending'");
+            $old->execute([$acc['id'], 'pc:' . $id]);
+            foreach ($old->fetchAll() as $o) {
+                $od = json_decode((string)$o['data'], true) ?: [];
+                if (!isset($od['art'])) continue;
+                $keep = array_diff_key((array)$od['art'], $art);
+                rs_dev_pc_art_drop(array_intersect_key((array)$od['art'], $art));
+                $art += $keep;
+                $db->prepare('DELETE FROM dev_changes WHERE id = ?')->execute([$o['id']]);
+            }
+            $db->prepare("INSERT INTO dev_changes (account_id, app_id, data, message, status, created) VALUES (?, ?, ?, ?, 'pending', NOW())")
+               ->execute([$acc['id'], 'pc:' . $id, json_encode(['art' => $art], JSON_UNESCAPED_SLASHES), mb_substr(trim((string)($in['message'] ?? '')), 0, 1000)]);
+            rs_log('developers', 'art', rs_dev_label($acc) . ' sent pictures for PC ' . $id . ' (' . implode(', ', array_keys($art)) . ')');
+            rs_dev_edit_notify($acc, $p, array_keys($art), true, true);
+        }
+        $msg = $what ? ($live ?? false ? 'Saved. It\'s on its page now.' : 'Saved. It shows on its page with RecompStore\'s next update.') : '';
+        if ($art) $msg = trim($msg . ' ' . 'Your new pictures are waiting for a quick look, usually within a day.');
+        rs_dev_out(200, ['ok' => true, 'message' => $msg, 'fields' => array_intersect_key($p, RS_DEV_PC_FIELDS), 'waiting' => rs_dev_pc_art_waiting((int)$acc['id'])[$id] ?? []]);
     }
     // (2.7.3) Verified developers change their own app pages straight away (you're emailed).
     if ($a === 'edit' && $post) {
