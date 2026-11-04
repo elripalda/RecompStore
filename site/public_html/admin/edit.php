@@ -174,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($g['beta_notes'] === (string)$orig['beta_notes']) $g['beta_notes'] = ''; // a new build starts with fresh notes unless they were typed in this save
             }
             rs_save_game($g, $isNew ? null : $oldId);
+            if ($g['source'] === 'github' && $g['repo'] !== '' && function_exists('rs_gh_refresh_public')) rs_gh_refresh_public((string)$g['repo']);
             rs_flash('Saved ' . $g['name'] . '. Press Publish to send it to the store and the site.');
             header('Location: edit.php?id=' . urlencode($g['id']));
             exit;

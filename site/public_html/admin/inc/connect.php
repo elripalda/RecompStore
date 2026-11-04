@@ -414,6 +414,20 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim): ar
     return ['status' => 502, 'body' => '{"message":"GitHub didn\'t answer. Try again in a moment."}', 'stale' => false, 'age' => 0];
 }
 
+// (3.8) Asks GitHub for a repo's releases now and puts the answer in /api/gh.php's copy on disk,
+// so a PS5 asking right after you save a new version gets the new release, not a 30-minute-old list.
+function rs_gh_refresh_public(string $repo): void {
+    if (!rs_repo_ok($repo)) return;
+    try {
+        $r = rs_gh_releases($repo, 0);
+        if ($r['status'] !== 200 || $r['stale']) return;
+        $dir = dirname(RS_PUBLIC) . '/recompstore-private/gh';
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $f = $dir . '/' . md5(strtolower($repo)) . '.json';
+        if (@file_put_contents($f . '.' . getmypid(), $r['body']) !== false) @rename($f . '.' . getmypid(), $f);
+    } catch (Throwable $e) { /* the 30-minute copy catches up by itself */ }
+}
+
 // A repo's releases, as GitHub lists them, trimmed to what the store and the site read.
 function rs_gh_releases(string $repo, int $maxAge = 900): array {
     return rs_gh_cached($repo, rs_gh_api() . '/repos/' . $repo . '/releases?per_page=30', $maxAge, function (array $list): array {
