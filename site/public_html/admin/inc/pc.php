@@ -745,6 +745,7 @@ function rs_pc_pattern(string $name, string $tag): string {
     return $p !== $name ? $p : $name;
 }
 function rs_pc_heal_assets(array $a, array $r): array {
+    if (rs_pc_release_for($a)) return $a; // (3.8) a recent release still has its files: the newest just has other ones (Switch, Android)
     $rel = rs_gh_releases($a['repo'], 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     $latest = null;
@@ -770,6 +771,20 @@ function rs_pc_latest_release(string $repo): ?array {
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) return $x;
     return $list[0] ?? null;
+}
+
+// (3.8) The newest release (not a draft or pre-release) with a file matching one of the recomp's
+// patterns; null when none of the recent ones has one.
+function rs_pc_release_for(array $a): ?array {
+    $pats = array_values(array_filter([(string)$a['asset_win'], (string)$a['asset_linux'], (string)$a['asset_mac']], fn($p) => trim($p) !== ''));
+    $rel = rs_gh_releases((string)$a['repo'], 3600);
+    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    foreach ($list as $x) {
+        if (!empty($x['draft']) || !empty($x['prerelease'])) continue;
+        if (!$pats) return $x;
+        foreach ((array)$x['assets'] as $f) foreach ($pats as $p) if (rs_pattern_matches($p, (string)$f['name'])) return $x;
+    }
+    return null;
 }
 
 // (3.5) Each listed recomp's release as GitHub has it now: version, size, downloads. Oldest checked
@@ -798,8 +813,15 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'];
         // (3.8) A new release goes out at once when security checks are off, the first time a recomp is
         // seen, or when it's the release that's out already; otherwise it's held until it's checked.
-        $latest = rs_pc_latest_release($a['repo']);
-        $tag = $latest ? (string)$latest['tag_name'] : '';
+        // (3.8) The newest release that has one of this recomp's files: a release with only a Switch,
+        // Android or HD-pack download is passed over, so players never get the wrong file.
+        $latest = rs_pc_release_for($a);
+        if (!$latest) { rs_pc_save($a); continue; }
+        $r['version'] = rs_tidy_version((string)$latest['tag_name']);
+        $r['released'] = substr((string)$latest['published_at'], 0, 10);
+        $r['size'] = 0;
+        foreach ((array)$latest['assets'] as $x) if ($a['asset_win'] !== '' && rs_pattern_matches((string)$a['asset_win'], (string)$x['name'])) { $r['size'] = (int)($x['size'] ?? 0); break; }
+        $tag = (string)$latest['tag_name'];
         $okTag = (string)($a['ok_tag'] ?? '');
         if (!function_exists('rs_vt_on') || !rs_vt_on() || $tag === '' || $okTag === '' || $tag === $okTag) {
             $a['version'] = $r['version']; $a['released'] = $r['released'];
