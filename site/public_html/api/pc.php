@@ -5,8 +5,17 @@
 //   GET  ?a=app&id=<app>              -> {app: {...}}            (one recomp's whole entry, for its page)
 //   GET  ?a=counts                     -> {counts: {app: {runs, issues, broken}}}
 //   POST a=feedback id verdict sys note version   (one per player and recomp: a new one replaces theirs)
+// (3.9) Reports developers can act on:
+//   POST a=feedback also takes specs (OS, CPU, GPU, RAM, driver; 600 characters) and, as multipart, a
+//        log file (text, 2 MB). Has problems / Won't run need a note of 15 characters or more. Signed
+//        in (RecompLauncher's Bearer token, or this site's cookie) it's tied to the account, so the
+//        player hears back. -> {ok, id}
+//   GET  a=my-reports                  -> {reports[]}  the signed-in player's PC reports, with answers
+//   POST a=report-reply id text        -> {ok, replies[]}  the player answers the developer
+// Signed in on the website, POSTs come from this site's own pages (Origin and the X-RS header).
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
+require_once dirname(__DIR__) . '/admin/inc/rl_cloud.php'; // (3.9) RecompLauncher's sign-in
 
 header('X-Content-Type-Options: nosniff');
 header('Content-Type: application/json; charset=utf-8');
@@ -28,10 +37,62 @@ function rs_pc_listed(string $id): ?array {
 
 $post = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
 $in = $post ? $_POST : $_GET;
-$s = fn(string $k, int $max): string => isset($in[$k]) && is_string($in[$k]) ? mb_substr(trim($in[$k]), 0, $max) : '';
+// (3.9) The website's account POSTs are JSON.
+if ($post && str_starts_with(strtolower((string)($_SERVER['CONTENT_TYPE'] ?? '')), 'application/json'))
+    $in = json_decode((string)file_get_contents('php://input', false, null, 0, 65536), true) ?: [];
+$s = fn(string $k, int $max): string => isset($in[$k]) && is_scalar($in[$k]) ? mb_substr(trim((string)$in[$k]), 0, $max) : '';
 $a = $s('a', 16);
+
+// (3.9) Who's sending: RecompLauncher's token, else this site's sign-in. A cookie only counts on a POST
+// from the site's own pages, so another site can't send something as you.
+function rs_pc_me(bool $post): ?array {
+    if (!rs_acct_on()) return null;
+    $dev = rs_rl_device();
+    if ($dev) return $dev[0];
+    if ($post) {
+        $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
+        $host = preg_replace('/^www\./', '', strtolower((string)parse_url($origin, PHP_URL_HOST)));
+        $ok = ['recompstore.com', 'recomplauncher.com', rs_acct_host(), preg_replace('/recompstore/', 'recomplauncher', rs_acct_host())];
+        if ($origin === '' || !in_array($host, $ok, true)) return null;
+    }
+    return rs_acct_current();
+}
+// A cookie-signed POST also needs the X-RS header (the launcher's token needs nothing more).
+function rs_pc_cookie_post_ok(): bool {
+    return rs_rl_device() !== null || ($_SERVER['HTTP_X_RS'] ?? '') === '1';
+}
+
 try {
     if ($a === 'counts' && !$post) rs_pc_out(200, ['ok' => true, 'counts' => (object)rs_pc_feedback_counts()], 120);
+    // ---- (3.9) The player's own reports, and answering the developer ----
+    if ($a === 'my-reports' && !$post) {
+        $me = rs_pc_me(false);
+        if (!$me) rs_pc_out(401, ['ok' => false, 'error' => 'Sign in to see your reports.']);
+        rs_play_sync_legacy();
+        $st = rs_db()->prepare("SELECT * FROM play_reports WHERE kind = 'pc' AND account_id = ? ORDER BY updated DESC LIMIT 100");
+        $st->execute([(int)$me['id']]);
+        $rows = $st->fetchAll();
+        $replies = rs_play_replies(array_column($rows, 'id'));
+        $names = array_column(rs_pc_apps(), 'name', 'id');
+        rs_pc_out(200, ['ok' => true, 'reports' => array_map(fn($x) => ['id' => (int)$x['id'], 'app' => (string)$x['app'], 'name' => (string)($names[$x['app']] ?? $x['app']),
+            'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'], 'version' => (string)$x['version'], 'note' => (string)$x['note'],
+            'specs' => rs_play_specs_line($x), 'log' => !empty($x['has_log']), 'hidden' => (bool)$x['hidden'],
+            'from' => $x['source'] === 'pcfb' ? 'launcher' : 'site', 'when' => gmdate('c', strtotime((string)$x['updated'] . ' UTC')),
+            'replies' => $replies[(int)$x['id']] ?? []], $rows)]);
+    }
+    if ($a === 'report-reply' && $post) {
+        $me = rs_pc_me(true);
+        if (!$me) rs_pc_out(401, ['ok' => false, 'error' => 'Sign in to answer.']);
+        if (!rs_pc_cookie_post_ok()) rs_pc_out(403, ['ok' => false, 'error' => 'Do that from the website.']);
+        $r = rs_play_report((int)$s('id', 12));
+        if (!$r || (int)($r['account_id'] ?? 0) !== (int)$me['id']) rs_pc_out(404, ['ok' => false, 'error' => 'That report isn\'t yours, or it\'s gone.']);
+        $text = trim(str_replace(["\r\n", "\r"], "\n", preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/u', '', (string)($in['text'] ?? '')) ?? ''));
+        if (($e = rs_cm_body_error($text)) !== null) rs_pc_out(422, ['ok' => false, 'error' => $e]);
+        if (rs_rate_over('pc-reply', 20, 3600)) rs_pc_out(429, ['ok' => false, 'error' => 'That\'s a lot of answers in an hour. Try again a bit later.']);
+        rs_rate_hit('pc-reply');
+        rs_play_reply_add($r, $text, null, (int)$me['id']);
+        rs_pc_out(200, ['ok' => true, 'replies' => rs_play_replies([(int)$r['id']])[(int)$r['id']] ?? []]);
+    }
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);
     if ($a === 'app' && !$post) rs_pc_out(200, ['ok' => true, 'app' => $app], 120);
@@ -42,8 +103,19 @@ try {
     }
     if ($a === 'feedback' && !$post) {
         $c = rs_pc_feedback_counts()[$app['id']] ?? [];
+        // (3.9) With the player's PC in a line, whether a log came with it, and the answers.
+        $list = rs_pc_feedback_list($app['id']);
+        $play = [];
+        if ($list) {
+            rs_play_tables();
+            $st = rs_db()->query("SELECT id, legacy_id, has_log FROM play_reports WHERE source = 'pcfb' AND legacy_id IN (" . implode(',', array_map(fn($x) => (int)$x['id'], $list)) . ')');
+            foreach ($st->fetchAll() as $p) $play[(int)$p['legacy_id']] = $p;
+        }
+        $replies = rs_play_replies(array_map(fn($p) => (int)$p['id'], $play));
         $items = array_map(fn($x) => ['verdict' => $x['verdict'], 'sys' => $x['sys'], 'version' => $x['version'], 'note' => $x['note'],
-            'when' => gmdate('c', strtotime((string)$x['created']))], rs_pc_feedback_list($app['id']));
+            'specs' => rs_play_specs_line($x), 'log' => !empty($play[(int)$x['id']]['has_log']),
+            'replies' => isset($play[(int)$x['id']]) ? ($replies[(int)$play[(int)$x['id']]['id']] ?? []) : [],
+            'when' => gmdate('c', strtotime((string)$x['created']))], $list);
         rs_pc_out(200, ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items]);
     }
     if ($a === 'feedback' && $post) {
@@ -52,15 +124,34 @@ try {
         if (!isset(RS_PC_VERDICTS[$verdict])) rs_pc_out(422, ['ok' => false, 'error' => 'Pick how it plays.']);
         $sys = $s('sys', 12);
         if (!isset(RS_PC_SYSTEMS[$sys])) rs_pc_out(422, ['ok' => false, 'error' => 'Pick what you play it on.']);
-        $note = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $s('note', 500)) ?? '';
+        $note = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $s('note', 1000)) ?? '';
+        // (3.9) A bad report says what happened, so the developer can do something with it.
+        if ($verdict !== 'runs' && mb_strlen(trim($note)) < 15) rs_pc_out(422, ['ok' => false, 'error' => 'Tell the developer what happened and when.', 'field' => 'note']);
         $version = preg_replace('/[^\w .+-]/u', '', $s('version', 40)) ?? '';
+        $specs = rs_play_specs_clean(isset($in['specs']) && is_string($in['specs']) ? $in['specs'] : '');
+        // (3.9) A log, checked before anything is saved: text only, 2 MB at most.
+        $log = !empty($_FILES['log']) && (int)($_FILES['log']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE ? $_FILES['log'] : null;
+        if ($log && ($e = rs_play_log_error($log)) !== null) rs_pc_out(422, ['ok' => false, 'error' => $e, 'field' => 'log']);
         if (rs_rate_over('pc-feedback', 12, 3600)) rs_pc_out(429, ['ok' => false, 'error' => 'That\'s a lot at once. Try again later.']);
         rs_rate_hit('pc-feedback');
         rs_pc_tables();
-        rs_db()->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created) VALUES (?, ?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), created = NOW(), hidden = 0')
-            ->execute([$app['id'], $verdict, $sys, $version, $note, rs_ip_hash()]);
-        rs_pc_out(200, ['ok' => true]);
+        // Signed in, the report is the account's (the same one RecompLauncher's own reports use).
+        $me = rs_pc_me(true);
+        $who = $me ? hash('sha256', 'acct:' . $me['id']) : rs_ip_hash();
+        $db = rs_db();
+        $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, account_id, specs) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+            ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), created = NOW(), hidden = 0,
+            account_id = COALESCE(VALUES(account_id), account_id), specs = IF(VALUES(specs) <> \'\', VALUES(specs), specs)')
+            ->execute([$app['id'], $verdict, $sys, $version, $note, $who, $me ? (int)$me['id'] : null, $specs]);
+        $fb = $db->prepare('SELECT id FROM pc_feedback WHERE app = ? AND ip_hash = ?');
+        $fb->execute([$app['id'], $who]);
+        $rid = rs_play_from_pcfb((int)$fb->fetchColumn(), ['app' => $app['id'], 'who' => $who, 'verdict' => $verdict, 'sys' => $sys, 'version' => $version,
+            'note' => $note, 'specs' => $specs], $me ? (int)$me['id'] : null);
+        if ($log && $rid) {
+            try { rs_play_log_save($rid, $log); } catch (RuntimeException $e) { rs_pc_out(200, ['ok' => true, 'id' => $rid, 'warning' => 'Your report is in, but the log couldn\'t be kept.']); }
+        }
+        if ($verdict !== 'runs') rs_play_dev_ping($app['id']);
+        rs_pc_out(200, ['ok' => true, 'id' => $rid]);
     }
     rs_pc_out(400, ['ok' => false, 'error' => 'Unknown request.']);
 } catch (Throwable $e) {

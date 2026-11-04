@@ -52,7 +52,7 @@ if (!$row) {
 <meta name="robots" content="noindex">
 <title><?= $e($title) ?> · RecompStore</title>
 <link rel="icon" href="/assets/logo-512.png">
-<link rel="stylesheet" href="/assets/site.css?v=25">
+<link rel="stylesheet" href="/assets/site.css?v=26">
 <style>
 .list-page{max-width:520px;margin:12vh auto 0;padding:32px 28px;text-align:center}
 .list-page img{width:72px;height:72px;margin-bottom:16px}

@@ -351,7 +351,7 @@ function rs_dev_apps(array $acc): array {
 // (2.8) Their PC recomps: the repo's owner is them or one of their orgs, or it's on their page.
 // What they can change on its page; a verified developer's change goes out straight away.
 const RS_DEV_PC_FIELDS = ['name' => 120, 'blurb' => 160, 'description' => 8000, 'features' => 1200, 'media' => 5000, 'needs' => 200, 'credits' => 1000,
-    'tags' => 300, 'setup_steps' => 2000];
+    'tags' => 300, 'setup_steps' => 2000, 'report_url' => 300]; // (3.9) report_url: where they want bugs reported (https)
 // (3.8) Their PC recomp's pictures: new ones wait for you to look at them before they go on its page.
 const RS_DEV_PC_ART = ['cover_file' => 'cover', 'hero_file' => 'hero', 'logo_file' => 'logo', 'icon_file' => 'icon'];
 
@@ -774,7 +774,7 @@ function rs_dev_edit_notify(array $acc, array $g, array $what, bool $pc = false,
         if (!rs_mail_ready()) return;
         $names = ['blurb' => 'one-line summary', 'description' => 'description', 'news' => 'what\'s new', 'needs' => 'what players need',
             'credits' => 'credits', 'video' => 'video', 'icon' => 'icon', 'hero' => 'backdrop', 'logo' => 'logo', 'screens' => 'screenshots',
-            'name' => 'name', 'features' => 'what\'s in it', 'media' => 'links around the web', 'tags' => 'tags', 'setup_steps' => 'setup steps', 'cover' => 'cover'];
+            'name' => 'name', 'features' => 'what\'s in it', 'media' => 'links around the web', 'tags' => 'tags', 'setup_steps' => 'setup steps', 'cover' => 'cover', 'report_url' => 'bug report link'];
         $list = implode(', ', array_map(fn($k) => $names[$k] ?? $k, $what));
         $who = $acc['name'] ?: rs_dev_label($acc);
         $edit = $pc ? '/admin/pc.php?edit=' . rawurlencode((string)$g['id']) . '#edit' : '/admin/edit.php?id=' . rawurlencode((string)$g['id']);

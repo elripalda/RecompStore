@@ -15,6 +15,7 @@
 //   (3.2) GET a=betas -> {betas[]}   POST a=beta-join {id}   POST a=beta-leave {id}
 // The launcher, signed in or not (an install ID it made itself):
 //   (3.2) POST a=report {install, app, verdict, version, note, mins, gpu, cpu, ram_gb, osver}
+//         (3.9) and specs (free text, 600). For a log, and the 15-character note rule, use api/pc.php a=feedback.
 //   (3.2) POST a=hello {install, version, os, osver, cpu, cores, ram_gb, gpu, gpu_driver, screen, lang, pads, games, bigpicture}
 //   (3.2) POST a=events {install, events: [{kind, at, game, version, secs, code, detail}]}
 // The account page (its sign-in cookie; POSTs from the site's own pages only):
@@ -124,7 +125,7 @@ try {
         if (!in_array($verdict, ['runs', 'issues', 'broken'], true)) rs_rl_err(422, 'Pick how it plays.');
         $c = fn(string $k, int $max) => rs_rl_clean((string)($in[$k] ?? ''), $max);
         rs_rl_report(['app' => $app, 'verdict' => $verdict, 'sys' => in_array($in['sys'] ?? '', ['windows', 'linux', 'macos', 'deck'], true) ? $in['sys'] : 'windows',
-            'version' => preg_replace('/[^\w .+-]/u', '', $c('version', 40)) ?? '', 'note' => $c('note', 500), 'gpu' => $c('gpu', 160), 'cpu' => $c('cpu', 120),
+            'version' => preg_replace('/[^\w .+-]/u', '', $c('version', 40)) ?? '', 'note' => $c('note', 1000), 'specs' => is_string($in['specs'] ?? null) ? mb_substr($in['specs'], 0, 2000) : '', 'gpu' => $c('gpu', 160), 'cpu' => $c('cpu', 120),
             'ram_gb' => max(0, min(4096, (int)($in['ram_gb'] ?? 0))), 'osver' => $c('osver', 80), 'mins' => max(0, min(100000, (int)($in['mins'] ?? 0)))], $acc, $install);
         rs_rl_out(200, []);
     }

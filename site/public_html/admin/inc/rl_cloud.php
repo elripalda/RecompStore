@@ -576,25 +576,28 @@ function rs_rl_beta_members(int $betaId): array {
 function rs_rl_report(array $r, ?array $acc, string $install): void {
     rs_rl_more_tables();
     $key = $acc ? 'acct:' . $acc['id'] : 'rl:' . $install;
-    rs_db()->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, gpu, cpu, ram_gb, osver, src, mins) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, \'launcher\', ?)
+    $who = hash('sha256', $key);
+    // (3.9) The PC's specs in one place (sent as specs, else made from its parts), and the account, so
+    // the player hears back when the developer answers.
+    $specs = rs_play_specs_clean((string)($r['specs'] ?? ''));
+    if ($specs === '') $specs = rs_play_specs_clean(implode("\n", array_filter([$r['osver'] !== '' ? 'OS: ' . $r['osver'] : '', $r['cpu'] !== '' ? 'CPU: ' . $r['cpu'] : '',
+        $r['gpu'] !== '' ? 'GPU: ' . $r['gpu'] : '', (int)$r['ram_gb'] ? 'RAM: ' . (int)$r['ram_gb'] . ' GB' : ''])));
+    $db = rs_db();
+    $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, gpu, cpu, ram_gb, osver, src, mins, account_id, specs) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, \'launcher\', ?, ?, ?)
         ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), created = NOW(), hidden = 0,
-        gpu = VALUES(gpu), cpu = VALUES(cpu), ram_gb = VALUES(ram_gb), osver = VALUES(osver), src = VALUES(src), mins = VALUES(mins)')
-        ->execute([$r['app'], $r['verdict'], $r['sys'], $r['version'], $r['note'], hash('sha256', $key), $r['gpu'], $r['cpu'], $r['ram_gb'], $r['osver'], $r['mins']]);
+        gpu = VALUES(gpu), cpu = VALUES(cpu), ram_gb = VALUES(ram_gb), osver = VALUES(osver), src = VALUES(src), mins = VALUES(mins),
+        account_id = COALESCE(VALUES(account_id), account_id), specs = VALUES(specs)')
+        ->execute([$r['app'], $r['verdict'], $r['sys'], $r['version'], $r['note'], $who, $r['gpu'], $r['cpu'], $r['ram_gb'], $r['osver'], $r['mins'], $acc ? (int)$acc['id'] : null, $specs]);
     // The game page's reports (play_reports, 3.2) copy pc_feedback in about once a minute; this one
     // goes in now, with the PC's parts, which that copy leaves alone.
-    $db = rs_db();
-    if (!$db->query("SHOW TABLES LIKE 'play_reports'")->fetch()) return;
-    $who = hash('sha256', $key);
     $st = $db->prepare('SELECT id FROM pc_feedback WHERE app = ? AND ip_hash = ? ORDER BY id DESC LIMIT 1');
     $st->execute([$r['app'], $who]);
     $id = (int)$st->fetchColumn();
     if (!$id) return;
     try {
-        $db->prepare("INSERT INTO play_reports (kind, app, who, account_id, verdict, sys, version, note, gpu, cpu, ram, source, legacy_id, created, updated)
-            VALUES ('pc', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pcfb', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-            ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), gpu = VALUES(gpu), cpu = VALUES(cpu),
-            ram = VALUES(ram), hidden = 0, updated = UTC_TIMESTAMP()")
-            ->execute([$r['app'], $who, $r['verdict'], $r['sys'], $r['version'], $r['note'], mb_substr($r['gpu'], 0, 80), mb_substr($r['cpu'], 0, 80), min(32767, (int)$r['ram_gb']), $id]);
+        rs_play_from_pcfb($id, ['app' => $r['app'], 'who' => $who, 'verdict' => $r['verdict'], 'sys' => $r['sys'], 'version' => $r['version'], 'note' => $r['note'],
+            'gpu' => $r['gpu'], 'cpu' => $r['cpu'], 'ram' => (int)$r['ram_gb'], 'specs' => $specs], $acc ? (int)$acc['id'] : null);
+        if ($r['verdict'] !== 'runs') rs_play_dev_ping((string)$r['app']);
     } catch (Throwable $e) { /* the copy picks it up */ }
 }
 

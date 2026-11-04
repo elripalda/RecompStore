@@ -33,6 +33,10 @@
 //   GET  a=lounge                    -> {ok, posts} the room every approved developer shares
 //   POST a=lounge-post body room | a=lounge-delete id   (3.1: room = general, showcase, pc, ps5)
 //   GET  a=docs | a=doc slug         -> (3.1) developer docs for what they make
+//   (3.9) Player reports on their PC recomps:
+//   GET  a=pc-reports                -> {ok, reports[]} newest first, with specs, version, log, answers (marks them seen)
+//   POST a=pc-report-reply id text   -> {ok, replies[]} an answer under the report (the player is emailed if they can be)
+//   GET  a=pc-report-log id          -> the player's log, as a text file
 // JSON in for POSTs (a=edit is a form, for the pictures). Changing anything is only from this site's own pages.
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
@@ -274,8 +278,18 @@ try {
                 'repo' => $g['repo'], 'beta' => (bool)$g['beta'], 'soon' => (bool)$g['soon'], 'category' => $g['category'],
                 
                 'fields' => array_intersect_key($g, RS_DEV_CHANGE_FIELDS), 'stats' => $stats[$g['id']] ?? null], $apps),
-            'pcApps' => (function () use ($pcApps, $acc): array {
+            'pcApps' => (function () use ($pcApps, $acc, $db): array {
                 $fb = rs_pc_feedback_counts();
+                // (3.9) Reports they haven't seen yet (a bare "Plays great" isn't one to read).
+                $unseen = [];
+                if ($pcApps) {
+                    rs_play_sync_legacy();
+                    $ids = array_map(fn($a) => (string)$a['id'], $pcApps);
+                    $st = $db->prepare("SELECT app, COUNT(*) n FROM play_reports WHERE kind = 'pc' AND hidden = 0 AND dev_seen = 0 AND (verdict <> 'runs' OR note <> '' OR has_log = 1)
+                        AND app IN (" . implode(',', array_fill(0, count($ids), '?')) . ') GROUP BY app');
+                    $st->execute($ids);
+                    foreach ($st->fetchAll() as $r) $unseen[(string)$r['app']] = (int)$r['n'];
+                }
                 $artWaiting = $pcApps ? rs_dev_pc_art_waiting((int)$acc['id']) : [];
                 return array_map(fn($a) => ['id' => $a['id'], 'name' => $a['name'], 'game' => $a['game'], 'version' => $a['version'], 'repo' => $a['repo'],
                     'cover' => $a['cover'] !== '' ? rs_abs($a['cover']) : '', 'art' => $a['hero'] !== '' ? rs_abs($a['hero']) : '',
@@ -283,6 +297,7 @@ try {
                     'waiting' => array_map('rs_abs', $artWaiting[$a['id']] ?? []),
                     'fields' => array_intersect_key($a, RS_DEV_PC_FIELDS),
                     'ai' => ['v' => (string)($a['ai'] ?? ''), 'uses' => rs_ai_uses_clean($a['ai_uses'] ?? []), 'note' => (string)($a['ai_note'] ?? ''), 'by' => (string)($a['ai_by'] ?? '')], 
+                    'unseen' => $unseen[$a['id']] ?? 0,
                     'stats' => ['downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'runs' => (int)($fb[$a['id']]['runs'] ?? 0),
                         'issues' => (int)($fb[$a['id']]['issues'] ?? 0), 'broken' => (int)($fb[$a['id']]['broken'] ?? 0)]], $pcApps);
             })(),
@@ -380,6 +395,7 @@ try {
         foreach ($pc ? RS_DEV_PC_FIELDS : RS_DEV_CHANGE_FIELDS as $k => $max) {
             if (!array_key_exists($k, $f)) continue;
             $v = mb_substr(trim(str_replace("\r\n", "\n", (string)$f[$k])), 0, $max);
+            if ($k === 'report_url' && $v !== '' && rs_pc_report_url($v) === '') rs_dev_out(200, ['ok' => false, 'error' => 'The bug report link has to be a full https:// address.']);
             if ($v !== trim((string)($g[$k] ?? ''))) $data[$k] = $v;
         }
         if (!$data) rs_dev_out(200, ['ok' => false, 'error' => 'Nothing changed.']);
@@ -423,6 +439,7 @@ try {
             if (!array_key_exists($k, $f)) continue;
             $v = mb_substr(trim(str_replace("\r\n", "\n", (string)$f[$k])), 0, $max);
             if ($k === 'name' && $v === '') continue; // a page always has a name
+            if ($k === 'report_url' && $v !== '' && rs_pc_report_url($v) === '') rs_dev_out(200, ['ok' => false, 'error' => 'The bug report link has to be a full https:// address.']);
             if ($k === 'tags') $v = implode(', ', array_slice(array_values(array_unique(array_filter(array_map(fn($x) => mb_substr(trim($x), 0, 24), explode(',', $v))))), 0, 8));
             if ($v !== trim((string)($p[$k] ?? ''))) { $before[$k] = (string)($p[$k] ?? ''); $p[$k] = $v; $what[$k] = $v; }
         }
@@ -692,6 +709,43 @@ try {
     if ($a === 'lounge-delete' && $post) {
         $db->prepare("UPDATE dev_messages SET deleted = 2 WHERE id = ? AND channel = 'lounge' AND account_id = ? AND from_admin = 0 AND deleted = 0")->execute([(int)($in['id'] ?? 0), $acc['id']]);
         rs_dev_out(200, ['ok' => true, 'room' => $room, 'posts' => rs_dev_lounge((int)$acc['id'], $room)]);
+    }
+    // ---- (3.9) Player reports on their PC recomps: read them, get the logs, answer -------------------
+    if ($a === 'pc-reports') {
+        if (!$pcIds) rs_dev_out(200, ['ok' => true, 'reports' => []]);
+        rs_acct_tables();
+        rs_play_sync_legacy();
+        $st = $db->prepare("SELECT r.*, u.username FROM play_reports r LEFT JOIN accounts u ON u.id = r.account_id WHERE r.kind = 'pc' AND r.hidden = 0
+            AND r.app IN (" . implode(',', array_fill(0, count($pcIds), '?')) . ') ORDER BY r.updated DESC LIMIT 300');
+        $st->execute($pcIds);
+        $rows = $st->fetchAll();
+        $replies = rs_play_replies(array_column($rows, 'id'));
+        $out = array_map(fn($x) => ['id' => (int)$x['id'], 'app' => (string)$x['app'], 'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'],
+            'version' => (string)$x['version'], 'progress' => (string)$x['progress'], 'fps' => (string)$x['fps'], 'res' => (string)$x['res'],
+            'problems' => (object)rs_play_problems_decode((string)$x['problems']), 'note' => (string)$x['note'], 'fix' => (string)$x['fix'],
+            'specs' => (string)$x['specs'] !== '' ? (string)$x['specs'] : rs_play_specs_line($x), 'log' => !empty($x['has_log']), 'logName' => (string)$x['log_name'],
+            'account' => $x['account_id'] !== null, 'user' => $x['account_id'] !== null && (int)$x['show_name'] === 1 && $x['username'] !== null ? (string)$x['username'] : null,
+            'from' => $x['source'] === 'pcfb' ? 'launcher' : 'site', 'seen' => (int)$x['dev_seen'] === 1,
+            'when' => gmdate('c', strtotime((string)$x['updated'] . ' UTC')), 'replies' => $replies[(int)$x['id']] ?? []], $rows);
+        if ($rows) $db->exec('UPDATE play_reports SET dev_seen = 1 WHERE dev_seen = 0 AND id IN (' . implode(',', array_map(fn($x) => (int)$x['id'], $rows)) . ')');
+        rs_dev_out(200, ['ok' => true, 'reports' => $out]);
+    }
+    if ($a === 'pc-report-reply' && $post) {
+        $r = rs_play_report((int)($in['id'] ?? 0));
+        if (!$r || !in_array((string)$r['app'], $pcIds, true)) rs_dev_out(200, ['ok' => false, 'error' => 'That report isn\'t on one of your recomps.']);
+        $text = trim(str_replace(["\r\n", "\r"], "\n", preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/u', '', is_string($in['text'] ?? null) ? $in['text'] : '') ?? ''));
+        if (($e = rs_cm_body_error($text)) !== null) rs_dev_out(200, ['ok' => false, 'error' => $e]);
+        if (rs_rate_over('dev-report-reply', 30, 3600)) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of answers in an hour. Try again a bit later.']);
+        rs_rate_hit('dev-report-reply');
+        rs_play_reply_add($r, $text, $acc, null);
+        rs_log('developers', 'report-reply', rs_dev_label($acc) . ' answered a report on PC ' . $r['app']);
+        rs_dev_out(200, ['ok' => true, 'replies' => rs_play_replies([(int)$r['id']])[(int)$r['id']] ?? [],
+            'message' => $r['account_id'] !== null ? 'Sent. The player gets an email if they can.' : 'Sent. It shows under their report on the game page.']);
+    }
+    if ($a === 'pc-report-log') {
+        $r = rs_play_report((int)($in['id'] ?? 0));
+        if (!$r || empty($r['has_log']) || !in_array((string)$r['app'], $pcIds, true)) { http_response_code(404); header('Content-Type: text/plain; charset=utf-8'); exit('Not found.'); }
+        rs_play_log_send($r);
     }
     if ($a === 'weekly' && $post) {
         $db->prepare('UPDATE dev_accounts SET weekly = ? WHERE id = ?')->execute([!empty($in['on']) ? 1 : 0, $acc['id']]);

@@ -9,6 +9,13 @@ rs_require_login();
 rs_pc_tables();
 @set_time_limit(180);
 
+// (3.9) A player's log from a report, for you (never public). Its developer gets it from their hub.
+if (isset($_GET['report_log'])) {
+    $r = rs_play_report((int)$_GET['report_log']);
+    if (!$r || empty($r['has_log'])) { http_response_code(404); header('Content-Type: text/plain; charset=utf-8'); exit('No log with that report.'); }
+    rs_play_log_send($r);
+}
+
 $editId = (string)($_GET['edit'] ?? '');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
@@ -34,8 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a = rs_pc_app((string)($_POST['id'] ?? ''));
             if (!$a) throw new RuntimeException('That app is gone.');
             foreach (['name' => 120, 'game' => 120, 'repo' => 160, 'asset_win' => 160, 'asset_linux' => 160, 'asset_mac' => 160, 'blurb' => 160, 'adds' => 120, 'description' => 8000,
-                'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000] as $k => $max)
+                'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000, 'report_url' => 300] as $k => $max)
                 $a[$k] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST[$k] ?? ''))), 0, $max);
+            // (3.9) The developer's "how to report bugs" page: https only.
+            if ($a['report_url'] !== '' && rs_pc_report_url($a['report_url']) === '') throw new RuntimeException('The bug report link has to be a full https:// address.');
             $a['origin'] = isset(RS_PC_ORIGINS[$_POST['origin'] ?? '']) ? (string)$_POST['origin'] : 'other';
             $a['genre'] = isset(RS_PC_GENRES[$_POST['genre'] ?? '']) ? (string)$_POST['genre'] : '';
             $a['dev'] = preg_match('/^[a-z0-9-]{1,40}$/', (string)($_POST['dev'] ?? '')) ? (string)$_POST['dev'] : '';
@@ -127,8 +136,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['got' => $got, 'miss' => $miss, 'left' => max(0, count($todo) - $n)]);
             exit;
         } elseif ($act === 'fb-hide' || $act === 'fb-show') {
-            rs_pc_tables();
-            rs_db()->prepare('UPDATE pc_feedback SET hidden = ? WHERE id = ?')->execute([$act === 'fb-hide' ? 1 : 0, (int)($_POST['fb'] ?? 0)]);
+            // (3.9) Reports are the game page's (play_reports): the website's and RecompLauncher's together.
+            // One from RecompLauncher hides at its source too, so the copy doesn't come back.
+            rs_play_tables();
+            $db = rs_db(); $rid = (int)($_POST['fb'] ?? 0); $on = $act === 'fb-hide' ? 1 : 0;
+            $db->prepare('UPDATE play_reports SET hidden = ?, flags = IF(? = 0, 0, flags) WHERE id = ?')->execute([$on, $on, $rid]);
+            if (!$on) $db->prepare('DELETE FROM play_flags WHERE report_id = ?')->execute([$rid]);
+            $src = $db->prepare('SELECT source, legacy_id FROM play_reports WHERE id = ?'); $src->execute([$rid]); $sr = $src->fetch();
+            if ($sr && $sr['source'] === 'pcfb') $db->prepare('UPDATE pc_feedback SET hidden = ? WHERE id = ?')->execute([$on, (int)$sr['legacy_id']]);
+            rs_play_scores_forget();
             rs_flash($act === 'fb-hide' ? 'Hidden from its page.' : 'Back on its page.');
             $back = ($_POST['from'] ?? '') === 'reports' ? 'pc.php?view=reports' : 'pc.php?edit=' . rawurlencode((string)($_POST['id'] ?? '')) . '#feedback';
         } elseif ($act === 'delete') {
@@ -155,6 +171,34 @@ $origin = fn(string $k) => RS_PC_ORIGINS[$k] ?? 'Other';
 $sys = fn(array $a) => implode(' · ', array_keys(array_filter(['Windows' => $a['asset_win'], 'Linux' => $a['asset_linux'], 'macOS' => $a['asset_mac']])));
 $published = is_file(RS_PC_CATALOG) ? (int)filemtime(RS_PC_CATALOG) : 0;
 // (3.5) The list shows small copies of the covers (made once, then kept), not the full pictures.
+// (3.9) Player reports on the game pages, from the website and RecompLauncher: what they said, their
+// PC, a log if they sent one (Download log is only here and in the developer's hub), and the answers.
+$pcReports = function (?string $app, int $limit): array {
+    rs_acct_tables();
+    rs_play_sync_legacy();
+    $st = rs_db()->prepare("SELECT r.*, a.username FROM play_reports r LEFT JOIN accounts a ON a.id = r.account_id WHERE r.kind = 'pc'" . ($app !== null ? ' AND r.app = ?' : '') . ' ORDER BY r.updated DESC LIMIT ' . $limit);
+    $st->execute($app !== null ? [$app] : []);
+    return $st->fetchAll();
+};
+$pcNames = array_column($apps, 'name', 'id');
+$pcReportLi = function (array $x, string $appId, string $from, array $replies) use ($pcNames): string {
+    $rep = $replies[(int)$x['id']] ?? [];
+    $specs = rs_play_specs_line($x);
+    $probs = implode(', ', array_map(fn($k) => RS_PLAY_PROBLEMS[$k] ?? $k, array_keys(rs_play_problems_decode((string)$x['problems']))));
+    $o = '<li class="' . ($x['hidden'] ? 'is-hidden' : '') . '">'
+        . '<span class="pill ' . ($x['verdict'] === 'runs' ? 'ok' : ($x['verdict'] === 'issues' ? 'warn' : 'bad')) . '">' . h(RS_PLAY_VERDICTS[$x['verdict']] ?? $x['verdict']) . '</span> '
+        . '<span class="muted">' . ($from === 'reports' ? '<a href="pc.php?edit=' . h(rawurlencode($appId)) . '#feedback">' . h($pcNames[$appId] ?? $appId) . '</a> · ' : '')
+        . h(RS_PLAY_PC_SYS[$x['sys']] ?? $x['sys']) . ($x['version'] !== '' ? ' · ' . h($x['version']) : '') . ' · ' . h(rs_date('M j, g:i a', strtotime((string)$x['updated'] . ' UTC')))
+        . ' · ' . ($x['source'] === 'pcfb' ? 'RecompLauncher' : 'website') . ($x['account_id'] !== null ? ' · account ' . h((string)($x['username'] ?? '#' . $x['account_id'])) : ' · guest') . '</span>'
+        . ($probs !== '' ? '<p><strong>Problems:</strong> ' . h($probs) . '</p>' : '')
+        . ($x['note'] !== '' ? '<p>' . nl2br(h((string)$x['note'])) . '</p>' : '')
+        . ($x['fix'] !== '' ? '<p><strong>What helped:</strong> ' . h((string)$x['fix']) . '</p>' : '')
+        . ($specs !== '' ? '<p class="muted"><strong>PC:</strong> ' . h($specs) . '</p>' : '')
+        . (!empty($x['has_log']) ? '<p><a href="pc.php?report_log=' . (int)$x['id'] . '">Download log</a> <span class="muted">' . h((string)$x['log_name']) . '</span></p>' : '');
+    foreach ($rep as $r) $o .= '<p class="muted"><strong>' . ($r['dev'] ? h((string)$r['name']) . ' (developer)' : 'Player') . ':</strong> ' . nl2br(h($r['text'])) . '</p>';
+    return $o . '<form method="post"><input type="hidden" name="csrf" value="' . h(rs_csrf()) . '"><input type="hidden" name="action" value="' . ($x['hidden'] ? 'fb-show' : 'fb-hide') . '"><input type="hidden" name="fb" value="' . (int)$x['id'] . '"><input type="hidden" name="id" value="' . h($appId) . '">'
+        . ($from !== '' ? '<input type="hidden" name="from" value="' . h($from) . '">' : '') . '<button>' . ($x['hidden'] ? 'Show' : 'Hide') . '</button></form></li>';
+};
 $thumb = fn(string $u, int $w): string => preg_match('#/media/([A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(jpe?g|png|webp))$#i', $u, $m) ? '/api/thumb.php?f=' . rawurlencode($m[1]) . '&w=' . $w : $u;
 
 rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']);
@@ -196,6 +240,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>Made by<input name="author" value="<?= h($a['author']) ?>" maxlength="80"></label>
     <label>Developer page<select name="dev"><option value="">None</option><?php foreach ($devs as $slug => $d): ?><option value="<?= h($slug) ?>"<?= $a['dev'] === $slug ? ' selected' : '' ?>><?= h((string)$d['name']) ?></option><?php endforeach; ?></select></label>
     <label>Labels<input name="tags" value="<?= h($a['tags']) ?>" maxlength="120" placeholder="Recomp, 4K, Mods"><small>Shown as pills on its page, comma between.</small></label>
+    <label>How to report bugs<input name="report_url" value="<?= h((string)($a['report_url'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://github.com/owner/name/issues/new/choose"><small>The developer's own page for bug reports. Shown next to the report form. https only.</small></label>
     <label class="span2">Key features<textarea name="features" rows="5" maxlength="1200" placeholder="One per line"><?= h($a['features']) ?></textarea><small>One per line, shown at the top of its page. Picked up from the README's Features list when it was added.</small></label>
     <label class="span2">Around the web<textarea name="media" rows="4" maxlength="5000" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.reddit.com/r/…/comments/…&#10;https://x.com/…/status/…"><?= h($a['media']) ?></textarea><small>Videos, posts and articles about it, one link per line. YouTube shows as a video, Reddit and X as cards.</small></label>
     <label class="span2">Boot profile<textarea name="boot" rows="8" maxlength="20000" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace;font-size:13px" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>How RecompLauncher starts it, sets it up from the player's copy (Easy Setup) and which of its settings to show. One JSON object, per the curator setup guide. Empty: the launcher works it out.</small></label>
@@ -213,19 +258,10 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     </div>
     <div class="actions span2"><button class="primary">Save</button><button name="art" value="1"<?= rs_sgdb_key() === '' ? ' disabled title="Add your SteamGridDB key in Settings"' : '' ?>>Get art from SteamGridDB</button><button name="art" value="next"<?= rs_sgdb_key() === '' ? ' disabled' : '' ?> title="The next cover and banner SteamGridDB has for it">Different art</button><button name="readme" value="1">Key features from the README</button><?php if ($a['repo'] !== ''): ?><a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">Its GitHub</a><?php endif; ?></div>
   </form>
-  <?php $fb = rs_pc_feedback_list($a['id'], true, 200); ?>
-  <h3 id="feedback">Player feedback <span class="pill<?= $fb ? ' cyan' : '' ?>"><?= count($fb) ?></span></h3>
+  <?php $fb = $pcReports($a['id'], 200); ?>
+  <h3 id="feedback">Player reports <span class="pill<?= $fb ? ' cyan' : '' ?>"><?= count($fb) ?></span></h3>
   <?php if (!$fb): ?><p class="muted">Nobody has said how it runs yet.</p><?php else: ?>
-  <ul class="pc-fb">
-    <?php foreach ($fb as $x): ?>
-    <li class="<?= $x['hidden'] ? 'is-hidden' : '' ?>">
-      <span class="pill <?= $x['verdict'] === 'runs' ? 'ok' : ($x['verdict'] === 'issues' ? 'warn' : 'bad') ?>"><?= h(RS_PC_VERDICTS[$x['verdict']] ?? $x['verdict']) ?></span>
-      <span class="muted"><?= h(RS_PC_SYSTEMS[$x['sys']] ?? '') ?><?= $x['version'] !== '' ? ' · ' . h($x['version']) : '' ?> · <?= h(rs_date('M j, g:i a', strtotime((string)$x['created']))) ?></span>
-      <?php if ($x['note'] !== ''): ?><p><?= nl2br(h($x['note'])) ?></p><?php endif; ?>
-      <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="<?= $x['hidden'] ? 'fb-show' : 'fb-hide' ?>"><input type="hidden" name="fb" value="<?= (int)$x['id'] ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button><?= $x['hidden'] ? 'Show' : 'Hide' ?></button></form>
-    </li>
-    <?php endforeach; ?>
-  </ul>
+  <ul class="pc-fb"><?php $fbRep = rs_play_replies(array_column($fb, 'id')); foreach ($fb as $x) echo $pcReportLi($x, $a['id'], '', $fbRep); ?></ul>
   <?php endif; ?>
   <form method="post" class="pc-del" onsubmit="return confirm('Delete <?= h(addslashes($a['name'])) ?> from the PC store?')"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="danger">Delete</button></form>
 </section>
@@ -285,22 +321,12 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   </details>
   <?php endif; ?>
 </section>
-<?php else: $names = array_column($apps, 'name', 'id'); rs_pc_tables();
-  $all = rs_db()->query('SELECT id, app, verdict, sys, version, note, created, hidden FROM pc_feedback ORDER BY created DESC LIMIT 300')->fetchAll(); ?>
+<?php else: $all = $pcReports(null, 300); ?>
 <section class="card">
   <h2>Player reports <span class="pill<?= $all ? ' cyan' : '' ?>"><?= count($all) ?></span></h2>
   <p class="muted small-note">What players say about how each recomp plays, newest first. Hide anything rude or spammy; it comes off the recomp's page.</p>
   <?php if (!$all): ?><p class="muted">No reports yet.</p><?php else: ?>
-  <ul class="pc-fb">
-    <?php foreach ($all as $x): ?>
-    <li class="<?= $x['hidden'] ? 'is-hidden' : '' ?>">
-      <span class="pill <?= $x['verdict'] === 'runs' ? 'ok' : ($x['verdict'] === 'issues' ? 'warn' : 'bad') ?>"><?= h(RS_PC_VERDICTS[$x['verdict']] ?? $x['verdict']) ?></span>
-      <span class="muted"><a href="pc.php?edit=<?= h(rawurlencode((string)$x['app'])) ?>#feedback"><?= h($names[$x['app']] ?? $x['app']) ?></a> · <?= h(RS_PC_SYSTEMS[$x['sys']] ?? '') ?><?= $x['version'] !== '' ? ' · ' . h($x['version']) : '' ?> · <?= h(rs_date('M j, g:i a', strtotime((string)$x['created']))) ?></span>
-      <?php if ($x['note'] !== ''): ?><p><?= nl2br(h($x['note'])) ?></p><?php endif; ?>
-      <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="<?= $x['hidden'] ? 'fb-show' : 'fb-hide' ?>"><input type="hidden" name="fb" value="<?= (int)$x['id'] ?>"><input type="hidden" name="id" value="<?= h((string)$x['app']) ?>"><input type="hidden" name="from" value="reports"><button><?= $x['hidden'] ? 'Show' : 'Hide' ?></button></form>
-    </li>
-    <?php endforeach; ?>
-  </ul>
+  <ul class="pc-fb"><?php $allRep = rs_play_replies(array_column($all, 'id')); foreach ($all as $x) echo $pcReportLi($x, (string)$x['app'], 'reports', $allRep); ?></ul>
   <?php endif; ?>
 </section>
 <?php endif; ?>

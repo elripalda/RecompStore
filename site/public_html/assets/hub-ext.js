@@ -518,6 +518,11 @@
   const firstTab = (page) => {
     const want = S.deep;
     S.deep = null;
+    // (3.9) A link to the reports (from the email about new ones) opens on them.
+    if (want === 'reports') {
+      const b = page.querySelector('[data-tab="reports"]');
+      if (b) { if (!b.classList.contains('on')) b.click(); return; }
+    }
     if (want === 'messages' || want === 'press' || want === 'docs') {
       const q = new URLSearchParams(location.search);
       openX(page, want === 'press' ? 'press' : want === 'docs' ? 'docs' : 'msgs', want === 'docs' ? (q.get('doc') || '') : (q.get('room') || ''));

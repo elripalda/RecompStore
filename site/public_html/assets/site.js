@@ -4014,22 +4014,31 @@
         wireOut();
         return;
       }
-      const tabs = [['apps', t('Your apps')], ['pc', t('PC recomps')], ['page', t('Your page')], ['betas', t('Betas')], ['logs', t('Logs')], ['ids', t('Title IDs')]];
+      // (3.9) Reports: what players say about their PC recomps, with a count of the ones not read yet.
+      const hasPc = (data.pcApps || []).length > 0;
+      const tabs = [['apps', t('Your apps')], ['pc', t('PC recomps')], ...(hasPc ? [['reports', t('Reports') + '<span class="hub-count" data-unseen></span>']] : []), ['page', t('Your page')], ['betas', t('Betas')], ['logs', t('Logs')], ['ids', t('Title IDs')]];
+      const firstTab = hasPc && new URLSearchParams(location.search).get('tab') === 'reports' ? 'reports' : 'apps';
       const tot = data.apps.reduce((o, a) => { const st = a.stats || {}; ['installs', 'week', 'downloads', 'likes'].forEach((k) => { o[k] += Number(st[k] || 0); }); return o; }, { installs: 0, week: 0, downloads: 0, likes: 0 });
       page.innerHTML = head(acc) + `
         <dl class="hub-totals">
           <div><dt>${t('Apps')}</dt><dd>${num(data.apps.length)}</dd></div><div><dt>${t('On PS5s now')}</dt><dd>${num(tot.installs)}</dd></div>
           <div><dt>${t('New this week')}</dt><dd>${num(tot.week)}</dd></div><div><dt>${t('GitHub downloads')}</dt><dd>${num(tot.downloads)}</dd></div><div><dt>${t('Likes')}</dt><dd>${num(tot.likes)}</dd></div></dl>
-        <div class="hub-bar"><nav class="hub-tabs" role="tablist">${tabs.map(([k, n], i) => `<button type="button" role="tab" aria-selected="${i === 0}" class="${i === 0 ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('')}</nav>
+        <div class="hub-bar"><nav class="hub-tabs" role="tablist">${tabs.map(([k, n]) => `<button type="button" role="tab" aria-selected="${k === firstTab}" class="${k === firstTab ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('')}</nav>
           <a class="btn primary hub-submit" href="/submit">+ ${t('Submit an app')}</a></div>
         <div data-pane></div>`;
       wireOut();
-      page.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { page.querySelectorAll('[data-tab]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); }); show(b.dataset.tab); }));
-      show('apps');
+      page.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.tab)));
+      unseenBadge();
+      show(firstTab);
+    };
+    const goTab = (tab, arg) => { page.querySelectorAll('[data-tab]').forEach((x) => { const on = x.dataset.tab === tab; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); }); show(tab, arg); };
+    const unseenBadge = () => {
+      const n = (data.pcApps || []).reduce((x, a) => x + Number(a.unseen || 0), 0), el = page.querySelector('[data-unseen]');
+      if (el) { el.textContent = n ? num(n) : ''; el.hidden = !n; }
     };
     const wireOut = () => { const o = page.querySelector('[data-out]'); if (o) o.addEventListener('click', () => call('out').then(() => { devHubButton(null); location.href = '/developers'; })); };
     const pane = () => page.querySelector('[data-pane]');
-    const show = (tab) => ({ apps: showApps, pc: showPc, page: showPage, betas: showBetas, logs: showLogs, ids: showIds })[tab]();
+    const show = (tab, arg) => ({ apps: showApps, pc: showPc, reports: showReports, page: showPage, betas: showBetas, logs: showLogs, ids: showIds })[tab](arg);
     // (2.7.3) Title IDs: a free one, or one they picked, held for them while their app is on its way.
     const showIds = () => {
       pane().innerHTML = `<p class="muted">${t('Loading…')}</p>`;
@@ -4180,7 +4189,8 @@
     // (2.8) Their PC recomps: downloads, what players say, and the words on each page.
     const PC_FIELDS = [['name', t('Name'), 120], ['blurb', t('One-line summary'), 160], ['description', t('Description'), 8000], ['features', t("What's in it"), 1200, t('One per line')],
       ['media', t('Around the web'), 5000, t('YouTube, Reddit or X links, one per line')], ['needs', t('What players need'), 200], ['credits', t('Credits'), 1000],
-      ['tags', t('Tags'), 300, t('Up to 8, separated by commas, like Widescreen, 60 FPS, Mods')], ['setup_steps', t('Setup steps'), 2000, t('Only if players set something up before the first play. One step per line.')]];
+      ['tags', t('Tags'), 300, t('Up to 8, separated by commas, like Widescreen, 60 FPS, Mods')], ['setup_steps', t('Setup steps'), 2000, t('Only if players set something up before the first play. One step per line.')],
+      ['report_url', t('How To Report Bugs'), 300, t('A link to your own page for bug reports, like your GitHub issues. Shown next to the report form. Starts with https://')]];
     // (3.8) Its pictures: new ones wait for a quick look before they go on its page.
     const PC_PICS = [['cover', 'cover_file', t('Cover'), t('Portrait, 600×900')], ['art', 'hero_file', t('Backdrop'), t('Wide, 1920×620 or bigger')],
       ['logo', 'logo_file', t('Logo'), t('PNG with a see-through background')], ['icon', 'icon_file', t('Icon'), t('Square, 512×512')]];
@@ -4204,7 +4214,8 @@
             <div class="hub-app-art"${a.art ? ` style="background-image:url('${cssUrl(a.art)}')"` : ''}></div>
             <div class="hub-app-body">
             <div class="hub-app-head">${a.cover ? `<img class="hub-pc-cover" src="${esc(thumb(a.cover, 400))}" alt="" width="48" height="72">` : `<span class="ico mono">${esc(a.name.slice(0, 2))}</span>`}
-              <div><h2>${esc(a.name)}</h2><span class="muted">${a.game && a.game !== a.name ? esc(a.game) + ' · ' : ''}${esc(a.version || '')} · <a href="/pc/game/${encodeURIComponent(a.id)}">${t('Its page')}</a></span></div></div>
+              <div><h2>${esc(a.name)}</h2><span class="muted">${a.game && a.game !== a.name ? esc(a.game) + ' · ' : ''}${esc(a.version || '')} · <a href="/pc/game/${encodeURIComponent(a.id)}">${t('Its page')}</a></span>
+                ${a.unseen ? `<button type="button" class="hub-new-reports" data-goto-reports="${esc(a.id)}">${esc(tn(a.unseen, '1 New Report', '{n} New Reports'))}</button>` : ''}</div></div>
             <dl class="hub-stats">
               <div><dt>${t('GitHub downloads')}</dt><dd>${num(a.stats.downloads)}</dd></div><div><dt>${t('Plays great')}</dt><dd>${num(a.stats.runs)}</dd></div>
               <div><dt>${t('Has problems')}</dt><dd>${num(a.stats.issues)}</dd></div><div><dt>${t("Won't run")}</dt><dd>${num(a.stats.broken)}</dd></div></dl>
@@ -4220,6 +4231,7 @@
           </section>`).join('')}</div>`
         : `<section class="glass card-pad"><p>${t('None of your GitHub repositories are on RecompLauncher yet.')}</p><a class="btn primary" href="/submit">${t('Submit an app')}</a></section>`;
       wireAi(pane(), (k) => list.find((x) => 'pc:' + x.id === k));
+      pane().querySelectorAll('[data-goto-reports]').forEach((b) => b.addEventListener('click', () => goTab('reports', b.dataset.gotoReports)));
       pane().querySelectorAll('form[data-pc]').forEach((f) => f.addEventListener('submit', (e) => {
         e.preventDefault();
         const a = list.find((x) => x.id === f.dataset.pc), st = f.querySelector('.status'), btn = f.querySelector('button[type=submit]');
@@ -4247,6 +4259,82 @@
         });
       }));
       pane().querySelectorAll('form[data-pc]').forEach(wirePics);
+    };
+
+    // (3.9) Reports: what players say about their PC recomps, newest first. Their PC, the version, a log
+    // to download when they sent one, and an answer box. Players with an account get an email.
+    const showReports = (only) => {
+      pane().innerHTML = `<p class="muted">${t('Loading…')}</p>`;
+      fetch('/api/dev.php?a=pc-reports', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => {
+        if (!page.isConnected || !pane()) return;
+        if (!j || !j.ok) { pane().innerHTML = `<p class="status bad">${t('That didn\'t go through. Check your connection and try again.')}</p>`; return; }
+        (data.pcApps || []).forEach((a) => { a.unseen = 0; });
+        unseenBadge();
+        const apps = data.pcApps || [], list = j.reports || [];
+        const name = (id) => (apps.find((a) => a.id === id) || { name: id }).name;
+        const when = (at) => new Date(at).toLocaleString(lang, { dateStyle: 'medium', timeStyle: 'short' });
+        if (!list.length) { pane().innerHTML = `<section class="glass card-pad"><p>${t('No reports yet. When players say how your PC recomps play, on the website or in RecompLauncher, they show up here.')}</p></section>`; return; }
+        let filter = { app: apps.some((a) => a.id === only) ? only : '', v: '' };
+        const VF = [['', t('All')], ['issues', t('Has Problems')], ['broken', t("Won't Run")], ['runs', t('Plays Great')]];
+        pane().innerHTML = `
+          <div class="hub-logs-bar">
+            <p class="muted">${t('What players say about your PC recomps, newest first. Your answer shows under their report on the game page, and players with an account get an email.')}</p>
+            <div class="hub-logs-acts">
+              ${apps.length > 1 ? `<select data-rep-app aria-label="${t('Recomp')}"><option value="">${t('All Your Recomps')}</option>${apps.map((a) => `<option value="${esc(a.id)}"${a.id === filter.app ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+              <div class="pr-seg sm" role="group" aria-label="${t('Status')}" data-rep-v>${VF.map(([k, l]) => `<button type="button" data-k="${k}" class="${k === filter.v ? 'on' : ''}" aria-pressed="${k === filter.v}">${esc(l)}</button>`).join('')}</div>
+            </div>
+          </div>
+          <div data-rep-list></div>`;
+        const box = pane().querySelector('[data-rep-list]');
+        const card = (x) => {
+          const probs = Object.keys(x.problems || {}).map((k) => `${pName(PLAY_PROBLEMS, k)}, ${pName(PLAY_SEV, x.problems[k]).toLowerCase()}`).join('; ');
+          const facts = [pName(PLAY_PC_SYS, x.sys) || x.sys, x.version ? 'v' + x.version.replace(/^v/i, '') : t('No version given'), pName(PLAY_PROGRESS, x.progress), x.from === 'launcher' ? 'RecompLauncher' : t('Website'), when(x.when)].filter(Boolean);
+          return `<section class="glass card-pad hub-log hub-rep" data-rep="${x.id}">
+            <div class="hub-log-head"><strong>${esc(name(x.app))}</strong>${prVerdict(x.verdict)}${x.seen ? '' : `<span class="tag hub-new">${t('New')}</span>`}<span class="muted">${esc(facts.join(' · '))}</span></div>
+            <p class="hub-rep-who muted">${x.user ? esc(x.user) : x.account ? t('A signed-in player') : t('A guest')}</p>
+            ${probs ? `<p class="pr-probs">${esc(probs)}.</p>` : ''}
+            ${x.note ? `<p class="pr-note-text" dir="auto">${esc(x.note)}</p>` : `<p class="muted">${t('No words with this one.')}</p>`}
+            ${x.fix ? `<div class="pr-helped"><p class="pr-helped-h">${t('What helped')}</p><p dir="auto">${esc(x.fix)}</p></div>` : ''}
+            <div class="hub-rep-pc">
+              <div class="hub-rep-specs"><span class="kicker">${t('Their PC')}</span>${x.specs ? `<p dir="ltr">${esc(x.specs).replace(/\n/g, '<br>')}</p>` : `<p class="muted">${t('Not given.')}</p>`}</div>
+              <div class="hub-rep-specs"><span class="kicker">${t('Log')}</span>${x.log ? `<p><a class="btn small" href="/api/dev.php?a=pc-report-log&amp;id=${x.id}" download>${t('Download Log')}</a></p><small class="muted">${esc(x.logName || '')}</small>` : `<p class="muted">${t('No log with this one.')}</p>`}</div>
+            </div>
+            <div data-rep-thread>${prReplies(x.replies, x.user || t('Player'))}</div>
+            <form class="form hub-rep-form" novalidate>
+              <label>${t('Your Answer')}<textarea name="text" rows="2" maxlength="2000" placeholder="${esc(t('Ask for a log, point to a fix, or say it\'s fixed in the next version.'))}"></textarea>
+                <small>${x.account ? t('They have an account, so they get an email and can answer you.') : t('They posted as a guest, so your answer shows on the game page only.')}</small></label>
+              <div class="form-row"><button class="btn primary" type="submit">${t('Send Reply')}</button><span class="status" role="status"></span></div>
+            </form>
+          </section>`;
+        };
+        const draw = () => {
+          const shown = list.filter((x) => (!filter.app || x.app === filter.app) && (!filter.v || x.verdict === filter.v));
+          box.innerHTML = shown.map(card).join('') || `<p class="muted">${t('None like that yet.')}</p>`;
+          box.querySelectorAll('.hub-rep-form').forEach((f) => f.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const sec = f.closest('[data-rep]'), x = list.find((r) => String(r.id) === sec.dataset.rep), st = f.querySelector('.status'), btn = f.querySelector('button[type=submit]');
+            const text = f.text.value.trim();
+            if (text.length < 2) { say(st, { ok: false, error: t('Write a little more.') }); return; }
+            btn.disabled = true; st.textContent = t('Sending…'); st.className = 'status';
+            call('pc-report-reply', { id: x.id, text }).then((res) => {
+              btn.disabled = false;
+              say(st, res, t('Sent.'));
+              if (!res.ok) return;
+              x.replies = res.replies || x.replies;
+              sec.querySelector('[data-rep-thread]').innerHTML = prReplies(x.replies, x.user || t('Player'));
+              f.text.value = '';
+            });
+          }));
+        };
+        const sel = pane().querySelector('[data-rep-app]');
+        if (sel) sel.addEventListener('change', () => { filter.app = sel.value; draw(); });
+        pane().querySelectorAll('[data-rep-v] [data-k]').forEach((b) => b.addEventListener('click', () => {
+          filter.v = b.dataset.k;
+          pane().querySelectorAll('[data-rep-v] [data-k]').forEach((x) => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
+          draw();
+        }));
+        draw();
+      });
     };
 
     // Your page: name, about, links; Discord
@@ -4935,6 +5023,7 @@
         ${card('pcs', t('RecompLauncher on your PCs'), `<div data-pcs><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('cloud', t('Cloud saves'), `<div data-cloud><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('betas', t('Betas'), `<div data-betas><p class="muted">${t('Loading…')}</p></div>`)}
+        ${card('reports', t('Your Reports'), `<div data-myreports><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('data', t('Your data'), `<p class="muted">${t('Download everything we keep about you, or delete your account. Deleting removes your email, saved games and sign-ins. Your comments stay up as "deleted user" so threads still make sense.')}</p>
           <div class="form-row"><a class="btn" href="/api/account.php?a=export" download data-fx>${t('Download my data')}</a></div>
           <form class="form acct-inline danger-zone" data-f="delete"><label>${me.hasPassword ? t('Your password') : me.twoStep ? t('A code from your app') : t('Type your username')}<input name="confirm" type="${me.hasPassword ? 'password' : 'text'}" autocomplete="off"></label><button class="btn danger" type="submit">${t('Delete my account')}</button><span class="status" role="status"></span></form>`)}
@@ -5036,6 +5125,36 @@
       betaBox.querySelectorAll('[data-beta-leave]').forEach((b) => b.addEventListener('click', () => rlApi('web-beta-leave', { id: +b.dataset.betaLeave }).then(drawBetas)));
     };
     rlApi('my-betas').then(drawBetas);
+    // (3.9) Your reports on PC recomps, from the website and RecompLauncher, with the developer's answers.
+    const repBox = view.querySelector('[data-myreports]');
+    const pcApi = (body) => fetch('/api/pc.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-RS': '1' }, body: JSON.stringify(body) })
+      .then((r) => r.json().catch(() => ({ ok: false, error: t('Something went wrong on our side. Try again in a moment.') }))).catch(() => ({ ok: false, error: t('That didn\'t go through. Try again.') }));
+    const drawReports = (j) => {
+      if (!j || !j.ok) { repBox.innerHTML = `<p class="muted">${esc((j && j.error) || t('Your reports can\'t be shown right now.'))}</p>`; return; }
+      const list = j.reports || [];
+      repBox.innerHTML = list.length ? `<ul class="acct-reports">${list.map((x) => `<li data-rep="${x.id}">
+          <div class="acct-rep-head"><a href="/pc/game/${encodeURIComponent(x.app)}"><b>${esc(x.name)}</b></a>${prVerdict(x.verdict)}</div>
+          <small class="muted">${esc([x.version ? 'v' + x.version.replace(/^v/i, '') : '', x.from === 'launcher' ? 'RecompLauncher' : t('Website'), ago(x.when), x.log ? t('Log Attached') : ''].filter(Boolean).join(' · '))}</small>
+          ${x.note ? `<p dir="auto">${esc(x.note)}</p>` : ''}
+          <div data-thread>${prReplies(x.replies, t('You'))}</div>
+          ${(x.replies || []).some((r) => r.dev) ? `<form class="form acct-inline acct-rep-form"><label>${t('Answer The Developer')}<textarea name="text" rows="2" maxlength="2000"></textarea></label><button class="btn" type="submit">${t('Send Reply')}</button><span class="status" role="status"></span></form>` : ''}
+        </li>`).join('')}</ul>`
+        : `<p class="muted">${t('None yet. When you say how a PC recomp plays while signed in, here or in RecompLauncher, it shows here with any answer from its developer.')}</p>`;
+      repBox.querySelectorAll('.acct-rep-form').forEach((f) => f.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const li = f.closest('[data-rep]'), st = f.querySelector('.status'), text = f.text.value.trim();
+        if (text.length < 2) { say(st, t('Write a little more.'), 'bad'); return; }
+        say(st, t('Sending…'));
+        pcApi({ a: 'report-reply', id: +li.dataset.rep, text }).then((r) => {
+          if (!r.ok) { say(st, r.error, 'bad'); return; }
+          li.querySelector('[data-thread]').innerHTML = prReplies(r.replies, t('You'));
+          f.text.value = '';
+          say(st, t('Sent.'), 'ok');
+        });
+      }));
+      if (new URLSearchParams(location.search).get('tab') === 'reports') { const c = document.getElementById('acct-reports'); if (c) c.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' }); }
+    };
+    fetch('/api/pc.php?a=my-reports', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json()).catch(() => null).then(drawReports);
     const out = (all) => acctApi('signout', { all }).then(() => { acct.me = null; acctHeader(); acctGo('/'); });
     view.querySelector('[data-signout]').addEventListener('click', () => out(false));
     view.querySelector('[data-signout-all]').addEventListener('click', () => out(true));
@@ -5531,6 +5650,30 @@
   const PLAY_TONE_WORD = { great: N_('Plays great'), good: N_('Plays well'), mixed: N_('Mixed'), rough: N_('Rough'), bad: N_('Mostly broken') };
   const PLAY_VDESC = { runs: N_('Nothing worth mentioning'), issues: N_('Playable, with issues'), broken: N_('Crashes or won\'t start') };
   const prSq = (cls) => `<i class="pr-sq ${cls}" aria-hidden="true"></i>`;
+  // (3.9) A verdict as a small colored label, and the answers under a report: the developer's with a
+  // Developer badge, the player's with their name (or Player).
+  const PR_TONE = { runs: 'great', issues: 'mixed', broken: 'bad' };
+  const prVerdict = (v) => `<span class="pr-verdict ${PR_TONE[v] || 'few'}">${prSq(PR_TONE[v] || 'few')}${esc(pName(PLAY_VERDICTS, v))}</span>`;
+  const prReplies = (list, player) => (list || []).length ? `<div class="pr-replies">${list.map((r) => `<div class="pr-reply${r.dev ? ' dev' : ''}">
+      <p class="pr-reply-h"><strong>${esc(r.dev ? (r.name || t('Developer')) : (r.name || player || t('Player')))}</strong>${r.dev ? `<span class="pr-dev-badge">${t('Developer')}</span>` : ''}<small>${esc(ago(r.when))}</small></p>
+      <p dir="auto">${esc(r.text)}</p></div>`).join('')}</div>` : '';
+  // (3.9) What this browser can tell about the PC, for the developer: the OS, the graphics card, how many
+  // threads the processor has, and roughly the memory. The player can change any of it.
+  const browserSpecs = () => {
+    const ua = navigator.userAgent || '', uad = navigator.userAgentData;
+    let os = (uad && uad.platform) || '';
+    if (!os) os = /Windows NT 10/.test(ua) ? 'Windows' : /Windows/.test(ua) ? 'Windows (older)' : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+    if (os === 'Windows') os = 'Windows 10 or 11';
+    if (/SteamOS|Steam Deck/i.test(ua)) os = 'SteamOS';
+    const gpu = myGPU(), threads = navigator.hardwareConcurrency || 0, mem = navigator.deviceMemory || 0;
+    return [os && 'OS: ' + os, gpu && 'GPU: ' + gpu, threads && 'CPU threads: ' + threads, mem && 'RAM: ' + (mem >= 8 ? 'at least 8 GB' : mem + ' GB')].filter(Boolean).join('\n');
+  };
+  // Chrome and Edge can tell Windows 11 from 10 when asked.
+  const browserSpecsMore = (txt) => {
+    const uad = navigator.userAgentData;
+    if (!uad || !uad.getHighEntropyValues || uad.platform !== 'Windows') return Promise.resolve(txt);
+    return uad.getHighEntropyValues(['platformVersion']).then((h) => txt.replace('OS: Windows 10 or 11', 'OS: Windows ' + (parseInt(h.platformVersion, 10) >= 13 ? '11' : '10'))).catch(() => txt);
+  };
   function playReports(box, kind, a) {
     if (!box) return;
     const pc = kind === 'pc';
@@ -5538,6 +5681,7 @@
     let sort = 'helpful', sysFilter = '', mine = null, tsToken = '', all = [];
     box.innerHTML = `<section class="glass play-box${pc ? '' : ' play-ps5'}">
       <header class="pr-head"><h2>${t('Player reports')}</h2><button type="button" class="btn primary pr-write" data-write>${t('Write a report')}</button></header>
+      ${pc && a.report_url ? `<p class="pr-howto"><a href="${esc(a.report_url)}" target="_blank" rel="noopener">${t('How To Report Bugs For This Game')}<span aria-hidden="true">↗</span></a></p>` : ''}
       <div data-sum><p class="muted">${t('Loading…')}</p></div>
       <div data-form-box></div>
       <div class="pr-bar" data-bar hidden>
@@ -5590,18 +5734,22 @@
       const worst = probs.reduce((m, k) => Math.max(m, x.problems[k]), 0);
       const probText = probs.map((k) => `${pName(PLAY_PROBLEMS, k)}, ${pName(PLAY_SEV, x.problems[k]).toLowerCase()}`).join('; ');
       const facts = [sysName(x.sys), x.version ? 'v' + x.version.replace(/^v/i, '') : '', pName(PLAY_PROGRESS, x.progress), x.fps ? tf('{fps} fps', { fps: pName(PLAY_FPS, x.fps) }) : '', pName(PLAY_RES, x.res)].filter(Boolean);
-      const rig = [x.gpu, x.cpu, x.ram ? tf('{n} GB', { n: x.ram }) : ''].filter(Boolean).join(' · ');
+      const rig0 = [x.gpu, x.cpu, x.ram ? tf('{n} GB', { n: x.ram }) : ''].filter(Boolean).join(' · ');
+      // (3.9) The player's PC in one line: RecompLauncher's full specs, else what they typed, else what the browser said.
+      const rig = x.app === 'launcher' ? (x.specs || rig0) : (rig0 || x.specs || '');
       const vcls = { runs: 'great', issues: 'mixed', broken: 'bad' }[x.verdict] || 'few';
       const av = x.user ? (x.avatar ? `<img class="pr-av" src="${esc(x.avatar)}" alt="" width="40" height="40" loading="lazy">` : `<span class="pr-av">${esc(x.user.slice(0, 1).toUpperCase())}</span>`) : '<span class="pr-av guest" aria-hidden="true">G</span>';
       return `<article class="pr-item" data-id="${x.id}">
         <header>${av}<span class="pr-by"><strong>${x.user ? esc(x.user) : t('Guest')}</strong><small>${esc(ago(x.when))}${x.app === 'launcher' ? ' · ' + t('from RecompLauncher') : ''}</small></span>
           <span class="pr-verdict ${vcls}">${prSq(vcls)}${esc(pName(PLAY_VERDICTS, x.verdict))}</span></header>
-        ${facts.length ? `<p class="pr-facts">${esc(facts.join(' · '))}</p>` : ''}
+        ${facts.length || x.log ? `<p class="pr-facts">${esc(facts.join(' · '))}${x.log ? `<span class="pr-log-tag">${t('Log Attached')}</span>` : ''}</p>` : ''}
         ${rig ? `<p class="pr-rig">${esc(rig)}</p>` : ''}
         ${probs.length ? `<p class="pr-probs sev${worst}">${esc(probText)}.</p>` : ''}
         ${x.fix ? `<div class="pr-helped"><p class="pr-helped-h">${t('What helped')}</p><p dir="auto">${esc(x.fix)}</p></div>` : ''}
         ${x.note ? `<p class="pr-note-text" dir="auto">${esc(x.note)}</p>` : ''}
+        ${prReplies(x.replies, x.user)}
         <footer>
+          ${x.mine && acct.me && (x.replies || []).some((r) => r.dev) ? `<a class="pr-act" href="${storeLink('/account?tab=reports')}" data-fx>${t('Answer The Developer')}</a>` : ''}
           ${x.mine ? `<button type="button" class="pr-act" data-edit>${t('Edit')}</button><button type="button" class="pr-link" data-del>${t('Delete')}</button>`
             : `<button type="button" class="pr-act${x.voted ? ' on' : ''}" data-vote aria-pressed="${x.voted ? 'true' : 'false'}">${t('Helpful')}${x.helpful ? ` · ${fmtNum(x.helpful)}` : ''}</button><button type="button" class="pr-link" data-flag>${t('Report')}</button>`}
           <span class="pr-flags" data-flagbox hidden>${PLAY_FLAGS.map(([k, l]) => `<button type="button" class="pr-link" data-why="${k}">${t(l)}</button>`).join('')}</span>
@@ -5627,9 +5775,9 @@
       const saved = playSysSaved();
       const m = mine || {};
       const st = { sys: m.sys || (pc ? (saved.sys || ({ windows: 'windows', linux: 'linux', macos: 'macos' }[myOS()] || 'windows')) : (saved.fw || '')), problems: Object.assign({}, m.problems || {}) };
-      const rigLine = () => [f.gpu.value, f.cpu.value, f.ram.value ? tf('{n} GB', { n: f.ram.value }) : ''].filter(Boolean).join(' · ') || t('Not filled in');
+      const rigLine = () => [f.gpu.value, f.cpu.value, f.ram.value ? tf('{n} GB', { n: f.ram.value }) : ''].filter(Boolean).join(' · ') || (f.specs ? f.specs.value.split('\n').join(' · ') : '') || t('Not filled in');
       fb.innerHTML = `<form class="pr-form" novalidate>
-        <div class="pr-form-h"><h3>${mine ? t('Edit your report') : t('How does it play for you?')}</h3><p class="muted">${t('Two answers and you\'re done. Everything under them is optional.')}</p></div>
+        <div class="pr-form-h"><h3>${mine ? t('Edit your report') : t('How does it play for you?')}</h3><p class="muted">${pc ? t('Plays great is two clicks. If something went wrong, tell the developer what happened. Everything under that is optional.') : t('Two answers and you\'re done. Everything under them is optional.')}</p></div>
         <fieldset class="pr-verdicts"><legend>${t('It…')}</legend>
           ${PLAY_VERDICTS.map(([k, l]) => `<label class="pr-vopt v-${k}"><input type="radio" name="verdict" value="${k}"${m.verdict === k ? ' checked' : ''}><span class="pr-vname">${t(l)}</span><span class="pr-vdesc">${t(PLAY_VDESC[k])}</span></label>`).join('')}
         </fieldset>
@@ -5637,6 +5785,7 @@
           ${pc ? `<div class="pr-seg big" role="radiogroup">${PLAY_PC_SYS.map(([k, l]) => `<button type="button" role="radio" data-sys="${k}" aria-checked="${st.sys === k}" class="${st.sys === k ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`
             : `<select name="fw" aria-label="${t('Your PS5\'s firmware')}">${opts(PLAY_FW, st.sys, t('Pick one'))}</select>`}
         </fieldset>
+        ${pc ? `<label class="pr-wide pr-what"><span class="pr-lt" data-what-l></span><textarea name="note" rows="3" maxlength="1000">${esc(m.note || '')}</textarea><small class="muted" data-what-n></small></label>` : ''}
         <div class="pr-more">
           <h4>${t('More detail')} <span>${t('optional, helps people with the same setup')}</span></h4>
           <div class="pr-grid">
@@ -5650,13 +5799,15 @@
             <div class="pr-sevs" data-sev></div>
           </fieldset>
           <label class="pr-wide"><span class="pr-lt">${t('What helped?')} <span class="opt">${t('a setting, a fix, a mod')}</span></span><textarea name="fix" rows="2" maxlength="600">${esc(m.fix || '')}</textarea></label>
-          <label class="pr-wide">${t('Anything else?')}<textarea name="note" rows="3" maxlength="1200">${esc(m.note || '')}</textarea></label>
+          ${pc ? `<label class="pr-wide"><span class="pr-lt">${t('Log File')} <span class="opt">${t('a .txt or .log, up to 2 MB. Only the developer sees it.')}</span></span><input type="file" name="log" accept=".txt,.log,text/plain"></label>`
+            : `<label class="pr-wide">${t('Anything else?')}<textarea name="note" rows="3" maxlength="1200">${esc(m.note || '')}</textarea></label>`}
           ${pc ? `<details class="pr-pc"><summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>${t('Your PC')} <span data-rigline></span></summary>
             <div class="pr-grid3">
               <label>${t('Graphics card')}<input name="gpu" maxlength="80" value="${esc(m.gpu || saved.gpu || '')}" placeholder="RTX 3060"></label>
               <label>${t('Processor')}<input name="cpu" maxlength="80" value="${esc(m.cpu || saved.cpu || '')}" placeholder="Ryzen 5 5600"></label>
               <label>${t('RAM (GB)')}<input name="ram" inputmode="numeric" maxlength="4" value="${esc(String(m.ram || saved.ram || ''))}" placeholder="16"></label>
-            </div><button type="button" class="pr-link" data-detect>${t('Fill in the graphics card from this computer')}</button></details>` : ''}
+            </div><button type="button" class="pr-link" data-detect>${t('Fill in the graphics card from this computer')}</button>
+            <label class="pr-wide"><span class="pr-lt">${t('System Info')} <span class="opt">${t('filled in from this browser. Fix anything that\'s wrong.')}</span></span><textarea name="specs" rows="3" maxlength="600">${esc(m.specs ? m.specs.split(' · ').join('\n') : '')}</textarea></label></details>` : ''}
         </div>
         <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
         <div class="pr-form-foot">
@@ -5673,7 +5824,22 @@
       };
       drawSev();
       const rl = f.querySelector('[data-rigline]');
-      if (rl) { rl.textContent = rigLine(); f.addEventListener('input', (e) => { if (/^(gpu|cpu|ram)$/.test(e.target.name || '')) rl.textContent = rigLine(); }); }
+      // (3.9) The PC's specs, from the browser, unless the report already has them.
+      if (pc && f.specs && !f.specs.value) { f.specs.value = browserSpecs(); browserSpecsMore(f.specs.value).then((v) => { if (f.specs.value === browserSpecs()) { f.specs.value = v; if (rl) rl.textContent = rigLine(); } }); }
+      if (rl) { rl.textContent = rigLine(); f.addEventListener('input', (e) => { if (/^(gpu|cpu|ram|specs)$/.test(e.target.name || '')) rl.textContent = rigLine(); }); }
+      // (3.9) Has problems or Won't run: the note is needed, and says so.
+      const whatL = f.querySelector('[data-what-l]'), whatN = f.querySelector('[data-what-n]');
+      const whatMode = () => {
+        if (!whatL) return;
+        const v = (f.querySelector('input[name=verdict]:checked') || {}).value || '';
+        const bad = v === 'issues' || v === 'broken';
+        whatL.innerHTML = bad ? `${t('What Happened?')} <span class="opt">${t('needed')}</span>` : `${t('Anything Else?')} <span class="opt">${t('optional')}</span>`;
+        f.note.required = bad;
+        f.note.placeholder = bad ? t('What happened, and when? (For example: crashes after the intro on the first level.)') : '';
+        whatN.textContent = bad ? t('A sentence or two, at least 15 characters. The developer reads every one.') : '';
+      };
+      whatMode();
+      f.addEventListener('change', (e) => { if (e.target.name === 'verdict') whatMode(); });
       f.addEventListener('change', (e) => {
         const p = e.target.closest('input[data-p]');
         if (!p) return;
@@ -5698,16 +5864,27 @@
         const sys = pc ? st.sys : f.fw.value;
         if (!verdict) { say(s, t('Pick how it plays.'), 'bad'); return; }
         if (!sys) { say(s, pc ? t('Pick what you play it on.') : t('Pick your PS5\'s firmware.'), 'bad'); return; }
+        if (pc && verdict !== 'runs' && f.note.value.trim().length < 15) { say(s, t('Tell the developer what happened and when.'), 'bad'); f.note.focus(); return; }
         if (verdict !== 'runs' && !Object.keys(st.problems).length && !f.note.value.trim()) { say(s, t('Tick what went wrong, or say in a few words.'), 'bad'); return; }
+        const logFile = pc && f.log && f.log.files ? f.log.files[0] : null;
+        if (logFile && logFile.size > 2 * 1024 * 1024) { say(s, t('Logs can be 2 MB at most.'), 'bad'); return; }
         btn.disabled = true; say(s, t('Sending…'));
         const body = { kind, id: a.id, verdict, sys, version: f.version.value, progress: f.progress.value, fps: f.fps.value, res: pc ? f.res.value : '', problems: st.problems,
           gpu: pc ? f.gpu.value : '', cpu: pc ? f.cpu.value : '', ram: pc ? f.ram.value : '', fix: f.fix.value, note: f.note.value, website: f.website.value,
-          show_name: f.show_name ? f.show_name.checked : true, ts: tsToken };
-        playApi('post', body).then((j) => {
+          show_name: f.show_name ? f.show_name.checked : true, ts: tsToken, specs: pc && f.specs ? f.specs.value : '' };
+        // (3.9) With a log, the same report goes as a form with the file.
+        const send = logFile ? (() => {
+          const fd = new FormData();
+          Object.entries(Object.assign({ a: 'post' }, body)).forEach(([k, v]) => fd.append(k, typeof v === 'boolean' ? (v ? '1' : '') : typeof v === 'object' ? JSON.stringify(v) : String(v)));
+          fd.append('log', logFile);
+          return fetch('/api/play.php', { method: 'POST', credentials: 'same-origin', headers: { 'X-RS': '1' }, body: fd })
+            .then((r) => r.json().catch(() => ({ ok: false }))).catch(() => ({ ok: false, error: t('That didn\'t go through. Try again.') }));
+        })() : playApi('post', body);
+        send.then((j) => {
           btn.disabled = false;
           if (!j.ok) { say(s, j.error || t('That didn\'t go through. Try again.'), 'bad'); if (tsBox) tsReset(tsBox); return; }
           try { localStorage.setItem('rs-play-sys', JSON.stringify(pc ? { sys, gpu: body.gpu, cpu: body.cpu, ram: body.ram } : Object.assign(playSysSaved(), { fw: sys }))); } catch (err) { /* only a nicety */ }
-          fb.innerHTML = `<p class="pr-thanks">${t('Thanks. Your report is up.')}</p>`;
+          fb.innerHTML = `<p class="pr-thanks">${j.warning ? esc(j.warning) : pc && verdict !== 'runs' ? t('Thanks. Your report is up, and its developer gets word of it.') : t('Thanks. Your report is up.')}</p>`;
           playScores(true).then(draw);
         });
       });

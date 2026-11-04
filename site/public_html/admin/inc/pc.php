@@ -60,6 +60,10 @@ function rs_pc_tables(): void {
         KEY app (app, hidden, created),
         UNIQUE KEY one (app, ip_hash)
     ) CHARACTER SET utf8mb4');
+    // (3.9) Longer notes (a bad report has to say what happened), the player's PC in a few words, and
+    // their account when they were signed in (never shown; it's how they hear back from the developer).
+    if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE 'specs'")->fetch())
+        $db->exec("ALTER TABLE pc_feedback MODIFY note VARCHAR(1200) NOT NULL DEFAULT '', ADD COLUMN account_id INT NULL, ADD COLUMN specs VARCHAR(600) NOT NULL DEFAULT ''");
     $done = true;
 }
 
@@ -70,7 +74,7 @@ function rs_pc_defaults(): array {
         'icon' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'tags' => '', 'links' => [],
         'featured' => false, 'hidden' => true, 'soon' => false, 'added' => '', 'live_at' => '', 'checked' => '', 'features' => '', 'features_read' => false, 'license' => '',
         'genre' => '', 'media' => '', 'issues' => 0, 'releases' => 0, 'first' => '',
-        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => ''];
+        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => ''];
 }
 
 // (3.8) Read once per request: pages that ask for the list for every row (submissions, the Inbox)
@@ -498,9 +502,17 @@ function rs_pc_feedback_counts(): array {
     return $out;
 }
 
+// (3.9) A recomp's "how to report bugs" link: https only, 300 characters at most. '' when it isn't one.
+function rs_pc_report_url(string $u): string {
+    $u = trim($u);
+    if ($u === '' || mb_strlen($u) > 300 || !preg_match('#^https://[^\s<>"\']+$#i', $u)) return '';
+    $host = (string)parse_url($u, PHP_URL_HOST);
+    return $host !== '' && filter_var($u, FILTER_VALIDATE_URL) ? $u : '';
+}
+
 function rs_pc_feedback_list(string $app, bool $withHidden = false, int $limit = 60): array {
     rs_pc_tables();
-    $st = rs_db()->prepare('SELECT id, verdict, sys, version, note, created, hidden FROM pc_feedback WHERE app = ?' . ($withHidden ? '' : ' AND hidden = 0') . ' ORDER BY created DESC LIMIT ' . max(1, min(500, $limit)));
+    $st = rs_db()->prepare('SELECT id, verdict, sys, version, note, specs, created, hidden FROM pc_feedback WHERE app = ?' . ($withHidden ? '' : ' AND hidden = 0') . ' ORDER BY created DESC LIMIT ' . max(1, min(500, $limit)));
     $st->execute([$app]);
     return $st->fetchAll();
 }
@@ -601,6 +613,8 @@ function rs_pc_catalog(): array {
             'genre' => isset(RS_PC_GENRES[$a['genre']]) ? $a['genre'] : 'other', 'media' => rs_pc_media_links((string)$a['media']),
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
+        // (3.9) Where its developer wants bugs reported (their own page or issue form).
+        if (($ru = rs_pc_report_url((string)($a['report_url'] ?? ''))) !== '') $e['report_url'] = $ru;
         // (3.8) The release that's out (the launcher installs this one) and its checked files.
         if ((string)($a['ok_tag'] ?? '') !== '') $e['tag'] = (string)$a['ok_tag'];
         if (function_exists('rs_vt_catalog_files') && ($vf = rs_vt_catalog_files($a))) $e['files'] = $vf;

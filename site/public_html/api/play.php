@@ -5,6 +5,9 @@
 //   GET  a=versions&title=<title id>                                 -> {versions[]: score, badges, fork}
 //   POST a=post   (JSON) kind id verdict sys version progress fps res problems{} gpu cpu ram fix note show_name ts website
 //   POST a=vote   (JSON) id           a=flag (JSON) id reason       a=delete (JSON) kind id
+//   (3.9) a=post also takes specs, and for a PC recomp it can be multipart (the same fields, problems as
+//   JSON) with a log file: text, 2 MB, seen only by its developer. PC: Has problems / Won't run need a
+//   note of 15 characters or more.
 // Posts come from the website (its own address, with the X-RS header).
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
@@ -43,7 +46,9 @@ try {
     rs_acct_tables();
     rs_play_tables();
     $post = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
-    $in = $post ? (json_decode((string)file_get_contents('php://input'), true) ?: []) : $_GET;
+    $multi = $post && str_starts_with(strtolower((string)($_SERVER['CONTENT_TYPE'] ?? '')), 'multipart/form-data');
+    $in = $post ? ($multi ? $_POST : (json_decode((string)file_get_contents('php://input'), true) ?: [])) : $_GET;
+    if ($multi && isset($in['problems']) && is_string($in['problems'])) $in['problems'] = json_decode($in['problems'], true) ?: [];
     $s = fn(string $k, int $max): string => isset($in[$k]) && is_scalar($in[$k]) ? mb_substr(trim((string)$in[$k]), 0, $max) : '';
     $a = $s('a', 10);
     $me = rs_acct_on() ? rs_acct_current() : null;
@@ -120,13 +125,22 @@ try {
             'fix' => rs_pl_clean($s('fix', 600), 600), 'note' => rs_pl_clean($s('note', 1200), 1200),
             'show_name' => !isset($in['show_name']) || !empty($in['show_name']),
         ];
+        // (3.9) A bad PC report says what happened, so its developer can do something with it.
+        if ($kind === 'pc' && $verdict !== 'runs' && mb_strlen($r['note']) < 15) rs_pl_out(422, ['ok' => false, 'error' => 'Tell the developer what happened and when.', 'field' => 'note']);
         if ($verdict !== 'runs' && !$problems && $r['note'] === '') rs_pl_out(422, ['ok' => false, 'error' => 'Tick what went wrong, or say in a few words.', 'field' => 'problems']);
+        $r['specs'] = $kind === 'pc' ? rs_play_specs_clean(isset($in['specs']) && is_string($in['specs']) ? $in['specs'] : '') : '';
+        $log = $kind === 'pc' && !empty($_FILES['log']) && (int)($_FILES['log']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE ? $_FILES['log'] : null;
+        if ($log && ($e = rs_play_log_error($log)) !== null) rs_pl_out(422, ['ok' => false, 'error' => $e, 'field' => 'log']);
         foreach (['fix', 'note'] as $k) if ($r[$k] !== '' && ($e = rs_cm_body_error($r[$k] . ' ..'))) rs_pl_out(422, ['ok' => false, 'error' => $e, 'field' => $k]);
         if (rs_acct_try_count('play', $ip, 60) >= 15) rs_pl_out(429, ['ok' => false, 'error' => 'That\'s a lot at once. Try again later.']);
         // Guests pass the bot check (when it's set up).
         if (!$me && rs_acct_turnstile_ready() && !rs_acct_turnstile_ok($s('ts', 2048))) rs_pl_out(422, ['ok' => false, 'error' => 'The check didn\'t go through. Try it again.', 'field' => 'ts']);
         rs_acct_try_add('play', $ip);
         $rid = rs_play_save($kind, $id, $me, $r);
+        if ($log && $rid) {
+            try { rs_play_log_save($rid, $log); } catch (RuntimeException $e) { rs_pl_out(200, ['ok' => true, 'id' => $rid, 'warning' => 'Your report is up, but the log couldn\'t be kept.']); }
+        }
+        if ($kind === 'pc' && $verdict !== 'runs') rs_play_dev_ping($id);
         rs_pl_out(200, ['ok' => true, 'id' => $rid]);
     }
     if ($a === 'vote') {
@@ -164,6 +178,13 @@ try {
     }
     if ($a === 'delete') {
         $kind = $s('kind', 4); $id = $s('id', 64);
+        // (3.9) Its log and the answers on it go with it.
+        $old = rs_db()->prepare('SELECT id FROM play_reports WHERE kind = ? AND app = ? AND who = ?');
+        $old->execute([$kind, $id, $myWho]);
+        if (($oid = (int)$old->fetchColumn()) > 0) {
+            @unlink(rs_play_log_path($oid));
+            rs_db()->prepare('DELETE FROM play_report_replies WHERE report_id = ?')->execute([$oid]);
+        }
         $st = rs_db()->prepare('DELETE FROM play_reports WHERE kind = ? AND app = ? AND who = ?');
         $st->execute([$kind, $id, $myWho]);
         rs_play_scores_forget();
