@@ -1859,6 +1859,11 @@
     // it's a PC one, else the most downloaded. Its page shows the others to pick from.
     pcCat.apps = pcCat.listed.filter((a) => { const tt = pcTitleOf('pc', a.id); return !tt || pcLeadOf(tt, pcCat.listed) === a.id; });
   }
+  // How many recomps a list of tiles stands for: a game's tile counts each of its listed versions.
+  const pcVersions = (list) => list.reduce((n, a) => {
+    const tt = pcTitleOf('pc', a.id);
+    return n + (tt ? Math.max(1, (tt.pc || []).filter((id) => pcCat.listed.some((x) => x.id === id)).length) : 1);
+  }, 0);
   // (3.0) Games with more than one version (pc-catalog.json's titles): PC recomps and PS5 apps.
   const pcTitles = () => (pcCat && pcCat.titles) || [];
   const pcTitleOf = (kind, id) => pcTitles().find((tt) => (kind === 'pc' ? (tt.pc || []).includes(id) : (tt.ps5 || []).some((x) => x.id === id))) || null;
@@ -2292,7 +2297,7 @@
       tagbar.innerHTML = tag ? `<button type="button" class="pc-tagchip" data-untag aria-label="${esc(tf('Stop showing only {tag}', { tag }))}"><span>${esc(t('Tag'))}</span><b>${esc(tag)}</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>` : '';
       const un = tagbar.querySelector('[data-untag]');
       if (un) un.addEventListener('click', () => { tag = ''; const u = new URL(location.href); u.searchParams.delete('tag'); history.replaceState(history.state, '', u.pathname + u.search); routed = location.href; draw(true); });
-      setCount(list.length);
+      setCount(pcVersions(list));
       grid.innerHTML = list.length ? list.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${animate && !reduced ? ' pop' : ''}" style="--i:${Math.min(i, 14)}"`)).join('') : `<p class="muted">${t('Nothing matches that.')}</p>`;
       gtabs.innerHTML = [['', t('All')], ...genresHere.map((k) => [k, t(PC_GENRES[k])])].map(([k, n]) => `<button type="button" class="${genre === k ? 'on' : ''}" data-g="${esc(k)}">${esc(n)}</button>`).join('');
       otabs.innerHTML = [['', t('Every console')], ...(pcCat.origins || []).map((o) => [o.id, originName(o.id)])].map(([k, n]) => `<button type="button" class="${origin === k ? 'on' : ''}" data-o="${esc(k)}">${esc(n)}</button>`).join('');
@@ -2390,7 +2395,7 @@
           const covers = o.apps.filter((a) => a.cover).slice(0, 3);
           return `<a class="glass pc-con" href="/pc/all?from=${encodeURIComponent(o.id)}" style="--c:${c}">
             <span class="pc-con-art" aria-hidden="true">${covers.map((a, i) => `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" style="--k:${i}">`).join('')}</span>
-            <span class="pc-con-words"><strong>${esc(originName(o.id))}</strong><small>${tn(o.apps.length, '1 recomp', '{n} recomps')}</small></span>
+            <span class="pc-con-words"><strong>${esc(originName(o.id))}</strong><small>${tn(pcVersions(o.apps), '1 recomp', '{n} recomps')}</small></span>
           </a>`;
         }).join('')}</div>
         ${pcNoFiles()}
