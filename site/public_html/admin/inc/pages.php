@@ -112,6 +112,9 @@ function rs_dev_save(array $d, ?string $oldSlug = null): void {
         $db->prepare('UPDATE developers SET slug = ?, data = ?, updated = NOW() WHERE slug = ?')->execute([$d['slug'], $json, $oldSlug]);
         // Games pointed at the old slug follow it.
         foreach (rs_games() as $g) if (($g['dev'] ?? '') === $oldSlug) { $g['dev'] = $d['slug']; rs_save_game($g); }
+        // PC recomps and the developer accounts on that page follow it too.
+        if (function_exists('rs_pc_apps')) foreach (rs_pc_apps(false) as $a) if (($a['dev'] ?? '') === $oldSlug) { $a['dev'] = $d['slug']; rs_pc_save($a); }
+        try { $db->prepare('UPDATE dev_accounts SET slug = ? WHERE slug = ?')->execute([$d['slug'], $oldSlug]); } catch (Throwable $e) { /* no accounts table yet */ }
         rs_dev_write_public();
         return;
     }
