@@ -305,6 +305,12 @@ function rs_http(string $url, array $o = []): array {
     $c = curl_init($url);
     $headers = $o['headers'] ?? [];
     if (!empty($o['range'])) $headers[] = 'Range: bytes=' . $o['range'][0] . '-' . ($o['range'][1] ?? '');
+    // (3.9) GitLab: the admin's token (Settings), only to GitLab's own API.
+    if (!empty($o['gitlab'])) {
+        $tok = function_exists('rs_secret_get') ? trim(rs_secret_get('gitlab_token')) : '';
+        if ($tok !== '' && str_starts_with($url, rs_gl_api() . '/')) $headers[] = 'PRIVATE-TOKEN: ' . $tok;
+        $headers[] = 'Accept: application/json';
+    }
     if (!empty($o['github'])) {
         $tok = trim((string)rs_setting('github_token', ''));
         if ($tok !== '' && str_starts_with($url, rs_gh_api() . '/')) $headers[] = 'Authorization: Bearer ' . $tok;
@@ -387,7 +393,9 @@ function rs_repo_ok(string $repo): bool {
 // GitHub's answer for a key ('<repo>' releases, '<repo>#info' the repo), from the cache when
 // it's younger than $maxAge, else asked again. When GitHub can't be reached the cached copy is
 // used whatever its age (stale). -> [status, body, stale, age]
-function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim): array {
+// (3.9) $via 'gitlab': asked of GitLab (its token, its name in the messages); the caller's key
+// starts with 'gl:' so the two never share a row.
+function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, string $via = 'github'): array {
     rs_cache_tables();
     $db = rs_db();
     $k = strtolower($key);
@@ -395,7 +403,8 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim): ar
     $st->execute([$k]);
     $have = $st->fetch() ?: null;
     if ($have && (int)$have['age'] < $maxAge) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => false, 'age' => (int)$have['age']];
-    $r = rs_http($url, ['github' => true, 'max' => 16 << 20, 'timeout' => 20]);
+    $gl = $via === 'gitlab';
+    $r = rs_http($url, [$gl ? 'gitlab' : 'github' => true, 'max' => 16 << 20, 'timeout' => 20]);
     if ($r['status'] === 200) {
         $j = json_decode($r['body'], true);
         if (is_array($j)) {
@@ -410,8 +419,9 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim): ar
     }
     if ($have) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
     // 403 or 429 from GitHub's API: its limit for this site (a token in Settings lifts it).
-    if ($r['status'] === 403 || $r['status'] === 429) return ['status' => 429, 'body' => '{"message":"GitHub is busy right now. Try again in a few minutes."}', 'stale' => false, 'age' => 0];
-    return ['status' => 502, 'body' => '{"message":"GitHub didn\'t answer. Try again in a moment."}', 'stale' => false, 'age' => 0];
+    $who = $gl ? 'GitLab' : 'GitHub';
+    if ($r['status'] === 403 || $r['status'] === 429) return ['status' => 429, 'body' => '{"message":"' . $who . ' is busy right now. Try again in a few minutes."}', 'stale' => false, 'age' => 0];
+    return ['status' => 502, 'body' => '{"message":"' . $who . ' didn\'t answer. Try again in a moment."}', 'stale' => false, 'age' => 0];
 }
 
 // (3.8) Asks GitHub for a repo's releases now and puts the answer in /api/gh.php's copy on disk,
@@ -464,6 +474,147 @@ function rs_gh_repo(string $repo, int $maxAge = 3600): ?array {
     if ($r['status'] !== 200) return null;
     $j = json_decode($r['body'], true);
     return is_array($j) ? $j : null;
+}
+
+// ---- (3.9) GitLab (gitlab.com), next to GitHub, for PC recomps ---------------------------------------
+// A project is "group/project" or "group/sub/project". Its releases come out in the same shape as
+// GitHub's (rs_gl_release_list), so everything that reads releases reads both. The API base can be
+// pointed elsewhere for tests (RS_GL_API in the environment).
+
+function rs_gl_api(): string {
+    $e = getenv('RS_GL_API');
+    return rtrim(is_string($e) && $e !== '' ? $e : 'https://gitlab.com/api/v4', '/');
+}
+
+// 2 to 6 parts (140 characters at most), each letters, digits, _ . - (not starting with . or -), no '..'.
+function rs_gl_path_ok(string $path): bool {
+    if ($path === '' || strlen($path) > 140 || str_contains($path, '..')) return false; // fits the 160-character repo columns with gitlab.com/ in front
+    $parts = explode('/', $path);
+    if (count($parts) < 2 || count($parts) > 6) return false;
+    foreach ($parts as $p) if (!preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/D', $p)) return false;
+    return !preg_match('/\.(git|atom)$/i', $path);
+}
+
+// '' (GitHub) or 'gitlab'.
+function rs_host_norm(?string $host): string { return strtolower(trim((string)$host)) === 'gitlab' ? 'gitlab' : ''; }
+function rs_host_name(?string $host): string { return rs_host_norm($host) === 'gitlab' ? 'GitLab' : 'GitHub'; }
+function rs_host_repo_ok(?string $host, string $repo): bool { return rs_host_norm($host) === 'gitlab' ? rs_gl_path_ok($repo) : rs_repo_ok($repo); }
+// The project's page: https://github.com/owner/name or https://gitlab.com/group/project.
+function rs_host_web(?string $host, string $repo): string { return (rs_host_norm($host) === 'gitlab' ? 'https://gitlab.com/' : 'https://github.com/') . $repo; }
+// Where its releases are listed, and where a bug goes.
+function rs_host_releases_url(?string $host, string $repo): string { return rs_host_web($host, $repo) . (rs_host_norm($host) === 'gitlab' ? '/-/releases' : '/releases'); }
+// One string for a project on either host: 'owner/name' for GitHub (as before), 'gitlab.com/group/project'
+// for GitLab. Used where one column holds both (the finder's list, the security checks).
+function rs_repo_key(?string $host, string $repo): string { return rs_host_norm($host) === 'gitlab' ? 'gitlab.com/' . $repo : $repo; }
+
+// A pasted link or path -> ['host' => ''|'gitlab', 'repo' => path], or null. GitHub keeps its owner/name
+// (anything after is dropped, as before); GitLab stops at "/-/" (its pages under a project) and ".git".
+// A bare path is GitHub's unless $bare says otherwise.
+function rs_repo_from_link(string $s, string $bare = ''): ?array {
+    $s = trim($s);
+    if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/(.+)$#i', $s, $m)) {
+        $p = preg_replace('#[?\#].*$#', '', $m[1]);
+        $p = preg_replace('#/-(/.*)?$#', '', $p);
+        $p = preg_replace('#\.git$#i', '', trim($p, '/'));
+        return rs_gl_path_ok($p) ? ['host' => 'gitlab', 'repo' => $p] : null;
+    }
+    $gh = (bool)preg_match('#^(?:https?://)?(?:www\.)?github\.com/#i', $s);
+    if (!$gh && rs_host_norm($bare) === 'gitlab') {
+        $p = preg_replace('#\.git$#i', '', trim($s, '/ '));
+        return rs_gl_path_ok($p) ? ['host' => 'gitlab', 'repo' => $p] : null;
+    }
+    $p = trim((string)preg_replace(['#^(?:https?://)?(?:www\.)?github\.com/#i', '#[?\#].*$#', '#\.git$#i'], '', $s), '/ ');
+    $p = implode('/', array_slice(explode('/', $p), 0, 2));
+    $p = preg_replace('#\.git$#i', '', $p);
+    return rs_repo_ok($p) ? ['host' => '', 'repo' => $p] : null;
+}
+
+// Is this download the project's own: on https://gitlab.com/<path>/... (or the test host)?
+function rs_gl_own_url(string $url, string $path): bool {
+    $p = parse_url($url);
+    if (!is_array($p) || empty($p['host'])) return false;
+    $host = strtolower($p['host']);
+    $test = parse_url(rs_gl_api());
+    $isTest = is_array($test) && strtolower((string)($test['host'] ?? '')) !== 'gitlab.com' && strtolower((string)($test['host'] ?? '')) === $host;
+    if (!$isTest && ($host !== 'gitlab.com' || ($p['scheme'] ?? '') !== 'https')) return false;
+    return str_starts_with(strtolower((string)($p['path'] ?? '')), '/' . strtolower($path) . '/');
+}
+
+// GitLab's /projects/:id/releases answer as GitHub's release list (what /api/gh.php gives):
+// released_at -> published_at, description -> body, _links.self -> html_url, upcoming_release ->
+// prerelease. Files are the release's links that are the project's own (assets.sources, GitLab's
+// own source archives, are never files). GitLab doesn't say a link's size: 0.
+function rs_gl_release_list(array $list, string $path): array {
+    $out = [];
+    foreach (array_slice(array_values($list), 0, 30) as $r) {
+        if (!is_array($r)) continue;
+        $assets = [];
+        foreach (is_array($r['assets']['links'] ?? null) ? $r['assets']['links'] : [] as $l) {
+            if (!is_array($l)) continue;
+            $name = trim((string)($l['name'] ?? ''));
+            $u = (string)(($l['direct_asset_url'] ?? '') ?: ($l['url'] ?? ''));
+            if ($name === '' || $u === '' || !rs_gl_own_url($u, $path)) continue;
+            $assets[] = ['name' => $name, 'size' => 0, 'browser_download_url' => $u, 'download_count' => 0];
+        }
+        $out[] = [
+            'tag_name' => (string)($r['tag_name'] ?? ''), 'name' => (string)($r['name'] ?? ''),
+            'published_at' => (string)($r['released_at'] ?? ''), 'prerelease' => (bool)($r['upcoming_release'] ?? false),
+            'draft' => false, 'body' => mb_strcut((string)($r['description'] ?? ''), 0, 20000, 'UTF-8'),
+            'html_url' => (string)($r['_links']['self'] ?? ''), 'assets' => $assets,
+        ];
+    }
+    return $out;
+}
+
+// A GitLab project's releases, newest first, in GitHub's shape. -> [status, body, stale, age]
+function rs_gl_releases(string $path, int $maxAge = 900): array {
+    if (!rs_gl_path_ok($path)) return ['status' => 400, 'body' => '{"message":"Not a GitLab project."}', 'stale' => false, 'age' => 0];
+    return rs_gh_cached('gl:' . $path, rs_gl_api() . '/projects/' . rawurlencode($path) . '/releases?per_page=30', $maxAge,
+        fn(array $list): array => rs_gl_release_list($list, $path), 'gitlab');
+}
+
+// The project: its name, description, stars, license, default branch and README's place.
+function rs_gl_project(string $path, int $maxAge = 3600): ?array {
+    if (!rs_gl_path_ok($path)) return null;
+    $r = rs_gh_cached('gl:' . $path . '#info', rs_gl_api() . '/projects/' . rawurlencode($path) . '?license=true', $maxAge, function (array $j): array {
+        $lic = is_array($j['license'] ?? null) ? (string)($j['license']['key'] ?? '') : '';
+        $spdx = ['mit' => 'MIT', 'apache-2.0' => 'Apache-2.0', 'gpl-2.0' => 'GPL-2.0', 'gpl-3.0' => 'GPL-3.0', 'agpl-3.0' => 'AGPL-3.0', 'lgpl-2.1' => 'LGPL-2.1',
+            'lgpl-3.0' => 'LGPL-3.0', 'mpl-2.0' => 'MPL-2.0', 'bsd-2-clause' => 'BSD-2-Clause', 'bsd-3-clause' => 'BSD-3-Clause', 'unlicense' => 'Unlicense',
+            'isc' => 'ISC', 'cc0-1.0' => 'CC0-1.0', 'zlib' => 'Zlib', 'bsl-1.0' => 'BSL-1.0', 'epl-2.0' => 'EPL-2.0'];
+        return [
+            'full_name' => (string)($j['path_with_namespace'] ?? ''), 'name' => (string)($j['name'] ?? ''), 'path' => (string)($j['path'] ?? ''),
+            'description' => (string)($j['description'] ?? ''), 'stars' => (int)($j['star_count'] ?? 0),
+            'topics' => array_values(array_map('strval', (array)($j['topics'] ?? ($j['tag_list'] ?? [])))),
+            'owner' => (string)($j['namespace']['full_path'] ?? ''), 'avatar' => (string)(($j['avatar_url'] ?? '') ?: ($j['namespace']['avatar_url'] ?? '')),
+            'archived' => (bool)($j['archived'] ?? false), 'fork' => !empty($j['forked_from_project']),
+            'issues' => (int)($j['open_issues_count'] ?? 0), 'license' => $lic === '' ? '' : ($spdx[strtolower($lic)] ?? strtoupper($lic)),
+            'default_branch' => (string)($j['default_branch'] ?? ''), 'readme_url' => (string)($j['readme_url'] ?? ''), 'web_url' => (string)($j['web_url'] ?? ''),
+        ];
+    }, 'gitlab');
+    if ($r['status'] !== 200) return ['_status' => $r['status']];
+    $j = json_decode($r['body'], true);
+    return is_array($j) ? $j : ['_status' => 502];
+}
+
+// Releases on either host. -> [status, body, stale, age]
+function rs_host_releases(?string $host, string $repo, int $maxAge = 900): array {
+    return rs_host_norm($host) === 'gitlab' ? rs_gl_releases($repo, $maxAge) : rs_gh_releases($repo, $maxAge);
+}
+
+// /api/gl.php's 30-minute copy on disk, and the folder it lives in.
+function rs_gl_disk_file(string $path): string { return dirname(RS_PUBLIC) . '/recompstore-private/gl/' . md5(strtolower($path)) . '.json'; }
+function rs_gl_disk_put(string $path, string $body): void {
+    $f = rs_gl_disk_file($path);
+    if (!is_dir(dirname($f))) @mkdir(dirname($f), 0755, true);
+    if (@file_put_contents($f . '.' . getmypid(), $body) !== false) @rename($f . '.' . getmypid(), $f);
+}
+// Like rs_gh_refresh_public, for a GitLab project.
+function rs_gl_refresh_public(string $path): void {
+    if (!rs_gl_path_ok($path)) return;
+    try {
+        $r = rs_gl_releases($path, 0);
+        if ($r['status'] === 200 && !$r['stale']) rs_gl_disk_put($path, $r['body']);
+    } catch (Throwable $e) { /* the 30-minute copy catches up by itself */ }
 }
 
 // ---- Reading a zip on GitHub without downloading it -------------------------------------------

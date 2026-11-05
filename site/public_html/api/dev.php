@@ -657,7 +657,7 @@ try {
         if ($open->fetch()) rs_dev_out(200, ['ok' => true, 'message' => 'You\'ve claimed it already. We\'ll look at it soon.', 'claims' => rs_dev_claim_state($acc, $apps, $pcApps)]);
         $note = mb_substr(trim((string)($in['note'] ?? '')), 0, 1000);
         // Theirs by GitHub, and not on another developer's page: straight away. Anything else, we check.
-        if (rs_dev_owns_repo($acc, (string)$app['repo']) && $owner === '') {
+        if (rs_dev_owns_repo($acc, (string)$app['repo'], (string)($app['host'] ?? '')) && $owner === '') {
             rs_dev_claim_apply($acc, $key);
             $db->prepare("INSERT INTO dev_claims (account_id, app_id, note, status, created, decided) VALUES (?, ?, ?, 'approved', NOW(), NOW())")->execute([$acc['id'], $key, $note]);
             rs_log('developers', 'claim', rs_dev_label($acc) . ' claimed ' . $key . ' (their GitHub)');

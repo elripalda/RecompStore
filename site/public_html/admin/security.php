@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$app || empty($app['pending']['tag'])) throw new RuntimeException('That update isn\'t waiting any more.');
             if ($act === 'approve') { rs_vt_release_go($app, 'approved'); rs_flash($app['name'] . ' ' . ($app['pending']['version'] ?: $app['pending']['tag']) . ' is out.', 'ok'); }
             else { rs_vt_block($app); rs_flash($app['name'] . ' stays on the version before. That release won\'t be offered.', 'ok'); }
-            rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([$app['repo'], $app['pending']['tag']]);
+            rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([rs_pc_key($app), $app['pending']['tag']]);
         } elseif ($act === 'seen') {
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? '')]);
             rs_flash('Marked as seen.', 'ok');
@@ -141,9 +141,9 @@ rs_head('Security', true, ['assets/vt.css']);
 
 <section class="card vt-check">
   <h2>Check a link</h2>
-  <p class="muted">A GitHub repo, a release page or a link to a file. You get its rundown and a VirusTotal result for each download, usually within a minute.</p>
+  <p class="muted">A GitHub repo, a GitLab project, a release page or a link to a file. You get its rundown and a VirusTotal result for each download, usually within a minute.</p>
   <form class="vt-checkform" data-vt-check>
-    <input type="url" name="url" placeholder="https://github.com/owner/repo" required autocomplete="off" spellcheck="false">
+    <input type="url" name="url" placeholder="https://github.com/owner/repo or https://gitlab.com/group/project" required autocomplete="off" spellcheck="false">
     <button class="primary">Check it</button>
   </form>
   <div class="vt-result" data-vt-result hidden></div>
@@ -183,12 +183,12 @@ rs_head('Security', true, ['assets/vt.css']);
   <div class="vt-head"><h2>Updates on hold</h2></div>
   <?php if (!$held): ?><p class="vt-empty">No updates waiting. New releases from developers who aren't verified wait here until they're checked<?= $cfg['hold'] ? ' and ' . $cfg['hold'] . ' hours have passed' : '' ?>.</p><?php else: ?>
   <div class="vt-list">
-    <?php foreach ($held as $x): $p = $x['pending']; [$rows, $v] = rs_vt_release($x['repo'], (string)$p['tag']);
+    <?php foreach ($held as $x): $p = $x['pending']; [$rows, $v] = rs_vt_release(rs_pc_key($x), (string)$p['tag']);
       $hrs = rs_vt_trusted($x) ? $cfg['hold_verified'] : $cfg['hold']; $left = max(0, (int)strtotime((string)$p['since']) + $hrs * 3600 - time()); ?>
     <div class="vt-row <?= $v ?>">
       <div class="vt-what"><strong><?= h($x['name']) ?></strong><small><?= h($x['version'] ?: '?') ?> → <?= h($p['version'] ?: $p['tag']) ?> · <?= rs_vt_trusted($x) ? 'verified developer' : 'not verified' ?></small></div>
       <div class="vt-src"><span class="vt-chip"><?= $v === 'red' ? 'Waiting for you' : ($v === 'grey' ? 'Being checked' : ($left ? 'Out in ' . ($left >= 3600 ? round($left / 3600) . ' h' : max(1, round($left / 60)) . ' min') : 'Going out')) ?></span></div>
-      <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge($x['repo'], (string)$p['tag'])) ?: '<span class="vt-badge grey"><span class="vt-dot">…</span>In line</span>' ?></div>
+      <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge(rs_pc_key($x), (string)$p['tag'])) ?: '<span class="vt-badge grey"><span class="vt-dot">…</span>In line</span>' ?></div>
       <div class="vt-acts">
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Let it out now</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="block"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button class="danger">Block</button></form>

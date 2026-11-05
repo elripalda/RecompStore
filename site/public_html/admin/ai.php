@@ -16,7 +16,8 @@ $store = 'pc';
 function rs_ai_rows(string $store): array {
     $rows = [];
     if ($store === 'pc') {
-        foreach (rs_pc_apps() as $a) $rows[] = ['key' => $a['id'], 'name' => $a['name'], 'repo' => (string)$a['repo'], 'hidden' => !empty($a['hidden']), 'soon' => !empty($a['soon']),
+        // (3.9) The AI check reads GitHub only: a GitLab recomp shows as not on GitHub.
+        foreach (rs_pc_apps() as $a) $rows[] = ['key' => $a['id'], 'name' => $a['name'], 'repo' => rs_pc_host($a) === '' ? (string)$a['repo'] : '', 'hidden' => !empty($a['hidden']), 'soon' => !empty($a['soon']),
             'ai' => (string)$a['ai'], 'ai_by' => (string)$a['ai_by'], 'ai_uses' => (array)$a['ai_uses'], 'edit' => 'pc.php?edit=' . rawurlencode($a['id']) . '#edit'];
     } else {
         foreach (rs_games() as $g) $rows[] = ['key' => $g['id'], 'name' => $g['name'], 'repo' => $g['source'] === 'github' ? (string)$g['repo'] : '', 'hidden' => !empty($g['hidden']) || !empty($g['beta']) || !empty($g['testers']), 'soon' => !empty($g['soon']),

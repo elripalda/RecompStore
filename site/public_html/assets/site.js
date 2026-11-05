@@ -970,29 +970,41 @@
   }
   // (2.8) Release notes go through the README renderer: GitHub's HTML in them (pictures, links,
   // line breaks, <details>) shows as it should, and their headings sit under the release's own.
-  const notesMd = (text, repo) => mdFull(text, `https://raw.githubusercontent.com/${repo}/HEAD/`, `https://github.com/${repo}/blob/HEAD/`)
+  // (3.9) A PC recomp's project on GitLab (entry.host 'gitlab', repo its path there) or GitHub.
+  const isGL = (host) => host === 'gitlab';
+  const repoWeb = (repo, host) => (isGL(host) ? 'https://gitlab.com/' : 'https://github.com/') + repo;
+  const repoReleases = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/releases' : '/releases');
+  const repoLatest = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/releases/permalink/latest' : '/releases/latest');
+  const repoIssues = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/issues/new' : '/issues');
+  const relApi = (repo, host) => (isGL(host) ? '/api/gl.php?repo=' : '/api/gh.php?repo=') + encodeURIComponent(repo);
+  const notesMd = (text, repo, host) => (isGL(host) ? mdFull(text, `https://gitlab.com/${repo}/-/raw/HEAD/`, `https://gitlab.com/${repo}/-/blob/HEAD/`)
+    : mdFull(text, `https://raw.githubusercontent.com/${repo}/HEAD/`, `https://github.com/${repo}/blob/HEAD/`))
     .replace(/<(\/?)h[23]\b/g, '<$1h4');
-  function loadNotes(repo, el) {
+  function loadNotes(repo, el, host) {
+    const gl = isGL(host);
     const show = (rel) => {
-      if (!rel || !rel.length) { el.innerHTML = `<p class="muted">${t('No releases on GitHub yet.')}</p>`; return; }
+      if (!rel || !rel.length) { el.innerHTML = `<p class="muted">${gl ? t('No releases on GitLab yet.') : t('No releases on GitHub yet.')}</p>`; return; }
       el.innerHTML = rel.filter((r) => !r.draft).map((r) => `
         <section class="release" dir="auto">
           <h3>${esc(r.name || r.tag_name)}</h3>
           <p class="when">${esc(new Date(r.published_at).toLocaleDateString(locale(), { year: 'numeric', month: 'long', day: 'numeric' }))}${r.prerelease ? ' · ' + t('Pre-release') : ''}${r.name && r.name !== r.tag_name ? ' · ' + esc(r.tag_name) : ''}</p>
-          <div class="rel-body">${notesMd(r.body, repo) || `<p class="muted">${t('No notes for this release.')}</p>`}</div>
+          <div class="rel-body">${notesMd(r.body, repo, host) || `<p class="muted">${t('No notes for this release.')}</p>`}</div>
         </section>`).join('');
       // (2.6) In the reader's language, as they come.
       const shown = rel.filter((r) => !r.draft);
       translateWritten(shown.map((r) => r.body || ''), true).then((tx) => {
         const bodies = el.querySelectorAll('.rel-body');
-        tx.forEach((x, i) => { if (x && bodies[i]) showTranslated(bodies[i], notesMd(x, repo), notesMd(shown[i].body, repo)); });
+        tx.forEach((x, i) => { if (x && bodies[i]) showTranslated(bodies[i], notesMd(x, repo, host), notesMd(shown[i].body, repo, host)); });
       });
     };
-    if (notesCache[repo]) { show(notesCache[repo]); return; }
-    fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, { headers: { Accept: 'application/vnd.github+json' } })
+    const ck = (gl ? 'gl:' : '') + repo;
+    if (notesCache[ck]) { show(notesCache[ck]); return; }
+    (gl ? fetch(relApi(repo, host)) : fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, { headers: { Accept: 'application/vnd.github+json' } }))
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((rel) => { notesCache[repo] = rel; show(rel); })
-      .catch(() => { el.innerHTML = `<p class="muted">${tf("GitHub's notes couldn't be loaded. {link}.", { link: `<a href="https://github.com/${esc(repo)}/releases" target="_blank" rel="noopener">${t('See them on GitHub')}</a>` })}</p>`; });
+      .then((rel) => { notesCache[ck] = rel; show(rel); })
+      .catch(() => { el.innerHTML = `<p class="muted">${gl
+        ? tf("GitLab's notes couldn't be loaded. {link}.", { link: `<a href="${esc(repoReleases(repo, host))}" target="_blank" rel="noopener">${t('See them on GitLab')}</a>` })
+        : tf("GitHub's notes couldn't be loaded. {link}.", { link: `<a href="https://github.com/${esc(repo)}/releases" target="_blank" rel="noopener">${t('See them on GitHub')}</a>` })}</p>`; });
   }
 
   // A zip name with * (any run of characters) or ? (any one), as the store matches it.
@@ -1150,7 +1162,7 @@
             <label>${t('Name')}<input name="name" maxlength="120" required placeholder="${t('What players will see')}"></label>
             <label>${t('Made by')}<input name="author" maxlength="80" required autocomplete="nickname" placeholder="${t('Your name or handle')}"></label>
             <label>${t('How can we reach you?')}<input name="contact" maxlength="200" required placeholder="${t('Email or Discord name')}"></label>
-            <label>${t('GitHub repository')}<input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
+            <label><span data-ps5-only>${t('GitHub repository')}</span><span data-pc-only hidden>${t('GitHub or GitLab project')}</span><input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
             <label data-ps5-only>${t('Release file')} <span class="opt">${t('optional')}</span><input name="asset" maxlength="160" placeholder="MyApp-*.zip" spellcheck="false"><small>${t('The .zip or .7z on your GitHub release the store should install. Put * for the part that changes with each version.')}</small></label>
             <label>${t('Version')} <span class="opt" data-ps5-only>${t('optional')}</span><input name="version" maxlength="40" placeholder="1.0.0"></label>
             <label data-ps5-only>${t('Title ID')} <span class="opt">${t('optional')}</span><input name="title_id" maxlength="9" placeholder="PPSA12345" spellcheck="false" class="mono"><small>${tf('Already have one? Check it doesn\'t clash on the {link}. No? We\'ll pick one with you.', { link: `<a href="/ids" target="_blank">${t('Title IDs page')}</a>` })}</small><small class="tid-check" data-tid-check role="status"></small></label>
@@ -1245,7 +1257,7 @@
       pick('platform', d.platform === 'pc' ? 'pc' : 'ps5'); showPlat();
       if (d.category) pick('kind', d.category);
       ['name', 'author', 'contact', 'version', 'asset', 'title_id', 'blurb', 'description', 'needs', 'credits', 'notes', 'disc', 'origin', 'setup_steps', 'ai_note'].forEach((k) => set(k, d[k]));
-      set('repo', d.repo ? 'https://github.com/' + d.repo : '');
+      set('repo', d.repo ? repoWeb(d.repo, d.host) : '');
       (d.links || []).forEach((u, i) => set('link' + (i + 1), u));
       Object.entries(d.assets || {}).forEach(([k, v]) => { const c = form.querySelector(`[name="sys_${k}"]`); if (c) c.checked = true; set('asset_' + k, v); });
       ['rl_quick', 'rl_settings', 'rl_future', 'ai'].forEach((k) => d[k] && pick(k, d[k]));
@@ -1295,7 +1307,7 @@
     const lookup = (repo) => {
       if (!dev || !repo) return;
       // (3.6) A PC recomp: its release is read for the systems it runs on, not for a PS5 build.
-      if (platNow() === 'pc') { form.repo.value = 'https://github.com/' + String(repo).replace(/^https?:\/\/(www\.)?github\.com\//i, ''); readRelease(); return; }
+      if (platNow() === 'pc') { if (!/gitlab\.com\//i.test(repo)) form.repo.value = 'https://github.com/' + String(repo).replace(/^https?:\/\/(www\.)?github\.com\//i, ''); readRelease(); return; }
       const st = repoBox.querySelector('.status') || status;
       st.textContent = t('Reading its latest release…'); st.className = 'status';
       devGet('lookup', '&repo=' + encodeURIComponent(repo)).then((j) => {
@@ -1375,6 +1387,18 @@
     };
     const globRe = (g) => new RegExp('^' + String(g).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
     let relAssets = [], relTag = '', relRepo = '';
+    // (3.9) A pasted link -> {host: '' | 'gitlab', repo}, or null. GitLab: group/project or group/sub/project.
+    const parseRepo = (v) => {
+      v = String(v || '').trim().replace(/[?#].*$/, '');
+      const gm = v.match(/^(?:https?:\/\/)?(?:www\.)?gitlab\.com\/(.+)$/i);
+      if (gm) {
+        const p = gm[1].replace(/\/-(\/.*)?$/, '').replace(/\/+$/, '').replace(/\.git$/i, '');
+        const parts = p.split('/');
+        return parts.length >= 2 && parts.length <= 6 && !p.includes('..') && parts.every((x) => /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/.test(x)) ? { host: 'gitlab', repo: p } : null;
+      }
+      const p = v.replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
+      return /^[\w.-]+\/[\w.-]+$/.test(p) ? { host: '', repo: p } : null;
+    };
     const platCheck = () => {
       ['win', 'mac', 'linux'].forEach((k) => {
         const on = form['sys_' + k].checked, inp = form['asset_' + k], out = form.querySelector(`[data-plat-check="${k}"]`);
@@ -1392,15 +1416,17 @@
       form.querySelector('[data-setup-steps]').hidden = !form.querySelector('input[name="rl_quick"][value="setup"]').checked;
     };
     const readRelease = () => {
-      const repo = String(form.repo.value || '').trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
-      if (platNow() !== 'pc' || !/^[\w.-]+\/[\w.-]+$/.test(repo) || repo === relRepo) return;
-      relRepo = repo;
+      const pr = platNow() === 'pc' ? parseRepo(form.repo.value) : null;
+      if (!pr) return;
+      const repo = pr.repo, host = pr.host, key = (host ? host + ':' : '') + repo;
+      if (key === relRepo) return;
+      relRepo = key;
       relBox.textContent = t('Reading its latest release…'); relBox.className = 'sub-rel';
-      Promise.all([fetch('/api/gh.php?repo=' + encodeURIComponent(repo)).then((r) => r.json()).catch(() => null), pcLoad().catch(() => null)]).then(([rels, cat]) => {
-        if (relRepo !== repo) return;
-        const listed = cat && (cat.all || cat.apps || []).find((a) => String(a.repo).toLowerCase() === repo.toLowerCase());
+      Promise.all([fetch(relApi(repo, host)).then((r) => r.json()).catch(() => null), pcLoad().catch(() => null)]).then(([rels, cat]) => {
+        if (relRepo !== key) return;
+        const listed = cat && (cat.all || cat.apps || []).find((a) => String(a.repo).toLowerCase() === repo.toLowerCase() && (a.host || '') === host);
         const rel = Array.isArray(rels) ? (rels.find((r) => !r.draft && !r.prerelease) || rels.find((r) => !r.draft)) : null;
-        if (!rel) { relAssets = []; relBox.textContent = Array.isArray(rels) ? t('No releases on that repo yet. Publish one on GitHub with your builds, then come back.') : t('We couldn\'t read that repo. Check the link.'); relBox.className = 'sub-rel bad'; platCheck(); return; }
+        if (!rel) { relAssets = []; relBox.textContent = Array.isArray(rels) ? (isGL(host) ? t('No releases on that project yet. Publish one on GitLab with your builds, then come back.') : t('No releases on that repo yet. Publish one on GitHub with your builds, then come back.')) : t('We couldn\'t read that repo. Check the link.'); relBox.className = 'sub-rel bad'; platCheck(); return; }
         relAssets = (rel.assets || []).filter((a) => !NOT_GAME.test(a.name));
         relTag = rel.tag_name || rel.name || '';
         if (!form.version.value.trim()) form.version.value = relTag.replace(/^v/i, '');
@@ -2611,12 +2637,14 @@
       [t('Runs on'), (a.systems || []).length ? `<span class="pc-sys">${a.systems.map((x) => `<span>${osIcon(x)}${SYS_NAMES[x]}</span>`).join('')}</span>` : ''],
       [t('Last updated'), when ? `${esc(ago(when.toISOString()))}<small>${esc(when.toLocaleDateString(locale(), { dateStyle: 'medium' }))}</small>` : ''],
       [t('Version'), esc(a.version || '')], [t('Download'), esc(a.size || '')],
-      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [t('Stars on GitHub'), a.stars ? esc(fmtNum(a.stars)) : ''],
+      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [isGL(a.host) ? t('Stars on GitLab') : t('Stars on GitHub'), a.stars ? esc(fmtNum(a.stars)) : ''],
       [t('Releases'), a.releases ? esc(fmtNum(a.releases)) : ''], [t('First release'), first ? esc(first.toLocaleDateString(locale(), { dateStyle: 'medium' })) : ''],
       [t('Open issues'), a.repo ? esc(fmtNum(a.issues || 0)) : ''], [t('License'), esc(a.license || '')]].filter(([, v]) => v);
     const tags = (a.tags || []).map((x) => `<a class="pc-tagpill" href="/pc/all?tag=${encodeURIComponent(x)}" title="${esc(tf('All recomps with {tag}', { tag: x }))}">${esc(x)}</a>`).join('');
     const genre = a.genre && a.genre !== 'other' ? `<a class="pc-pill plain" href="/pc/all?kind=${esc(a.genre)}">${esc(t(PC_GENRES[a.genre]))}</a>` : '';
-    const gh = `https://github.com/${esc(a.repo)}`;
+    // (3.9) Its project page, releases and issues: on GitLab when its entry says so.
+    const gl = isGL(a.host);
+    const gh = esc(repoWeb(a.repo, a.host)), ghLatest = esc(repoLatest(a.repo, a.host)), ghRels = esc(repoReleases(a.repo, a.host)), ghIssues = esc(repoIssues(a.repo, a.host));
     const feats = (a.features || []).length ? `<section class="glass pc-side-card pc-feats"><h2>${t("What's in it")}</h2><ul>${a.features.map((f) => `<li dir="auto">${featIcon(f)}<span>${esc(f)}</span></li>`).join('')}</ul></section>` : '';
     const ab = a.about || null;
     const abYear = ab && ab.released ? new Date(ab.released + 'T12:00:00Z') : null;
@@ -2669,7 +2697,7 @@
             </nav>
             <div class="pc-tab-wrap">
               <section class="pc-tab glass pc-readme" data-panel="readme"><p class="muted">${t('Loading…')}</p></section>
-              <section class="pc-tab glass notes pc-releases" data-panel="releases" hidden><p class="muted">${t('Loading the notes from GitHub…')}</p></section>
+              <section class="pc-tab glass notes pc-releases" data-panel="releases" hidden><p class="muted">${gl ? t('Loading the notes from GitLab…') : t('Loading the notes from GitHub…')}</p></section>
               <section class="pc-tab" data-panel="feedback" hidden></section>
             </div>
             ${a.credits ? `<p class="credits" dir="auto">${esc(a.credits)}</p>` : ''}
@@ -2681,18 +2709,18 @@
           <aside class="pc-side">
             <div class="glass panel">
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
-              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><a class="btn primary" href="${gh}" target="_blank" rel="noopener">${t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>${systems.map((sx, i) => `<a class="btn${i === 0 ? ' primary' : ''}" href="${gh}/releases/latest" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn primary" href="${gh}/releases/latest" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>`}
+              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><a class="btn primary" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>${systems.map((sx, i) => `<a class="btn${i === 0 ? ' primary' : ''}" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn primary" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>`}
               <div data-acct-save></div>
               <div data-rl-send></div>
               <div class="pc-links">
-                <a href="${gh}" target="_blank" rel="noopener">${t('View on GitHub')}<span aria-hidden="true">↗</span></a>
-                <a href="${gh}/releases" target="_blank" rel="noopener">${t('All releases')}<span aria-hidden="true">↗</span></a>
-                <a href="${gh}/issues" target="_blank" rel="noopener">${t('Report an issue')}<span aria-hidden="true">↗</span></a>
+                <a href="${gh}" target="_blank" rel="noopener">${gl ? t('View on GitLab') : t('View on GitHub')}<span aria-hidden="true">↗</span></a>
+                <a href="${ghRels}" target="_blank" rel="noopener">${t('All releases')}<span aria-hidden="true">↗</span></a>
+                <a href="${ghIssues}" target="_blank" rel="noopener">${t('Report an issue')}<span aria-hidden="true">↗</span></a>
               </div>
-              ${a.setup_required ? `<div class="pc-setup"><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</strong><p>${t('This one needs a few things on your PC before it plays. Do these once, in order:')}</p>${(a.setup_steps || []).length ? `<ol>${a.setup_steps.map((x) => `<li dir="auto">${esc(x)}</li>`).join('')}</ol>` : ''}<p class="pc-setup-l">${t('In RecompLauncher it shows a yellow Set Up button until you\'re done.')}</p><a href="${gh}#readme" target="_blank" rel="noopener">${t('Full steps in the README')}<span aria-hidden="true">↗</span></a></div>` : ''}
+              ${a.setup_required ? `<div class="pc-setup"><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</strong><p>${t('This one needs a few things on your PC before it plays. Do these once, in order:')}</p>${(a.setup_steps || []).length ? `<ol>${a.setup_steps.map((x) => `<li dir="auto">${esc(x)}</li>`).join('')}</ol>` : ''}<p class="pc-setup-l">${t('In RecompLauncher it shows a yellow Set Up button until you\'re done.')}</p><a href="${gl ? gh : gh + '#readme'}" target="_blank" rel="noopener">${t('Full steps in the README')}<span aria-hidden="true">↗</span></a></div>` : ''}
               ${a.needs ? `<p class="note needs"><strong>${t('You bring')}:</strong> ${esc(a.needs)}</p>` : ''}
               <dl class="pc-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd dir="auto">${v}</dd></div>`).join('')}</dl>
-              <p class="note">${t('Each download comes straight from the developer\'s own GitHub release.')}</p>
+              <p class="note">${gl ? t('Each download comes straight from the developer\'s own GitLab release.') : t('Each download comes straight from the developer\'s own GitHub release.')}</p>
             </div>
             ${feats}
             ${gameCard}
@@ -2721,10 +2749,10 @@
       const panel = view.querySelector(`[data-panel="${name}"]`);
       if (name === 'readme') {
         fetch('/api/pc.php?a=readme&id=' + encodeURIComponent(a.id)).then((r) => r.json()).then((j) => {
-          if (!j.ok) { panel.innerHTML = `<p class="muted">${esc(j.error || t('No README on its GitHub.'))}</p>`; return; }
-          panel.innerHTML = `<div class="md-body" dir="auto">${mdFull(j.md, j.raw, j.blob)}</div><a class="src" href="${esc(j.url || gh)}" target="_blank" rel="noopener">${t('Read it on GitHub')} ↗</a>`;
-        }).catch(() => { panel.innerHTML = `<p class="muted">${t('GitHub didn\'t answer. Try again in a moment.')}</p>`; });
-      } else if (name === 'releases') loadNotes(a.repo, panel);
+          if (!j.ok) { panel.innerHTML = `<p class="muted">${esc(j.error || (gl ? t('No README on its GitLab.') : t('No README on its GitHub.')))}</p>`; return; }
+          panel.innerHTML = `<div class="md-body" dir="auto">${mdFull(j.md, j.raw, j.blob)}</div><a class="src" href="${esc(j.url || repoWeb(a.repo, a.host))}" target="_blank" rel="noopener">${gl ? t('Read it on GitLab') : t('Read it on GitHub')} ↗</a>`;
+        }).catch(() => { panel.innerHTML = `<p class="muted">${gl ? t('GitLab didn\'t answer. Try again in a moment.') : t('GitHub didn\'t answer. Try again in a moment.')}</p>`; });
+      } else if (name === 'releases') loadNotes(a.repo, panel, a.host);
       else if (name === 'feedback') pcFeedback(a, panel);
     };
     // (2.9) A long tab (a big README, many updates) folds to where the side column ends, with Show more,
@@ -2784,9 +2812,9 @@
       const vs = view.querySelector('[data-versions]');
       if (vs) ps5CountsLoad().then(() => { const v2 = view.querySelector('[data-versions]'); if (v2) v2.outerHTML = versionsHTML('pc', a.id); });
     });
-    // The real files from its latest release, straight from GitHub (through this site).
+    // The real files from its latest release, straight from GitHub or GitLab (through this site).
     const pat = (p) => new RegExp('^' + String(p).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
-    fetch('/api/gh.php?repo=' + encodeURIComponent(a.repo)).then((r) => r.json()).then((rels) => {
+    fetch(relApi(a.repo, a.host)).then((r) => r.json()).then((rels) => {
       const rel = (Array.isArray(rels) ? rels : []).find((r) => !r.draft && !r.prerelease) || (Array.isArray(rels) ? rels[0] : null);
       if (!rel) return;
       view.querySelectorAll('[data-sys]').forEach((b) => {

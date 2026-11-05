@@ -385,7 +385,8 @@ function rs_dev_pc_apps(array $acc): array {
     $owners = rs_dev_owners($acc);
     $out = [];
     foreach (rs_pc_apps(false) as $a) {
-        $owner = strtolower((string)strtok((string)$a['repo'], '/'));
+        // (3.9) A GitLab project's owner isn't a GitHub login: those are theirs only through the page (dev).
+        $owner = rs_pc_host($a) === 'gitlab' ? '' : strtolower((string)strtok((string)$a['repo'], '/'));
         if (($owner !== '' && in_array($owner, $owners, true)) || ((string)$acc['slug'] !== '' && $a['dev'] === $acc['slug'])) $out[] = $a;
     }
     return $out;
@@ -818,7 +819,9 @@ function rs_dev_app_owner(string $key, ?array $app = null): string {
 }
 
 // Is it theirs by GitHub (the repo's owner is them or one of their organizations)?
-function rs_dev_owns_repo(array $acc, string $repo): bool {
+// (3.9) Never for a GitLab project ($host 'gitlab'): there's no GitLab sign-in yet.
+function rs_dev_owns_repo(array $acc, string $repo, string $host = ''): bool {
+    if (rs_host_norm($host) === 'gitlab') return false;
     $owner = strtolower((string)strtok($repo, '/'));
     return $owner !== '' && in_array($owner, rs_dev_owners($acc), true);
 }
@@ -844,7 +847,7 @@ function rs_dev_claim_state(array $acc, array $apps, array $pcApps): array {
     $mine = fn(array $a, bool $pc) => $slug !== '' && ($pc ? (string)($a['dev'] ?? '') : rs_dev_for($a, $devs)) === $slug;
     $out = [];
     foreach ($pcApps as $a) if (!$mine($a, true) && empty($a['hidden'])) $out[] = ['key' => 'pc:' . $a['id'], 'name' => $a['name'], 'repo' => $a['repo'], 'pc' => true,
-        'pic' => $a['cover'] !== '' ? rs_abs($a['cover']) : ''];
+        'pic' => $a['cover'] !== '' ? rs_abs($a['cover']) : ''] + (rs_pc_host($a) === 'gitlab' ? ['host' => 'gitlab'] : []); // (3.9)
     foreach ($apps as $g) if (!$mine($g, false) && !$g['hidden']) $out[] = ['key' => $g['id'], 'name' => $g['name'], 'repo' => $g['repo'], 'pc' => false,
         'pic' => $g['icon'] !== '' ? rs_abs($g['icon']) : ''];
     $st = rs_db()->prepare('SELECT id, app_id, status, created FROM dev_claims WHERE account_id = ? ORDER BY id DESC LIMIT 40');
@@ -865,7 +868,7 @@ function rs_dev_claim_search(array $acc, string $q): array {
     $slug = (string)$acc['slug'];
     $hit = fn(array $a) => str_contains(mb_strtolower((string)$a['name'] . ' ' . (string)($a['game'] ?? '') . ' ' . (string)$a['repo']), $q);
     $out = [];
-    foreach (rs_pc_apps(false) as $a) if ($hit($a) && (string)($a['dev'] ?? '') !== $slug) $out[] = ['key' => 'pc:' . $a['id'], 'name' => $a['name'], 'repo' => $a['repo'], 'pc' => true, 'pic' => $a['cover'] !== '' ? rs_abs($a['cover']) : ''];
+    foreach (rs_pc_apps(false) as $a) if ($hit($a) && (string)($a['dev'] ?? '') !== $slug) $out[] = ['key' => 'pc:' . $a['id'], 'name' => $a['name'], 'repo' => $a['repo'], 'pc' => true, 'pic' => $a['cover'] !== '' ? rs_abs($a['cover']) : ''] + (rs_pc_host($a) === 'gitlab' ? ['host' => 'gitlab'] : []);
     foreach (rs_games(false) as $g) if ($hit($g) && (string)($g['dev'] ?? '') !== $slug) $out[] = ['key' => $g['id'], 'name' => $g['name'], 'repo' => $g['repo'], 'pc' => false, 'pic' => $g['icon'] !== '' ? rs_abs($g['icon']) : ''];
     return array_slice($out, 0, 20);
 }

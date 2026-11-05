@@ -74,8 +74,13 @@ function rs_pc_defaults(): array {
         'icon' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'tags' => '', 'links' => [],
         'featured' => false, 'hidden' => true, 'soon' => false, 'added' => '', 'live_at' => '', 'checked' => '', 'features' => '', 'features_read' => false, 'license' => '',
         'genre' => '', 'media' => '', 'issues' => 0, 'releases' => 0, 'first' => '',
-        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => ''];
+        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => '', 'host' => ''];
 }
+
+// (3.9) Where a recomp's project lives: '' GitHub, 'gitlab' GitLab. Its key ('owner/name', or
+// 'gitlab.com/group/project') is what the finder and the security checks file it under.
+function rs_pc_host(array $a): string { return rs_host_norm((string)($a['host'] ?? '')); }
+function rs_pc_key(array $a): string { return rs_repo_key(rs_pc_host($a), (string)($a['repo'] ?? '')); }
 
 // (3.8) Read once per request: pages that ask for the list for every row (submissions, the Inbox)
 // don't decode all 600+ recomps each time. Saving one clears the copy.
@@ -172,8 +177,11 @@ function rs_pc_assets(array $assets, array &$flags): array {
     return $out;
 }
 
-// One repo read from GitHub: what the finder and Add need. -> [ok, ...] or [ok => false, why]
-function rs_pc_read_repo(string $repo): array {
+// One repo read from GitHub (or, (3.9), a GitLab project): what the finder and Add need.
+// -> [ok, ...] or [ok => false, why]
+function rs_pc_read_repo(string $repo, string $host = ''): array {
+    $host = rs_host_norm($host);
+    if ($host === 'gitlab') return rs_pc_read_gitlab($repo);
     if (!rs_repo_ok($repo)) return ['ok' => false, 'why' => 'Not a GitHub repo.'];
     if (in_array(strtolower($repo), RS_PC_TOOLKITS, true)) return ['ok' => false, 'why' => 'A recompiler, not a game.'];
     $info = rs_gh_cached($repo . '#pcinfo', rs_gh_api() . '/repos/' . $repo, 3600, fn(array $j): array => [
@@ -186,7 +194,23 @@ function rs_pc_read_repo(string $repo): array {
     if ($info['status'] === 404) return ['ok' => false, 'why' => 'That repo doesn\'t exist, or it\'s private.'];
     if ($info['status'] !== 200) return ['ok' => false, 'why' => 'GitHub didn\'t answer. Try again later.'];
     $i = json_decode((string)$info['body'], true) ?: [];
-    $rel = rs_gh_releases($repo, 3600);
+    return rs_pc_read_releases($repo, '', $i);
+}
+
+// (3.9) A GitLab project, read the same way: its facts from /projects/:id, its releases in GitHub's shape.
+function rs_pc_read_gitlab(string $repo): array {
+    if (!rs_gl_path_ok($repo)) return ['ok' => false, 'why' => 'Not a GitLab project.'];
+    $i = rs_gl_project($repo, 3600);
+    $st = (int)($i['_status'] ?? 200);
+    if ($st === 404) return ['ok' => false, 'why' => 'That GitLab project doesn\'t exist, or it\'s private.'];
+    if ($st !== 200 || !$i) return ['ok' => false, 'why' => 'GitLab didn\'t answer. Try again later.'];
+    if ((string)$i['full_name'] === '') $i['full_name'] = $repo;
+    return rs_pc_read_releases((string)$i['full_name'], 'gitlab', $i);
+}
+
+// What both hosts share: the newest release, its files per system, the numbers.
+function rs_pc_read_releases(string $repo, string $host, array $i): array {
+    $rel = rs_host_releases($host, $repo, 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     $latest = null;
     foreach ($list as $r) if (empty($r['draft']) && empty($r['prerelease'])) { $latest = $r; break; }
@@ -207,7 +231,8 @@ function rs_pc_read_repo(string $repo): array {
         'pattern' => [
             'win' => $assets['win'] !== '' && $latest ? rs_asset_pattern($assets['win'], (string)$latest['tag_name']) : '',
             'linux' => $assets['linux'] !== '' && $latest ? rs_asset_pattern($assets['linux'], (string)$latest['tag_name']) : '',
-            'mac' => $assets['mac'] !== '' && $latest ? rs_asset_pattern($assets['mac'], (string)$latest['tag_name']) : '']];
+            'mac' => $assets['mac'] !== '' && $latest ? rs_asset_pattern($assets['mac'], (string)$latest['tag_name']) : '']]
+        + ($host === 'gitlab' ? ['host' => 'gitlab'] : []);
 }
 
 // ---- The finder -------------------------------------------------------------------------------
@@ -221,7 +246,7 @@ function rs_pc_find(int $budget = 25): array {
     $have = [];
     foreach ($db->query('SELECT repo, state, UNIX_TIMESTAMP(checked) t FROM pc_found')->fetchAll() as $r) $have[strtolower((string)$r['repo'])] = [(string)$r['state'], (int)$r['t']];
     $listed = [];
-    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') $listed[strtolower($a['repo'])] = true;
+    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') $listed[strtolower(rs_pc_key($a))] = true;
     // PS5 ports aren't PC recomps.
     $ps5 = [];
     foreach (rs_games(true) as $g) if ((string)$g['repo'] !== '') $ps5[strtolower((string)$g['repo'])] = true;
@@ -252,16 +277,18 @@ function rs_pc_find(int $budget = 25): array {
 }
 
 // Looks a repo up by hand (the admin's box): it lands in the found list either way.
+// (3.9) A gitlab.com link is read from GitLab; it's filed as gitlab.com/<project>.
 function rs_pc_find_one(string $repo): array {
     rs_pc_tables();
-    $repo = trim((string)preg_replace(['#^https?://(www\.)?github\.com/#i', '#\.git$#i'], '', $repo), '/ ');
-    $repo = implode('/', array_slice(explode('/', $repo), 0, 2));
-    $r = rs_pc_read_repo($repo);
+    $l = rs_repo_from_link($repo);
+    if (!$l) return ['ok' => false, 'why' => 'Paste a GitHub repo or a GitLab project, like github.com/owner/name or gitlab.com/group/project.'];
+    $r = rs_pc_read_repo($l['repo'], $l['host']);
     if (!$r['ok']) return $r;
+    $key = rs_repo_key($l['host'], (string)$r['repo']);
     $listed = false;
-    foreach (rs_pc_apps() as $a) if (strcasecmp($a['repo'], $r['repo']) === 0) $listed = true;
+    foreach (rs_pc_apps() as $a) if (strcasecmp(rs_pc_key($a), $key) === 0) $listed = true;
     rs_db()->prepare('INSERT INTO pc_found (repo, data, found, checked, state) VALUES (?, ?, NOW(), NOW(), ?) ON DUPLICATE KEY UPDATE data = VALUES(data), checked = NOW(), state = VALUES(state)')
-        ->execute([$r['repo'], json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $listed ? 'added' : 'new']);
+        ->execute([$key, json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $listed ? 'added' : 'new']);
     return $r;
 }
 
@@ -270,7 +297,15 @@ function rs_pc_found(string $state = 'new'): array {
     $st = rs_db()->prepare('SELECT repo, data, found, state FROM pc_found WHERE state = ? ORDER BY found DESC');
     $st->execute([$state]);
     $out = [];
-    foreach ($st->fetchAll() as $r) { $d = json_decode((string)$r['data'], true) ?: []; $d['repo'] = (string)$r['repo']; $d['found_at'] = (string)$r['found']; $out[] = $d; }
+    foreach ($st->fetchAll() as $r) {
+        $d = json_decode((string)$r['data'], true) ?: [];
+        // (3.9) key: the row's own (gitlab.com/<project> for GitLab); repo: the project's path.
+        $d['key'] = (string)$r['repo'];
+        $d['host'] = rs_host_norm((string)($d['host'] ?? ''));
+        $d['repo'] = $d['host'] === 'gitlab' && (string)($d['repo'] ?? '') !== '' ? (string)$d['repo'] : (string)$r['repo'];
+        $d['found_at'] = (string)$r['found'];
+        $out[] = $d;
+    }
     usort($out, fn($a, $b) => ($b['stars'] ?? 0) <=> ($a['stars'] ?? 0));
     return $out;
 }
@@ -372,11 +407,16 @@ function rs_pc_media_file(string $tmp, string $id): array {
 
 // A found recomp, added as a hidden PC app (you look it over, then show it): its GitHub facts, and
 // its art from SteamGridDB when there's a key (else the developer's GitHub picture as its icon).
+// (3.9) $repo: owner/name, a GitHub link, or a GitLab project (gitlab.com/group/project, with or without https://).
 function rs_pc_add(string $repo): array {
+    $l = rs_repo_from_link($repo);
+    $want = $l ? rs_repo_key($l['host'], $l['repo']) : trim($repo);
     $f = null;
-    foreach (array_merge(rs_pc_found('new'), rs_pc_found('skip')) as $x) if (strcasecmp($x['repo'], $repo) === 0) $f = $x;
+    foreach (array_merge(rs_pc_found('new'), rs_pc_found('skip')) as $x) if (strcasecmp($x['key'], $want) === 0) $f = $x;
     if (!$f) $f = rs_pc_find_one($repo);
     if (empty($f['ok']) && !isset($f['repo'])) throw new RuntimeException($f['why'] ?? 'That repo couldn\'t be read.');
+    if (empty($f['repo'])) throw new RuntimeException($f['why'] ?? 'That repo couldn\'t be read.');
+    $host = rs_host_norm((string)($f['host'] ?? ''));
     $id = rs_pc_slug((string)$f['name']);
     $taken = array_column(rs_pc_apps(), 'id');
     for ($n = 2; in_array($id, $taken, true); ++$n) $id = rs_pc_slug((string)$f['name']) . '-' . $n;
@@ -386,6 +426,7 @@ function rs_pc_add(string $repo): array {
         'version' => (string)$f['version'], 'released' => (string)$f['released'], 'size' => $f['size'] ? rs_human_size((int)$f['size']) : '',
         'downloads' => (int)$f['downloads'], 'stars' => (int)$f['stars'], 'blurb' => mb_substr((string)$f['description'], 0, 160),
         'author' => (string)$f['owner'], 'needs' => 'Your own copy of ' . ($f['game'] ?: 'the game'), 'hidden' => true, 'added' => gmdate('Y-m-d'),
+        'host' => $host,
     ]);
     if (rs_sgdb_key() !== '' && $a['game'] !== '') {
         $art = rs_sgdb_art($a['game'], rs_pc_art_used($id));
@@ -393,19 +434,21 @@ function rs_pc_add(string $repo): array {
         foreach (['cover', 'hero', 'logo', 'icon'] as $k) if ($art[$k] !== '' && ($m = rs_pc_media($art[$k], $k, $id))) { $a = array_merge($a, $m); $a[$k . '_src'] = $art[$k]; }
     }
     if ($a['icon'] === '' && preg_match('#^https://avatars\.githubusercontent\.com/#', (string)$f['avatar'])) $a = array_merge($a, rs_pc_media((string)$f['avatar'] . '&s=512', 'icon', $id));
+    elseif ($a['icon'] === '' && $host === 'gitlab' && preg_match('#^https://gitlab\.com/uploads/#', (string)$f['avatar'])) $a = array_merge($a, rs_pc_media((string)$f['avatar'], 'icon', $id));
     unset($a['hero_web']);
     $a['license'] = (string)($f['license'] ?? '');
     $a = rs_pc_fill_features($a);
-    $a = rs_ai_on_add($a, $a['repo']); // (2.9)
+    if ($host === '') $a = rs_ai_on_add($a, $a['repo']); // (2.9) (3.9) the AI check reads GitHub only
     rs_pc_save($a);
-    rs_db()->prepare("UPDATE pc_found SET state = 'added' WHERE repo = ?")->execute([$f['repo']]);
+    rs_db()->prepare("UPDATE pc_found SET state = 'added' WHERE repo = ?")->execute([rs_pc_key($a)]);
     return $a;
 }
 
 // ---- README and key features (2.8) ------------------------------------------------------------
 
 // A repo's README as Markdown (cached a day), and where its relative pictures live.
-function rs_pc_readme(string $repo): array {
+function rs_pc_readme(string $repo, string $host = ''): array {
+    if (rs_host_norm($host) === 'gitlab') return rs_pc_readme_gitlab($repo);
     if (!rs_repo_ok($repo)) return ['status' => 400, 'md' => ''];
     $r = rs_gh_cached($repo . '#readme', rs_gh_api() . '/repos/' . $repo . '/readme', 86400, function (array $j): array {
         $md = (string)base64_decode((string)($j['content'] ?? ''), false);
@@ -417,6 +460,39 @@ function rs_pc_readme(string $repo): array {
     return ['status' => $r['status'], 'md' => (string)($j['md'] ?? ''), 'url' => (string)($j['url'] ?? ''),
         'raw' => 'https://raw.githubusercontent.com/' . $repo . '/HEAD/' . ($dir !== '' ? $dir . '/' : ''),
         'blob' => 'https://github.com/' . $repo . '/blob/HEAD/' . ($dir !== '' ? $dir . '/' : '')];
+}
+
+// (3.9) A GitLab project's README: the file its project page names (README.md when it names none),
+// on its default branch, from /projects/:id/repository/files/<file>?ref=<branch> (cached a day).
+function rs_pc_readme_gitlab(string $repo): array {
+    if (!rs_gl_path_ok($repo)) return ['status' => 400, 'md' => ''];
+    $p = rs_gl_project($repo, 86400);
+    $st = (int)($p['_status'] ?? 200);
+    if ($st !== 200 || !$p) return ['status' => $st === 404 ? 404 : 503, 'md' => ''];
+    $branch = (string)$p['default_branch'];
+    if ($branch === '') return ['status' => 404, 'md' => '']; // an empty project
+    $web = 'https://gitlab.com/' . $repo;
+    $file = 'README.md';
+    $ru = (string)$p['readme_url'];
+    if ($ru === '' && (string)$p['web_url'] !== '') return ['status' => 404, 'md' => ''];
+    $pre = '/-/blob/' . $branch . '/';
+    if (($at = strpos($ru, $pre)) !== false) {
+        $f = rawurldecode(substr($ru, $at + strlen($pre)));
+        if ($f !== '' && strlen($f) < 300 && !str_contains($f, '..') && preg_match('#^[\w./ -]+$#u', $f)) $file = $f;
+    }
+    $r = rs_gh_cached('gl:' . $repo . '#readme', rs_gl_api() . '/projects/' . rawurlencode($repo) . '/repository/files/' . rawurlencode($file) . '?ref=' . rawurlencode($branch), 86400,
+        function (array $j) use ($file): array {
+            $md = (string)base64_decode((string)($j['content'] ?? ''), false);
+            if (strlen($md) > 200000) $md = substr($md, 0, 200000);
+            return ['md' => mb_convert_encoding($md, 'UTF-8', 'UTF-8'), 'path' => (string)($j['file_path'] ?? $file)];
+        }, 'gitlab');
+    $j = json_decode((string)$r['body'], true) ?: [];
+    $path = (string)($j['path'] ?? $file);
+    $dir = trim(dirname($path), './');
+    $seg = fn(string $s) => implode('/', array_map('rawurlencode', explode('/', $s)));
+    $sub = $dir !== '' ? $seg($dir) . '/' : '';
+    return ['status' => $r['status'], 'md' => (string)($j['md'] ?? ''), 'url' => $web . '/-/blob/' . $seg($branch) . '/' . $seg($path),
+        'raw' => $web . '/-/raw/' . $seg($branch) . '/' . $sub, 'blob' => $web . '/-/blob/' . $seg($branch) . '/' . $sub];
 }
 
 // The README's list under a Features (or Highlights, Improvements...) heading: up to 8 short lines.
@@ -454,7 +530,7 @@ function rs_pc_features_from_md(string $md): array {
 // Key features from the README, once (the admin's own edits stay).
 function rs_pc_fill_features(array $a, bool $force = false): array {
     if ($a['repo'] === '' || (!$force && $a['features_read'] && (int)($a['features_v'] ?? 0) >= 2)) return $a;
-    $r = rs_pc_readme($a['repo']);
+    $r = rs_pc_readme($a['repo'], rs_pc_host($a));
     if ($r['status'] !== 200) return $a;
     $f = rs_pc_features_from_md($r['md']);
     if ($f || $force || (int)($a['features_v'] ?? 0) < 2) $a['features'] = implode("\n", $f);
@@ -613,6 +689,8 @@ function rs_pc_catalog(): array {
             'genre' => isset(RS_PC_GENRES[$a['genre']]) ? $a['genre'] : 'other', 'media' => rs_pc_media_links((string)$a['media']),
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
+        // (3.9) A GitLab project: "repo" is its path there (group/project). Left out for GitHub.
+        if (rs_pc_host($a) === 'gitlab') $e['host'] = 'gitlab';
         // (3.9) Where its developer wants bugs reported (their own page or issue form).
         if (($ru = rs_pc_report_url((string)($a['report_url'] ?? ''))) !== '') $e['report_url'] = $ru;
         // (3.8) The release that's out (the launcher installs this one) and its checked files.
@@ -760,7 +838,7 @@ function rs_pc_pattern(string $name, string $tag): string {
 }
 function rs_pc_heal_assets(array $a, array $r): array {
     if (rs_pc_release_for($a)) return $a; // (3.8) a recent release still has its files: the newest just has other ones (Switch, Android)
-    $rel = rs_gh_releases($a['repo'], 3600);
+    $rel = rs_host_releases(rs_pc_host($a), $a['repo'], 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     $latest = null;
     foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
@@ -780,8 +858,8 @@ function rs_pc_heal_assets(array $a, array $r): array {
 }
 
 // The release rs_pc_read_repo goes by: the newest that isn't a draft or a pre-release, else the newest.
-function rs_pc_latest_release(string $repo): ?array {
-    $rel = rs_gh_releases($repo, 3600);
+function rs_pc_latest_release(string $repo, string $host = ''): ?array {
+    $rel = rs_host_releases($host, $repo, 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) return $x;
     return $list[0] ?? null;
@@ -791,7 +869,7 @@ function rs_pc_latest_release(string $repo): ?array {
 // patterns; null when none of the recent ones has one.
 function rs_pc_release_for(array $a): ?array {
     $pats = array_values(array_filter([(string)$a['asset_win'], (string)$a['asset_linux'], (string)$a['asset_mac']], fn($p) => trim($p) !== ''));
-    $rel = rs_gh_releases((string)$a['repo'], 3600);
+    $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
     foreach ($list as $x) {
         if (!empty($x['draft']) || !empty($x['prerelease'])) continue;
@@ -813,7 +891,7 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
     foreach ($apps as $a) {
         if (microtime(true) > $until) break;
         $f = rs_pc_fill_features($a);
-        $r = rs_pc_read_repo($a['repo']);
+        $r = rs_pc_read_repo($a['repo'], rs_pc_host($a));
         $n++;
         // What GitHub says goes onto the recomp as it is now (an edit saved meanwhile stays).
         $a = rs_pc_app($a['id']);

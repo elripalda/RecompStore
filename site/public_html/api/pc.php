@@ -97,8 +97,9 @@ try {
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);
     if ($a === 'app' && !$post) rs_pc_out(200, ['ok' => true, 'app' => $app], 120);
     if ($a === 'readme' && !$post) {
-        $r = rs_pc_readme((string)$app['repo']);
-        if ($r['status'] !== 200) rs_pc_out($r['status'] === 404 ? 404 : 503, ['ok' => false, 'error' => $r['status'] === 404 ? 'No README on its GitHub.' : 'GitHub didn\'t answer. Try again in a moment.']);
+        $rh = rs_host_norm((string)($app['host'] ?? '')); // (3.9) GitHub or GitLab
+        $r = rs_pc_readme((string)$app['repo'], $rh);
+        if ($r['status'] !== 200) rs_pc_out($r['status'] === 404 ? 404 : 503, ['ok' => false, 'error' => $r['status'] === 404 ? 'No README on its ' . rs_host_name($rh) . '.' : rs_host_name($rh) . ' didn\'t answer. Try again in a moment.']);
         rs_pc_out(200, ['ok' => true, 'md' => $r['md'], 'raw' => $r['raw'], 'blob' => $r['blob'], 'url' => $r['url']], 600);
     }
     if ($a === 'feedback' && !$post) {

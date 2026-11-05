@@ -85,7 +85,8 @@ function rl_push_watch(int $budget = 6): void {
     if (($seen['_catalog'] ?? '') !== '' && $seen['_catalog'] !== $sig) rl_push('catalog');
     $seen['_catalog'] = $sig;
 
-    $apps = array_values(array_filter($cat['apps'], fn($a) => is_array($a) && (string)($a['id'] ?? '') !== '' && rs_repo_ok((string)($a['repo'] ?? ''))));
+    // (3.9) A GitLab project ("host": "gitlab") is asked of GitLab, and its copy kept for /api/gl.php.
+    $apps = array_values(array_filter($cat['apps'], fn($a) => is_array($a) && (string)($a['id'] ?? '') !== '' && rs_host_repo_ok((string)($a['host'] ?? ''), (string)($a['repo'] ?? ''))));
     usort($apps, fn($x, $y) => (int)($seen['g'][$x['id']]['at'] ?? 0) <=> (int)($seen['g'][$y['id']]['at'] ?? 0));
     $start = microtime(true);
     foreach ($apps as $a) {
@@ -94,7 +95,8 @@ function rl_push_watch(int $budget = 6): void {
         if (time() - (int)($seen['g'][$id]['at'] ?? 0) < 1800) break; // oldest first: the rest were looked at more lately
         $seen['g'][$id]['at'] = time();
         $repo = (string)$a['repo'];
-        try { $r = rs_gh_releases($repo, 1800); } catch (Throwable $e) { continue; }
+        $gl = rs_host_norm((string)($a['host'] ?? '')) === 'gitlab';
+        try { $r = rs_host_releases($gl ? 'gitlab' : '', $repo, 1800); } catch (Throwable $e) { continue; }
         if ((int)($r['status'] ?? 0) !== 200) continue;
         $tag = rl_push_latest_tag((string)$r['body']);
         if ($tag === '') continue;
@@ -103,8 +105,8 @@ function rl_push_watch(int $budget = 6): void {
         if ($was === '' || $was === $tag) continue;
         // A new release: a fresh copy for /api/gh.php first, then the message.
         try {
-            $f = rs_gh_releases($repo, 0);
-            if ((int)($f['status'] ?? 0) === 200 && empty($f['stale'])) rl_push_gh_put($repo, (string)$f['body']);
+            $f = rs_host_releases($gl ? 'gitlab' : '', $repo, 0);
+            if ((int)($f['status'] ?? 0) === 200 && empty($f['stale'])) { if ($gl) rs_gl_disk_put($repo, (string)$f['body']); else rl_push_gh_put($repo, (string)$f['body']); }
         } catch (Throwable $e) { /* the 5-minute copy runs out on its own */ }
         rl_push('game ' . $id);
     }

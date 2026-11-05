@@ -120,8 +120,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // submitter wrote takes the place of what was read from GitHub.
             if (($d['platform'] ?? '') === 'pc') {
                 rs_pc_tables();
-                foreach (rs_pc_apps() as $x) if (strcasecmp((string)$x['repo'], (string)($d['repo'] ?? '')) === 0) throw new RuntimeException('It\'s already on RecompLauncher, as ' . $x['id'] . '.');
-                $a = rs_pc_add((string)($d['repo'] ?? ''));
+                $subKey = rs_repo_key((string)($d['host'] ?? ''), (string)($d['repo'] ?? '')); // (3.9) gitlab.com/<project> for GitLab
+                foreach (rs_pc_apps() as $x) if (strcasecmp(rs_pc_key($x), $subKey) === 0) throw new RuntimeException('It\'s already on RecompLauncher, as ' . $x['id'] . '.');
+                $a = rs_pc_add($subKey);
                 foreach (['name' => 120, 'blurb' => 160, 'description' => 8000, 'needs' => 200, 'credits' => 1000] as $k => $max) {
                     $v = trim(str_replace("\r\n", "\n", (string)($d[$k] ?? '')));
                     if ($v !== '') $a[$k] = mb_substr($v, 0, $max);
@@ -152,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: pc.php?edit=' . rawurlencode($a['id']) . '#edit');
                 exit;
             }
+            if (rs_host_norm((string)($d['host'] ?? '')) === 'gitlab') throw new RuntimeException('PS5 apps come from GitHub only for now.'); // (3.9)
             $tid = (string)($d['title_id'] ?? '');
             $gid = preg_match('/^[A-Z]{4}\d{5}$/', $tid) && !rs_game($tid) && !isset(rs_taken_ids()[$tid]) && !rs_move_block($tid) ? $tid : 'SUB' . $id;
             if (rs_game($gid)) throw new RuntimeException('It\'s already added, as ' . $gid . '.');
@@ -390,14 +392,14 @@ $liveMail = function (array $r): ?array {
     $d = json_decode((string)($r['data'] ?? ''), true);
     if (!is_array($d) || ($d['platform'] ?? '') !== 'pc') return null;
     $a = null;
-    foreach (rs_pc_apps() as $x) if (strcasecmp((string)$x['repo'], (string)($d['repo'] ?? '')) === 0) $a = $x;
+    foreach (rs_pc_apps() as $x) if (strcasecmp(rs_pc_key($x), rs_repo_key((string)($d['host'] ?? ''), (string)($d['repo'] ?? ''))) === 0) $a = $x;
     if (!$a) return null;
     $who = trim((string)($d['author'] ?? ''));
     $url = 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']);
     $sdk = ($d['rl_quick'] ?? '') !== 'yes' || ($d['rl_settings'] ?? '') !== 'yes';
     return ['subject' => (string)$a['name'] . ' is live on RecompLauncher',
         'body' => 'Hi' . ($who !== '' ? ' ' . $who : '') . ",\n\n" . 'Good news: ' . $a['name'] . ' is now live on RecompLauncher. Here\'s its page:' . "\n" . $url . "\n\n"
-            . 'Players can install it from the launcher, and every release you publish on GitHub reaches them automatically.'
+            . 'Players can install it from the launcher, and every release you publish on ' . rs_host_name((string)($d['host'] ?? '')) . ' reaches them automatically.'
             . ($sdk ? "\n\n" . 'If you\'d like it to feel even more native, quick install and in-launcher settings come from one small file in your release. The SDK walks you through it:' . "\n" . 'https://recomplauncher.com/sdk' : '')
             . "\n\n" . 'Thanks for sending it in.' . "\n"];
 };
@@ -513,7 +515,8 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     </ul>
     <?php elseif ($r['kind'] === 'submit' && is_array($d = json_decode((string)($r['data'] ?? ''), true))): $sp = $subPics[(int)$r['id']] ?? [];
       $byRole = fn($role) => array_values(array_filter($sp, fn($p) => $p['role'] === $role));
-      $rel = rs_repo_ok((string)$d['repo']) ? rs_gh_releases((string)$d['repo'], 7 * 86400) : ['status' => 0, 'body' => '']; // (3.3) a week-old copy is fine here
+      $sHost = rs_host_norm((string)($d['host'] ?? '')); $sKey = rs_repo_key($sHost, (string)$d['repo']); // (3.9) GitHub or GitLab
+      $rel = rs_host_repo_ok($sHost, (string)$d['repo']) ? rs_host_releases($sHost, (string)$d['repo'], 7 * 86400) : ['status' => 0, 'body' => '']; // (3.3) a week-old copy is fine here
       $rels = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
       $latest = is_array($rels) && $rels ? $rels[0] : null; ?>
     <header>
@@ -535,12 +538,12 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
       <div class="sub-top">
         <?php if ($i = $byRole('icon')): ?><img class="sub-icon" src="picture.php?id=<?= (int)$i[0]['id'] ?>" alt="Icon"><?php endif; ?>
         <dl class="sub-facts">
-          <dt>GitHub</dt><dd><a href="https://github.com/<?= h($d['repo']) ?>" target="_blank" rel="noopener noreferrer">github.com/<?= h($d['repo']) ?></a>
+          <dt><?= h(rs_host_name($sHost)) ?></dt><dd><a href="<?= h(rs_host_web($sHost, (string)$d['repo'])) ?>" target="_blank" rel="noopener noreferrer"><?= h(preg_replace('#^https://#', '', rs_host_web($sHost, (string)$d['repo']))) ?></a>
             <?php if ($latest): ?><br><span class="muted">Newest release <?= h((string)$latest['tag_name']) ?><?= !empty($latest['published_at']) ? ', ' . h(rs_date('M j, Y', strtotime((string)$latest['published_at']))) : '' ?>: <?= h(implode(', ', array_map(fn($a) => (string)$a['name'], array_slice((array)($latest['assets'] ?? []), 0, 6))) ?: 'no files') ?></span>
-            <?php elseif ($rel['status'] === 404): ?><br><span class="warn">GitHub can't find it (private or misspelled?)</span>
+            <?php elseif ($rel['status'] === 404): ?><br><span class="warn"><?= h(rs_host_name($sHost)) ?> can't find it (private or misspelled?)</span>
             <?php elseif ($rel['status'] === 200): ?><br><span class="warn">No releases yet</span><?php endif; ?></dd>
           <?php // (3.8) What VirusTotal says about its release files.
-          if (function_exists('rs_vt_on') && rs_vt_on() && $latest): $vb = rs_vt_repo_badge((string)$d['repo'], (string)$latest['tag_name']); ?>
+          if (function_exists('rs_vt_on') && rs_vt_on() && $latest): $vb = rs_vt_repo_badge($sKey, (string)$latest['tag_name']); ?>
           <dt>Security</dt><dd><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>In line for a VirusTotal check</span>' ?></dd>
           <?php endif; ?>
           <?php if (($d['platform'] ?? '') === 'pc' && is_array($d['assets'] ?? null)): // (3.6) its files, checked against the newest release

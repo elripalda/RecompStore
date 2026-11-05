@@ -71,7 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // puts it at the front of Newest arrivals.
             if (!$a['hidden'] && empty($_POST['soon']) && (($wasHidden && (string)($a['live_at'] ?? '') === '') || $wasSoon)) $a['live_at'] = gmdate('Y-m-d\TH:i:s\Z');
             if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', (string)($_POST['live_at'] ?? ''))) $a['live_at'] = (string)$_POST['live_at'];
-            if ($a['repo'] !== '' && !rs_repo_ok($a['repo'])) throw new RuntimeException('The GitHub repo goes as owner/name.');
+            // (3.9) GitHub or GitLab: a pasted link says which; else the host picked next to it.
+            $a['host'] = rs_host_norm((string)($_POST['host'] ?? ''));
+            if ($a['repo'] !== '') {
+                $l = rs_repo_from_link($a['repo'], $a['host']);
+                if (!$l) throw new RuntimeException($a['host'] === 'gitlab' ? 'The GitLab project goes as group/project (or group/sub/project).' : 'The GitHub repo goes as owner/name.');
+                $a['repo'] = $l['repo']; $a['host'] = $l['host'];
+            }
             foreach (['icon_file' => 'icon', 'hero_file' => 'hero', 'logo_file' => 'logo'] as $field => $kind) {
                 if (empty($_FILES[$field]['name'])) continue;
                 $out = rs_save_image($_FILES[$field], $kind, 'pc-' . $a['id']);
@@ -217,7 +223,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
 <section class="card" id="edit">
   <div class="an-head"><h2><?= h($a['name']) ?></h2><a class="an-csv an-plain" href="pc.php">All PC recomps</a></div>
   <?php // (3.8) Its release files, as VirusTotal saw them, and a held update.
-  if (function_exists('rs_vt_on') && rs_vt_on()): $vb = rs_vt_repo_badge($a['repo'], (string)($a['pending']['tag'] ?? ($a['ok_tag'] ?? ''))); ?>
+  if (function_exists('rs_vt_on') && rs_vt_on()): $vb = rs_vt_repo_badge(rs_pc_key($a), (string)($a['pending']['tag'] ?? ($a['ok_tag'] ?? ''))); ?>
   <p class="vt-line"><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>Not checked yet</span>' ?>
     <?php if (!empty($a['pending']['tag'])): ?> <a href="security.php">Update to <?= h($a['pending']['version'] ?: $a['pending']['tag']) ?> is on hold</a><?php endif; ?></p>
   <?php endif; ?>
@@ -227,11 +233,12 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>The game<input name="game" value="<?= h($a['game']) ?>" maxlength="120"><small>The original game, like The Legend of Zelda: Majora's Mask.</small></label>
     <label>From<select name="origin"><?php foreach (RS_PC_ORIGINS as $k => $n): ?><option value="<?= h($k) ?>"<?= $a['origin'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select></label>
     <label>Kind of game<select name="genre"><option value="">Pick one</option><?php foreach (RS_PC_GENRES as $k => $n): ?><option value="<?= h($k) ?>"<?= $a['genre'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select><small>Each kind is a category on the PC store, with its own row and page.</small></label>
-    <label>GitHub repo<input name="repo" value="<?= h($a['repo']) ?>" class="mono" placeholder="owner/name"></label>
+    <?php $aHost = rs_pc_host($a); ?>
+    <label>Project<span class="pc-repo-row"><select name="host" aria-label="Where it lives"><option value="">GitHub</option><option value="gitlab"<?= $aHost === 'gitlab' ? ' selected' : '' ?>>GitLab</option></select><input name="repo" value="<?= h($a['repo']) ?>" class="mono" placeholder="owner/name"></span><small><?php if ($a['repo'] !== ''): ?><a href="<?= h(rs_host_web($aHost, $a['repo'])) ?>" target="_blank" rel="noopener">Open on <?= h(rs_host_name($aHost)) ?></a>. <?php endif; ?>owner/name, or paste a github.com or gitlab.com link.</small></label>
     <label>Windows download<input name="asset_win" value="<?= h($a['asset_win']) ?>" class="mono" placeholder="Zelda64Recompiled-*-Windows.zip"><small>The release file, * for the part that changes.</small></label>
     <label>Linux download<input name="asset_linux" value="<?= h($a['asset_linux']) ?>" class="mono"></label>
     <label>macOS download<input name="asset_mac" value="<?= h($a['asset_mac']) ?>" class="mono"></label>
-    <label>Version<input name="version" value="<?= h($a['version']) ?>" maxlength="40"><small>Updated from GitHub on Publish.</small></label>
+    <label>Version<input name="version" value="<?= h($a['version']) ?>" maxlength="40"><small>Updated from <?= h(rs_host_name($aHost)) ?> on Publish.</small></label>
     <label class="span2">One-line summary<input name="blurb" value="<?= h($a['blurb']) ?>" maxlength="160"></label>
     <label class="span2">What this version adds<input name="adds" value="<?= h($a['adds'] ?? '') ?>" maxlength="120" placeholder="DLSS, FSR 4 and a 13-language launcher"><small>For games with more than one version: a few words on what sets this one apart. Shown in the versions list.</small></label>
     <label class="span2">Description<textarea name="description" rows="7" maxlength="8000"><?= h($a['description']) ?></textarea><small>What it is, what works, how to set it up. Markdown: ## headings, - lists, **bold**, links.</small></label>
@@ -250,7 +257,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <div class="span2 pc-about-adm"><strong>About the game</strong> <span class="muted"><?= $ab ? h($ab['name'] . (!empty($ab['released']) ? ' · ' . substr($ab['released'], 0, 4) : '') . (!empty($ab['developer']) ? ' · ' . $ab['developer'] : '')) . ' · <a href="' . h($ab['url'] ?? '') . '" target="_blank">IGDB</a>' : (!empty($a['about_none']) ? 'No close match on IGDB.' : 'Not looked up yet.') ?></span>
       <label>IGDB game ID<input name="igdb_id" value="<?= (int)($a['igdb_id'] ?? 0) ?: '' ?>" inputmode="numeric" placeholder="Only if it picked the wrong game"><small>The number from the game's IGDB page (bottom of the page, "IGDB ID").</small></label>
       <button name="about" value="1">Get game info from IGDB</button></div>
-    <?= rs_ai_fieldset($a, (string)$a['repo']) ?>
+    <?= rs_ai_fieldset($a, $aHost === '' ? (string)$a['repo'] : '') ?>
     <div class="span2 pc-art">
       <?php foreach (['cover' => 'Cover (600×900)', 'hero' => 'Backdrop', 'logo' => 'Logo', 'icon' => 'Icon'] as $k => $n): ?>
       <label class="pc-art-<?= $k ?>"><span class="pc-art-box"><?= $a[$k] !== '' ? '<img src="' . h($a[$k]) . '" alt="">' : '<span class="muted">None</span>' ?></span><?= h($n) ?><input type="file" name="<?= $k ?>_file" accept="image/png,image/jpeg,image/webp"></label>
@@ -289,7 +296,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <div class="found-head">
     <h2>Found on GitHub <span class="pill<?= $found ? ' cyan' : '' ?>"><?= count($found) ?></span></h2>
     <div class="found-acts">
-      <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="lookup"><input name="repo" placeholder="github.com/owner/repo" class="mono" required><button>Look up</button></form>
+      <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="lookup"><input name="repo" placeholder="github.com/owner/repo or gitlab.com/group/project" class="mono" required><button>Look up</button></form>
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="find"><button>Look again</button></form>
     </div>
   </div>
@@ -299,16 +306,16 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <div class="ftr fth" role="row"><span>Project</span><span>Console</span><span>Release</span><span>Stars</span><span></span></div>
     <?php foreach ($found as $f): $flags = (array)($f['flags'] ?? []); ?>
     <div class="ftr" role="row">
-      <span class="ft-name"><?= !empty($f['avatar']) ? '<img src="' . h($f['avatar']) . '" alt="" loading="lazy">' : '<i></i>' ?><span><a href="https://github.com/<?= h($f['repo']) ?>" target="_blank" rel="noopener"><?= h($f['repo']) ?></a><small title="<?= h((string)($f['description'] ?? '')) ?>"><?= h($f['game'] ?: mb_strimwidth((string)($f['description'] ?? ''), 0, 80, '…')) ?></small><?php if (!empty($flags['gamefiles']) || !empty($flags['huge'])): ?><small class="bad-text"><?= !empty($flags['gamefiles']) ? 'Has a file that looks like game data' : 'Has a very large file' ?></small><?php endif; ?></span></span>
+      <span class="ft-name"><?= !empty($f['avatar']) ? '<img src="' . h($f['avatar']) . '" alt="" loading="lazy">' : '<i></i>' ?><span><a href="<?= h(rs_host_web($f['host'], $f['repo'])) ?>" target="_blank" rel="noopener"><?= h($f['repo']) ?></a><?= $f['host'] === 'gitlab' ? ' <span class="pill">GitLab</span>' : '' ?><small title="<?= h((string)($f['description'] ?? '')) ?>"><?= h($f['game'] ?: mb_strimwidth((string)($f['description'] ?? ''), 0, 80, '…')) ?></small><?php if (!empty($flags['gamefiles']) || !empty($flags['huge'])): ?><small class="bad-text"><?= !empty($flags['gamefiles']) ? 'Has a file that looks like game data' : 'Has a very large file' ?></small><?php endif; ?></span></span>
       <span><?= h($origin((string)$f['origin'])) ?></span>
       <span><?= h($f['version'] ?: 'none') ?><small class="muted"><?= h(implode(', ', array_keys(array_filter((array)$f['assets'])))) ?></small></span>
       <span><?= (int)$f['stars'] ?></span>
       <span class="ft-btns">
-        <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="add"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><button class="primary">Add</button></form>
-        <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="skip"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><button title="Not a PC recomp, or not good enough">Skip</button></form>
+        <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="add"><input type="hidden" name="repo" value="<?= h($f['key']) ?>"><button class="primary">Add</button></form>
+        <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="skip"><input type="hidden" name="repo" value="<?= h($f['key']) ?>"><button title="Not a PC recomp, or not good enough">Skip</button></form>
       </span>
       <?php // (3.8) Pre-checked: VirusTotal, already listed, game data, how recent.
-      $fn = function_exists('rs_auto_find_notes') ? rs_auto_find_notes($f) : []; $fb = function_exists('rs_vt_repo_badge') && rs_vt_on() ? rs_vt_repo_badge((string)$f['repo']) : null; if ($fn || $fb): ?>
+      $fn = function_exists('rs_auto_find_notes') ? rs_auto_find_notes($f) : []; $fb = function_exists('rs_vt_repo_badge') && rs_vt_on() ? rs_vt_repo_badge((string)$f['key']) : null; if ($fn || $fb): ?>
       <span class="ft-notes"><?= $fb ? rs_vt_badge_html($fb) : '' ?><?php foreach ($fn as [$k, $t]): ?><em class="fn <?= $k ?>"><?= h($t) ?></em><?php endforeach; ?></span>
       <?php endif; ?>
     </div>
@@ -317,7 +324,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <?php endif; ?>
   <?php if ($skipped): ?>
   <details class="hl-fine"><summary>Skipped (<?= count($skipped) ?>)</summary>
-    <ul class="pc-skipped"><?php foreach ($skipped as $f): ?><li><a href="https://github.com/<?= h($f['repo']) ?>" target="_blank" rel="noopener"><?= h($f['repo']) ?></a> <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="unskip"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><button>Put back</button></form></li><?php endforeach; ?></ul>
+    <ul class="pc-skipped"><?php foreach ($skipped as $f): ?><li><a href="<?= h(rs_host_web($f['host'], $f['repo'])) ?>" target="_blank" rel="noopener"><?= h($f['key']) ?></a> <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="unskip"><input type="hidden" name="repo" value="<?= h($f['key']) ?>"><button>Put back</button></form></li><?php endforeach; ?></ul>
   </details>
   <?php endif; ?>
 </section>

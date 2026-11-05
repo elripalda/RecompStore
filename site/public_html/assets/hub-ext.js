@@ -183,7 +183,7 @@
     const box = document.createElement('section');
     box.className = 'glass card-pad hx-claims';
     const pic = (x) => x.pic ? `<img src="${esc(x.pic)}" alt="" width="${pc ? 32 : 40}" height="${pc ? 48 : 40}" class="${pc ? 'hx-cover' : 'hx-icon'}">` : '<span class="hx-nopic"></span>';
-    const row = (x, act) => `<li>${pic(x)}<span class="hx-claim-name"><strong>${esc(x.name)}</strong>${x.repo ? `<small class="muted">github.com/${esc(x.repo)}</small>` : ''}</span>${act}</li>`;
+    const row = (x, act) => `<li>${pic(x)}<span class="hx-claim-name"><strong>${esc(x.name)}</strong>${x.repo ? `<small class="muted">${x.host === 'gitlab' ? 'gitlab.com' : 'github.com'}/${esc(x.repo)}</small>` : ''}</span>${act}</li>`;
     const stateTag = (s) => s === 'approved' ? `<span class="tag good">${esc(t('On your page'))}</span>` : s === 'rejected' ? `<span class="tag warn">${esc(t('Not confirmed'))}</span>` : `<span class="tag info">${esc(t('Waiting for review'))}</span>`;
     box.innerHTML = `
       <div class="hx-claims-head"><div><h2>${esc(pc ? t('Claim your recomps') : t('Claim your apps'))}</h2>

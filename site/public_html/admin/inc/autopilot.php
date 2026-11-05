@@ -65,11 +65,11 @@ function rs_auto_prevet(): void {
     if (!function_exists('rs_vt_on') || !rs_vt_on()) return;
     foreach (rs_pc_found('new') as $f) {
         if (strtotime((string)($f['found_at'] ?? $f['found'] ?? '')) < time() - 3 * 86400 && !empty($f['found_at'])) continue;
-        $list = rs_vt_peek_releases((string)$f['repo']);
+        $list = rs_vt_peek_releases((string)($f['key'] ?? $f['repo'])); // (3.9) gitlab.com/<project> for GitLab
         $r = rs_vt_newest($list, false) ?? rs_vt_newest($list);
         if (!$r) continue;
         $pats = array_filter([(string)($f['assets']['win'] ?? ''), (string)($f['assets']['linux'] ?? ''), (string)($f['assets']['mac'] ?? '')]);
-        foreach (rs_vt_pick((array)$r['assets'], $pats) as $x) rs_vt_add((string)$f['repo'], (string)$r['tag_name'], $x, 'finder', 'found', 4);
+        foreach (rs_vt_pick((array)$r['assets'], $pats) as $x) rs_vt_add((string)($f['key'] ?? $f['repo']), (string)$r['tag_name'], $x, 'finder', 'found', 4);
     }
 }
 
@@ -179,7 +179,8 @@ function rs_ps5_heal(): array {
 function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
     $items = [];
     $pc = ($d['platform'] ?? '') === 'pc';
-    if ($relStatus === 404) $items[] = ['bad', 'GitHub can\'t find the repo'];
+    $host = rs_host_norm((string)($d['host'] ?? '')); // (3.9)
+    if ($relStatus === 404) $items[] = ['bad', rs_host_name($host) . ' can\'t find the ' . ($host === 'gitlab' ? 'project' : 'repo')];
     elseif (!$latest) $items[] = ['bad', 'No release to download yet'];
     else {
         $names = array_map(fn($x) => (string)$x['name'], (array)($latest['assets'] ?? []));
@@ -190,15 +191,15 @@ function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
         else $items[] = ['ok', 'Release files match'];
         if (!empty($latest['prerelease'])) $items[] = ['warn', 'Newest release is a pre-release'];
         if (function_exists('rs_vt_on') && rs_vt_on()) {
-            [$rows, $v] = rs_vt_release((string)$d['repo'], (string)$latest['tag_name']);
+            [$rows, $v] = rs_vt_release(rs_repo_key($host, (string)$d['repo']), (string)$latest['tag_name']);
             if (!$rows || $v === 'grey') $items[] = ['warn', 'VirusTotal still checking'];
             elseif ($v === 'red') $items[] = ['bad', 'Flagged by VirusTotal'];
             elseif ($v === 'yellow') $items[] = ['ok', 'VirusTotal: a minor flag (common for unsigned programs)'];
             else $items[] = ['ok', 'VirusTotal: clean'];
         }
     }
-    $repo = strtolower((string)($d['repo'] ?? ''));
-    foreach (rs_pc_apps() as $a) if (strtolower($a['repo']) === $repo) { $items[] = ['bad', 'Already on RecompLauncher as ' . $a['name']]; break; }
+    $repo = strtolower(rs_repo_key($host, (string)($d['repo'] ?? '')));
+    foreach (rs_pc_apps() as $a) if (strtolower(rs_pc_key($a)) === $repo) { $items[] = ['bad', 'Already on RecompLauncher as ' . $a['name']]; break; }
     foreach (rs_games() as $g) if (strtolower((string)$g['repo']) === $repo) { $items[] = ['bad', 'Already on RecompStore as ' . $g['name']]; break; }
     $k = rs_auto_norm((string)($d['name'] ?? ''));
     $listed = rs_auto_listed_games();

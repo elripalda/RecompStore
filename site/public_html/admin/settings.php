@@ -135,6 +135,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($r['status'] === 401 ? 'Saved, but GitHub refused it. Make a new token and paste it again.' : 'Saved. GitHub didn\'t answer the check, so it\'s untested.'),
                      $r['status'] === 401 ? 'err' : 'ok');
         }
+    } elseif (($_POST['action'] ?? '') === 'gitlab') {
+        // (3.9) A GitLab token, for PC recomps on gitlab.com: kept locked away, sent only to GitLab's API.
+        $tok = trim((string)($_POST['gitlab_token'] ?? ''));
+        if (!empty($_POST['gitlab_clear'])) { rs_secret_put('gitlab_token', ''); rs_flash('The GitLab token is gone. The site asks GitLab without one.'); }
+        elseif ($tok === '') rs_flash('Nothing changed: paste a token to save it.', 'err');
+        elseif (!preg_match('/^[A-Za-z0-9_.-]{20,255}$/', $tok)) rs_flash('That doesn\'t look like a GitLab token. Copy it again from GitLab.', 'err');
+        else {
+            rs_secret_put('gitlab_token', $tok);
+            $r = rs_http(rs_gl_api() . '/personal_access_tokens/self', ['gitlab' => true, 'timeout' => 15]);
+            rs_flash($r['status'] === 200 ? 'Saved. GitLab took the token.'
+                     : ($r['status'] === 401 ? 'Saved, but GitLab refused it. Make a new token and paste it again.' : 'Saved. GitLab didn\'t answer the check, so it\'s untested.'),
+                     $r['status'] === 401 ? 'err' : 'ok');
+        }
     } elseif (($_POST['action'] ?? '') === 'translations') {
         // (2.6) DeepL: descriptions and patch notes in each player's language. The key is a secret:
         // never shown again, never logged, never in the catalog.
@@ -755,6 +768,15 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <?php $hasTok = trim((string)rs_setting('github_token', '')) !== ''; ?>
     <label><span>GitHub token <span class="muted">(optional)</span></span><input type="text" name="github_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasTok ? 'A token is saved. Paste a new one to replace it.' : 'Paste a token' ?>"><small>Every PS5 asks recompstore.com about releases and custom sources, and the site asks GitHub once for everyone. Without a token GitHub answers 60 questions an hour; with one, 5,000. Make a fine-grained token on GitHub (Settings, Developer settings, Personal access tokens) with read-only access to public repositories, and paste it here.</small></label>
     <div class="actions"><button class="btn">Save the token</button><?php if ($hasTok): ?><label class="check"><input type="checkbox" name="github_clear" value="1"> Remove the saved token</label><?php endif; ?></div>
+  </form>
+</section>
+<section class="card">
+  <h2>GitLab</h2>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="gitlab">
+    <?php $hasGl = rs_secret_get('gitlab_token') !== ''; ?>
+    <label><span>GitLab token <span class="muted">(optional)</span></span><input type="text" name="gitlab_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $hasGl ? 'A token is saved. Paste a new one to replace it.' : 'Paste a token' ?>"><small>For PC recomps on gitlab.com. The site asks GitLab once for everyone, and public projects work without a token; one gives the site GitLab's higher limit. Make a personal access token on GitLab (Preferences, Access tokens) with only the read_api scope, and paste it here.</small></label>
+    <div class="actions"><button class="btn">Save the token</button><?php if ($hasGl): ?><label class="check"><input type="checkbox" name="gitlab_clear" value="1"> Remove the saved token</label><?php endif; ?></div>
   </form>
 </section>
 <section class="card" id="translations">

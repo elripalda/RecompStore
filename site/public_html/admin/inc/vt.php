@@ -240,11 +240,20 @@ function rs_vt_pick(array $assets, array $patterns): array {
 }
 
 // What GitHub said last about a repo's releases, without asking it again (the 30-minute refresh keeps it fresh).
+// (3.9) $repo is a check key: 'gitlab.com/<project>' reads GitLab's copy.
 function rs_vt_peek_releases(string $repo): array {
+    $k = strtolower($repo);
+    if (str_starts_with($k, 'gitlab.com/')) $k = 'gl:' . substr($k, 11);
     $st = rs_db()->prepare('SELECT body FROM gh_cache WHERE k = ? AND status = 200');
-    $st->execute([strtolower($repo)]);
+    $st->execute([$k]);
     $b = $st->fetchColumn();
     return $b ? (json_decode((string)$b, true) ?: []) : [];
+}
+// (3.9) A project's releases on GitHub or GitLab, as a list (empty when it couldn't be read).
+function rs_vt_list(string $host, string $repo, int $maxAge = 3600): array {
+    if (!rs_host_repo_ok($host, $repo)) return [];
+    $rel = rs_host_releases($host, $repo, $maxAge);
+    return $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
 }
 function rs_vt_newest(array $list, bool $pre = true): ?array {
     foreach ($list as $r) if (empty($r['draft']) && ($pre || empty($r['prerelease']))) return $r;
@@ -264,21 +273,21 @@ function rs_vt_discover(bool $force = false): void {
     foreach ($db->query("SELECT id, repo, data FROM inbox WHERE kind = 'submit' AND status IN ('new', 'read') AND created > DATE_SUB(NOW(), INTERVAL 30 DAY)")->fetchAll() as $s) {
         $d = json_decode((string)$s['data'], true) ?: [];
         $repo = (string)($d['repo'] ?? '');
-        if (!rs_repo_ok($repo)) continue;
-        $rel = rs_gh_releases($repo, 3600);
-        $r = rs_vt_newest($rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []);
+        $host = rs_host_norm((string)($d['host'] ?? ''));
+        if (!rs_host_repo_ok($host, $repo)) continue;
+        $r = rs_vt_newest(rs_vt_list($host, $repo));
         if (!$r) continue;
         $pats = ($d['platform'] ?? '') === 'pc' ? rs_vt_main_patterns((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
-        foreach (rs_vt_pick((array)$r['assets'], $pats) as $a) rs_vt_add($repo, (string)$r['tag_name'], $a, 'submission', 'm' . $s['id'], 2);
+        foreach (rs_vt_pick((array)$r['assets'], $pats) as $a) rs_vt_add(rs_repo_key($host, $repo), (string)$r['tag_name'], $a, 'submission', 'm' . $s['id'], 2);
     }
     // (3.8) Only what's new: a PC recomp's held update. What's already in the stores isn't checked
     // in bulk; "Check again" or "Check a link" checks any one of them.
     foreach (rs_pc_apps() as $a) {
         $tag = (string)($a['pending']['tag'] ?? '');
         if ($a['repo'] === '' || $tag === '') continue;
-        foreach (rs_vt_peek_releases($a['repo']) as $r) {
+        foreach (rs_vt_peek_releases(rs_pc_key($a)) as $r) {
             if ((string)$r['tag_name'] !== $tag) continue;
-            foreach (rs_vt_pick((array)$r['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f) rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
+            foreach (rs_vt_pick((array)$r['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f) rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3);
         }
     }
     rs_vt_promote();
@@ -288,13 +297,16 @@ function rs_vt_discover(bool $force = false): void {
 
 function rs_vt_tmp(int $id): string { return sys_get_temp_dir() . '/rs-vt-' . $id . '.bin'; }
 
-// Downloads a file to check it. -> '' or the reason it couldn't.
+// Downloads a file to check it. -> '' or the reason it couldn't. Any https link (or http) is fetched:
+// GitHub's release files, (3.9) a GitLab project's own release links, and links pasted by hand.
 function rs_vt_fetch(array $f, string $to): string {
     if ((string)$f['url'] === '') return 'No download link.';
+    if (!preg_match('#^https?://#i', (string)$f['url'])) return 'Not a web link.';
     $fp = fopen($to, 'wb');
     $ch = curl_init((string)$f['url']);
     $got = 0;
     curl_setopt_array($ch, [CURLOPT_FILE => $fp, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 6, CURLOPT_TIMEOUT => 900, CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP,
         CURLOPT_USERAGENT => 'RecompStore-security', CURLOPT_NOPROGRESS => false,
         CURLOPT_XFERINFOFUNCTION => function ($c, $dlTotal, $dl) use (&$got) { $got = $dl; return $dl > RS_VT_MAX_BYTES ? 1 : 0; }]);
     $ok = curl_exec($ch);
@@ -474,7 +486,7 @@ function rs_vt_hold(array $a, array $latest, array $r): array {
     $a['pending'] = ['tag' => $tag, 'version' => (string)$r['version'], 'released' => (string)$r['released'],
         'size' => $r['size'] ? rs_human_size((int)$r['size']) : '', 'since' => (string)($a['pending']['tag'] ?? '') === $tag ? (string)$a['pending']['since'] : gmdate('c')];
     foreach (rs_vt_pick((array)$latest['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f)
-        rs_vt_add($a['repo'], $tag, $f, 'update', 'pc:' . $a['id'], 3);
+        rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3);
     return $a;
 }
 
@@ -484,7 +496,7 @@ function rs_vt_promote(): void {
     foreach (rs_pc_apps() as $a) {
         $p = $a['pending'] ?? null;
         if (!is_array($p) || empty($p['tag'])) continue;
-        [, $v] = rs_vt_release($a['repo'], (string)$p['tag']);
+        [, $v] = rs_vt_release(rs_pc_key($a), (string)$p['tag']);
         if ($v === 'red') {
             if (empty($p['told'])) {
                 $a['pending']['told'] = gmdate('c');
@@ -538,7 +550,7 @@ function rs_vt_catalog_files(array $a): array {
     if ($tag === '' || $a['repo'] === '') return [];
     rs_vt_tables();
     $st = rs_db()->prepare("SELECT name, sha256, status, malicious, suspicious FROM vt_files WHERE repo = ? AND tag = ? AND sha256 IS NOT NULL");
-    $st->execute([$a['repo'], $tag]);
+    $st->execute([rs_pc_key($a), $tag]);
     $out = [];
     $sys = ['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => $a['asset_mac']];
     foreach ($st->fetchAll() as $r) foreach ($sys as $k => $p) if ($p !== '' && rs_pattern_matches($p, (string)$r['name']))
@@ -566,9 +578,33 @@ function rs_vt_check_link(string $url): array {
         $flags = [];
         if ($r) rs_pc_assets((array)$r['assets'], $flags);
         $where = [];
-        foreach (rs_pc_apps() as $a) if (strcasecmp($a['repo'], $repo) === 0) $where[] = 'PC: ' . $a['name'] . ($a['hidden'] ? ' (hidden)' : '');
+        foreach (rs_pc_apps() as $a) if (rs_pc_host($a) === '' && strcasecmp($a['repo'], $repo) === 0) $where[] = 'PC: ' . $a['name'] . ($a['hidden'] ? ' (hidden)' : '');
         foreach (rs_games() as $g) if (strcasecmp((string)$g['repo'], $repo) === 0) $where[] = 'PS5: ' . $g['name'] . (!empty($g['hidden']) ? ' (hidden)' : '');
         return ['ok' => true, 'repo' => $repo, 'info' => $info, 'tag' => $r ? (string)$r['tag_name'] : '', 'when' => $r ? (string)$r['published_at'] : '',
+            'pre' => $r ? !empty($r['prerelease']) : false, 'releases' => count($list), 'flags' => array_keys($flags), 'where' => $where,
+            'files' => array_map(fn($f) => (string)$f['name'], $files)];
+    }
+    // (3.9) A GitLab project, or one of its release pages (/-/releases/<tag>).
+    if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/#i', $url)) {
+        $tagWant = preg_match('#/-/releases/([^/?\#]+)#', $url, $tm) ? urldecode($tm[1]) : '';
+        $l = rs_repo_from_link($url);
+        if (!$l) return ['ok' => false, 'error' => 'That isn\'t a GitLab project link.'];
+        $repo = $l['repo'];
+        $gi = rs_gl_project($repo) ?: [];
+        if (isset($gi['_status'])) $gi = [];
+        $info = ['description' => (string)($gi['description'] ?? ''), 'stars' => (int)($gi['stars'] ?? 0), 'owner' => (string)($gi['owner'] ?? ''), 'archived' => !empty($gi['archived'])];
+        $list = rs_vt_list('gitlab', $repo, 300);
+        $r = null;
+        foreach ($list as $x) if ($tagWant !== '' && (string)$x['tag_name'] === $tagWant) $r = $x;
+        $r ??= rs_vt_newest($list);
+        $key = rs_repo_key('gitlab', $repo);
+        $files = $r ? rs_vt_pick((array)$r['assets'], []) : [];
+        foreach ($files as $f) rs_vt_add($key, (string)$r['tag_name'], $f, 'link', 'link', 1);
+        $flags = [];
+        if ($r) rs_pc_assets((array)$r['assets'], $flags);
+        $where = [];
+        foreach (rs_pc_apps() as $a) if (strcasecmp(rs_pc_key($a), $key) === 0) $where[] = 'PC: ' . $a['name'] . ($a['hidden'] ? ' (hidden)' : '');
+        return ['ok' => true, 'repo' => $key, 'info' => $info, 'tag' => $r ? (string)$r['tag_name'] : '', 'when' => $r ? (string)$r['published_at'] : '',
             'pre' => $r ? !empty($r['prerelease']) : false, 'releases' => count($list), 'flags' => array_keys($flags), 'where' => $where,
             'files' => array_map(fn($f) => (string)$f['name'], $files)];
     }
@@ -576,7 +612,7 @@ function rs_vt_check_link(string $url): array {
         rs_vt_add('', 'link', ['name' => urldecode($m[1]), 'url' => $url, 'size' => 0], 'link', 'link', 1);
         return ['ok' => true, 'repo' => '', 'tag' => 'link', 'files' => [urldecode($m[1])], 'where' => [], 'flags' => []];
     }
-    return ['ok' => false, 'error' => 'Paste a GitHub repo, a release page, or a link to a file.'];
+    return ['ok' => false, 'error' => 'Paste a GitHub repo, a GitLab project, a release page, or a link to a file.'];
 }
 
 function rs_vt_rows(string $repo, string $tag, array $names): array {

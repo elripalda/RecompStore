@@ -1,6 +1,6 @@
 <?php
 // RecompStore website (2.1): a developer submits a game port, emulator, app or tool for the store,
-// with its GitHub repo, the details for its page and, if they want, its pictures. It lands in the
+// with its GitHub repo (or, (3.9), a PC recomp's GitLab project), the details for its page and, if they want, its pictures. It lands in the
 // admin's Inbox under Submissions, where it can be added to the store as a hidden draft.
 //   POST multipart: kind, name, author, contact, repo, asset, title_id, version, blurb, description,
 //   needs, credits, link1..3, notes, rights=1, website (honeypot), icon, hero, logo, shots[] (up to 4)
@@ -110,11 +110,21 @@ foreach (['link1', 'link2', 'link3'] as $k) {
     $d['links'][] = $l;
 }
 $d['repo'] = preg_replace('#\.git$#', '', $d['repo']);
+// (3.9) A gitlab.com project link (group/project or group/sub/project): PC recomps only for now.
+$repoHost = '';
+if (preg_match('#^(https?://)?(www\.)?gitlab\.com/#i', $d['repo'])) {
+    $gl = rs_repo_from_link($d['repo']);
+    if (!$gl) rs_sub_out(422, ['ok' => false, 'error' => 'The GitLab project goes like gitlab.com/you/your-app.']);
+    if (($d['platform'] ?? '') !== 'pc') rs_sub_out(422, ['ok' => false, 'error' => 'PS5 apps need a GitHub repo for now. GitLab works for PC recomps.']);
+    $repoHost = 'gitlab';
+    $d['repo'] = $gl['repo'];
+    $d['host'] = 'gitlab';
+}
 if ($d['category'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Pick what it is: a game port, an emulator, an app or a tool.']);
 if (mb_strlen($d['name']) < 2) rs_sub_out(422, ['ok' => false, 'error' => 'Give it a name.']);
 if (mb_strlen($d['author']) < 2) rs_sub_out(422, ['ok' => false, 'error' => 'Say who made it (your name or handle).']);
 if (mb_strlen($d['contact']) < 3) rs_sub_out(422, ['ok' => false, 'error' => 'Leave an email or a Discord name so we can reach you.']);
-if (!preg_match('#^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$#', $d['repo'])) rs_sub_out(422, ['ok' => false, 'error' => 'The GitHub repo goes like github.com/you/your-app.']);
+if ($repoHost === '' && !preg_match('#^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$#', $d['repo'])) rs_sub_out(422, ['ok' => false, 'error' => 'The GitHub repo goes like github.com/you/your-app.']);
 if ($d['title_id'] !== '' && !preg_match('/^[A-Z]{4}\d{5}$/', $d['title_id'])) rs_sub_out(422, ['ok' => false, 'error' => 'A title ID is four letters and five numbers, like PPSA12345. Leave it empty if you don\'t have one yet.']);
 if ($d['asset'] !== '' && !preg_match('/\.(zip|7z)$/i', $d['asset'])) rs_sub_out(422, ['ok' => false, 'error' => 'The release file is the .zip or .7z on your GitHub release, like MyApp-*.zip.']);
 if ($d['ai'] === '' && ($d['platform'] ?? '') === 'pc') rs_sub_out(422, ['ok' => false, 'error' => 'Say whether AI tools helped make it (yes or no).']);
@@ -179,7 +189,7 @@ try {
         $d['was_declined'] = (json_decode((string)$fixRow['data'], true) ?: [])['declined'] ?? null;
         if (empty($d['account']) && !empty($fixRow['dev_account'])) $d['account'] = (int)$fixRow['dev_account'];
         $db->prepare("UPDATE inbox SET app_id = ?, name = ?, contact = ?, repo = ?, version = ?, body = ?, status = 'new', data = ? WHERE id = ?")
-           ->execute([$d['title_id'], $d['name'], $d['contact'], 'https://github.com/' . $d['repo'], $d['version'], $d['description'],
+           ->execute([$d['title_id'], $d['name'], $d['contact'], rs_host_web($repoHost, $d['repo']), $d['version'], $d['description'],
                json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $id]);
         // New pictures replace the old ones in the same role.
         $roles = array_values(array_unique(array_column($pics, 'role')));
@@ -189,7 +199,7 @@ try {
         }
     } else {
     $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, data, dev_account) VALUES (\'submit\', ?, ?, ?, ?, ?, ?, \'new\', ?, NOW(), ?, ?)')
-       ->execute([$d['title_id'], $d['name'], $d['contact'], 'https://github.com/' . $d['repo'], $d['version'], $d['description'], $ip,
+       ->execute([$d['title_id'], $d['name'], $d['contact'], rs_host_web($repoHost, $d['repo']), $d['version'], $d['description'], $ip,
            json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $subAcc ? (int)$subAcc['id'] : null]);
     $id = (int)$db->lastInsertId();
     }
@@ -220,7 +230,7 @@ try {
     if ($subAcc) {
         try {
             if (rs_mail_ready()) rs_mail_send(rs_mail_get('mail_from'), 'New app from ' . $d['account_name'] . ': ' . $d['name'],
-                $d['account_name'] . ($d['verified'] ? ' (verified developer)' : '') . ' sent in ' . $d['name'] . ' (github.com/' . $d['repo'] . ') from their developer hub.'
+                $d['account_name'] . ($d['verified'] ? ' (verified developer)' : '') . ' sent in ' . $d['name'] . ' (' . preg_replace('#^https://#', '', rs_host_web($repoHost, $d['repo'])) . ') from their developer hub.'
                 . "\n\nSee it in Submissions: " . rs_abs('/admin/submissions.php#m' . $id));
         } catch (Throwable $e) { /* it's in the Inbox either way */ }
         rs_sub_out(200, ['ok' => true, 'hub' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. Reviews take 24 to 48 hours, usually less than a day. You can follow it in your developer hub, and you\'ll hear back at ' . $d['contact'] . '.']);

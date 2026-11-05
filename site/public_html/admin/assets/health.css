@@ -63,6 +63,8 @@
 .pc-art-logo .pc-art-box img{object-fit:contain;padding:8px}
 .pc-list>li{grid-template-columns:minmax(220px,1fr) auto auto;align-items:center}
 .pc-lookup{display:flex;gap:8px}.pc-lookup input{min-width:260px}
+/* (3.9) GitHub or GitLab, then the project */
+.pc-repo-row{display:flex;gap:8px}.pc-repo-row select{flex:0 0 auto;width:auto}.pc-repo-row input{flex:1 1 auto;min-width:0}
 .pc-del{margin-top:14px}
 .pc-skipped{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px}
 .pc-skipped li{display:flex;align-items:center;gap:10px}
