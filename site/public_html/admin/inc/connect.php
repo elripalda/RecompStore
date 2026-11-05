@@ -537,7 +537,71 @@ function rs_gl_own_url(string $url, string $path): bool {
     $test = parse_url(rs_gl_api());
     $isTest = is_array($test) && strtolower((string)($test['host'] ?? '')) !== 'gitlab.com' && strtolower((string)($test['host'] ?? '')) === $host;
     if (!$isTest && ($host !== 'gitlab.com' || ($p['scheme'] ?? '') !== 'https')) return false;
-    return str_starts_with(strtolower((string)($p['path'] ?? '')), '/' . strtolower($path) . '/');
+    $up = strtolower((string)($p['path'] ?? ''));
+    if (str_starts_with($up, '/' . strtolower($path) . '/')) return true;
+    // (3.9) A file uploaded to the project, by its number: /-/project/<id>/uploads/...
+    if (preg_match('#^/-/project/(\d+)/uploads/#', $up, $m)) { $id = rs_gl_project_id($path); return $id > 0 && (int)$m[1] === $id; }
+    return false;
+}
+
+// (3.9) The project's number on GitLab (it never changes): kept for good once known.
+function rs_gl_project_id(string $path): int {
+    static $mem = [];
+    $k = strtolower($path);
+    if (isset($mem[$k])) return $mem[$k];
+    $kv = function_exists('rs_kv_get') ? rs_kv_get('glpid:' . $k) : null;
+    if ($kv && (int)$kv['v'] > 0) return $mem[$k] = (int)$kv['v'];
+    if (!rs_gl_path_ok($path)) return $mem[$k] = 0;
+    $r = rs_http(rs_gl_api() . '/projects/' . rawurlencode($path), ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
+    $id = $r['status'] === 200 ? (int)((json_decode($r['body'], true) ?: [])['id'] ?? 0) : 0;
+    if ($id > 0 && function_exists('rs_kv_put')) rs_kv_put('glpid:' . $k, (string)$id);
+    return $mem[$k] = $id;
+}
+
+// (3.9) An uploaded file's size, by a HEAD request (uploads never change, so it's kept). 0 when unknown.
+function rs_gl_upload_size(string $url): int {
+    $k = 'glsize:' . md5($url);
+    $kv = function_exists('rs_kv_get') ? rs_kv_get($k) : null;
+    if ($kv && (int)$kv['v'] > 0) return (int)$kv['v'];
+    $c = curl_init($url);
+    curl_setopt_array($c, [CURLOPT_NOBODY => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5, CURLOPT_TIMEOUT => 8,
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_USERAGENT => 'RecompStore']);
+    curl_exec($c);
+    $code = (int)curl_getinfo($c, CURLINFO_RESPONSE_CODE);
+    $len = (int)curl_getinfo($c, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+    curl_close($c);
+    $len = $code === 200 && $len > 0 ? $len : 0;
+    if ($len > 0 && function_exists('rs_kv_put')) rs_kv_put($k, (string)$len);
+    return $len;
+}
+
+// (3.9) Builds a release has as upload links in its notes (no release links): Markdown links to
+// /uploads/<secret>/<file>, https://gitlab.com/<path>/uploads/... or /-/project/<id>/uploads/...,
+// for build files only. Downloaded from /-/project/<id>/uploads/... (the only form that still works).
+// A SHA-256 written next to a file's name in the notes becomes its digest.
+function rs_gl_note_assets(string $body, string $path, int $pid): array {
+    if ($pid <= 0 || !preg_match_all('/\[[^\]]*\]\(\s*([^)\s]+)\s*\)/', $body, $mm)) return [];
+    $out = [];
+    $seen = [];
+    $lines = preg_split('/\R/', $body) ?: [];
+    $norm = fn(string $x): string => str_replace(' ', '_', strtolower($x));
+    foreach ($mm[1] as $u) {
+        $sec = $file = '';
+        if (preg_match('#^/uploads/([0-9a-f]{32})/([^/?\#]+)$#i', $u, $m)) [$sec, $file] = [$m[1], $m[2]];
+        elseif (preg_match('#^https://gitlab\.com/(.+?)/uploads/([0-9a-f]{32})/([^/?\#]+)$#i', $u, $m) && strtolower($m[1]) === strtolower($path)) [$sec, $file] = [$m[2], $m[3]];
+        elseif (preg_match('#^(?:https://gitlab\.com)?/-/project/(\d+)/uploads/([0-9a-f]{32})/([^/?\#]+)$#i', $u, $m) && (int)$m[1] === $pid) [$sec, $file] = [$m[2], $m[3]];
+        else continue;
+        $name = rawurldecode($file);
+        if (!preg_match('/\.(zip|7z|rar|exe|appimage|tar\.gz|tgz|tar\.xz|dmg)$/i', $name) || isset($seen[strtolower($name)])) continue;
+        $seen[strtolower($name)] = true;
+        $url = 'https://gitlab.com/-/project/' . $pid . '/uploads/' . strtolower($sec) . '/' . $file;
+        $a = ['name' => $name, 'size' => rs_gl_upload_size($url), 'browser_download_url' => $url, 'download_count' => 0];
+        foreach ($lines as $ln) {
+            if (str_contains($norm($ln), $norm($name)) && preg_match('/\b([0-9a-f]{64})\b/i', $ln, $h)) { $a['digest'] = 'sha256:' . strtolower($h[1]); break; }
+        }
+        $out[] = $a;
+    }
+    return $out;
 }
 
 // GitLab's /projects/:id/releases answer as GitHub's release list (what /api/gh.php gives):
@@ -546,6 +610,7 @@ function rs_gl_own_url(string $url, string $path): bool {
 // own source archives, are never files). GitLab doesn't say a link's size: 0.
 function rs_gl_release_list(array $list, string $path): array {
     $out = [];
+    $pid = rs_gl_project_id($path); // (3.9)
     foreach (array_slice(array_values($list), 0, 30) as $r) {
         if (!is_array($r)) continue;
         $assets = [];
@@ -556,11 +621,12 @@ function rs_gl_release_list(array $list, string $path): array {
             if ($name === '' || $u === '' || !rs_gl_own_url($u, $path)) continue;
             $assets[] = ['name' => $name, 'size' => 0, 'browser_download_url' => $u, 'download_count' => 0];
         }
+        if (!$assets) $assets = rs_gl_note_assets((string)($r['description'] ?? ''), $path, $pid); // (3.9)
         $out[] = [
             'tag_name' => (string)($r['tag_name'] ?? ''), 'name' => (string)($r['name'] ?? ''),
             'published_at' => (string)($r['released_at'] ?? ''), 'prerelease' => (bool)($r['upcoming_release'] ?? false),
             'draft' => false, 'body' => mb_strcut((string)($r['description'] ?? ''), 0, 20000, 'UTF-8'),
-            'html_url' => (string)($r['_links']['self'] ?? ''), 'assets' => $assets,
+            'html_url' => (string)($r['_links']['self'] ?? ''), 'project_id' => $pid, 'assets' => $assets,
         ];
     }
     return $out;

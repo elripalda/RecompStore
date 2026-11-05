@@ -2,7 +2,7 @@
 // RecompStore website (3.9): a GitLab project's releases, through this site, in the same JSON shape
 // /api/gh.php gives for a GitHub repo (rs_gl_release_list): [{tag_name, name, published_at,
 // prerelease, draft, body, html_url, assets: [{name, size, browser_download_url, download_count}]}],
-// newest first. Files are the release's links on https://gitlab.com/<project>/ (never GitLab's
+// newest first, with project_id (3.9). Files are the release's links on https://gitlab.com/<project>/ (never GitLab's
 // source archives); GitLab doesn't give sizes, so size is 0. Cached like gh.php: 15 minutes in the
 // database, 30 on disk, and the last copy (any age) with X-RS-Stale: 1 when GitLab can't be reached.
 //   GET ?repo=group/project  (or group/sub/project, URL-encoded)
