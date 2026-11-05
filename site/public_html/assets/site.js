@@ -1833,7 +1833,7 @@
   // header's PS5 / PC switch moves between the two stores.
   const PC_ORIGINS = { n64: 'Nintendo 64', x360: 'Xbox 360', xbox: 'Xbox', ps1: 'PlayStation', ps2: 'PlayStation 2', ps3: 'PlayStation 3', ps4: 'PlayStation 4',
     gc: 'GameCube', wii: 'Wii', wiiu: 'Wii U', snes: 'Super Nintendo', gba: 'Game Boy Advance', gb: 'Game Boy', ds: 'Nintendo DS', dc: 'Dreamcast', saturn: 'Saturn', psp: 'PSP', switch: 'Nintendo Switch',
-    nes: 'NES', gbc: 'Game Boy Color', '3ds': 'Nintendo 3DS', vb: 'Virtual Boy', ps5: 'PlayStation 5', genesis: 'Genesis', s32x: '32X', gg: 'Game Gear', arcade: 'Arcade', cdi: 'CD-i', amiga: 'Amiga', pc: N_('PC Classics'), other: N_('Other') };
+    nes: 'NES', gbc: 'Game Boy Color', '3ds': 'Nintendo 3DS', vb: 'Virtual Boy', ps5: 'PlayStation 5', genesis: 'Genesis', s32x: '32X', gg: 'Game Gear', arcade: 'Arcade', cdi: 'CD-i', amiga: 'Amiga', pc: 'PC', other: N_('Other') };
   const SYS_NAMES = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
   let pcCat = null, pcLoading = null;
   // (3.5) The website's lighter copy of the list (pc-catalog-web.json: everything but what only a
