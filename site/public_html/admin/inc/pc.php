@@ -17,7 +17,7 @@ const RS_PC_ORIGINS = ['n64' => 'Nintendo 64', 'x360' => 'Xbox 360', 'xbox' => '
     'ps3' => 'PlayStation 3', 'ps4' => 'PlayStation 4', 'gc' => 'GameCube', 'wii' => 'Wii', 'wiiu' => 'Wii U', 'snes' => 'Super Nintendo', 'gba' => 'Game Boy Advance',
     'gb' => 'Game Boy', 'ds' => 'Nintendo DS', 'dc' => 'Dreamcast', 'saturn' => 'Saturn', 'psp' => 'PSP', 'switch' => 'Nintendo Switch',
     'nes' => 'NES', 'gbc' => 'Game Boy Color', '3ds' => 'Nintendo 3DS', 'vb' => 'Virtual Boy', 'ps5' => 'PlayStation 5', 'genesis' => 'Genesis', 's32x' => '32X',
-    'gg' => 'Game Gear', 'arcade' => 'Arcade', 'cdi' => 'CD-i', 'amiga' => 'Amiga', 'other' => 'Other'];
+    'gg' => 'Game Gear', 'arcade' => 'Arcade', 'cdi' => 'CD-i', 'amiga' => 'Amiga', 'pc' => 'PC Classics', 'other' => 'Other'];
 // (2.8) What kind of game it is: each one a category of the PC store, with its own page (/pc/<slug>).
 const RS_PC_GENRES = ['action' => 'Action', 'adventure' => 'Adventure', 'platformer' => 'Platformers', 'racing' => 'Racing', 'fighting' => 'Fighting',
     'shooter' => 'Shooters', 'sports' => 'Sports', 'rpg' => 'RPG', 'puzzle' => 'Puzzle', 'other' => 'Other'];
