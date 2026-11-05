@@ -148,7 +148,6 @@ try {
 
     // ---- Signing up and in ----
     if ($a === 'signup') {
-        if (!rs_mail_ready()) rs_ac_err(503, 'Email sign-up isn\'t open yet. Use Google, Discord or GitHub.');
         if (rs_acct_try_count('signup', $ip, 60) >= 5) rs_ac_err(429, 'Too many new accounts from here. Try again in an hour.');
         if (!rs_acct_turnstile_ok($s('turnstile', 2048))) rs_ac_err(422, 'The check that you\'re a person didn\'t pass. Try again.', ['field' => 'turnstile']);
         if (empty($in['agree'])) rs_ac_err(422, 'Tick the box to agree to the Terms and Privacy.', ['field' => 'agree']);
@@ -157,30 +156,22 @@ try {
         $email = strtolower($s('email', 190));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) rs_ac_err(422, 'That doesn\'t look like an email address.', ['field' => 'email']);
         $had = rs_acct_by('email_lc', $email);
-        if ($had && !$had['email_ok'] && $had['pass_hash'] !== null) {
-            // Signed up before and never confirmed: the link again.
-            rs_acct_try_add('signup', $ip);
-            try { rs_acct_mail_confirm($had); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); }
-            rs_ac_out(200, ['ok' => true, 'confirm' => true, 'email' => $email]);
-        }
         if ($had) rs_ac_err(422, 'There\'s already an account with that email. Sign in, or set a new password.', ['field' => 'email']);
         $pass = (string)($in['password'] ?? '');
         if ($e = rs_acct_pass_error($pass)) rs_ac_err(422, $e, ['field' => 'password']);
         rs_acct_try_add('signup', $ip);
         $acc = rs_acct_create(['username' => $user, 'username_lc' => strtolower($user), 'email' => $email, 'email_lc' => $email, 'pass_hash' => rs_acct_hash($pass),
             'prefs' => json_encode(['weekly' => !empty($in['news']) || !empty($in['weekly']), 'launcher' => !empty($in['news']) || !empty($in['launcher']), 'updates' => !empty($in['updates'])])]);
-        // (3.0) The account works once its email is confirmed: nothing is signed in until then.
-        // (3.1) The email waits in line if it can't go this second: the account stays either way.
-        try { rs_acct_mail_confirm($acc); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); }
-        rs_ac_out(200, ['ok' => true, 'confirm' => true, 'email' => $email]);
+        // (3.9) No confirmation email: the account is signed in straight away. Its email stays
+        // unconfirmed (email_ok 0), so nothing else is mailed to it.
+        rs_ac_out(200, ['ok' => true] + rs_acct_sign_in($acc));
     }
     if ($a === 'resend') {
         $email = strtolower($s('email', 190));
         if (rs_acct_try_count('resend', $ip, 60) >= 4) rs_ac_err(429, 'That\'s a few already. Check your spam folder, or try again in an hour.');
         rs_acct_try_add('resend', $ip);
         $acc = filter_var($email, FILTER_VALIDATE_EMAIL) ? rs_acct_by('email_lc', $email) : ($me ?: null);
-        if ($acc && !$acc['email_ok'] && !$acc['banned']) { try { rs_acct_mail_confirm($acc); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); } }
-        rs_ac_out(200, ['ok' => true, 'message' => 'If that account is waiting, a new link is on its way. Check your spam folder too.']);
+        rs_ac_out(200, ['ok' => true, 'message' => 'No confirmation needed any more: just sign in.']);
     }
     if ($a === 'signin') {
         $login = strtolower($s('login', 190));
@@ -195,8 +186,6 @@ try {
             rs_ac_err(422, $acc && $acc['pass_hash'] === null ? 'That account signs in with Google, Discord or GitHub.' : 'That username or password isn\'t right.', ['needCheck' => $fails + 1 >= 5 && rs_acct_turnstile_ready()]);
         }
         if ($acc['banned']) rs_ac_err(403, 'This account was closed for breaking the house rules.');
-        if (!$acc['email_ok'] && $acc['google_sub'] === null && $acc['discord_id'] === null && $acc['github_id'] === null)
-            rs_ac_err(403, 'Confirm your email first: the link is in the email we sent you.', ['needConfirm' => true, 'email' => (string)$acc['email']]);
         if (password_needs_rehash((string)$acc['pass_hash'], defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_BCRYPT)) rs_acct_update((int)$acc['id'], ['pass_hash' => rs_acct_hash($pass)]);
         rs_ac_out(200, ['ok' => true] + rs_acct_sign_in($acc));
     }
@@ -278,7 +267,6 @@ try {
         if (rs_acct_try_count('email', (string)$id, 60) >= 4) rs_ac_err(429, 'Try again in an hour.');
         rs_acct_try_add('email', (string)$id);
         rs_acct_update($id, ['email' => $email, 'email_lc' => $email, 'email_ok' => 0]);
-        rs_acct_mail_confirm(rs_acct_get($id));
         rs_ac_out(200, ['ok' => true, 'account' => rs_acct_public(rs_acct_get($id))]);
     }
     if ($a === 'password') {
