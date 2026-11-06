@@ -40,6 +40,14 @@ function rs_rl_out(int $code, array $body): void {
     exit;
 }
 function rs_rl_err(int $code, string $why): void { rs_rl_out($code, ['ok' => false, 'error' => $why]); }
+// (4.1) A refused cloud save upload, noted (time, game, size, reason) so the admin can see why saves
+// don't go up. Kept small: the file starts over past 2 MB.
+function rs_rl_put_err(int $code, string $why, string $game = '', string $note = ''): void {
+    $f = dirname(RS_PUBLIC) . '/recompstore-private/rl-put-errors.log';
+    if (@filesize($f) > 2 << 20) @unlink($f);
+    @file_put_contents($f, gmdate('c') . "\t$code\t" . substr($game, 0, 80) . "\t" . (int)($_SERVER['CONTENT_LENGTH'] ?? 0) . "\t$why" . ($note !== '' ? " ($note)" : '') . "\n", FILE_APPEND | LOCK_EX);
+    rs_rl_err($code, $why);
+}
 
 $a = (string)($_GET['a'] ?? '');
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -169,26 +177,26 @@ try {
             rs_rl_out(200, ['versions' => rs_rl_versions((int)$me['id'], $game)] + $space($me));
         case 'save-put': {
             if ($method !== 'PUT' && $method !== 'POST') rs_rl_err(405, 'PUT');
-            if (!rs_rl_game_ok($game)) rs_rl_err(400, 'That isn\'t a game.');
+            if (!rs_rl_game_ok($game)) rs_rl_put_err(400, 'That isn\'t a game.', $game);
             $hash = strtolower((string)($_GET['hash'] ?? ''));
-            if (!preg_match('/^[0-9a-f]{64}$/', $hash)) rs_rl_err(400, 'That isn\'t a save copy.');
+            if (!preg_match('/^[0-9a-f]{64}$/', $hash)) rs_rl_put_err(400, 'That isn\'t a save copy.', $game, 'bad hash');
             if (rs_acct_try_count('rl-put', (string)$me['id'], 60) >= 120) rs_rl_err(429, 'Too many uploads. Try again in a while.');
             rs_acct_try_add('rl-put', (string)$me['id']);
             $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
-            if ($len <= 0) rs_rl_err(400, 'Nothing arrived.');
-            if ($len > RS_RL_QUOTA) rs_rl_err(413, 'That save is bigger than your 150 MB of cloud space.');
+            if ($len <= 0) rs_rl_put_err(400, 'Nothing arrived.', $game);
+            if ($len > RS_RL_QUOTA) rs_rl_put_err(413, 'That save is bigger than your 150 MB of cloud space.', $game);
             $tmp = tempnam(sys_get_temp_dir(), 'rls');
             $out = fopen($tmp, 'wb');
             $inp = fopen('php://input', 'rb');
             $n = stream_copy_to_stream($inp, $out, RS_RL_QUOTA + 1);
             fclose($inp); fclose($out);
-            if ($n !== $len) { @unlink($tmp); rs_rl_err(400, 'The upload didn\'t arrive whole. Try again.'); }
-            if ($why = rs_rl_check_zip($tmp)) { @unlink($tmp); rs_rl_err(400, $why); }
+            if ($n !== $len) { @unlink($tmp); rs_rl_put_err(400, 'The upload didn\'t arrive whole. Try again.', $game); }
+            if ($why = rs_rl_check_zip($tmp, $note)) { @unlink($tmp); rs_rl_put_err(400, $why, $game, (string)$note); }
             try {
                 $r = rs_rl_put($me, $game, $tmp, $hash, (int)($_GET['made'] ?? time()), max(0, (int)($_GET['played'] ?? 0)), (string)($_GET['device'] ?? $pc['name']));
             } catch (RangeException $e) {
                 @unlink($tmp);
-                rs_rl_err(413, $e->getMessage());
+                rs_rl_put_err(413, $e->getMessage(), $game);
             }
             @unlink($tmp);
             rs_rl_out(200, ['v' => $r['v'], 'same' => $r['same']] + $space($me));

@@ -13,7 +13,10 @@ const RS_RL_KEEP = 5;
 require_once __DIR__ . '/b2.php';
 const RS_RL_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 // Never in a save upload: game files, programs, archives.
-const RS_RL_NOT_SAVES = ['iso', 'bin', 'cue', 'chd', 'cso', 'gcm', 'rvz', 'wbfs', 'wad', 'nsp', 'xci', 'xex', 'xbe', 'z64', 'n64', 'v64', 'sfc', 'smc',
+// (4.1) .bin is left out: many games keep their saves as small .bin files (the launcher sends .bin up
+// to 16 MB, RS_RL_BIN_MAX); a bigger one is a disc image.
+const RS_RL_BIN_MAX = 16 * 1024 * 1024;
+const RS_RL_NOT_SAVES = ['iso', 'cue', 'chd', 'cso', 'gcm', 'rvz', 'wbfs', 'wad', 'nsp', 'xci', 'xex', 'xbe', 'z64', 'n64', 'v64', 'sfc', 'smc',
     'gba', 'nds', '3ds', 'elf', 'rpx', 'exe', 'dll', 'so', 'msi', 'zip', '7z', 'rar', 'appimage', 'mp4', 'mkv'];
 
 function rs_rl_tables(): void {
@@ -239,12 +242,13 @@ function rs_rl_game_name(string $game): string {
 }
 
 // Why an upload isn't a save copy, or null when it is one.
-function rs_rl_check_zip(string $file): ?string {
+function rs_rl_check_zip(string $file, ?string &$note = null): ?string {
+    $note = '';
     $head = (string)file_get_contents($file, false, null, 0, 4);
-    if ($head !== "PK\x03\x04") return 'That isn\'t a save copy.';
+    if ($head !== "PK\x03\x04") { $note = 'not a zip'; return 'That isn\'t a save copy.'; }
     if (!class_exists('ZipArchive')) return null;
     $z = new ZipArchive();
-    if ($z->open($file) !== true) return 'That isn\'t a save copy.';
+    if ($z->open($file) !== true) { $note = 'zip won\'t open'; return 'That isn\'t a save copy.'; }
     $has = false; $total = 0;
     for ($i = 0; $i < $z->numFiles; $i++) {
         $s = $z->statIndex($i);
@@ -252,12 +256,12 @@ function rs_rl_check_zip(string $file): ?string {
         $name = (string)$s['name'];
         if ($name === 'rlsave.json') { $has = true; continue; }
         $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-        if (in_array($ext, RS_RL_NOT_SAVES, true)) { $z->close(); return 'Game files and programs can\'t go in cloud saves.'; }
-        if ((int)$s['size'] > 64 * 1024 * 1024) { $z->close(); return 'One of those files is too big to be a save.'; }
+        if (in_array($ext, RS_RL_NOT_SAVES, true) || ($ext === 'bin' && (int)$s['size'] > RS_RL_BIN_MAX)) { $note = substr($name, -60) . ', ' . (int)$s['size']; $z->close(); return 'Game files and programs can\'t go in cloud saves.'; }
+        if ((int)$s['size'] > 64 * 1024 * 1024) { $note = substr($name, -60) . ', ' . (int)$s['size']; $z->close(); return 'One of those files is too big to be a save.'; }
         $total += (int)$s['size'];
     }
     $z->close();
-    if (!$has) return 'That isn\'t a save copy.';
+    if (!$has) { $note = 'no rlsave.json'; return 'That isn\'t a save copy.'; }
     if ($total > 4 * RS_RL_QUOTA) return 'That\'s too big to be a save.';
     return null;
 }
@@ -273,6 +277,24 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
     // Room: what's kept now, less the oldest copy this one replaces, plus this one.
     $drop = count($have) >= RS_RL_KEEP ? array_slice($have, RS_RL_KEEP - 1) : [];
     $after = rs_rl_used($id) - array_sum(array_column($drop, 'size')) + $size;
+    // (4.1) Short of room: older copies go first, oldest first, this game's and then the others'. The
+    // newest copy of every game is always kept, so a save only fails when those alone fill the space.
+    $more = [];
+    if ($after > RS_RL_QUOTA) {
+        $gone = array_flip(array_column($drop, 'v'));
+        $st = rs_db()->prepare('SELECT game, v, size, made FROM cloud_saves WHERE account_id = ? ORDER BY game, made DESC, id DESC');
+        $st->execute([$id]);
+        $older = []; $seen = [];
+        foreach ($st->fetchAll() as $r) {
+            if (!isset($seen[$r['game']])) { $seen[$r['game']] = 1; continue; } // its newest copy stays
+            if (!isset($gone[$r['v']])) $older[] = $r;
+        }
+        usort($older, fn($x, $y) => [$x['game'] !== $game, (int)$x['made']] <=> [$y['game'] !== $game, (int)$y['made']]);
+        foreach ($older as $r) {
+            if ($after <= RS_RL_QUOTA) break;
+            $more[] = $r; $after -= (int)$r['size'];
+        }
+    }
     if ($after > RS_RL_QUOTA) throw new RangeException('Your cloud saves are full (150 MB). Delete some on your account page at recomplauncher.com.');
     $v = bin2hex(random_bytes(8));
     if (rs_b2_on()) {
@@ -285,6 +307,7 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
     rs_db()->prepare('INSERT INTO cloud_saves (account_id, game, v, hash, size, made, device, played, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
         ->execute([$id, $game, $v, $hash, $size, $made, rs_rl_clean($device, 64), $played]);
     foreach ($drop as $old) rs_rl_delete($a, $game, $old['v']);
+    foreach ($more as $old) rs_rl_delete($a, (string)$old['game'], (string)$old['v']);
     return ['v' => $v, 'same' => false];
 }
 
