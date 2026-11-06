@@ -1,0 +1,551 @@
+{
+ "snap64recomp": {
+  "kind": "portable",
+  "start": "Snap64Recomp.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "file",
+   "contains": [
+    "pokemonsnap.z64"
+   ],
+   "region": "E",
+   "n64_id": "PF",
+   "what": "Your Pokemon Snap N64 ROM, USA"
+  }
+ },
+ "perfect-dark": {
+  "kind": "portable",
+  "start": "pd.i686.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "data",
+   "accepts": "file",
+   "contains": [
+    "pd.ntsc-final.z64"
+   ],
+   "region": "E",
+   "n64_id": "PD",
+   "n64_rev": 1,
+   "what": "Your Perfect Dark N64 ROM, USA v1.1"
+  }
+ },
+ "cvlod-recomp": {
+  "kind": "portable",
+  "start": "LodRecomp.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "file",
+   "contains": [
+    "rom.z64"
+   ],
+   "region": "E",
+   "what": "Your Castlevania: Legacy of Darkness N64 ROM, USA"
+  }
+ },
+ "rush2recompiled": {
+  "kind": "portable",
+  "start": "Rush2Recompiled.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "file",
+   "contains": [
+    "Rush 2 - Extreme Racing USA (USA).z64"
+   ],
+   "region": "E",
+   "what": "Your Rush 2: Extreme Racing USA N64 ROM, USA"
+  },
+  "player_note": "Only the USA ROM works."
+ },
+ "sote-recomp": {
+  "kind": "portable",
+  "start": "Shadows of the Empire.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "file",
+   "contains": [
+    "sote.us.v1.2.z64"
+   ],
+   "region": "E",
+   "n64_id": "SW",
+   "n64_rev": 2,
+   "what": "Your Shadows of the Empire N64 ROM, USA v1.2"
+  }
+ },
+ "goldeneye-pc-port": {
+  "kind": "portable",
+  "start": "ge007.x86_64.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "data",
+   "accepts": "file",
+   "contains": [
+    "ge007.ntsc-final.z64"
+   ],
+   "region": "E",
+   "n64_id": "GE",
+   "what": "Your GoldenEye 007 N64 ROM, USA"
+  },
+  "player_note": "Only the USA ROM works for now. The first start prepares the game once. It can take a few minutes."
+ },
+ "winbackrecomp": {
+  "kind": "portable",
+  "start": "WinBackRecompiled.exe",
+  "start_is": "game",
+  "files": {
+   "how": "flag",
+   "flag": "--rom",
+   "accepts": "file",
+   "what": "Your WinBack N64 ROM, USA"
+  }
+ },
+ "army-men-sarges-heroes-64-recompiled": {
+  "kind": "portable",
+  "start": "ArmyMenSargesHeroesRecompiled.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "roms",
+   "accepts": "file",
+   "contains": [
+    "Army Men - Sarge's Heroes (USA).z64"
+   ],
+   "region": "E",
+   "what": "Your Army Men: Sarge's Heroes N64 ROM, USA (8 MB)"
+  },
+  "player_note": "Only the USA ROM works."
+ },
+ "wwe-svr2007-recomp": {
+  "kind": "portable",
+  "start": "svr2007.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "iso",
+   "check_image": "xdvdfs",
+   "contains": [
+    "svr2007.iso"
+   ],
+   "id": "545107E0",
+   "what": "Your WWE SmackDown vs. Raw 2007 Xbox 360 disc image (.iso), USA or Europe"
+  }
+ },
+ "wwe-svr2008-recomp": {
+  "kind": "portable",
+  "start": "svr2008.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "iso",
+   "check_image": "xdvdfs",
+   "contains": [
+    "svr2008.iso"
+   ],
+   "id": "5451080B",
+   "what": "Your WWE SmackDown vs. Raw 2008 Xbox 360 disc image (.iso), USA or Europe"
+  }
+ },
+ "wwe-svr2009-recomp": {
+  "kind": "portable",
+  "start": "svr2009.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "iso",
+   "check_image": "xdvdfs",
+   "contains": [
+    "svr2009.iso"
+   ],
+   "id": "54510826",
+   "what": "Your WWE SmackDown vs. Raw 2009 Xbox 360 disc image (.iso), USA or Europe"
+  }
+ },
+ "wwe-svr2010-recomp": {
+  "kind": "portable",
+  "start": "svr2010.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "iso",
+   "check_image": "xdvdfs",
+   "contains": [
+    "svr2010.iso"
+   ],
+   "id": "54510844",
+   "what": "Your WWE SmackDown vs. Raw 2010 Xbox 360 disc image (.iso), USA or Europe"
+  }
+ },
+ "wwe13-recomp": {
+  "kind": "portable",
+  "start": "WWE13 Launcher.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "WWE 13",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your WWE '13 Xbox 360 disc image (.iso) or its extracted files"
+  },
+  "player_note": "Add the title update in the game's own launcher."
+ },
+ "wwe2k14-recomp": {
+  "kind": "portable",
+  "start": "WWE 2K14 Launcher.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "WWE 2K14",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your WWE 2K14 Xbox 360 disc image (.iso) or its extracted files"
+  },
+  "player_note": "Add the title update in the game's own launcher."
+ },
+ "wwe2k15-pc": {
+  "kind": "portable",
+  "start": "WWE 2K15 Launcher.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "game",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your WWE 2K15 Xbox 360 disc image (.iso) or its extracted files"
+  },
+  "player_note": "Add title update 4 in the game's own launcher."
+ },
+ "silent-hill-decomp": {
+  "kind": "portable",
+  "start": "SilentHillPC.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "gamedata",
+   "accepts": "file",
+   "contains": [
+    "Silent Hill (USA).bin"
+   ],
+   "what": "Your Silent Hill PS1 disc as a .bin image: USA, Europe or Japan"
+  }
+ },
+ "ac6-recomp": {
+  "kind": "portable",
+  "start": "ac6recomp.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "assets",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your Ace Combat 6 Xbox 360 disc image (.iso) or its extracted files, USA"
+  },
+  "player_note": "Only the USA disc works."
+ },
+ "eternaldarknessrecomp": {
+  "kind": "portable",
+  "start": "play.bat",
+  "start_is": "script",
+  "files": {
+   "how": "folder",
+   "folder": "dump",
+   "accepts": "iso",
+   "contains": [
+    "Eternal Darkness (Europe).iso"
+   ],
+   "what": "Your Eternal Darkness GameCube disc image (.iso), Europe (GEDP01)"
+  },
+  "player_note": "Only the Europe disc (GEDP01) works."
+ },
+ "ghclassic": {
+  "kind": "portable",
+  "start": "GHClassic.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "PUT_DISC_HERE",
+   "accepts": "iso",
+   "contains": [
+    "Guitar Hero II (USA).iso"
+   ],
+   "what": "Your Guitar Hero II PS2 disc image (.iso), USA (SLUS-21447)"
+  },
+  "player_note": "Only the USA disc of Guitar Hero II works."
+ },
+ "summitstrike-recomp": {
+  "kind": "portable",
+  "start": "summitstrike.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "game",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xbe"
+   ],
+   "what": "Your Summit Strike Xbox disc image (.iso) or its extracted files"
+  }
+ },
+ "the-darkness-recomp": {
+  "kind": "portable",
+  "start": "Launch.cmd",
+  "start_is": "script",
+  "files": {
+   "how": "folder",
+   "folder": "Darkness",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your The Darkness Xbox 360 disc image (.iso) or its extracted files"
+  }
+ },
+ "hp1-recompiled": {
+  "kind": "portable",
+  "start": "hpps.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "game",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xbe"
+   ],
+   "what": "Your Harry Potter and the Philosopher's Stone Xbox disc image (.iso) or its extracted files, PAL (Europe)"
+  },
+  "player_note": "This build is for the PAL (Europe) disc."
+ },
+ "ghostrecon2-recomp": {
+  "kind": "portable",
+  "start": "ghostrecon2.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "game",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xbe"
+   ],
+   "what": "Your Ghost Recon 2 Xbox disc image (.iso) or its extracted files"
+  }
+ },
+ "dead-or-alive-xtreme-2-recompilation": {
+  "kind": "portable",
+  "start": "DOAX2 Recomp Launcher.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "extracted game files here",
+   "accepts": "folder or iso",
+   "extract": "xdvdfs",
+   "contains": [
+    "default.xex"
+   ],
+   "what": "Your Dead or Alive Xtreme 2 Xbox 360 disc image (.iso) or its extracted files"
+  }
+ },
+ "xmen2-pc": {
+  "kind": "portable",
+  "start": "XMen2.exe",
+  "start_is": "game",
+  "files": {
+   "how": "flag",
+   "accepts": "file",
+   "what": "Your X-Men 2: Clone Wars Genesis ROM, USA or Europe"
+  }
+ },
+ "babel-recomp": {
+  "kind": "portable",
+  "start": "babel-recomp.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": ".",
+   "accepts": "file",
+   "contains": [
+    "rom.sfc"
+   ],
+   "what": "Your Illusion of Gaia SNES ROM, USA"
+  }
+ },
+ "flintstones-jetsons-timewarp-static-recomp": {
+  "kind": "portable",
+  "start": "timewarp_hd.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "rom",
+   "accepts": "folder",
+   "what": "The folder with your The Flintstones and The Jetsons: Timewarp CD-i disc image (.cue and .bin)"
+  }
+ },
+ "laser-lords-static-recomp": {
+  "kind": "portable",
+  "start": "laserlords_hd.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "rom",
+   "accepts": "folder",
+   "what": "The folder with your Laser Lords CD-i disc image (.cue and .bin)"
+  }
+ },
+ "zelda-adventures-static-recomp": {
+  "kind": "portable",
+  "start": "zelda.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "rom",
+   "accepts": "folder",
+   "what": "The folder with your Zelda's Adventure CD-i disc image (.cue and .bin)"
+  }
+ },
+ "dogs-of-war-atari-st-recomp": {
+  "kind": "portable",
+  "start": "dowport.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "original",
+   "accepts": "file",
+   "contains": [
+    "Dogs of War (1989)(Elite)[cr Replicants][t].st"
+   ],
+   "what": "Your Dogs of War Atari ST disk image (.st)"
+  }
+ },
+ "supermetroidplus": {
+  "kind": "portable",
+  "start": "Play.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "games",
+   "accepts": "file",
+   "contains": [
+    "Super Metroid.sfc"
+   ],
+   "what": "Your Super Metroid SNES ROM (Japan, USA), unheadered .sfc"
+  }
+ },
+ "initial-d-arcade-stage-3-native-sh-4-recompilation-wip": {
+  "kind": "portable",
+  "start": "Initial D Arcade Stage 3 Recompiled.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "game files",
+   "accepts": "folder",
+   "contains": [
+    "gds-0033.chd",
+    "317-0384-com.pic"
+   ],
+   "what": "The folder with your Initial D Arcade Stage 3 files: gds-0033.chd and 317-0384-com.pic"
+  },
+  "player_note": "The first start unpacks the game once and needs about 1.3 GB of free space."
+ },
+ "wolf3d-x64": {
+  "kind": "portable",
+  "start": "wolf3d.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "data",
+   "accepts": "folder",
+   "what": "The folder with your Wolfenstein 3D game files, version 1.4 (full .WL6 or shareware .WL1)"
+  }
+ },
+ "testdrive3-enhanced": {
+  "kind": "portable",
+  "start": "Test Drive III Enhanced.exe",
+  "start_is": "launcher",
+  "files": {
+   "how": "folder",
+   "folder": "Game",
+   "accepts": "folder",
+   "contains": [
+    "PLAYDISK.DAT"
+   ],
+   "what": "The folder with your DOS Test Drive III game files (TDIII.EXE, PLAYDISK.DAT and the rest)"
+  }
+ },
+ "testdrive-enhanced": {
+  "kind": "portable",
+  "start": "testdrive-enhanced.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "Game",
+   "accepts": "folder",
+   "contains": [
+    "TDEGA.EXE"
+   ],
+   "what": "The folder with your DOS Test Drive game files (TDEGA.EXE, CARS.TXT and the rest)"
+  }
+ },
+ "td2": {
+  "kind": "portable",
+  "start": "TD2.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "Game",
+   "accepts": "folder",
+   "contains": [
+    "TD2EGA.EXE"
+   ],
+   "what": "The folder with your DOS Test Drive II game files (TD2EGA.EXE, CARS.DAT, SCENES.DAT and the rest)"
+  }
+ },
+ "grand-prix-circuit-recomp": {
+  "kind": "portable",
+  "start": "GrandPrixCircuit.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "gprix2",
+   "accepts": "folder",
+   "what": "The folder with your DOS Grand Prix Circuit game files (GPEGA.EXE and the .PES and .PCS files)"
+  }
+ },
+ "future-rust-cop": {
+  "kind": "portable",
+  "start": "fcop.exe",
+  "start_is": "game",
+  "files": {
+   "how": "folder",
+   "folder": "game_files",
+   "accepts": "folder",
+   "what": "Your Future Cop: LAPD PC CD contents or installed game folder, USA or German version"
+  }
+ }
+}
