@@ -1,0 +1,4 @@
+ac6-recomp|sal063/AC6_recomp|*.zip|ac6recomp.exe
+ghclassic|noahbaxter/GHClassic|GHClassic-windows-x64-*.zip|GHClassic.exe
+the-darkness-recomp|portingpete/The-Darkness-Recomp|The-Darkness-Recomp-*-windows-x64.zip|Launch.cmd
+army-men-sarges-heroes-64-recompiled|RangerXT/Army-Men-Sarges-Heroes-64-Recompiled|ArmyMenSargesHeroes64Recompiled-*-Windows-x64.zip|ArmyMenSargesHeroesRecompiled.exe

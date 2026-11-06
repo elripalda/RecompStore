@@ -42,9 +42,8 @@ for line in sys.stdin:
         rels, _ = get("https://recompstore.com/api/gh.php?repo=" + repo)
         rels = json.loads(rels)
         url = None
-        for r in rels:
-            if r.get("draft") or r.get("prerelease"):
-                continue
+        pre = [r for r in rels if r.get("prerelease") and not r.get("draft")]
+        for r in [r for r in rels if not r.get("draft") and not r.get("prerelease")] + pre:
             for a in r.get("assets", []):
                 if fnmatch.fnmatch(a["name"], pat):
                     url = a["browser_download_url"]
@@ -52,7 +51,7 @@ for line in sys.stdin:
             if url:
                 break
         if not url:
-            print(gid, "NO-ASSET")
+            print(gid, "NO-ASSET", "(%d releases: %s)" % (len(rels), ", ".join(a["name"] for r in rels[:2] for a in r.get("assets", [])[:4])))
             continue
         names = zip_names(url)
         if names is None:
