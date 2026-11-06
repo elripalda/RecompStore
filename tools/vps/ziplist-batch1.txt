@@ -1,0 +1,18 @@
+gears-of-war-2-pc-port|santiquiroz/gears-of-war-2-pc-port|gow2-recomp-*-win64.zip|gow2.exe
+birdman64|NoahVl/Birdman64|Birdman64-windows-x64.zip|Birdman64.exe
+black-xberecomp|TGP482/BLACK-XBERecomp|BLACK-XBERecomp.zip|BLACK.exe
+scda-xberecomp|TGP482/SCDA-XBERecomp|SCDA-XBERecomp.zip|SCDA.exe
+fm4-recomp|Alexbeav/fm4-recomp|fm4-recomp-*-win-x64.zip|Launch FM4.bat
+cod2-bro-native-loader|SmokeDoggy044/CoD2-BRO-Native-Loader|cod_bro-*-windows.zip|cod_bro_loader.exe
+vandalhearts-pcport|HalmyLyseas/VandalHearts-PcPort|VandalHearts-*-windows-x64.zip|vandalhearts_pc.exe
+untildawn-pc|SuperCatElvis/UntilDawn_PC|UntilDawn_*.zip|UntilDawn.exe
+castlevaniacod-pc|jmafort/CastlevaniaCOD-PC|CastlevaniaCOD-PC-*.zip|Castlevania.exe
+timesplitters|GTTeancum/Timesplitters|TimeSplitters-Recomp-*-windows.zip|timesplitters.exe
+metal-arms-pc-port|tvall43/metal-arms-pc-port|ma_win_release_r153_o2.zip|ma_win.exe
+starwars-renegadesquadron-pc|GTTeancum/StarWars-RenegadeSquadron-PC|RenegadeSquadronPC-*.zip|RenegadeSquadron.exe
+mcrae05-xbe-recomp|projectedan/McRae05-XBE-Recomp|CMR2005.zip|CMR2005.exe
+tigerwoods2004-xbe-recomp|projectedan/TigerWoods2004-XBE-Recomp|TW2004.zip|TW2004.exe
+hp2-recompiled|Barthes-Recompiled/HP2-Recompiled|hpcos-*-windows-PAL.zip|hpcos.exe
+hp3-recompiled|Barthes-Recompiled/HP3-Recompiled|hppoa-0.5.2-windows-PAL.zip|hppoa.exe
+baroque-decomp|Arch61s/Baroque-Decomp|Baroque-*-win64.zip|Baroque.exe
+oratan-recomp|kitaaaaaa/Oratan-recomp|Oratan-recomp-*-win64.zip|oratan.exe
