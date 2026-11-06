@@ -150,3 +150,6 @@ ol.steps{display:grid;gap:6px;padding-left:22px;margin:10px 0 14px;line-height:1
 .note-row.off{opacity:.5}
 .note-row p{margin:0 0 4px}
 .note-row form{display:flex;gap:8px;flex:none}
+/* (4.0) Not compatible yet: hidden, with the reason under its name */
+.pc-card-cover em.blocked{color:#ff9a9a}
+.pc-blocked-why{color:#ffb4b4;font-size:12px;line-height:1.35;white-space:normal;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}

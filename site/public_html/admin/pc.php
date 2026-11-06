@@ -48,6 +48,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a['origin'] = isset(RS_PC_ORIGINS[$_POST['origin'] ?? '']) ? (string)$_POST['origin'] : 'other';
             $a['genre'] = isset(RS_PC_GENRES[$_POST['genre'] ?? '']) ? (string)$_POST['genre'] : '';
             $a['dev'] = preg_match('/^[a-z0-9-]{1,40}$/', (string)($_POST['dev'] ?? '')) ? (string)$_POST['dev'] : '';
+            // (4.0) Why it can't be listed yet (.rar download, no Windows build...): only you see it, and it
+            // puts the recomp under Not compatible instead of Hidden.
+            $a['blocked_why'] = mb_substr(trim(str_replace(["\r", "\n"], ' ', (string)($_POST['blocked_why'] ?? ''))), 0, 200);
             // (4.0) Project status: on hold, or ended (no more updates). Empty: active, or worked out from GitHub.
             $a['status'] = in_array((string)($_POST['status'] ?? ''), RS_PC_STATUSES, true) ? (string)$_POST['status'] : '';
             $a['status_note'] = mb_substr(trim(str_replace(["\r", "\n"], ' ', (string)($_POST['status_note'] ?? ''))), 0, 200);
@@ -199,7 +202,7 @@ $lastFind = $view === 'found' ? rs_kv_get('pc_find_run') : null;
 
 // (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
 // and page size are remembered (a cookie) so the list comes back the way you left it.
-$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look'],
+$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look', 'blocked' => 'Not compatible'],
     'sort' => ['new' => 'Newest', 'old' => 'Oldest', 'az' => 'A to Z', 'za' => 'Z to A', 'updated' => 'Recently updated', 'downloads' => 'Most downloads', 'reports' => 'Most reports'],
     'per' => [25, 50, 100, 200]];
 $lsPick = function (string $k, $def) use ($lsOpt) {
@@ -298,6 +301,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>How to report bugs<input name="report_url" value="<?= h((string)($a['report_url'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://github.com/owner/name/issues/new/choose"><small>The developer's own page for bug reports. Shown next to the report form. https only.</small></label>
     <label>Project status<select name="status"><option value="">Active</option><option value="paused"<?= ($a['status'] ?? '') === 'paused' ? ' selected' : '' ?>>On hold</option><option value="ended"<?= ($a['status'] ?? '') === 'ended' ? ' selected' : '' ?>>Ended (no more updates)</option></select><small><?= !empty($a['archived']) ? 'Archived on GitHub, so it shows as ended even when this says Active.' : 'On hold or Ended shows a label on its tile and page. Archived GitHub projects show as ended by themselves.' ?></small></label>
     <label>Status note<input name="status_note" value="<?= h((string)($a['status_note'] ?? '')) ?>" maxlength="200" placeholder="The developer moved on to the sequel."><small>Optional. A short line shown under the label, ideally the developer's own words.</small></label>
+    <label class="span2">Not compatible yet<input name="blocked_why" value="<?= h((string)($a['blocked_why'] ?? '')) ?>" maxlength="200" placeholder="Like: the download is a .rar, or there's no Windows build yet"><small>Only you see this. A hidden recomp with a reason here sits under Not compatible in the list instead of Hidden, until its developer puts out a build that works.</small></label>
     <label class="span2">Key features<textarea name="features" rows="5" maxlength="1200" placeholder="One per line"><?= h($a['features']) ?></textarea><small>One per line, shown at the top of its page. Picked up from the README's Features list when it was added.</small></label>
     <label class="span2">Around the web<textarea name="media" rows="4" maxlength="5000" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.reddit.com/r/…/comments/…&#10;https://x.com/…/status/…"><?= h($a['media']) ?></textarea><small>Videos, posts and articles about it, one link per line. YouTube shows as a video, Reddit and X as cards.</small></label>
     <label class="span2">Boot profile<textarea name="boot" rows="8" maxlength="20000" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace;font-size:13px" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>How RecompLauncher starts it, sets it up from the player's copy (Easy Setup) and which of its settings to show. One JSON object, per the curator setup guide. Empty: the launcher works it out.</small></label>
@@ -328,8 +332,8 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
 <?php if ($view === ''):
     // (4.0) What each filter matches, its count, then the search, the order and the page.
     $lifeOf = fn(array $a): bool => in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) || !empty($a['archived']);
-    $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'], 'soon' => fn($a) => !empty($a['soon']),
-        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a)];
+    $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) === '', 'soon' => fn($a) => !empty($a['soon']),
+        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a), 'blocked' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== ''];
     $q = mb_strtolower($ls['q']);
     $inQ = $q === '' ? $apps : array_values(array_filter($apps, fn($a) => str_contains(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id'] . ' ' . $a['author']), $q)));
     $lsCount = array_map(fn($f) => count(array_filter($inQ, $f)), $lsMatch);
@@ -376,10 +380,10 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <div class="pc-cards">
     <?php foreach ($shown as $a): $c = $counts[$a['id']] ?? []; $n = array_sum($c); $life = (string)($a['status'] ?? '') === 'paused' ? 'On hold' : ($lifeOf($a) ? 'Ended' : ''); ?>
     <a class="pc-card<?= $a['hidden'] ? ' dim' : '' ?><?= $editId === $a['id'] ? ' here' : '' ?>" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>&amp;<?= h($listQs) ?>#edit">
-      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async" width="150" height="225">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?><?= rs_pc_alerts($a) ? '<em class="look">Needs a look</em>' : ($life !== '' ? '<em class="life">' . $life . '</em>' : '') ?></span>
+      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async" width="150" height="225">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? (trim((string)($a['blocked_why'] ?? '')) !== '' ? '<em class="blocked">Not compatible</em>' : '<em>Hidden</em>') : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?><?= rs_pc_alerts($a) ? '<em class="look">Needs a look</em>' : ($life !== '' ? '<em class="life">' . $life . '</em>' : '') ?></span>
       <span class="pc-card-words"><strong><?= h($a['name']) ?></strong><small><?= h($a['game'] ?: '?') ?></small>
         <small class="muted"><?= h($origin($a['origin'])) ?> · <?= h(RS_PC_GENRES[$a['genre']] ?? 'No kind yet') ?></small>
-        <small class="muted"><?= h($a['version'] ?: 'no release') ?><?= $n ? ' · ' . $n . ($n === 1 ? ' report' : ' reports') : '' ?></small></span>
+        <small class="muted"><?= h($a['version'] ?: 'no release') ?><?= $n ? ' · ' . $n . ($n === 1 ? ' report' : ' reports') : '' ?></small><?= $a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== '' ? '<small class="pc-blocked-why">' . h((string)$a['blocked_why']) . '</small>' : '' ?></span>
     </a>
     <?php endforeach; ?>
   </div>
