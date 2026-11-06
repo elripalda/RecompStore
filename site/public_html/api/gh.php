@@ -28,6 +28,14 @@ if ($gage < 1800) { // (3.3) 30 minutes; a new release refreshes it sooner (admi
     readfile($gf);
     exit;
 }
+// (4.1) While GitHub is slow or refusing, or another request is already asking it about this repo, the
+// last copy goes out at once instead of every PS5 holding a PHP worker until GitHub answers.
+if (is_file($gf) && rs_gh_cooling('github')) {
+    header('Cache-Control: public, max-age=60');
+    header('X-RS-Stale: 1');
+    readfile($gf);
+    exit;
+}
 try {
     $r = rs_gh_releases($repo);
 } catch (Throwable $e) {

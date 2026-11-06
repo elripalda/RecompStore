@@ -78,7 +78,7 @@ try {
         $st->execute([(int)$me['id']]);
         $rows = $st->fetchAll();
         $replies = rs_play_replies(array_column($rows, 'id'));
-        $names = array_column(rs_pc_apps(), 'name', 'id');
+        $names = array_column((array)(rs_json_cached(RS_PC_CATALOG)['apps'] ?? []), 'name', 'id'); // (4.1) not every recomp from the database
         rs_pc_out(200, ['ok' => true, 'reports' => array_map(fn($x) => ['id' => (int)$x['id'], 'app' => (string)$x['app'], 'name' => (string)($names[$x['app']] ?? $x['app']),
             'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'], 'version' => (string)$x['version'], 'note' => (string)$x['note'],
             'specs' => rs_play_specs_line($x), 'log' => !empty($x['has_log']), 'hidden' => (bool)$x['hidden'],

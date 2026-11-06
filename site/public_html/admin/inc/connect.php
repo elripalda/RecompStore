@@ -404,7 +404,29 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     $have = $st->fetch() ?: null;
     if ($have && (int)$have['age'] < $maxAge) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => false, 'age' => (int)$have['age']];
     $gl = $via === 'gitlab';
-    $r = rs_http($url, [$gl ? 'gitlab' : 'github' => true, 'max' => 16 << 20, 'timeout' => 20]);
+    $who = $gl ? 'GitLab' : 'GitHub';
+    $staleOut = fn() => ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
+    // (4.1) While GitHub is slow or refusing (rs_gh_cool), nobody waits on it: the last copy goes out, or
+    // "busy" at once. Before this, every page and PS5 asking held a PHP worker up to 20 s, and enough of
+    // them at once took the whole site down.
+    if (rs_gh_cooling($via)) {
+        if ($have) return $staleOut();
+        return ['status' => 429, 'body' => '{"message":"' . $who . ' is busy right now. Try again in a few minutes."}', 'stale' => false, 'age' => 0];
+    }
+    // (4.1) One request refreshes a given copy; the others meanwhile get the copy they have.
+    $ldir = dirname(RS_PUBLIC) . '/recompstore-private/gh-locks';
+    if (!is_dir($ldir)) @mkdir($ldir, 0755, true);
+    $lock = @fopen($ldir . '/' . md5($k), 'c');
+    if ($lock && !flock($lock, LOCK_EX | LOCK_NB)) {
+        fclose($lock); $lock = null;
+        if ($have) return $staleOut();
+    }
+    try {
+        $r = rs_http($url, [$gl ? 'gitlab' : 'github' => true, 'max' => 16 << 20, 'timeout' => $have ? 6 : 12]);
+    } finally {
+        if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
+    }
+    if (!in_array((int)$r['status'], [200, 404], true)) rs_gh_cool($via, (int)$r['status'] === 403 || (int)$r['status'] === 429 ? 300 : 90);
     if ($r['status'] === 200) {
         $j = json_decode($r['body'], true);
         if (is_array($j)) {
@@ -419,9 +441,21 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     }
     if ($have) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
     // 403 or 429 from GitHub's API: its limit for this site (a token in Settings lifts it).
-    $who = $gl ? 'GitLab' : 'GitHub';
     if ($r['status'] === 403 || $r['status'] === 429) return ['status' => 429, 'body' => '{"message":"' . $who . ' is busy right now. Try again in a few minutes."}', 'stale' => false, 'age' => 0];
     return ['status' => 502, 'body' => '{"message":"' . $who . ' didn\'t answer. Try again in a moment."}', 'stale' => false, 'age' => 0];
+}
+
+// (4.1) GitHub (or GitLab) slow or refusing: a short pause in asking it, shared by every PHP worker.
+function rs_gh_cool_file(string $via): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-cool-' . ($via === 'gitlab' ? 'gitlab' : 'github'); }
+function rs_gh_cooling(string $via): bool {
+    $f = rs_gh_cool_file($via);
+    clearstatcache(true, $f);
+    return is_file($f) && (int)@filemtime($f) > time();
+}
+function rs_gh_cool(string $via, int $secs): void {
+    $f = rs_gh_cool_file($via);
+    if (!is_file($f)) @touch($f);
+    @touch($f, time() + $secs);
 }
 
 // (3.8) Asks GitHub for a repo's releases now and puts the answer in /api/gh.php's copy on disk,
