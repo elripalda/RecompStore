@@ -350,8 +350,19 @@ function rs_dc_dev_news(string $text, string $link = ''): bool {
 // ---- (4.0) PC releases on Discord: after Publish PC, new recomps and new versions, with their cover --
 // Its own webhook (a PC channel), else the PS5 one. Never in the way of publishing.
 function rs_pc_discord_hook(): string { $h = (string)rs_setting('discord_pc_webhook', ''); return rs_discord_hook_ok($h) ? $h : (rs_discord_hook_ok(rs_discord_hook()) ? rs_discord_hook() : ''); }
-function rs_pc_discord_post(array $payload, ?string &$why = null): bool {
-    $hook = rs_pc_discord_hook();
+// (4.1) New versions can have their own channel (#recomp-updates): its webhook, or else the bot posts there.
+function rs_pc_discord_upd_hook(): string { $h = (string)rs_setting('discord_pc_upd_webhook', ''); return rs_discord_hook_ok($h) ? $h : ''; }
+function rs_pc_discord_upd_on(): bool {
+    return rs_pc_discord_upd_hook() !== '' || (trim((string)rs_setting('dc_pc_upd_chan', '')) !== '' && rs_dc_conf()['bot'] !== '');
+}
+function rs_pc_discord_post(array $payload, ?string &$why = null, string $to = 'new'): bool {
+    if ($to === 'update' && rs_pc_discord_upd_hook() === '' && rs_pc_discord_upd_on()) {
+        unset($payload['username']);
+        [$st] = rs_dc_call('POST', '/channels/' . rawurlencode(trim((string)rs_setting('dc_pc_upd_chan', ''))) . '/messages', ['bot' => rs_dc_conf()['bot'], 'json' => $payload]);
+        if ($st !== 200) { $why = 'Discord answered ' . ($st ?: 'nothing') . '.'; return false; }
+        return true;
+    }
+    $hook = $to === 'update' && rs_pc_discord_upd_hook() !== '' ? rs_pc_discord_upd_hook() : rs_pc_discord_hook();
     if ($hook === '') { $why = 'No webhook set.'; return false; }
     $ch = curl_init($hook);
     curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
@@ -369,7 +380,7 @@ function rs_pc_discord_announce(array $cat): void {
     $now = [];
     foreach ((array)$cat['apps'] as $a) if (empty($a['soon'])) $now[(string)$a['id']] = (string)$a['version'];
     rs_kv_put('pc_dc_seen', json_encode($now));
-    if (!is_array($seen) || rs_pc_discord_hook() === '') return; // the first time: remember what's there, post nothing
+    if (!is_array($seen) || (rs_pc_discord_hook() === '' && !rs_pc_discord_upd_on())) return; // the first time: remember what's there, post nothing
     $byId = array_column((array)$cat['apps'], null, 'id');
     $new = []; $upd = [];
     foreach ($now as $id => $v) {
@@ -378,18 +389,90 @@ function rs_pc_discord_announce(array $cat): void {
         // Old PC games (origin pc) update often and aren't news here: only console recomps' updates.
         elseif ($v !== '' && $seen[$id] !== $v && !empty($want['update']) && ($a['origin'] ?? '') !== 'pc') $upd[] = $a;
     }
-    $embeds = [];
+    $embeds = []; $updEmbeds = [];
     foreach ($new as $a) $embeds[] = ['title' => mb_substr('New: ' . $a['name'], 0, 250), 'url' => 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']),
         'description' => mb_substr(trim((string)($a['blurb'] ?? '')) . ((string)($a['game'] ?? '') !== '' && $a['game'] !== $a['name'] ? "\nRebuilt from " . $a['game'] : ''), 0, 400),
         'color' => RS_DC_DEV_COLOR] + ((string)($a['cover'] ?? '') !== '' ? ['thumbnail' => ['url' => (string)$a['cover']]] : []);
-    foreach ($upd as $a) $embeds[] = ['title' => mb_substr('Updated: ' . $a['name'] . ' ' . $a['version'], 0, 250), 'url' => 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']),
+    foreach ($upd as $a) $updEmbeds[] = ['title' => mb_substr('Updated: ' . $a['name'] . ' ' . $a['version'], 0, 250), 'url' => 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']),
         'color' => 0x5FE3A1] + ((string)($a['cover'] ?? '') !== '' ? ['thumbnail' => ['url' => (string)$a['cover']]] : []);
-    if (!$embeds) return;
-    $more = count($embeds) - 10;
-    $payload = ['username' => 'RecompLauncher', 'embeds' => array_slice($embeds, 0, 10), 'allowed_mentions' => ['parse' => []]];
-    if ($more > 0) $payload['content'] = 'And ' . $more . ' more on https://recomplauncher.com/all';
-    $ok = rs_pc_discord_post($payload, $why);
-    rs_log('discord', 'pc-post', $ok ? count($embeds) . ' posted' : 'not posted: ' . $why);
+    $send = function (array $list, string $to): void {
+        if (!$list) return;
+        $more = count($list) - 10;
+        $payload = ['username' => 'RecompLauncher', 'embeds' => array_slice($list, 0, 10), 'allowed_mentions' => ['parse' => []]];
+        if ($more > 0) $payload['content'] = 'And ' . $more . ' more on https://recomplauncher.com/all';
+        $ok = rs_pc_discord_post($payload, $why, $to);
+        rs_log('discord', 'pc-post', ($to === 'update' ? 'updates: ' : '') . ($ok ? count($list) . ' posted' : 'not posted: ' . $why));
+    };
+    // Updates in #recomp-updates when it's set up; else everything together, as before.
+    if (rs_pc_discord_upd_on()) { $send($embeds, 'new'); $send($updEmbeds, 'update'); }
+    else $send(array_merge($embeds, $updEmbeds), 'new');
+}
+
+// (4.1) Makes (or finds) #recomp-updates right under the new-recomps channel, with the same who-sees-what,
+// and gives it a RecompLauncher webhook when the bot may make one (else the bot posts there itself).
+function rs_dc_pc_updates_setup(): array {
+    $c = rs_dc_conf();
+    if ($c['bot'] === '' || $c['guild'] === '') throw new RuntimeException('Connect the bot first (Discord server, above).');
+    $g = rawurlencode($c['guild']);
+    $bot = ['bot' => $c['bot']];
+    [$st, $me] = rs_dc_call('GET', '/users/@me', $bot);
+    if ($st !== 200 || empty($me['id'])) throw new RuntimeException('Discord didn\'t say who the bot is (' . $st . ').');
+    $botId = (string)$me['id'];
+    // Where the new-recomps channel is: its webhook knows.
+    $parent = ''; $pos = null; $over = []; $near = '';
+    $hook = (string)rs_setting('discord_pc_webhook', '');
+    if (rs_discord_hook_ok($hook)) {
+        [$st, $w] = rs_dc_call('GET', $hook);
+        if ($st === 200 && !empty($w['channel_id'])) {
+            [$st, $nc] = rs_dc_call('GET', '/channels/' . rawurlencode((string)$w['channel_id']), $bot);
+            if ($st === 200 && is_array($nc)) {
+                $parent = (string)($nc['parent_id'] ?? '');
+                $pos = (int)($nc['position'] ?? 0) + 1;
+                $over = (array)($nc['permission_overwrites'] ?? []);
+                $near = (string)($nc['name'] ?? '');
+            }
+        }
+    }
+    [$st, $chans] = rs_dc_call('GET', '/guilds/' . $g . '/channels', $bot);
+    if ($st !== 200) throw new RuntimeException('Couldn\'t read the server\'s channels (' . $st . ').');
+    $id = trim((string)rs_setting('dc_pc_upd_chan', ''));
+    $have = null;
+    foreach ((array)$chans as $ch) if ((string)$ch['id'] === $id) $have = $ch;
+    if (!$have) foreach ((array)$chans as $ch) if ((int)$ch['type'] === 0 && strcasecmp((string)$ch['name'], 'recomp-updates') === 0) $have = $ch;
+    $done = [];
+    if ($have) {
+        $id = (string)$have['id'];
+        $done[] = '#recomp-updates was there already.';
+    } else {
+        $copy = array_values(array_filter(array_map(fn($o) => ['id' => (string)$o['id'], 'type' => (int)$o['type'], 'allow' => (string)$o['allow'], 'deny' => (string)$o['deny']], $over),
+            fn($o) => $o['id'] !== $botId));
+        $mine = ['id' => $botId, 'type' => 1, 'allow' => (string)(RS_DC_VIEW | RS_DC_SEND | RS_DC_HISTORY | 16384), 'deny' => '0'];
+        $body = ['name' => 'recomp-updates', 'type' => 0, 'topic' => 'New versions of PC recomps on RecompLauncher.'];
+        if ($parent !== '') $body['parent_id'] = $parent;
+        if ($pos !== null) $body['position'] = $pos;
+        $x = null;
+        // The bot can only hand out what it has itself: try the fullest version first.
+        foreach ([array_merge($copy, [$mine]), $copy, null] as $try) {
+            $b = $body;
+            if ($try !== null) $b['permission_overwrites'] = $try;
+            [$st, $x] = rs_dc_call('POST', '/guilds/' . $g . '/channels', $bot + ['json' => $b]);
+            if (($st === 200 || $st === 201) && !empty($x['id'])) break;
+            $x = null;
+        }
+        if (!$x) throw new RuntimeException('Couldn\'t make #recomp-updates (' . $st . '). The bot needs Manage Channels.');
+        $id = (string)$x['id'];
+        $done[] = 'Made #recomp-updates' . ($near !== '' ? ', under #' . $near : '') . '.';
+    }
+    rs_set_setting('dc_pc_upd_chan', $id);
+    if (rs_pc_discord_upd_hook() === '') {
+        [$st, $w] = rs_dc_call('POST', '/channels/' . rawurlencode($id) . '/webhooks', $bot + ['json' => ['name' => 'RecompLauncher']]);
+        if ($st === 200 && !empty($w['id']) && !empty($w['token'])) {
+            rs_set_setting('discord_pc_upd_webhook', 'https://discord.com/api/webhooks/' . $w['id'] . '/' . $w['token']);
+            $done[] = 'Posts there come from RecompLauncher, like the new ones.';
+        } else $done[] = 'The bot posts the updates there itself.';
+    }
+    rs_log('discord', 'setup', implode(' ', $done));
+    return $done;
 }
 
 // ---- (4.0) Team notes: short notes from the RecompStore team, pinned on top of the developer hub

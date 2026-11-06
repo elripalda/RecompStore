@@ -40,6 +40,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_flash(rs_pc_discord_hook() !== '' ? 'Saved. Press Send a test to check it.' : 'Saved. Paste the webhook link to turn the posts on.');
             }
             $back = 'community.php#posts';
+        } elseif ($act === 'pc-upd-setup') {
+            rs_flash(implode(' ', rs_dc_pc_updates_setup()) . ' Press Send a test to check it.');
+            $back = 'community.php#posts';
+        } elseif ($act === 'pc-upd-test') {
+            $ok = rs_pc_discord_post(['username' => 'RecompLauncher', 'embeds' => [['title' => 'Recomp updates go here', 'description' => 'New versions of PC recomps show up in this channel when you press Publish PC. New recomps stay in their own channel.', 'color' => 0x5FE3A1, 'url' => 'https://recomplauncher.com/']]], $why, 'update');
+            rs_flash($ok ? 'Sent. Look in #recomp-updates.' : 'Not sent: ' . $why, $ok ? 'ok' : 'err');
+            $back = 'community.php#posts';
+        } elseif ($act === 'pc-upd-off') {
+            rs_set_setting('dc_pc_upd_chan', '');
+            rs_set_setting('discord_pc_upd_webhook', '');
+            rs_log('settings', 'discord', 'PC updates back with the new recomps');
+            rs_flash('Updates go back to the same channel as new recomps. The #recomp-updates channel is still on Discord; delete it there if you don\'t want it.');
+            $back = 'community.php#posts';
         } elseif ($act === 'note-add') {
             $body = mb_substr(trim(preg_replace('/\s+/u', ' ', (string)($_POST['body'] ?? '')) ?? ''), 0, 400);
             $link = trim((string)($_POST['link'] ?? ''));
@@ -71,6 +84,7 @@ $state = rs_dc_server_state();
 $invite = rs_dc_bot_invite();
 $pcHookOwn = rs_discord_hook_ok((string)rs_setting('discord_pc_webhook', ''));
 $pcHook = rs_pc_discord_hook();
+$updOn = rs_pc_discord_upd_on();
 $pcPosts = json_decode((string)rs_setting('discord_pc_posts', '{"new":true,"update":true}'), true) ?: [];
 $notes = rs_notes(false);
 rs_dev_tables();
@@ -119,6 +133,14 @@ rs_head('Discord & notes', true, ['assets/health.css']);
     <div class="checks"><label class="check"><input type="checkbox" name="new" value="1"<?= !empty($pcPosts['new']) ? ' checked' : '' ?>> New recomps</label><label class="check"><input type="checkbox" name="update" value="1"<?= !empty($pcPosts['update']) ? ' checked' : '' ?>> New versions</label></div>
     <div class="actions"><button class="btn primary">Save</button><?php if ($pcHook !== ''): ?><button class="btn" name="do" value="test">Send a test</button><?php endif; ?><?php if ($pcHookOwn): ?><label class="check"><input type="checkbox" name="clear" value="1"> Remove the PC webhook</label><?php endif; ?></div>
   </form>
+  <h3 class="cm-sub">Updates in their own channel</h3>
+  <?php if ($updOn): ?>
+  <p class="muted">New versions go to <b>#recomp-updates</b> <?= ($u = $chan('dc_pc_upd_chan')) ? '<a href="' . h($u) . '" target="_blank" rel="noopener">open</a>' : '' ?>; new recomps stay in their channel.</p>
+  <form method="post" class="actions"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><button class="btn" name="action" value="pc-upd-test">Send a test</button><button class="btn" name="action" value="pc-upd-off">Put updates back with new recomps</button></form>
+  <?php else: ?>
+  <p class="muted">Right now new recomps and new versions share one channel. <b>Make #recomp-updates</b> has the bot make a channel right under it, seen by the same people, and new versions go there from then on.</p>
+  <form method="post" class="actions"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><button class="btn primary" name="action" value="pc-upd-setup"<?= $state['ready'] ? '' : ' disabled title="Connect the bot first"' ?>>Make #recomp-updates</button></form>
+  <?php endif; ?>
 </section>
 
 <section class="card" id="notes">

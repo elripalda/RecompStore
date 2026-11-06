@@ -140,6 +140,7 @@
 /* (4.0) Discord & team notes */
 .cm-warn{padding:10px 14px;border-radius:12px;background:rgba(245,197,24,.09);border:1px solid rgba(245,197,24,.45);color:#f4e6b0}
 .cm-warn strong{color:#f5c518}
+.cm-sub{margin:22px 0 4px;font-size:15px}
 ol.steps{display:grid;gap:6px;padding-left:22px;margin:10px 0 14px;line-height:1.5}
 .dc-list{display:grid;gap:8px;padding-left:20px;margin:6px 0 12px;line-height:1.5}
 .dc-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
