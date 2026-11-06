@@ -1,0 +1,38 @@
+snap64recomp|JackandBeans/Snap64Recomp|Snap64Recomp-*-win64.zip|Snap64Recomp.exe
+wwe-svr2007-recomp|nefariousjosiah/WWE-SVR2007-RECOMP|SVR2007-NATIVE.zip|svr2007.exe
+wwe-svr2008-recomp|nefariousjosiah/WWE-SVR2008-RECOMP|SVR2008-NATIVE.zip|svr2008.exe
+wwe-svr2009-recomp|nefariousjosiah/WWE-SVR2009-RECOMP|SVR2009-NATIVE.zip|svr2009.exe
+wwe-svr2010-recomp|nefariousjosiah/WWE-SVR2010-RECOMP|SVR2010-NATIVE.zip|svr2010.exe
+wwe13-recomp|PromethenDev/wwe13-recomp|WWE13-Recomp-*.zip|WWE13 Launcher.exe
+wwe2k14-recomp|PromethenDev/wwe2k14-recomp|WWE2K14-Recomp-*-x64.zip|WWE 2K14 Launcher.exe
+perfect-dark|perfect-dark-pc-port/perfect_dark|pd-i686-windows.zip|pd.i686.exe
+cvlod-recomp|fliperama86/cvlod_recomp|LodRecomp-*-windows-x64.zip|LodRecomp.exe
+silent-hill-decomp|SlickAmogus/silent-hill-decomp|SHPC_beta-2026.10.02.1_OLD.zip|SilentHill.exe
+ac6-recomp|sal063/AC6_recomp|ac6recomp-*.zip|ac6recomp.exe
+rush2recompiled|bryantmh/rush2recompiled|Rush2Recompiled-*.zip|Rush2Recompiled.exe
+eternaldarknessrecomp|griches/EternalDarknessRecomp|EternalDarkness-windows-x64-202610200024-1cb3fe6.zip|play.bat
+ghclassic|noahbaxter/GHClassic|GHClassic-windows-x64-*.zip|GHClassic.exe
+summitstrike-recomp|ElKev118/summitstrike-recomp|SummitStrike-*.zip|summitstrike.exe
+sote-recomp|GTTeancum/SotE-Recomp|SotE-Recomp-*.zip|Shadows of the Empire.exe
+goldeneye-pc-port|jkdansereau/goldeneye-pc-port|goldeneye-pc-port-*-win64.zip|ge007.exe
+xmen2-pc|crabsmack/xmen2-pc|xmen2-native-windows.zip|XMen2.exe
+the-darkness-recomp|portingpete/The-Darkness-Recomp|The-Darkness-Recomp-*-windows-x64.zip|Launch.cmd
+winbackrecomp|RetroPulse03/WinBackRecomp|WinBackRecompiled-v*-Windows-x64.zip|WinBackRecompiled.exe
+babel-recomp|mrOt4/babel-recomp|babel-recomp-*-windows-x86_64.zip|babel-recomp.exe
+flintstones-jetsons-timewarp-static-recomp|tools81/flintstones-jetsons-timewarp-static-recomp|Timewarp-*-portable.zip|timewarp_hd.exe
+laser-lords-static-recomp|tools81/laser-lords-static-recomp|LaserLords-*-portable.zip|laserlords_hd.exe
+wwe2k15-pc|iMrBurn/wwe2k15-pc|WWE2K15-PC-*.zip|WWE 2K15 Launcher.exe
+dogs-of-war-atari-st-recomp|voodatari/Dogs-of-War-Atari-ST-Recomp|Dogs-of-War-Atari-ST-Recomp-for-Windows-x64.zip|dowport.exe
+hp1-recompiled|Barthes-Recompiled/HP1-Recompiled|hpps-*-windows-PAL.zip|hpps.exe
+ghostrecon2-recomp|ElKev118/ghostrecon2-recomp|GhostRecon2-*.zip|ghostrecon2.exe
+dead-or-alive-xtreme-2-recompilation|hibikifukui22/Dead-or-Alive-Xtreme-2-Recompilation|DOAX2-Recomp-*-win64.zip|DOAX2 Recomp Launcher.exe
+zelda-adventures-static-recomp|tools81/zelda-adventures-static-recomp|zelda-*-portable.zip|zelda.exe
+supermetroidplus|peanutsofdoom/supermetroidplus|Super-Metroid-Plus-Windows-x64-253-254.zip|Play.exe
+initial-d-arcade-stage-3-native-sh-4-recompilation-wip|distilledorion-sketch/Initial-D-Arcade-Stage-3-Native-SH-4-Recompilation-WIP-|Initial.D.Arcade.Stage.3.Recompiled.v2489.zip|Initial D Arcade Stage 3 Recompiled.exe
+wolf3d-x64|mkalkhoven-po/wolf3d-x64|wolf3d-x64-*-windows-x64.zip|wolf3d.exe
+testdrive3-enhanced|kylofon/testdrive3-enhanced|testdrive3-enhanced-*-win64.zip|Test Drive III Enhanced.exe
+td2|Buyukcaglar/TD2|TD2-*-win64.zip|TD2.exe
+grand-prix-circuit-recomp|UgaTEC/grand-prix-circuit-recomp|GrandPrixCircuit_Windows_x64.zip|GrandPrixCircuit.exe
+testdrive-enhanced|kylofon/testdrive-enhanced|testdrive-enhanced-*-win64.zip|Test Drive Enhanced.exe
+future-rust-cop|RadiatorTwo/future_rust_cop|fcop-*-windows-x64.zip|fcop.exe
+army-men-sarges-heroes-64-recompiled|RangerXT/Army-Men-Sarges-Heroes-64-Recompiled|ArmyMenSargesHeroes64Recompiled-*-Windows-x64.zip|ArmyMenSargesHeroesRecompiled.exe
