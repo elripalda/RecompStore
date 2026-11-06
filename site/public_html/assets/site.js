@@ -318,7 +318,7 @@
     return `
       <section class="slider still" aria-label="${esc(kicker)}" data-accent="${esc(a.id)}">
         <a class="slide on" href="/game/${encodeURIComponent(a.id)}">
-          <span class="slide-blur" style="background-image:url('${cssUrl(art(a))}')"></span>
+          <span class="slide-blur" style="background-image:url('${cssUrl(thumb(art(a), 256))}')"></span>
           <span class="slide-art"><img src="${esc(art(a))}" alt="" loading="lazy" style="object-position:${b.x}% ${b.y}%;transform-origin:${b.x}% ${b.y}%;--z:${b.z}"></span>
           <span class="slide-glass">
             <span class="kicker">${esc(kicker)}</span>
@@ -514,7 +514,7 @@
       <section class="slider" aria-roledescription="carousel" aria-label="${t('Featured games')}">
         ${slides.map((a, i) => `
           <a class="slide${i === 0 ? ' on' : ''}" href="/game/${encodeURIComponent(a.id)}" aria-hidden="${i === 0 ? 'false' : 'true'}" tabindex="${i === 0 ? 0 : -1}" data-slide="${i}">
-            <span class="slide-blur" style="background-image:url('${cssUrl(art(a))}')"></span>
+            <span class="slide-blur" style="background-image:url('${cssUrl(thumb(art(a), 256))}')"></span>
             <span class="slide-art"><img src="${esc(art(a))}" srcset="${esc(thumb(art(a), 960))} 960w, ${esc(art(a))} 1600w" sizes="(max-width: 860px) 100vw, 70vw" alt=""${i === 0 ? ' fetchpriority="high"' : ' loading="lazy"'} style="object-position:${frame(a.banner).x}% ${frame(a.banner).y}%;transform-origin:${frame(a.banner).x}% ${frame(a.banner).y}%;--z:${frame(a.banner).z}"></span>
             <span class="slide-text">
               <span class="slide-meta">${esc(t((CATS.find((c) => c.key === (a.category || 'games')) || CATS[0]).name))}${a.author ? ` · <bdi>${esc(a.author)}</bdi>` : ''}</span>
@@ -2113,38 +2113,77 @@
   document.addEventListener('toggle', (e) => { if (e.target && e.target.matches && e.target.matches('details.vers')) { try { localStorage.setItem('rs-vers-open', e.target.open ? '1' : '0'); } catch (x) {} } }, true);
   // Shrinks each tile line that doesn't fit, a half pixel at a time, down to a floor; an ellipsis only
   // past that. Runs on new tiles as they appear, and on every tile when the window changes size.
-  const tileFitOne = (el) => {
-    if (el.dataset.full) el.textContent = el.dataset.full;
-    else if (el.firstElementChild && el.firstElementChild.classList.contains('pc-glide')) el.textContent = el.firstElementChild.textContent;
-    el.style.fontSize = '';
-    const w = el.clientWidth;
-    if (!w) return false;
-    const name = el.classList.contains('pc-name');
-    const base = parseFloat(getComputedStyle(el).fontSize);
-    // Text width follows the font size, so one jump lands close; at most two small steps after it.
-    const shrink = (floor) => {
-      let size = parseFloat(el.style.fontSize) || base;
-      let sw = el.scrollWidth;
-      if (sw <= w + 0.5 || size <= floor) return;
-      size = Math.max(floor, Math.floor(size * (w / sw) * 2) / 2);
-      el.style.fontSize = size + 'px';
-      for (let i = 0; i < 2 && size > floor && el.scrollWidth > w + 0.5; i++) { size = Math.max(floor, size - 0.5); el.style.fontSize = size + 'px'; }
-    };
-    // The whole line, a little smaller; then the short way to say it; then smaller still.
-    shrink(name ? 14 : 12);
-    if (el.scrollWidth > w + 0.5 && el.dataset.short) { el.textContent = el.dataset.short; el.style.fontSize = ''; shrink(name ? 14 : 12); }
-    shrink(name ? 12 : 10.5);
+  // (4.1) All the lines at once: every one measured together, then sized together, then measured again,
+  // so the page is laid out a handful of times in all, not several times per tile. Hidden lines (rows show
+  // 7 of their 16 tiles on a wide screen) are left alone and marked, so they're not tried again and again;
+  // a resize sizes everything again. (Before: hidden lines were retried on every change, and the retry
+  // itself counted as a change, so phones spent seconds re-laying the page out.)
+  const fitBatch = (els) => {
+    const glideOf = (el) => el.firstElementChild && el.firstElementChild.classList.contains('pc-glide');
+    const vis = [];
+    els.forEach((el) => { if (el.clientWidth) vis.push(el); else el.dataset.fit = '0'; });
+    if (!vis.length) return;
+    vis.forEach((el) => {
+      const full = el.dataset.full || (glideOf(el) ? el.firstElementChild.textContent : null);
+      if (full !== null && el.textContent !== full) el.textContent = full;
+      el.style.fontSize = '';
+      el.classList.remove('pc-long');
+    });
+    const m = vis.map((el) => ({ el, w: el.clientWidth, sw: el.scrollWidth, base: parseFloat(getComputedStyle(el).fontSize), name: el.classList.contains('pc-name') }));
+    const tooWide = (x) => x.sw > x.w + 0.5;
+    const jump = (x, floor) => { const v = Math.max(floor, Math.floor(x.size * (x.w / x.sw) * 2) / 2); if (v < x.size) { x.size = v; x.el.style.fontSize = v + 'px'; } };
+    const reread = (list) => { list.forEach((x) => { x.sw = x.el.scrollWidth; }); return list.filter(tooWide); };
+    // The whole line, a little smaller.
+    let over = m.filter(tooWide);
+    over.forEach((x) => { x.size = x.base; jump(x, x.name ? 14 : 12); });
+    over = reread(over);
+    // Then the short way to say it, where there is one.
+    const shorts = over.filter((x) => x.el.dataset.short);
+    if (shorts.length) {
+      shorts.forEach((x) => { x.el.textContent = x.el.dataset.short; x.el.style.fontSize = ''; x.size = x.base; });
+      reread(shorts).forEach((x) => jump(x, x.name ? 14 : 12));
+      over = reread(over);
+    }
+    // Then smaller still, with one half-pixel step after the jump.
+    over.forEach((x) => jump(x, x.name ? 12 : 10.5));
+    over = reread(over);
+    const step = over.filter((x) => x.size > (x.name ? 12 : 10.5));
+    step.forEach((x) => { x.size -= 0.5; x.el.style.fontSize = x.size + 'px'; });
+    if (step.length) over = reread(over);
     // Still too long: no "…". The end fades out, and the line glides across when the tile is hovered.
-    if (el.firstElementChild && el.firstElementChild.classList.contains('pc-glide')) el.textContent = el.firstElementChild.textContent;
-    const over = el.scrollWidth - w;
-    el.classList.toggle('pc-long', over > 0.5);
-    if (over > 0.5) { const t = el.textContent; el.innerHTML = `<span class="pc-glide">${esc(t)}</span>`; el.style.setProperty('--shift', -Math.ceil(over + 8) + 'px'); el.style.setProperty('--glide', Math.max(1.2, over / 40).toFixed(2) + 's'); }
-    return true;
+    over.forEach((x) => {
+      const o = x.sw - x.w, t = x.el.textContent;
+      x.el.classList.add('pc-long');
+      x.el.innerHTML = `<span class="pc-glide">${esc(t)}</span>`;
+      x.el.style.setProperty('--shift', -Math.ceil(o + 8) + 'px');
+      x.el.style.setProperty('--glide', Math.max(1.2, o / 40).toFixed(2) + 's');
+    });
+    vis.forEach((el) => { el.dataset.fit = '1'; });
   };
-  const fitTiles = (root, all) => (root || document).querySelectorAll(all ? '.pc-fit' : '.pc-fit:not([data-fit])').forEach((el) => { if (tileFitOne(el)) el.dataset.fit = '1'; });
+  // Only lines on screen (or about to be): a line is sized as it scrolls into view, and a hidden one when
+  // it shows. A first screen of covers no longer waits on hundreds of lines below it and to the side.
+  let fitHold = [], fitHoldQueued = false;
+  const fitIO = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { fitIO.unobserve(e.target); fitHold.push(e.target); } });
+    if (fitHold.length && !fitHoldQueued) { fitHoldQueued = true; requestAnimationFrame(() => { fitHoldQueued = false; const els = fitHold; fitHold = []; fitBatch(els.filter((el) => el.isConnected)); }); }
+  }, { rootMargin: '300px 600px' }) : null;
+  const fitTiles = (root, all) => {
+    const els = [...(root || document).querySelectorAll(all ? '.pc-fit' : '.pc-fit:not([data-fit])')];
+    if (!fitIO) { fitBatch(els); return; }
+    els.forEach((el) => { el.dataset.fit = 'w'; fitIO.unobserve(el); fitIO.observe(el); });
+  };
   let tileFitQueued = false;
   const tileFitSoon = (all) => { if (tileFitQueued) return; tileFitQueued = true; requestAnimationFrame(() => { tileFitQueued = false; fitTiles(document, all); }); };
-  new MutationObserver(() => tileFitSoon(false)).observe(document.documentElement, { childList: true, subtree: true });
+  // New tiles only: the sizing's own changes inside a line don't count.
+  new MutationObserver((list) => {
+    for (const r of list) {
+      const el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+      if (el && !el.closest('.pc-fit')) { tileFitSoon(false); return; }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  // Without the watcher: lines that were hidden and show now (a panel opened), after a click.
+  const fitShown = () => { const z = [...document.querySelectorAll('.pc-fit[data-fit="0"]')].filter((el) => el.clientWidth); if (z.length) fitBatch(z); };
+  if (!fitIO) { document.addEventListener('click', () => setTimeout(fitShown, 400), { passive: true }); document.addEventListener('toggle', () => setTimeout(fitShown, 50), true); }
   let tileFitTimer = 0;
   let tileFitW = innerWidth;
   addEventListener('resize', () => { if (innerWidth === tileFitW) return; tileFitW = innerWidth; clearTimeout(tileFitTimer); tileFitTimer = setTimeout(() => tileFitSoon(true), 120); });
@@ -2283,7 +2322,7 @@
         <section class="slider pc-slider" aria-roledescription="carousel" aria-label="${t('Featured games')}">
           ${slides.map((a, i) => `
             <a class="slide${i === 0 ? ' on' : ''}" href="/pc/game/${encodeURIComponent(a.id)}" aria-hidden="${i === 0 ? 'false' : 'true'}" tabindex="${i === 0 ? 0 : -1}" data-slide="${i}">
-              <span class="slide-blur" style="background-image:url('${cssUrl(a.hero)}')"></span>
+              <span class="slide-blur" style="background-image:url('${cssUrl(thumb(a.hero, 256))}')"></span>
               <span class="slide-art"><img src="${esc(a.hero)}" srcset="${esc(thumb(a.hero, 960))} 960w, ${esc(a.hero)} 1600w" sizes="(max-width: 860px) 100vw, 70vw" alt=""${i === 0 ? ' fetchpriority="high"' : ' loading="lazy"'}></span>
               <span class="slide-text">
                 ${bInfo(a).tag ? `<span class="slide-tag" dir="auto" style="align-self:flex-start;display:inline-flex;align-items:center;padding:5px 11px;border-radius:999px;background:var(--accent,#34F2E8);color:#05080d;font:700 12px/1 Figtree,sans-serif;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px">${esc(bInfo(a).tag)}</span>` : ''}
