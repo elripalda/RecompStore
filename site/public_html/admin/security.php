@@ -45,8 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_secret_put('vt_key', '');
             rs_flash('The key is gone. Nothing is checked until you add one again.');
         } elseif ($act === 'settings') {
-            rs_set_setting('vt_hold_hours', (string)max(0, min(168, (int)($_POST['hold'] ?? 12))));
-            rs_set_setting('vt_hold_verified', (string)max(0, min(168, (int)($_POST['hold_verified'] ?? 0))));
+            rs_set_setting('vt_hold_mins', (string)max(0, min(10080, (int)($_POST['hold'] ?? 30))));
+            rs_set_setting('vt_hold_verified_mins', (string)max(0, min(10080, (int)($_POST['hold_verified'] ?? 0))));
             rs_set_setting('vt_red_at', (string)max(1, min(20, (int)($_POST['red_at'] ?? 3))));
             rs_set_setting('vt_auto', !empty($_POST['auto']) ? '1' : '0');
             rs_set_setting('vt_clam_subs', !empty($_POST['clam_subs']) ? '1' : '0');
@@ -57,6 +57,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($act === 'approve') { rs_vt_release_go($app, 'approved'); rs_flash($app['name'] . ' ' . ($app['pending']['version'] ?: $app['pending']['tag']) . ' is out.', 'ok'); }
             else { rs_vt_block($app); rs_flash($app['name'] . ' stays on the version before. That release won\'t be offered.', 'ok'); }
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([rs_pc_key($app), $app['pending']['tag']]);
+        } elseif ($act === 'release-clean') {
+            // (4.1) Every held update that's checked and clean (green or yellow) goes out now, without waiting out its hold.
+            $out = [];
+            foreach (rs_pc_apps() as $x) {
+                if (empty($x['pending']['tag'])) continue;
+                [, $v] = rs_vt_release(rs_pc_key($x), (string)$x['pending']['tag']);
+                if ($v !== 'green' && $v !== 'yellow') continue;
+                $tag = (string)$x['pending']['tag'];
+                rs_vt_release_go($x, 'approved (all clean)');
+                rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([rs_pc_key($x), $tag]);
+                $out[] = $x['name'];
+            }
+            rs_flash($out ? count($out) . ' out: ' . implode(', ', $out) . '.' : 'Nothing clean was waiting.', 'ok');
         } elseif ($act === 'seen') {
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? '')]);
             rs_flash('Marked as seen.', 'ok');
@@ -151,7 +164,7 @@ rs_head('Security', true, ['assets/vt.css']);
 
 <section class="vt-tiles">
   <div class="card vt-tile <?= $red ? 'red' : '' ?>"><span>Needs you</span><b><?= count($red) ?></b><small><?= $red ? 'flagged by ' . $cfg['red_at'] . '+ engines' : 'nothing flagged' ?></small></div>
-  <div class="card vt-tile"><span>Updates on hold</span><b><?= count($held) ?></b><small><?= $cfg['hold'] ?> h for unverified developers</small></div>
+  <div class="card vt-tile"><span>Updates on hold</span><b><?= count($held) ?></b><small><?= rs_vt_mins_text($cfg['hold']) ?> for unverified developers</small></div>
   <div class="card vt-tile"><span>In line</span><b><?= $waiting ?></b><small>files waiting for a check</small></div>
   <div class="card vt-tile"><span>Checked</span><b><?= number_format($total) ?></b><small><?= $doneToday ?> in the last day</small></div>
 </section>
@@ -180,14 +193,16 @@ rs_head('Security', true, ['assets/vt.css']);
 </section>
 
 <section class="card">
-  <div class="vt-head"><h2>Updates on hold</h2></div>
-  <?php if (!$held): ?><p class="vt-empty">No updates waiting. New releases from developers who aren't verified wait here until they're checked<?= $cfg['hold'] ? ' and ' . $cfg['hold'] . ' hours have passed' : '' ?>.</p><?php else: ?>
+  <?php $clean = array_filter($held, function ($x) { [, $v] = rs_vt_release(rs_pc_key($x), (string)$x['pending']['tag']); return $v === 'green' || $v === 'yellow'; }); ?>
+  <div class="vt-head"><h2>Updates on hold</h2>
+    <?php if ($clean): ?><div class="vt-acts"><form method="post" onsubmit="return confirm('Let out all <?= count($clean) ?> clean updates now?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="release-clean"><button>Let out all clean (<?= count($clean) ?>)</button></form></div><?php endif; ?></div>
+  <?php if (!$held): ?><p class="vt-empty">No updates waiting. New releases from developers who aren't verified wait here until they're checked<?= $cfg['hold'] ? ' and ' . rs_vt_mins_text($cfg['hold']) . ' has passed' : '' ?>.</p><?php else: ?>
   <div class="vt-list">
     <?php foreach ($held as $x): $p = $x['pending']; [$rows, $v] = rs_vt_release(rs_pc_key($x), (string)$p['tag']);
-      $hrs = rs_vt_trusted($x) ? $cfg['hold_verified'] : $cfg['hold']; $left = max(0, (int)strtotime((string)$p['since']) + $hrs * 3600 - time()); ?>
+      $hrs = rs_vt_trusted($x) ? $cfg['hold_verified'] : $cfg['hold']; $left = max(0, (int)strtotime((string)$p['since']) + $hrs * 60 - time()); ?>
     <div class="vt-row <?= $v ?>">
       <div class="vt-what"><strong><?= h($x['name']) ?></strong><small><?= h($x['version'] ?: '?') ?> → <?= h($p['version'] ?: $p['tag']) ?> · <?= rs_vt_trusted($x) ? 'verified developer' : 'not verified' ?></small></div>
-      <div class="vt-src"><span class="vt-chip"><?= $v === 'red' ? 'Waiting for you' : ($v === 'grey' ? 'Being checked' : ($left ? 'Out in ' . ($left >= 3600 ? round($left / 3600) . ' h' : max(1, round($left / 60)) . ' min') : 'Going out')) ?></span></div>
+      <div class="vt-src"><span class="vt-chip"><?= $v === 'red' ? 'Waiting for you' : ($v === 'grey' ? 'Being checked' : ($left ? 'Out in ' . rs_vt_mins_text(max(1, (int)ceil($left / 60))) : 'Going out')) ?></span></div>
       <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge(rs_pc_key($x), (string)$p['tag'])) ?: '<span class="vt-badge grey"><span class="vt-dot">…</span>In line</span>' ?></div>
       <div class="vt-acts">
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Let it out now</button></form>
@@ -224,8 +239,8 @@ rs_head('Security', true, ['assets/vt.css']);
 <section class="card" id="settings">
   <h2>Settings</h2>
   <form method="post" class="vt-settings"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="settings"><input type="hidden" name="back" value="settings">
-    <label><span>Hold for developers who aren't verified</span><span class="vt-num"><input type="number" name="hold" min="0" max="168" value="<?= $cfg['hold'] ?>"> hours</span><small>How long a new release waits after it's checked and clean.</small></label>
-    <label><span>Hold for verified developers</span><span class="vt-num"><input type="number" name="hold_verified" min="0" max="168" value="<?= $cfg['hold_verified'] ?>"> hours</span><small>0: out as soon as it's checked.</small></label>
+    <label><span>Hold for developers who aren't verified</span><span class="vt-num"><input type="number" name="hold" min="0" max="10080" step="5" value="<?= $cfg['hold'] ?>"> minutes</span><small>How long a new release waits after it's checked and clean.</small></label>
+    <label><span>Hold for verified developers</span><span class="vt-num"><input type="number" name="hold_verified" min="0" max="10080" step="5" value="<?= $cfg['hold_verified'] ?>"> minutes</span><small>0: out as soon as it's checked.</small></label>
     <label><span>Hold for you when flagged by</span><span class="vt-num"><input type="number" name="red_at" min="1" max="20" value="<?= $cfg['red_at'] ?>"> engines</span><small>Unsigned programs often get 1 or 2 flags that mean nothing. Those show yellow and don't hold anything.</small></label>
     <label class="vt-toggle"><input type="checkbox" name="auto" value="1"<?= $cfg['auto'] ? ' checked' : '' ?>><span><strong>Let clean updates out on their own</strong><small>Off: every held update waits for Let it out now.</small></span></label>
     <label class="vt-toggle"><input type="checkbox" name="clam_subs" value="1"<?= $cfg['clam_subs'] ? ' checked' : '' ?><?= $clam ? '' : ' disabled' ?>><span><strong>ClamAV for submissions too</strong><small>When the day's VirusTotal checks run out, submissions and pasted links are checked by ClamAV instead of waiting for tomorrow.</small></span></label>

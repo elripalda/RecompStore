@@ -111,10 +111,20 @@ function rs_clam_check(array $f, string $tmp): bool {
 
 function rs_vt_key(): string { return function_exists('rs_secret_get') ? rs_secret_get('vt_key') : ''; }
 function rs_vt_on(): bool { return rs_vt_key() !== ''; }
+function rs_vt_hold_mins(string $key, string $oldKey, int $oldDefault): int {
+    $m = rs_setting($key, '');
+    return max(0, min(10080, $m !== '' ? (int)$m : (int)rs_setting($oldKey, (string)$oldDefault) * 60));
+}
+// (4.1) 90 -> "1 h 30 min", 30 -> "30 min", 120 -> "2 h"
+function rs_vt_mins_text(int $m): string {
+    if ($m < 60) return $m . ' min';
+    return intdiv($m, 60) . ' h' . ($m % 60 ? ' ' . ($m % 60) . ' min' : '');
+}
 function rs_vt_cfg(): array {
     return [
-        'hold' => max(0, min(168, (int)rs_setting('vt_hold_hours', '12'))),
-        'hold_verified' => max(0, min(168, (int)rs_setting('vt_hold_verified', '0'))),
+        // (4.1) Hold times in minutes (they were whole hours; the old settings still count until saved again).
+        'hold' => rs_vt_hold_mins('vt_hold_mins', 'vt_hold_hours', 12),
+        'hold_verified' => rs_vt_hold_mins('vt_hold_verified_mins', 'vt_hold_verified', 0),
         'red_at' => max(1, min(20, (int)rs_setting('vt_red_at', '3'))),
         'auto' => rs_setting('vt_auto', '1') === '1',
         'clam_subs' => rs_setting('vt_clam_subs', '1') === '1',
@@ -510,12 +520,12 @@ function rs_vt_promote(): void {
             continue;
         }
         if (!$cfg['auto']) continue;
-        $hours = rs_vt_trusted($a) ? $cfg['hold_verified'] : $cfg['hold'];
+        $secs = (rs_vt_trusted($a) ? $cfg['hold_verified'] : $cfg['hold']) * 60;
         $waited = time() - (int)strtotime((string)$p['since']);
         // (3.8) Not checked yet: it waits, but not forever. A busy day can use up the free key, and
         // players shouldn't be stuck on an old version because of that; it's still checked afterwards.
-        if ($v === 'grey' && $waited < max($hours, RS_VT_GREY_HOURS) * 3600) continue;
-        if ($waited < $hours * 3600) continue;
+        if ($v === 'grey' && $waited < max($secs, RS_VT_GREY_HOURS * 3600)) continue;
+        if ($waited < $secs) continue;
         if ($v === 'grey') rs_log('security', $a['id'], 'let out unchecked after ' . RS_VT_GREY_HOURS . ' h: ' . $p['tag']);
         rs_vt_release_go($a);
     }
