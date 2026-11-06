@@ -916,7 +916,7 @@ function rs_pc_dl_check(array $a): ?array {
     $name = $hit($newest);
     if ($name !== '') {
         // A file the developer marked as old (…_OLD.zip) while a newer one sits next to it.
-        if (preg_match('/(^|[^a-z])(old|deprecated|legacy|backup|outdated|broken)([^a-z]|$)/i', (string)preg_replace('/\.(zip|7z|rar|tar\.gz|exe|appimage|dmg)$/i', '', $name))) {
+        if (preg_match('/(^|[^a-z])(old|deprecated|backup|outdated)([^a-z]|$)/i', (string)preg_replace('/\.(zip|7z|rar|tar\.gz|exe|appimage|dmg)$/i', '', $name))) {
             $others = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']), fn($n) => $n !== $name && preg_match('/\.(zip|7z|exe)$/i', $n) && !preg_match('/(linux|mac|android|ios|apk|ipa)/i', $n)));
             return ['dl' => 'oldfile', 'why' => 'Players get ' . $name . ', which looks like an old copy' . ($others ? '. The release also has ' . implode(', ', array_slice($others, 0, 3)) . '.' : '.')];
         }
