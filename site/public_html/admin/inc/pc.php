@@ -884,12 +884,99 @@ function rs_pc_release_for(array $a): ?array {
     $pats = array_values(array_filter([(string)$a['asset_win'], (string)$a['asset_linux'], (string)$a['asset_mac']], fn($p) => trim($p) !== ''));
     $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    $has = function (array $x) use ($pats): bool { foreach ((array)$x['assets'] as $f) foreach ($pats as $p) if (rs_pattern_matches($p, (string)$f['name'])) return true; return false; };
     foreach ($list as $x) {
         if (!empty($x['draft']) || !empty($x['prerelease'])) continue;
-        if (!$pats) return $x;
-        foreach ((array)$x['assets'] as $f) foreach ($pats as $p) if (rs_pattern_matches($p, (string)$f['name'])) return $x;
+        if (!$pats || $has($x)) return $x;
     }
+    // (4.0) A project that only puts out pre-releases (nightlies, alphas): its newest one with the file,
+    // so it gets updates too. Projects with a full release that has the file stay on full releases.
+    if ($pats) foreach ($list as $x) if (empty($x['draft']) && $has($x)) return $x;
     return null;
+}
+
+// (4.0) Is the download players get the right one? Looked at with each background refresh.
+// -> null when the host didn't answer (keep what we knew), [] when it's fine, else
+// ['dl' => gone|nofile|prerelease|stuck|oldfile, 'why' => one plain sentence].
+function rs_pc_dl_check(array $a): ?array {
+    if (!empty($a['soon']) || (string)$a['repo'] === '') return [];
+    $pat = trim((string)$a['asset_win']) ?: (trim((string)$a['asset_linux']) ?: trim((string)$a['asset_mac']));
+    if ($pat === '') return [];
+    $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
+    if ($rel['status'] === 404) return ['dl' => 'gone', 'why' => 'Its project page is gone: renamed, made private or deleted.'];
+    if ($rel['status'] !== 200) return null;
+    $list = array_values(array_filter(json_decode((string)$rel['body'], true) ?: [], fn($x) => empty($x['draft'])));
+    $stable = array_values(array_filter($list, fn($x) => empty($x['prerelease'])));
+    $hit = function (array $x) use ($pat): string { foreach ((array)$x['assets'] as $f) if (rs_pattern_matches($pat, (string)$f['name'])) return (string)$f['name']; return ''; };
+    // Like rs_pc_release_for: full releases, or its pre-releases when no full release has its file.
+    $pool = array_values(array_filter($stable, fn($x) => $hit($x) !== '')) ? $stable : $list;
+    if (!$pool) return ['dl' => 'nofile', 'why' => 'It has no releases.'];
+    $stable = $pool;
+    $newest = $stable[0];
+    $name = $hit($newest);
+    if ($name !== '') {
+        // A file the developer marked as old (…_OLD.zip) while a newer one sits next to it.
+        if (preg_match('/(^|[^a-z])(old|deprecated|legacy|backup|outdated|broken)([^a-z]|$)/i', (string)preg_replace('/\.(zip|7z|rar|tar\.gz|exe|appimage|dmg)$/i', '', $name))) {
+            $others = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']), fn($n) => $n !== $name && preg_match('/\.(zip|7z|exe)$/i', $n) && !preg_match('/(linux|mac|android|ios|apk|ipa)/i', $n)));
+            return ['dl' => 'oldfile', 'why' => 'Players get ' . $name . ', which looks like an old copy' . ($others ? '. The release also has ' . implode(', ', array_slice($others, 0, 3)) . '.' : '.')];
+        }
+        return [];
+    }
+    $older = '';
+    foreach (array_slice($stable, 1) as $x) if ($hit($x) !== '') { $older = (string)$x['tag_name']; break; }
+    $winish = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']),
+        fn($n) => preg_match('/\.(zip|7z|exe|rar)$/i', $n) && preg_match('/(win|x64|x86_64|amd64|pc)/i', $n) && !preg_match('/(linux|mac|android|ios|switch|ps5|xbox)/i', $n)));
+    if ($older !== '' && $winish) return ['dl' => 'stuck', 'why' => 'Its newest release (' . $newest['tag_name'] . ') has ' . implode(', ', array_slice($winish, 0, 2)) . ', which doesn\'t match ' . $pat . ', so players still get ' . $older . '.'];
+    if ($older === '') return ['dl' => 'nofile', 'why' => 'None of its releases has a file that matches ' . $pat . '.'];
+    return [];
+}
+
+// (4.0) Does its README say development moved to another repo? -> 'owner/name' or ''. Only the top of
+// the README counts: that's where a "this project has moved" note goes.
+function rs_pc_moved_check(array $a): string {
+    if ((string)$a['repo'] === '' || rs_pc_host($a) === 'gitlab') return '';
+    $md = substr((string)(rs_pc_readme((string)$a['repo'])['md'] ?? ''), 0, 4000);
+    $re = '/(?:has moved|have moved|moved to|moving to|migrated to|development (?:continues|has moved|now happens)|continues (?:at|in|on)|continued (?:at|in|on)|new (?:home|repo(?:sitory)?|location)|now lives (?:at|in)|(?:project|repo(?:sitory)?) (?:has been|was) (?:moved|transferred|renamed))[\s\S]{0,200}?github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i';
+    if (!preg_match_all($re, $md, $m)) return '';
+    foreach ($m[1] as $to) {
+        $to = (string)preg_replace('/(\.git|[.)\]]+)$/', '', $to);
+        if (strcasecmp($to, (string)$a['repo']) !== 0 && rs_repo_ok($to)) return $to;
+    }
+    return '';
+}
+
+// (4.0) Points a recomp at another repo (it moved): the same listing, the new repo's files. Its next
+// release is held for the security checks like any update, since it comes from somewhere new.
+function rs_pc_switch_repo(array $a, string $to, string $host = ''): array {
+    $r = rs_pc_read_repo($to, $host);
+    if (empty($r['ok'])) throw new RuntimeException($r['why'] ?? 'That repo couldn\'t be read.');
+    $from = rs_pc_key($a);
+    $a['repo'] = (string)$r['repo'];
+    $a['host'] = rs_host_norm($host);
+    // Keep a download pattern that still fits the new repo's files; else take the one it was read with.
+    $rel = rs_host_releases($a['host'], $a['repo'], 600);
+    $names = [];
+    foreach (array_slice(json_decode((string)$rel['body'], true) ?: [], 0, 5) as $x) foreach ((array)($x['assets'] ?? []) as $f) $names[] = (string)$f['name'];
+    foreach (['win' => 'asset_win', 'linux' => 'asset_linux', 'mac' => 'asset_mac'] as $k => $field) {
+        $cur = trim((string)$a[$field]);
+        $fits = $cur !== '' && array_filter($names, fn($n) => rs_pattern_matches($cur, $n));
+        if (!$fits && (string)($r['pattern'][$k] ?? '') !== '') $a[$field] = (string)$r['pattern'][$k];
+    }
+    $a['ok_tag'] = 'moved:' . (string)($a['ok_tag'] ?? '');
+    unset($a['pending']);
+    foreach (['moved_to', 'moved_ack', 'dl_state', 'dl_why', 'dl_ack'] as $k) $a[$k] = '';
+    $a['moved_at'] = time();
+    $a['gh_at'] = 0; // read again on the next refresh
+    rs_log('pc', 'move', $a['id'] . ': ' . $from . ' -> ' . rs_pc_key($a));
+    return $a;
+}
+
+// (4.0) What needs a look on a recomp: a download problem or a move you haven't marked as fine.
+function rs_pc_alerts(array $a): array {
+    $out = [];
+    if ((string)($a['dl_state'] ?? '') !== '' && (string)($a['dl_ack'] ?? '') !== $a['dl_state'] . '|' . ($a['dl_why'] ?? '')) $out['dl'] = (string)$a['dl_why'];
+    if ((string)($a['moved_to'] ?? '') !== '' && (string)($a['moved_ack'] ?? '') !== $a['moved_to']) $out['moved'] = (string)$a['moved_to'];
+    return $out;
 }
 
 // (3.5) Each listed recomp's release as GitHub has it now: version, size, downloads. Oldest checked
@@ -911,6 +998,12 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         if (!$a) continue;
         foreach (['features', 'features_read', 'features_v'] as $k) if (array_key_exists($k, $f)) $a[$k] = $f[$k];
         $a['gh_at'] = time();
+        // (4.0) Whether players get the right file, and (once a week) whether the project moved.
+        try {
+            $dl = rs_pc_dl_check($a);
+            if ($dl !== null) { $a['dl_state'] = (string)($dl['dl'] ?? ''); $a['dl_why'] = (string)($dl['why'] ?? ''); }
+            if (time() - (int)($a['moved_at'] ?? 0) > 6 * 86400) { $a['moved_to'] = rs_pc_moved_check($a); $a['moved_at'] = time(); }
+        } catch (Throwable $e) { /* looked at again next time */ }
         if (!empty($r['ok'])) $a = rs_pc_heal_assets($a, $r);
         // (4.0) Archived on GitHub: the developer has closed it. The site and launcher show it as ended.
         if (!empty($r['ok'])) $a['archived'] = !empty($r['archived']);
@@ -941,6 +1034,71 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
     return $n;
 }
 
+// ---- (4.0) Notify me: players ask to hear when a Coming soon recomp comes out ---------------------
+function rs_pc_notify_tables(): void {
+    static $done = false;
+    if ($done) return;
+    rs_db()->exec('CREATE TABLE IF NOT EXISTS pc_notify (
+        account_id INT NOT NULL,
+        app VARCHAR(64) NOT NULL,
+        created DATETIME NOT NULL,
+        sent DATETIME NULL,
+        PRIMARY KEY (account_id, app), INDEX (app, sent)
+    ) CHARACTER SET utf8mb4');
+    $done = true;
+}
+
+// The recomps this account is waiting on (not emailed about yet).
+function rs_pc_notify_list(int $accountId): array {
+    rs_pc_notify_tables();
+    $st = rs_db()->prepare('SELECT app FROM pc_notify WHERE account_id = ? AND sent IS NULL');
+    $st->execute([$accountId]);
+    return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
+}
+
+function rs_pc_notify_set(int $accountId, string $app, bool $on): void {
+    rs_pc_notify_tables();
+    if (!$on) { rs_db()->prepare('DELETE FROM pc_notify WHERE account_id = ? AND app = ? AND sent IS NULL')->execute([$accountId, $app]); return; }
+    $n = rs_db()->prepare('SELECT COUNT(*) FROM pc_notify WHERE account_id = ? AND sent IS NULL');
+    $n->execute([$accountId]);
+    if ((int)$n->fetchColumn() >= 200) throw new RuntimeException('You\'re waiting on 200 games already.');
+    rs_db()->prepare('INSERT INTO pc_notify (account_id, app, created, sent) VALUES (?, ?, UTC_TIMESTAMP(), NULL) ON DUPLICATE KEY UPDATE sent = NULL, created = UTC_TIMESTAMP()')->execute([$accountId, $app]);
+}
+
+// Emails everyone whose game came out (listed, not Coming soon any more), one email each, and marks
+// them done. Runs after Publish PC. -> how many emails went.
+function rs_pc_notify_send(int $max = 40): int {
+    rs_pc_notify_tables();
+    $rows = rs_db()->query('SELECT n.account_id, n.app FROM pc_notify n JOIN accounts a ON a.id = n.account_id WHERE n.sent IS NULL AND a.email_ok = 1 AND a.banned = 0 AND a.email IS NOT NULL')->fetchAll();
+    if (!$rows) return 0;
+    $out = [];
+    foreach ($rows as $r) {
+        $x = rs_pc_app((string)$r['app']);
+        if (!$x || $x['hidden'] || !empty($x['soon'])) continue;
+        $out[(int)$r['account_id']][] = $x;
+    }
+    $out = array_slice($out, 0, $max, true);
+    if (!$out) return 0;
+    $msgs = []; $ids = [];
+    foreach ($out as $accId => $apps) {
+        $a = rs_acct_get($accId);
+        if (!$a || (string)($a['email'] ?? '') === '') continue;
+        $lines = array_map(fn($x) => '- ' . $x['name'] . ': https://recomplauncher.com/game/' . rawurlencode($x['id']), $apps);
+        $one = count($apps) === 1;
+        $text = 'Hi ' . ($a['username'] ?? 'there') . ",\n\n" . ($one ? $apps[0]['name'] . ' is out. You asked us to tell you when it was ready:' : 'Games you were waiting for are out:') . "\n" . implode("\n", $lines)
+            . "\n\nInstall it in RecompLauncher, or get it from its page.\n";
+        $msgs[] = [(string)$a['email'], rs_mail_build((string)$a['email'], $one ? $apps[0]['name'] . ' is out' : 'Games you were waiting for are out', $text,
+            ['footer' => "You're getting this because you pressed Notify Me on " . ($one ? $apps[0]['name'] : 'these games') . "'s page. It's only sent once."])['data']];
+        $ids[] = [$accId, array_column($apps, 'id')];
+    }
+    if (!$msgs) return 0;
+    try { $errs = rs_smtp_send($msgs); } catch (RuntimeException $e) { return 0; } // mail not set up: tried again next Publish
+    $up = rs_db()->prepare('UPDATE pc_notify SET sent = UTC_TIMESTAMP() WHERE account_id = ? AND app = ?');
+    $ok = 0;
+    foreach ($ids as $i => [$accId, $appIds]) if (($errs[$i] ?? '') === '') { $ok++; foreach ($appIds as $id) $up->execute([$accId, $id]); }
+    return $ok;
+}
+
 function rs_pc_publish(): int {
     rs_pc_refresh_github(20);
     if (function_exists('rs_titles_autogroup')) rs_titles_autogroup(); // (3.8) one game, one listing
@@ -948,5 +1106,8 @@ function rs_pc_publish(): int {
     if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json. Check that public_html is writable.');
     rs_log('publish', 'pc-catalog', count($cat['apps']) . ' apps');
+    // (4.0) Players waiting on a game that just came out hear about it; and new ones go to Discord.
+    try { if (($n = rs_pc_notify_send(40)) > 0) rs_log('publish', 'notify', $n . ' Notify Me emails'); } catch (Throwable $e) { /* tried again next Publish */ }
+    try { rs_pc_discord_announce($cat); } catch (Throwable $e) { /* best effort */ }
     return count($cat['apps']);
 }

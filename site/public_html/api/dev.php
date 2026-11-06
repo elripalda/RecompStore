@@ -268,6 +268,8 @@ try {
                 'rooms' => $approved ? rs_dev_rooms_for($acc) : [], 'docs' => $approved ? count(rs_dev_docs_for($acc)) : 0],
             'claims' => $approved ? rs_dev_claim_state($acc, $apps, $pcApps) : null,
             'discordReady' => rs_dc_ready(), 'discordInvite' => preg_match('#^https://#', $dc['invite']) ? $dc['invite'] : '',
+            // (4.0) Notes from the RecompStore team, pinned on top of the hub.
+            'notes' => (function () { try { return array_map(fn($n) => array_intersect_key($n, array_flip(['id', 'body', 'link', 'linkText', 'tone'])), rs_notes(true, 'devs')); } catch (Throwable $e) { return []; } })(),
             'profile' => $prof ? ['slug' => $prof['slug'], 'name' => $prof['name'], 'about' => $prof['about'], 'links' => (object)$prof['links'], 'avatar' => $prof['avatar'] !== '' ? rs_abs($prof['avatar']) : '', 'verified' => (bool)$prof['verified']] : null,
             'canEdit' => $verified,
             'linkKinds' => RS_DEV_LINKS,
@@ -396,6 +398,7 @@ try {
             if (!array_key_exists($k, $f)) continue;
             $v = mb_substr(trim(str_replace("\r\n", "\n", (string)$f[$k])), 0, $max);
             if ($k === 'report_url' && $v !== '' && rs_pc_report_url($v) === '') rs_dev_out(200, ['ok' => false, 'error' => 'The bug report link has to be a full https:// address.']);
+            if ($pc && ($e = rs_dev_pc_field_error($k, $v)) !== null) rs_dev_out(200, ['ok' => false, 'error' => $e]);
             if ($v !== trim((string)($g[$k] ?? ''))) $data[$k] = $v;
         }
         if (!$data) rs_dev_out(200, ['ok' => false, 'error' => 'Nothing changed.']);
@@ -440,6 +443,7 @@ try {
             $v = mb_substr(trim(str_replace("\r\n", "\n", (string)$f[$k])), 0, $max);
             if ($k === 'name' && $v === '') continue; // a page always has a name
             if ($k === 'report_url' && $v !== '' && rs_pc_report_url($v) === '') rs_dev_out(200, ['ok' => false, 'error' => 'The bug report link has to be a full https:// address.']);
+            if (($e = rs_dev_pc_field_error($k, $v)) !== null) rs_dev_out(200, ['ok' => false, 'error' => $e]);
             if ($k === 'tags') $v = implode(', ', array_slice(array_values(array_unique(array_filter(array_map(fn($x) => mb_substr(trim($x), 0, 24), explode(',', $v))))), 0, 8));
             if ($v !== trim((string)($p[$k] ?? ''))) { $before[$k] = (string)($p[$k] ?? ''); $p[$k] = $v; $what[$k] = $v; }
         }
@@ -486,6 +490,30 @@ try {
         $msg = $what ? ($live ?? false ? 'Saved. It\'s on its page now.' : 'Saved. It shows on its page with RecompStore\'s next update.') : '';
         if ($art) $msg = trim($msg . ' ' . 'Your new pictures are waiting for a quick look, usually within a day.');
         rs_dev_out(200, ['ok' => true, 'message' => $msg, 'fields' => array_intersect_key($p, RS_DEV_PC_FIELDS), 'waiting' => rs_dev_pc_art_waiting((int)$acc['id'])[$id] ?? []]);
+    }
+    // (4.0) Their recomp moved to another repo: they ask, you approve. Only to a repo under their own
+    // GitHub account or one of their orgs, with a release to download; its next release is checked
+    // before it goes out, like any update.
+    if ($a === 'pc-move' && $post) {
+        $id = (string)($in['app'] ?? '');
+        if (!in_array($id, $pcIds, true)) rs_dev_out(200, ['ok' => false, 'error' => 'That isn\'t one of your recomps.']);
+        $l = rs_repo_from_link((string)($in['repo'] ?? ''));
+        if (!$l || $l['host'] !== '' || !rs_repo_ok($l['repo'])) rs_dev_out(200, ['ok' => false, 'error' => 'Paste the new GitHub repo, like github.com/you/new-repo.']);
+        $p = rs_pc_app($id);
+        if (strcasecmp($l['repo'], (string)$p['repo']) === 0) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s the repo it\'s on now.']);
+        if (!in_array(strtolower((string)strtok($l['repo'], '/')), rs_dev_owners($acc), true))
+            rs_dev_out(200, ['ok' => false, 'error' => 'The new repo has to be under your GitHub account or one of your organizations. If it isn\'t, message us and we\'ll sort it out.']);
+        if (rs_rate_over('devmove', 6, 86400)) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of moves in a day. Message us instead.']);
+        rs_rate_hit('devmove');
+        $r = rs_pc_read_repo($l['repo']);
+        if (empty($r['ok'])) rs_dev_out(200, ['ok' => false, 'error' => $r['why'] ?? 'That repo couldn\'t be read.']);
+        if ((string)$r['version'] === '') rs_dev_out(200, ['ok' => false, 'error' => 'The new repo has no release yet. Put one up there first.']);
+        $db->prepare("DELETE FROM dev_changes WHERE account_id = ? AND app_id = ? AND status = 'pending' AND data LIKE '%\"move\"%'")->execute([$acc['id'], 'pc:' . $id]);
+        $db->prepare("INSERT INTO dev_changes (account_id, app_id, data, message, status, created) VALUES (?, ?, ?, ?, 'pending', NOW())")
+           ->execute([$acc['id'], 'pc:' . $id, json_encode(['move' => ['repo' => (string)$r['repo'], 'from' => (string)$p['repo']]], JSON_UNESCAPED_SLASHES), mb_substr(trim((string)($in['message'] ?? '')), 0, 1000)]);
+        rs_log('developers', 'move', rs_dev_label($acc) . ' asks to move PC ' . $id . ' to ' . $r['repo']);
+        rs_dev_notify_admin($acc, 'asks to move ' . $p['name'] . ' from ' . $p['repo'] . ' to ' . $r['repo']);
+        rs_dev_out(200, ['ok' => true, 'message' => 'Sent. We\'ll switch it over after a quick look, usually within a day. Its downloads stay as they are until then.']);
     }
     // (2.7.3) Verified developers change their own app pages straight away (you're emailed).
     if ($a === 'edit' && $post) {

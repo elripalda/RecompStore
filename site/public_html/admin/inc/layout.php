@@ -56,7 +56,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     if ($here === 'launcher.php') { $inPc = true; $inPs5 = false; $pcView = 'launcher'; }
     $pc[] = ['launcher.php', 'Launcher', 'launcher'];
     $links = [['dashboard.php', 'Dashboard', $here === 'dashboard.php'], ['index.php', 'PS5', $inPs5], ['pc.php', 'PC', $inPc],
-        ['developers.php', 'Developers' . (($devWait = rs_dev_waiting() + rs_inbox_new_count(true)) ? ' <span class="count">' . $devWait . '</span>' : ''), in_array($here, ['developers.php', 'submissions.php', 'dev-accounts.php', 'docs.php'], true)],
+        ['developers.php', 'Developers' . (($devWait = rs_dev_waiting() + rs_inbox_new_count(true)) ? ' <span class="count">' . $devWait . '</span>' : ''), in_array($here, ['developers.php', 'submissions.php', 'dev-accounts.php', 'docs.php', 'community.php'], true)],
         ['messages.php', 'Messages' . (($msgNew = rs_dev_admin_unread()) ? ' <span class="count">' . $msgNew . '</span>' : ''), $here === 'messages.php'],
         ['accounts.php', 'Accounts', $here === 'accounts.php'], ['inbox.php', 'Inbox' . ($inboxNew ? ' <span class="count">' . $inboxNew . '</span>' : ''), $here === 'inbox.php'], ['mail.php', 'Mail', $here === 'mail.php'],
         ['analytics.php', 'Analytics', in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['security.php', 'Security' . (($vtNeed = function_exists('rs_vt_need_count') ? rs_vt_need_count() : 0) ? ' <span class="count">' . $vtNeed . '</span>' : ''), $here === 'security.php'], ['status.php', 'Status', in_array($here, ['status.php', 'diag-db.php'], true)], ['settings.php', 'Settings', in_array($here, ['settings.php', 'log.php'], true)]];
@@ -69,7 +69,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
   <?php // (3.1) The developer side: their pages, their accounts, messages and the docs.
   // (3.7) Submissions moved here from the Inbox.
   $subNew = rs_inbox_new_count(true);
-  $devPages = [['developers.php', 'Developer pages'], ['submissions.php', 'Submissions' . ($subNew ? ' (' . $subNew . ')' : '')], ['dev-accounts.php', 'Accounts'], ['messages.php', 'Messages'], ['docs.php', 'Docs']];
+  $devPages = [['developers.php', 'Developer pages'], ['submissions.php', 'Submissions' . ($subNew ? ' (' . $subNew . ')' : '')], ['dev-accounts.php', 'Accounts'], ['messages.php', 'Messages'], ['community.php', 'Discord & notes'], ['docs.php', 'Docs']];
   if (in_array($here, array_column($devPages, 0), true)): ?>
   <nav class="subbar" aria-label="Developers">
     <span class="subbar-tag dev" style="background:rgba(138,75,255,.18);color:#cdb8ff;border:1px solid rgba(138,75,255,.5)">DEVELOPERS</span>

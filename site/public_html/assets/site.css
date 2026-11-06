@@ -2668,3 +2668,27 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .pc-life.life-ended strong{color:#ff8a8a}
 .pc-life.life-paused{background:rgba(255,184,77,.08);border:1px solid rgba(255,184,77,.4);color:#f6e2c2}
 .pc-life.life-paused strong{color:#ffc773}
+/* (4.0) Notify me on a Coming soon game */
+.pc-dl-soon [data-notify]{display:flex;flex-direction:column;gap:6px}
+.pc-dl-soon [data-notify]:empty{display:none}
+.pc-notify{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%}
+.pc-notify.on{background:transparent;color:var(--cyan);border-color:rgba(52,242,232,.55)}
+/* (4.0) Great on Deck: from Steam Deck players' reports */
+.pc-pill.deck{--c:#1a9fff}
+.pc-deck-b{position:absolute;z-index:2;right:8px;bottom:8px;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;font:700 11px/1 Figtree,sans-serif;color:#8fd0ff;background:rgba(11,18,32,.88);border:1px solid rgba(26,159,255,.5);backdrop-filter:blur(6px)}
+.pc-deck-b svg{width:13px;height:13px}
+/* (4.0) Notes from the team: on top of the main store pages and the developer hub */
+#team-notes{width:100%;max-width:calc(var(--wrap) + 2 * var(--gut));margin:0 auto;padding:0 var(--gut)}
+#team-notes:empty{display:none}
+.team-notes{display:grid;gap:10px;margin:18px 0 0}
+.team-notes.hub{margin:0 0 18px}
+.team-note{--c:#34F2E8;position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:12px 44px 12px 16px;border-radius:14px;
+  background:color-mix(in srgb,var(--c) 9%,rgba(11,18,32,.82));border:1px solid color-mix(in srgb,var(--c) 40%,transparent);border-left:4px solid var(--c);color:#e6edf5}
+.team-note.tone-gold{--c:#f5c518}
+.team-note.tone-violet{--c:#a07bff}
+.team-note-from{font:800 11px/1.4 Figtree,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--c);white-space:nowrap}
+.team-note p{margin:0;flex:1 1 300px;line-height:1.5}
+.team-note a{color:var(--c);font-weight:700;text-decoration:none;white-space:nowrap}
+.team-note a:hover{text-decoration:underline}
+.team-note-x{position:absolute;top:8px;right:8px;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:#9fb0c4;font:400 20px/1 Figtree,sans-serif;cursor:pointer}
+.team-note-x:hover{background:rgba(244,248,252,.08);color:#fff}

@@ -137,6 +137,7 @@ try {
         if (!$me) rs_ac_err(401, 'Sign in first.');
         if ($a === 'sessions') rs_ac_out(200, ['ok' => true, 'sessions' => rs_acct_sessions($me)]);
         if ($a === 'saved') rs_ac_out(200, ['ok' => true, 'saved' => rs_acct_saved($me)]);
+        if ($a === 'notifies') rs_ac_out(200, ['ok' => true, 'apps' => rs_pc_notify_list((int)$me['id'])]); // (4.0) Notify me
         if ($a === 'export') {
             header('Content-Type: application/json; charset=utf-8');
             header('Content-Disposition: attachment; filename="recompstore-account.json"');
@@ -317,6 +318,15 @@ try {
         if (rs_acct_dev($me) && rs_setting('acct_dev_2fa', '1') === '1') rs_ac_err(422, 'Developer accounts keep two-step sign-in on.');
         rs_acct_update($id, ['totp_on' => 0, 'totp_secret' => null, 'backup_codes' => null]);
         rs_ac_out(200, ['ok' => true, 'account' => rs_acct_public(rs_acct_get($id))]);
+    }
+    // (4.0) Notify me when a Coming soon PC recomp comes out (one email, then it's done).
+    if ($a === 'notify') {
+        $app = $s('app', 64);
+        $x = preg_match('/^[a-z0-9-]{1,64}$/', $app) ? rs_pc_app($app) : null;
+        if (!$x || $x['hidden']) rs_ac_err(400, 'Unknown game.');
+        if (!$me['email_ok']) rs_ac_err(422, 'Confirm your email first. The link is in the email we sent you.');
+        try { rs_pc_notify_set($id, $app, !empty($in['on'])); } catch (RuntimeException $e) { rs_ac_err(422, $e->getMessage()); }
+        rs_ac_out(200, ['ok' => true, 'on' => !empty($in['on'])]);
     }
     if ($a === 'save') {
         $g = rs_acct_game_key($s('game', 80));

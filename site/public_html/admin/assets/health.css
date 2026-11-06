@@ -131,3 +131,22 @@
 .pc-pager .gap{border:0;background:none;min-width:0;padding:0 2px;color:var(--muted)}
 .pc-card.here .pc-card-cover{box-shadow:0 0 0 2px var(--cyan)}
 .pc-card-cover em.life{top:auto;bottom:8px;color:#ff9a9a}
+.pc-card-cover em.look{top:auto;bottom:8px;color:#1a1400;background:#f5c518}
+/* (4.0) A download or moved-project alert on a recomp's edit page */
+.pc-alert{margin:0 0 16px;padding:12px 16px;border-radius:14px;background:rgba(245,197,24,.09);border:1px solid rgba(245,197,24,.45);color:#f4e6b0}
+.pc-alert p{margin:4px 0 8px}
+.pc-alert strong{color:#f5c518}
+.pc-alert form{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px}
+/* (4.0) Discord & team notes */
+.cm-warn{padding:10px 14px;border-radius:12px;background:rgba(245,197,24,.09);border:1px solid rgba(245,197,24,.45);color:#f4e6b0}
+.cm-warn strong{color:#f5c518}
+ol.steps{display:grid;gap:6px;padding-left:22px;margin:10px 0 14px;line-height:1.5}
+.dc-list{display:grid;gap:8px;padding-left:20px;margin:6px 0 12px;line-height:1.5}
+.dc-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.note-list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}
+.note-row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);border-left:4px solid #34F2E8;background:rgba(244,248,252,.04)}
+.note-row.tone-gold{border-left-color:#f5c518}
+.note-row.tone-violet{border-left-color:#a07bff}
+.note-row.off{opacity:.5}
+.note-row p{margin:0 0 4px}
+.note-row form{display:flex;gap:8px;flex:none}

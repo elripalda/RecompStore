@@ -5,6 +5,7 @@
 //   GET  ?a=app&id=<app>              -> {app: {...}}            (one recomp's whole entry, for its page)
 //   GET  ?a=counts                     -> {counts: {app: {runs, issues, broken}}}
 //   POST a=feedback id verdict sys note version   (one per player and recomp: a new one replaces theirs)
+// (4.0) GET a=notifies -> {apps}; POST a=notify app on -> {on}: Notify me when a Coming soon game is out.
 // (4.0) POST a=feedback also takes proton=1 (Linux or Steam Deck, the Windows build through Proton). GET
 //        feedback gives each item's proton, and proton: {n, runs} for the summary line.
 // (3.9) Reports developers can act on:
@@ -94,6 +95,22 @@ try {
         rs_rate_hit('pc-reply');
         rs_play_reply_add($r, $text, null, (int)$me['id']);
         rs_pc_out(200, ['ok' => true, 'replies' => rs_play_replies([(int)$r['id']])[(int)$r['id']] ?? []]);
+    }
+    // (4.0) Notify me (RecompLauncher's sign-in, or this site's): the Coming soon games they're waiting on.
+    if ($a === 'notifies' && !$post) {
+        $me = rs_pc_me(false);
+        if (!$me) rs_pc_out(401, ['ok' => false, 'error' => 'Sign in first.']);
+        rs_pc_out(200, ['ok' => true, 'apps' => rs_pc_notify_list((int)$me['id'])]);
+    }
+    if ($a === 'notify' && $post) {
+        $me = rs_pc_me(true);
+        if (!$me) rs_pc_out(401, ['ok' => false, 'error' => 'Sign in first.']);
+        if (!rs_pc_cookie_post_ok()) rs_pc_out(403, ['ok' => false, 'error' => 'Do that from the website.']);
+        $x = preg_match('/^[a-z0-9-]{1,64}$/', $s('app', 64)) ? rs_pc_app($s('app', 64)) : null;
+        if (!$x || $x['hidden']) rs_pc_out(404, ['ok' => false, 'error' => 'Unknown game.']);
+        if (empty($me['email_ok'])) rs_pc_out(422, ['ok' => false, 'error' => 'Confirm your email first. The link is in the email we sent you.']);
+        try { rs_pc_notify_set((int)$me['id'], (string)$x['id'], !empty($in['on'])); } catch (RuntimeException $e) { rs_pc_out(422, ['ok' => false, 'error' => $e->getMessage()]); }
+        rs_pc_out(200, ['ok' => true, 'on' => !empty($in['on'])]);
     }
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);

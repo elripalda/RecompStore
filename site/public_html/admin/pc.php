@@ -159,6 +159,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'delete') {
             rs_db()->prepare('DELETE FROM pc_apps WHERE id = ?')->execute([(string)($_POST['id'] ?? '')]);
             rs_flash('Deleted from the PC store. Publish to take it off the site.');
+        } elseif ($act === 'dl-ok' || $act === 'moved-ok' || $act === 'move-repo') {
+            // (4.0) The download or moved alerts on its edit page: fine as it is, or follow the move.
+            $a = rs_pc_app((string)($_POST['id'] ?? ''));
+            if (!$a) throw new RuntimeException('That app is gone.');
+            if ($act === 'dl-ok') { $a['dl_ack'] = (string)($a['dl_state'] ?? '') . '|' . (string)($a['dl_why'] ?? ''); rs_flash('Marked as fine. It shows again only if something new comes up.'); }
+            if ($act === 'moved-ok') { $a['moved_ack'] = (string)($a['moved_to'] ?? ''); rs_flash('Okay, it stays on ' . $a['repo'] . '.'); }
+            if ($act === 'move-repo') {
+                $to = (string)($a['moved_to'] ?? '');
+                if ($to === '') throw new RuntimeException('There\'s no new repo to move to.');
+                $a = rs_pc_switch_repo($a, $to);
+                rs_flash('Moved to ' . $a['repo'] . '. Its next release is checked before it goes out; press Publish PC when you\'re ready.');
+            }
+            rs_pc_save($a);
+            $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
         } elseif ($act === 'publish') {
             $n = rs_pc_publish();
             rs_flash('Published: ' . $n . ($n === 1 ? ' PC recomp is' : ' PC recomps are') . ' on recomplauncher.com.');
@@ -185,7 +199,7 @@ $lastFind = $view === 'found' ? rs_kv_get('pc_find_run') : null;
 
 // (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
 // and page size are remembered (a cookie) so the list comes back the way you left it.
-$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover'],
+$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look'],
     'sort' => ['new' => 'Newest', 'old' => 'Oldest', 'az' => 'A to Z', 'za' => 'Z to A', 'updated' => 'Recently updated', 'downloads' => 'Most downloads', 'reports' => 'Most reports'],
     'per' => [25, 50, 100, 200]];
 $lsPick = function (string $k, $def) use ($lsOpt) {
@@ -253,7 +267,15 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <p class="vt-line"><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>Not checked yet</span>' ?>
     <?php if (!empty($a['pending']['tag'])): ?> <a href="security.php">Update to <?= h($a['pending']['version'] ?: $a['pending']['tag']) ?> is on hold</a><?php endif; ?></p>
   <?php endif; ?>
-  <form method="post" enctype="multipart/form-data" class="grid2">
+    <?php $al = rs_pc_alerts($a); if ($al): ?>
+  <div class="pc-alert">
+    <?php if (isset($al['dl'])): ?><p><strong>Download needs a look.</strong> <?= h($al['dl']) ?></p>
+    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button name="action" value="dl-ok">It's fine</button><?php if ($a['repo'] !== ''): ?> <a class="btn" href="<?= h(rs_host_releases_url(rs_pc_host($a), $a['repo'])) ?>" target="_blank" rel="noopener">Its releases</a><?php endif; ?></form><?php endif; ?>
+    <?php if (isset($al['moved'])): ?><p><strong>This project may have moved.</strong> Its README points to <a href="https://github.com/<?= h($al['moved']) ?>" target="_blank" rel="noopener"><?= h($al['moved']) ?></a>.</p>
+    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button name="action" value="move-repo" class="primary" onclick="return confirm('Point this listing at <?= h($al['moved']) ?>? Its next release gets the security checks before it goes out.')">Switch to it</button> <button name="action" value="moved-ok">Keep this one</button></form><?php endif; ?>
+  </div>
+  <?php endif; ?>
+<form method="post" enctype="multipart/form-data" class="grid2">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><input type="hidden" name="list" value="<?= h($lsQs()) ?>">
     <label>Name<input name="name" value="<?= h($a['name']) ?>" maxlength="120"><small>The project's name, like Zelda 64: Recompiled.</small></label>
     <label>The game<input name="game" value="<?= h($a['game']) ?>" maxlength="120"><small>The original game, like The Legend of Zelda: Majora's Mask.</small></label>
@@ -307,7 +329,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     // (4.0) What each filter matches, its count, then the search, the order and the page.
     $lifeOf = fn(array $a): bool => in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) || !empty($a['archived']);
     $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'], 'soon' => fn($a) => !empty($a['soon']),
-        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === ''];
+        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a)];
     $q = mb_strtolower($ls['q']);
     $inQ = $q === '' ? $apps : array_values(array_filter($apps, fn($a) => str_contains(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id'] . ' ' . $a['author']), $q)));
     $lsCount = array_map(fn($f) => count(array_filter($inQ, $f)), $lsMatch);
@@ -354,7 +376,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <div class="pc-cards">
     <?php foreach ($shown as $a): $c = $counts[$a['id']] ?? []; $n = array_sum($c); $life = (string)($a['status'] ?? '') === 'paused' ? 'On hold' : ($lifeOf($a) ? 'Ended' : ''); ?>
     <a class="pc-card<?= $a['hidden'] ? ' dim' : '' ?><?= $editId === $a['id'] ? ' here' : '' ?>" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>&amp;<?= h($listQs) ?>#edit">
-      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async" width="150" height="225">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?><?= $life !== '' ? '<em class="life">' . $life . '</em>' : '' ?></span>
+      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async" width="150" height="225">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?><?= rs_pc_alerts($a) ? '<em class="look">Needs a look</em>' : ($life !== '' ? '<em class="life">' . $life . '</em>' : '') ?></span>
       <span class="pc-card-words"><strong><?= h($a['name']) ?></strong><small><?= h($a['game'] ?: '?') ?></small>
         <small class="muted"><?= h($origin($a['origin'])) ?> · <?= h(RS_PC_GENRES[$a['genre']] ?? 'No kind yet') ?></small>
         <small class="muted"><?= h($a['version'] ?: 'no release') ?><?= $n ? ' · ' . $n . ($n === 1 ? ' report' : ' reports') : '' ?></small></span>

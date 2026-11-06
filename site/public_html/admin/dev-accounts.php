@@ -195,6 +195,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($pc) {
                     // A PC recomp's change goes on its page straight away.
                     foreach (RS_DEV_PC_FIELDS as $k => $max) if (array_key_exists($k, $data)) $g[$k] = mb_substr((string)$data[$k], 0, $max);
+                    // (4.0) A move to another repo of theirs: the listing follows it, its next release is checked first.
+                    if (!empty($data['move']['repo'])) $g = rs_pc_switch_repo($g, (string)$data['move']['repo']);
                     if (array_key_exists('features', $data)) { $g['features_read'] = true; $g['features_v'] = 2; }
                     // (3.8) Their new pictures. The old ones are kept in the change, so Undo can put them back.
                     $was = [];
@@ -310,6 +312,12 @@ rs_head('Developer accounts');
     <p><strong><?= h($g['name'] ?? $c['app_id']) ?></strong><?= str_starts_with((string)$c['app_id'], 'pc:') ? ' <span class="pill">PC</span>' : '' ?> <span class="muted">from <?= h($c['name'] ?: $c['gh_login']) ?> · <?= h($when($c['created'])) ?></span></p>
     <?php if (trim((string)$c['message']) !== ''): ?><p class="body"><em><?= nl2br(h((string)$c['message'])) ?></em></p><?php endif; ?>
     <?php foreach ($data as $k => $v): if ($k === '_before') continue; ?>
+    <?php if ($k === 'move'): ?>
+    <div class="dev-diff"><span class="lbl">Move to another repo</span>
+      <div class="dev-diff-cols"><div><span class="muted">Now</span><p><a href="https://github.com/<?= h((string)($g['repo'] ?? '')) ?>" target="_blank" rel="noopener"><?= h((string)($g['repo'] ?? '')) ?></a></p></div>
+        <div><span class="muted">Asks for</span><p><a href="https://github.com/<?= h((string)$v['repo']) ?>" target="_blank" rel="noopener"><?= h((string)$v['repo']) ?></a> <span class="muted">(theirs; its next release is checked before it goes out)</span></p></div></div>
+    </div>
+    <?php continue; endif; ?>
     <?php if ($k === 'art'): foreach ((array)$v as $ak => $path): ?>
     <div class="dev-diff"><span class="lbl"><?= h(['cover' => 'Cover', 'hero' => 'Backdrop', 'logo' => 'Logo', 'icon' => 'Icon'][$ak] ?? $ak) ?></span>
       <div class="dev-diff-cols"><div><span class="muted">Now</span><p><?= (string)($g[$ak] ?? '') !== '' ? '<img class="dev-art dev-art-' . h($ak) . '" src="' . h((string)$g[$ak]) . '" alt="">' : '<span class="muted">none</span>' ?></p></div>

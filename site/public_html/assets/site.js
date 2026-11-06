@@ -1985,6 +1985,16 @@
   const originPill = (k) => `<span class="pc-pill" style="--c:${PC_COLORS[k] || PC_COLORS.other}">${esc(originName(k))}</span>`;
   // What players say: the one word most of them picked, and how many said anything.
   let pcCounts = null;
+  // (4.0) Great on Deck: 3 or more Steam Deck reports, with a Deck score of 80 or more (Plays great).
+  const SVG_DECK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="7" width="19" height="10" rx="3"/><circle cx="17" cy="12" r="1.6"/><path d="M6 12h3M7.5 10.5v3"/></svg>';
+  const onDeck = (id) => { const sc = window.rsPlaySc; const x = sc && sc.pc && sc.pc[id]; const d = x && x.sys && x.sys.deck; return !!(d && d.n >= 3 && d.score >= 80); };
+  const deckBadge = (id) => (onDeck(id) ? `<span class="pc-deck-b" title="${esc(t('Great on Deck: Steam Deck players say it plays great'))}">${SVG_DECK}${t('Deck')}</span>` : '');
+  const deckMarks = (root) => (root || document).querySelectorAll('a.pc-tile[href^="/pc/game/"]').forEach((el) => {
+    const p = el.querySelector('.pc-poster');
+    if (!p || p.querySelector('.pc-deck-b')) return;
+    const b = deckBadge(decodeURIComponent(el.getAttribute('href').slice(9)));
+    if (b) p.insertAdjacentHTML('beforeend', b);
+  });
   const playVerdicts = (m) => { const o = {}; Object.keys(m || {}).forEach((k) => { o[k] = m[k].verdicts || {}; }); return o; };
   const pcCountsLoad = () => (pcCounts ? Promise.resolve(pcCounts) : playScores().then((sc) => (pcCounts = playVerdicts(sc.pc))));
   const VERDICTS = { runs: N_('Plays great'), issues: N_('Has problems'), broken: N_("Won't run") };
@@ -2013,7 +2023,7 @@
   const starCount = (n) => { try { return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n); } catch (e) { return fmtNum(n); } };
   const osBadges = (a) => (OS_LOGOS.length && (a.systems || []).length ? `<span class="pc-os" aria-label="${esc((a.systems || []).map((k) => SYS_NAMES[k] || k).join(', '))}">${['windows', 'macos', 'linux'].filter((k) => a.systems.includes(k)).map(osIcon).join('')}</span>` : '');
   const pcPoster = (a) => `<a class="pc-tile" href="/pc/game/${encodeURIComponent(a.id)}">
-      <span class="pc-poster">${osBadges(a)}${lifeBadge(a)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
+      <span class="pc-poster">${osBadges(a)}${lifeBadge(a)}${deckBadge(a.id)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
       <strong class="pc-name pc-fit" dir="auto" title="${esc(a.name)}"${fitAttrs(a.name, shortName(a.name).toLowerCase() === String(a.game || '').toLowerCase() ? '' : shortName(a.name))}>${esc(a.name)}</strong>
       <small class="pc-game pc-fit" dir="auto"${a.game && a.game !== a.name ? ` title="${esc(a.game)}"${fitAttrs(a.game, shortGame(a.game))}>${esc(a.game)}` : '>&nbsp;'}</small>
       ${consoleTag(a.origin)}${a.stars ? `<span class="pc-stars" aria-label="${esc(tn(a.stars, '1 star on GitHub', '{n} stars on GitHub'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.8 6.6 19.8l1.2-6.1-4.5-4.2 6.1-.7z"/></svg>${esc(starCount(a.stars))}</span>` : ''}</a>`;
@@ -2744,7 +2754,7 @@
           <aside class="pc-side">
             <div class="glass panel">
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
-              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><a class="btn primary" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>${systems.map((sx, i) => `<a class="btn${i === 0 ? ' primary' : ''}" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn primary" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>`}
+              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div><a class="btn" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>${systems.map((sx, i) => `<a class="btn${i === 0 ? ' primary' : ''}" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn primary" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>`}
               <div data-acct-save></div>
               <div data-rl-send></div>
               <div class="pc-links">
@@ -2845,6 +2855,8 @@
       const n = view.querySelector('[data-fb-n]'), hv = view.querySelector('[data-head-verdict]');
       if (n && v) n.textContent = ' ' + fmtNum(v.n);
       if (hv && !hv.innerHTML.trim()) hv.innerHTML = verdictChip(c[a.id]);
+      const pills = view.querySelector('.pc-pills');
+      if (pills && onDeck(a.id) && !pills.querySelector('.deck')) pills.insertAdjacentHTML('beforeend', `<span class="pc-pill deck" title="${esc(t('Steam Deck players say it plays great'))}">${SVG_DECK}${t('Great on Deck')}</span>`);
       const vs = view.querySelector('[data-versions]');
       if (vs) ps5CountsLoad().then(() => { const v2 = view.querySelector('[data-versions]'); if (v2) v2.outerHTML = versionsHTML('pc', a.id); });
     });
@@ -4083,7 +4095,7 @@
       const tabs = [['apps', t('Your apps')], ['pc', t('PC recomps')], ...(hasPc ? [['reports', t('Reports') + '<span class="hub-count" data-unseen></span>']] : []), ['page', t('Your page')], ['betas', t('Betas')], ['logs', t('Logs')], ['ids', t('Title IDs')]];
       const firstTab = hasPc && new URLSearchParams(location.search).get('tab') === 'reports' ? 'reports' : 'apps';
       const tot = data.apps.reduce((o, a) => { const st = a.stats || {}; ['installs', 'week', 'downloads', 'likes'].forEach((k) => { o[k] += Number(st[k] || 0); }); return o; }, { installs: 0, week: 0, downloads: 0, likes: 0 });
-      page.innerHTML = head(acc) + `
+      page.innerHTML = head(acc) + teamNotesHTML(data.notes, 'hub') + `
         <dl class="hub-totals">
           <div><dt>${t('Apps')}</dt><dd>${num(data.apps.length)}</dd></div><div><dt>${t('On PS5s now')}</dt><dd>${num(tot.installs)}</dd></div>
           <div><dt>${t('New this week')}</dt><dd>${num(tot.week)}</dd></div><div><dt>${t('GitHub downloads')}</dt><dd>${num(tot.downloads)}</dd></div><div><dt>${t('Likes')}</dt><dd>${num(tot.likes)}</dd></div></dl>
@@ -4254,7 +4266,11 @@
     const PC_FIELDS = [['name', t('Name'), 120], ['blurb', t('One-line summary'), 160], ['description', t('Description'), 8000], ['features', t("What's in it"), 1200, t('One per line')],
       ['media', t('Around the web'), 5000, t('YouTube, Reddit or X links, one per line')], ['needs', t('What players need'), 200], ['credits', t('Credits'), 1000],
       ['tags', t('Tags'), 300, t('Up to 8, separated by commas, like Widescreen, 60 FPS, Mods')], ['setup_steps', t('Setup steps'), 2000, t('Only if players set something up before the first play. One step per line.')],
-      ['report_url', t('How To Report Bugs'), 300, t('A link to your own page for bug reports, like your GitHub issues. Shown next to the report form. Starts with https://')]];
+      ['report_url', t('How To Report Bugs'), 300, t('A link to your own page for bug reports, like your GitHub issues. Shown next to the report form. Starts with https://')],
+      // (4.0) Where the project stands: a label on its page and tile, here and in RecompLauncher.
+      ['status', t('Project Status'), 8, t('On hold or Ended shows a label on its page, so players know what to expect.')],
+      ['status_note', t('Status Note'), 200, t('Optional. One line under the label, like: Development moved to the sequel.')]];
+    const PC_STATUS = [['', N_('Active')], ['paused', N_('On hold')], ['ended', N_('Ended (no more updates)')]];
     // (3.8) Its pictures: new ones wait for a quick look before they go on its page.
     const PC_PICS = [['cover', 'cover_file', t('Cover'), t('Portrait, 600×900')], ['art', 'hero_file', t('Backdrop'), t('Wide, 1920×620 or bigger')],
       ['logo', 'logo_file', t('Logo'), t('PNG with a see-through background')], ['icon', 'icon_file', t('Icon'), t('Square, 512×512')]];
@@ -4265,8 +4281,17 @@
       return `<label class="hub-pic-pick hub-pic-${k === 'art' ? 'art' : k}"><span class="hub-pic-box">${now ? `<img src="${esc(now)}" alt="">` : `<span class="muted">${t('None yet')}</span>`}</span>
         <strong>${n}</strong><small>${waiting ? `<span class="tag">${t('Waiting for a look')}</span>` : hint}</small><input type="file" name="${field}" accept="image/png,image/jpeg,image/webp"></label>`;
     }).join('')}</div>`;
-    const pcFieldsHtml = (a) => PC_FIELDS.map(([k, n, max, hint]) => `<label>${n}${max > 300 ? `<textarea name="${k}" rows="${k === 'description' ? 7 : 4}" maxlength="${max}">${esc((a.fields || {})[k] || '')}</textarea>`
+    const pcFieldsHtml = (a) => PC_FIELDS.map(([k, n, max, hint]) => `<label>${n}${k === 'status' ? `<select name="status">${PC_STATUS.map(([v, l]) => `<option value="${v}"${((a.fields || {}).status || '') === v ? ' selected' : ''}>${t(l)}</option>`).join('')}</select>`
+      : max > 300 ? `<textarea name="${k}" rows="${k === 'description' ? 7 : 4}" maxlength="${max}">${esc((a.fields || {})[k] || '')}</textarea>`
       : `<input name="${k}" maxlength="${max}" value="${esc((a.fields || {})[k] || '')}">`}${hint ? `<small>${hint}</small>` : ''}</label>`).join('');
+    // (4.0) Moved to another repo of theirs: they ask here, we switch it over after a look.
+    const pcMoveHtml = (a) => `<details class="hub-move"><summary>${t('Moved to a new repo?')}</summary>
+      <form class="form" data-pc-move="${esc(a.id)}" novalidate>
+        <p class="muted">${esc(tf('It\'s on {repo} now. Paste the new one: it has to be under your GitHub account or one of your organizations, with a release up. We switch it over after a quick look, and its next release gets the usual security check.', { repo: a.repo || '' }))}</p>
+        <label>${t('New repo')}<input name="repo" placeholder="github.com/you/new-repo" autocomplete="off" spellcheck="false"></label>
+        <label>${t('A note for us')} <span class="opt">${t('optional')}</span><input name="message" maxlength="1000"></label>
+        <div class="form-row"><button class="btn primary" type="submit">${t('Ask to switch')}</button><span class="status" role="status"></span></div>
+      </form></details>`;
     const wirePics = (f) => f.querySelectorAll('.hub-pc-pics input[type=file]').forEach((inp) => inp.addEventListener('change', () => {
       const box = inp.closest('label').querySelector('.hub-pic-box');
       if (inp.files[0]) box.innerHTML = `<img src="${URL.createObjectURL(inp.files[0])}" alt="">`;
@@ -4291,6 +4316,7 @@
                 <div class="form-row"><button class="btn primary" type="submit">${data.canEdit ? t('Save changes') : t('Send for review')}</button><span class="status" role="status"></span></div>
               </form></details>
             ${aiForm(a, 'pc:' + a.id)}
+            ${pcMoveHtml(a)}
             </div>
           </section>`).join('')}</div>`
         : `<section class="glass card-pad"><p>${t('None of your GitHub repositories are on RecompLauncher yet.')}</p><a class="btn primary" href="/submit">${t('Submit an app')}</a></section>`;
@@ -4323,6 +4349,12 @@
         });
       }));
       pane().querySelectorAll('form[data-pc]').forEach(wirePics);
+      pane().querySelectorAll('form[data-pc-move]').forEach((f) => f.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const st = f.querySelector('.status');
+        if (!f.repo.value.trim()) { say(st, { ok: false, error: t('Paste the new repo first.') }); return; }
+        call('pc-move', { app: f.dataset.pcMove, repo: f.repo.value.trim(), message: f.message.value }).then((res) => { say(st, res); if (res.ok) f.repo.value = ''; });
+      }));
     };
 
     // (3.9) Reports: what players say about their PC recomps, newest first. Their PC, the version, a log
@@ -4420,7 +4452,7 @@
               <p>${t('Every Monday: your installs, new installs and the logs players sent, for each of your apps.')}</p>
               <label class="check"><input type="checkbox" data-weekly${data.account.weekly ? ' checked' : ''}> ${t('Send me the weekly email')}</label><span class="status" role="status"></span></div>
             <div class="glass card-pad"><span class="kicker">Discord</span>
-              ${data.account.discord ? `<p>${tf('Linked as @{name}.', { name: esc(data.account.discord) })}</p>` : `<p>${t('Link your Discord to get the Developer role in the RecompStore server.')}</p>`}
+              ${data.account.discord ? `<p>${tf('Linked as @{name}.', { name: esc(data.account.discord) })}</p>` : `<p>${t('Link your Discord to get the Developer role and the developer-only channels in our server.')}</p>`}
               ${data.discordReady ? `<a class="btn" href="/api/discord.php?game=hub">${SVG.discord}<span>${data.account.discord ? t('Link again') : t('Link Discord')}</span></a>` : ''}
               ${data.discordInvite ? `<p><a href="${esc(data.discordInvite)}" target="_blank" rel="noopener">${t('Join the Discord')}</a></p>` : ''}</div>
             ${data.profile && data.profile.verified ? (() => {
@@ -5316,6 +5348,8 @@
       if (save && save.isConnected) acctSaveButton(save, key);
       const send = view.querySelector('[data-rl-send]');
       if (send && send.isConnected && kind === 'pc' && acct.me) rlSendButton(send, id);
+      const ntf = view.querySelector('[data-notify]');
+      if (ntf && ntf.isConnected && kind === 'pc') notifyButton(ntf, id);
       if (box && box.isConnected) acctComments(box, key);
     });
   }
@@ -5341,6 +5375,57 @@
           }).catch(() => { btn.disabled = false; st.className = 'status small bad'; st.textContent = t('That didn\'t go through. Try again.'); });
       });
     }).catch(() => {});
+  }
+  // (4.0) Notes from the RecompStore team, pinned on top of the developer hub or the site. A closed one
+  // stays closed in this browser.
+  const notesClosed = () => { try { return JSON.parse(localStorage.getItem('rs-notes-closed') || '[]'); } catch (e) { return []; } };
+  const linkSafe = (u) => (/^https:\/\//.test(String(u || '')) ? u : '');
+  function teamNotesHTML(list, where) {
+    const closed = notesClosed();
+    const show = (list || []).filter((n) => !closed.includes(n.id));
+    if (!show.length) return '';
+    return `<div class="team-notes ${where}">${show.map((n) => `<div class="team-note tone-${esc(n.tone || 'cyan')}" data-note="${n.id}" role="note">
+      <span class="team-note-from">${where === 'hub' ? t('From the RecompStore team') : document.body.dataset.platform === 'pc' ? 'RecompLauncher' : 'RecompStore'}</span>
+      <p dir="auto">${esc(n.body)}${linkSafe(n.link) ? ` <a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.linkText || t('More'))}<span aria-hidden="true">↗</span></a>` : ''}</p>
+      <button type="button" class="team-note-x" data-note-x="${n.id}" aria-label="${t('Close')}">×</button></div>`).join('')}</div>`;
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-note-x]');
+    if (!b) return;
+    const id = +b.dataset.noteX;
+    try { const c = notesClosed(); if (!c.includes(id)) c.push(id); localStorage.setItem('rs-notes-closed', JSON.stringify(c.slice(-100))); } catch (err) { /* closes for now only */ }
+    const n = b.closest('[data-note]'); if (n) n.remove();
+  });
+  let siteNotes = null;
+  const siteNotesLoad = () => (siteNotes ? Promise.resolve(siteNotes) : fetch('/api/notes.php').then((r) => r.json()).then((j) => (siteNotes = (j && j.notes) || [])).catch(() => (siteNotes = [])));
+  // On top of the store's main pages, under the header: in their own box next to the page, so a page
+  // that draws itself again later doesn't take them away.
+  function siteNotesMount(on) {
+    let box = document.getElementById('team-notes');
+    if (!on) { if (box) box.innerHTML = ''; return; }
+    siteNotesLoad().then((list) => {
+      if (!list.length || !view || !view.parentNode) return;
+      if (!box) { box = document.createElement('div'); box.id = 'team-notes'; view.parentNode.insertBefore(box, view); }
+      box.innerHTML = teamNotesHTML(list, 'site');
+    });
+  }
+
+  // (4.0) Notify me: one email when a Coming soon game comes out.
+  const SVG_BELL = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
+  function notifyButton(el, app) {
+    const draw = (on) => { el.innerHTML = `<button type="button" class="btn primary pc-notify${on ? ' on' : ''}" aria-pressed="${on}">${SVG_BELL}<span>${on ? t('We\'ll Email You') : t('Notify Me')}</span></button><span class="status small" role="status"></span>`; };
+    if (!acct.me) { el.innerHTML = `<a class="btn primary pc-notify" href="${acctSignHref()}" data-fx>${SVG_BELL}<span>${t('Notify Me')}</span></a>`; return; }
+    let on = false;
+    draw(false);
+    fetch('/api/account.php?a=notifies', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json()).then((j) => { on = !!(j.apps || []).includes(app); draw(on); }).catch(() => {});
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('button')) return;
+      on = !on; draw(on);
+      acctApi('notify', { app, on }).then((j) => {
+        if (!j.ok) { on = !on; draw(on); const st = el.querySelector('.status'); if (st) { st.className = 'status small bad'; st.textContent = j.error || t('That didn\'t go through. Try again.'); } return; }
+        const st = el.querySelector('.status'); if (st && on) { st.className = 'status small ok'; st.textContent = t('We\'ll email you once, when it\'s out.'); }
+      });
+    });
   }
   function acctSaveButton(el, key) {
     const draw = (on) => { el.innerHTML = `<button type="button" class="btn acct-save${on ? ' on' : ''}" aria-pressed="${on}">${SVG_HEART}<span>${on ? t('Saved') : t('Save')}</span></button>`; };
@@ -5685,7 +5770,7 @@
     if (playSc && !fresh) return Promise.resolve(playSc);
     if (playScLoading && !fresh) return playScLoading;
     playScLoading = fetch('/api/play.php?a=scores' + (fresh ? '&t=' + Date.now() : ''), { cache: fresh ? 'no-store' : 'default' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-      .then((j) => { playSc = { pc: (j && j.pc) || {}, ps5: (j && j.ps5) || {} }; playScLoading = null; return playSc; });
+      .then((j) => { playSc = { pc: (j && j.pc) || {}, ps5: (j && j.ps5) || {} }; playScLoading = null; window.rsPlaySc = playSc; setTimeout(() => deckMarks(document), 0); return playSc; });
     return playScLoading;
   };
   const scoreTone = (s) => (s >= 80 ? 'great' : s >= 62 ? 'good' : s >= 45 ? 'mixed' : s >= 25 ? 'rough' : 'bad');
@@ -6279,6 +6364,7 @@
       window.scrollTo({ top: spot.y, behavior: 'instant' });
     } else if (!quiet) window.scrollTo({ top: 0, behavior: 'instant' });
     watchSections();
+    siteNotesMount(['home', 'pc', 'pc-all'].includes(here)); // (4.0) team notes on the main pages
     };
     // The page changes with a quick crossfade where the browser can (the header stays put); else a
     // short slide in.

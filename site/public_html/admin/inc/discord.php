@@ -233,3 +233,188 @@ function rs_dc_claim(array $u, string $gameId): string {
     rs_log('beta', $gameId, 'Discord code for ' . $who);
     return rs_beta_format($made[0]);
 }
+
+// ---- (4.0) The Discord server: a Developer role in its own color, shown apart in the member list,
+// and developer-only channels. Done by the site's bot (Beta page: bot token, server ID), which needs
+// Manage Roles and Manage Channels. Each step looks first, so pressing Set up again changes nothing.
+const RS_DC_DEV_COLOR = 0x34F2E8;
+const RS_DC_VIEW = 1024; const RS_DC_SEND = 2048; const RS_DC_HISTORY = 65536;
+
+// The link that adds the site's bot to the server with what it needs (and nothing more).
+function rs_dc_bot_invite(): string {
+    $c = rs_dc_conf();
+    if ($c['client'] === '') return '';
+    // View channels, send messages, read history, manage channels, manage roles.
+    $perm = RS_DC_VIEW | RS_DC_SEND | RS_DC_HISTORY | 16 | 268435456;
+    return 'https://discord.com/oauth2/authorize?' . http_build_query(['client_id' => $c['client'], 'scope' => 'bot', 'permissions' => (string)$perm, 'guild_id' => $c['guild'], 'disable_guild_select' => 'true']);
+}
+
+// What's there now: [ready, why, role id, channel ids].
+function rs_dc_server_state(): array {
+    $c = rs_dc_conf();
+    $out = ['ready' => false, 'why' => '', 'role' => trim((string)rs_setting('dc_dev_role', '')), 'chat' => trim((string)rs_setting('dc_dev_chat', '')), 'news' => trim((string)rs_setting('dc_dev_news', ''))];
+    if ($c['guild'] === '') { $out['why'] = 'No server ID yet (Beta page).'; return $out; }
+    if ($c['bot'] === '') { $out['why'] = 'No bot token yet (Beta page).'; return $out; }
+    [$st] = rs_dc_call('GET', '/guilds/' . rawurlencode($c['guild']) . '/roles', ['bot' => $c['bot']]);
+    if ($st === 401) { $out['why'] = 'Discord says the bot token isn\'t right.'; return $out; }
+    if ($st === 403 || $st === 404) { $out['why'] = 'The bot isn\'t in the server yet. Add it with the link below.'; return $out; }
+    if ($st !== 200) { $out['why'] = 'Discord didn\'t answer (' . $st . '). Try again in a minute.'; return $out; }
+    $out['ready'] = true;
+    return $out;
+}
+
+// Makes (or finds) the Developer role and the Developers channels. -> what it did, line by line.
+function rs_dc_server_setup(): array {
+    $c = rs_dc_conf();
+    $g = rawurlencode($c['guild']);
+    $bot = ['bot' => $c['bot']];
+    $done = [];
+    // The bot's own user: it keeps seeing the private channels it makes.
+    [$st, $me] = rs_dc_call('GET', '/users/@me', $bot);
+    if ($st !== 200 || empty($me['id'])) throw new RuntimeException('Discord didn\'t say who the bot is (' . $st . ').');
+    $botId = (string)$me['id'];
+    // 1. The role.
+    [$st, $roles] = rs_dc_call('GET', '/guilds/' . $g . '/roles', $bot);
+    if ($st !== 200) throw new RuntimeException('Couldn\'t read the server\'s roles (' . $st . '). Is the bot in the server?');
+    $roleId = trim((string)rs_setting('dc_dev_role', ''));
+    $have = null;
+    foreach ((array)$roles as $r) if ((string)$r['id'] === $roleId || ($roleId === '' && strcasecmp((string)$r['name'], 'Developer') === 0)) $have = $r;
+    if ($have) {
+        $roleId = (string)$have['id'];
+        rs_dc_call('PATCH', '/guilds/' . $g . '/roles/' . $roleId, $bot + ['json' => ['color' => RS_DC_DEV_COLOR, 'hoist' => true, 'mentionable' => true]]);
+        $done[] = 'The Developer role was there already: its color and its own spot in the member list are set.';
+    } else {
+        [$st, $r] = rs_dc_call('POST', '/guilds/' . $g . '/roles', $bot + ['json' => ['name' => 'Developer', 'color' => RS_DC_DEV_COLOR, 'hoist' => true, 'mentionable' => true, 'permissions' => '0']]);
+        if ($st !== 200 || empty($r['id'])) throw new RuntimeException('Couldn\'t make the Developer role (' . $st . '). The bot needs Manage Roles.');
+        $roleId = (string)$r['id'];
+        $done[] = 'Made the Developer role, in RecompStore cyan, shown apart in the member list.';
+    }
+    rs_set_setting('dc_dev_role', $roleId);
+    // 2. The channels: a Developers category only developers (and the bot) can see.
+    [$st, $chans] = rs_dc_call('GET', '/guilds/' . $g . '/channels', $bot);
+    if ($st !== 200) throw new RuntimeException('Couldn\'t read the server\'s channels (' . $st . ').');
+    $find = function (string $id, string $name, int $type, string $parent = '') use ($chans) {
+        foreach ((array)$chans as $ch) if ((string)$ch['id'] === $id) return $ch;
+        foreach ((array)$chans as $ch) if ((int)$ch['type'] === $type && strcasecmp((string)$ch['name'], $name) === 0 && ($parent === '' || (string)($ch['parent_id'] ?? '') === $parent)) return $ch;
+        return null;
+    };
+    $private = fn(int $devAllow, int $devDeny = 0) => [
+        ['id' => $c['guild'], 'type' => 0, 'deny' => (string)RS_DC_VIEW, 'allow' => '0'],                       // everyone: can't see it
+        ['id' => $roleId, 'type' => 0, 'allow' => (string)$devAllow, 'deny' => (string)$devDeny],                // developers
+        ['id' => $botId, 'type' => 1, 'allow' => (string)(RS_DC_VIEW | RS_DC_SEND | RS_DC_HISTORY), 'deny' => '0']]; // the bot
+    $mk = function (string $key, string $name, int $type, array $over, string $parent, string $topic) use ($find, $g, $bot, &$done) {
+        $ch = $find(trim((string)rs_setting($key, '')), $name, $type, $parent);
+        if ($ch) { $done[] = '#' . $name . ' was there already.'; rs_set_setting($key, (string)$ch['id']); return (string)$ch['id']; }
+        $body = ['name' => $name, 'type' => $type, 'permission_overwrites' => $over];
+        if ($parent !== '') $body['parent_id'] = $parent;
+        if ($topic !== '') $body['topic'] = $topic;
+        [$st, $x] = rs_dc_call('POST', '/guilds/' . $g . '/channels', $bot + ['json' => $body]);
+        if ($st !== 201 && $st !== 200 || empty($x['id'])) throw new RuntimeException('Couldn\'t make ' . $name . ' (' . $st . '). The bot needs Manage Channels.');
+        rs_set_setting($key, (string)$x['id']);
+        $done[] = 'Made ' . ($type === 4 ? 'the ' . $name . ' category' : '#' . $name) . '.';
+        return (string)$x['id'];
+    };
+    $all = RS_DC_VIEW | RS_DC_SEND | RS_DC_HISTORY;
+    $cat = $mk('dc_dev_category', 'Developers', 4, $private($all), '', '');
+    $mk('dc_dev_chat', 'dev-chat', 0, $private($all), $cat, 'For RecompStore and RecompLauncher developers: ask, share, plan.');
+    $mk('dc_dev_news', 'dev-announcements', 0, $private(RS_DC_VIEW | RS_DC_HISTORY, RS_DC_SEND), $cat, 'News for developers from the RecompStore team.');
+    rs_log('discord', 'setup', implode(' ', $done));
+    return $done;
+}
+
+// Gives the Developer role to every approved developer who linked Discord. -> [given, without Discord]
+function rs_dc_sync_devs(): array {
+    $c = rs_dc_conf();
+    $role = trim((string)rs_setting('dc_dev_role', ''));
+    if ($c['bot'] === '' || $c['guild'] === '' || $role === '') throw new RuntimeException('Set up the server first.');
+    rs_dev_tables();
+    $given = 0; $none = 0;
+    foreach (rs_db()->query("SELECT * FROM dev_accounts WHERE status = 'approved'")->fetchAll() as $acc) {
+        if ((string)$acc['discord_id'] === '') { $none++; continue; }
+        [$st] = rs_dc_call('PUT', '/guilds/' . rawurlencode($c['guild']) . '/members/' . rawurlencode((string)$acc['discord_id']) . '/roles/' . rawurlencode($role), ['bot' => $c['bot']]);
+        if ($st === 204) $given++;
+    }
+    return [$given, $none];
+}
+
+// A message from the team in #dev-announcements (a team note, when you tick it). Best effort.
+function rs_dc_dev_news(string $text, string $link = ''): bool {
+    $c = rs_dc_conf();
+    $ch = trim((string)rs_setting('dc_dev_news', ''));
+    if ($c['bot'] === '' || $ch === '') return false;
+    [$st] = rs_dc_call('POST', '/channels/' . rawurlencode($ch) . '/messages', ['bot' => $c['bot'], 'json' => [
+        'content' => mb_substr($text . ($link !== '' ? "\n" . $link : ''), 0, 1900), 'allowed_mentions' => ['parse' => []]]]);
+    return $st === 200;
+}
+
+// ---- (4.0) PC releases on Discord: after Publish PC, new recomps and new versions, with their cover --
+// Its own webhook (a PC channel), else the PS5 one. Never in the way of publishing.
+function rs_pc_discord_hook(): string { $h = (string)rs_setting('discord_pc_webhook', ''); return rs_discord_hook_ok($h) ? $h : (rs_discord_hook_ok(rs_discord_hook()) ? rs_discord_hook() : ''); }
+function rs_pc_discord_post(array $payload, ?string &$why = null): bool {
+    $hook = rs_pc_discord_hook();
+    if ($hook === '') { $why = 'No webhook set.'; return false; }
+    $ch = curl_init($hook);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 4, CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_FOLLOWLOCATION => false, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS]);
+    curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    if ($code < 200 || $code >= 300) { $why = 'Discord answered ' . ($code ?: 'nothing') . '.'; return false; }
+    return true;
+}
+function rs_pc_discord_announce(array $cat): void {
+    $want = json_decode((string)rs_setting('discord_pc_posts', '{"new":true,"update":true}'), true) ?: [];
+    $seen = json_decode((string)(rs_kv_get('pc_dc_seen')['v'] ?? ''), true);
+    $now = [];
+    foreach ((array)$cat['apps'] as $a) if (empty($a['soon'])) $now[(string)$a['id']] = (string)$a['version'];
+    rs_kv_put('pc_dc_seen', json_encode($now));
+    if (!is_array($seen) || rs_pc_discord_hook() === '') return; // the first time: remember what's there, post nothing
+    $byId = array_column((array)$cat['apps'], null, 'id');
+    $new = []; $upd = [];
+    foreach ($now as $id => $v) {
+        $a = $byId[$id];
+        if (!array_key_exists($id, $seen)) { if (!empty($want['new'])) $new[] = $a; }
+        // Old PC games (origin pc) update often and aren't news here: only console recomps' updates.
+        elseif ($v !== '' && $seen[$id] !== $v && !empty($want['update']) && ($a['origin'] ?? '') !== 'pc') $upd[] = $a;
+    }
+    $embeds = [];
+    foreach ($new as $a) $embeds[] = ['title' => mb_substr('New: ' . $a['name'], 0, 250), 'url' => 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']),
+        'description' => mb_substr(trim((string)($a['blurb'] ?? '')) . ((string)($a['game'] ?? '') !== '' && $a['game'] !== $a['name'] ? "\nRebuilt from " . $a['game'] : ''), 0, 400),
+        'color' => RS_DC_DEV_COLOR] + ((string)($a['cover'] ?? '') !== '' ? ['thumbnail' => ['url' => (string)$a['cover']]] : []);
+    foreach ($upd as $a) $embeds[] = ['title' => mb_substr('Updated: ' . $a['name'] . ' ' . $a['version'], 0, 250), 'url' => 'https://recomplauncher.com/game/' . rawurlencode((string)$a['id']),
+        'color' => 0x5FE3A1] + ((string)($a['cover'] ?? '') !== '' ? ['thumbnail' => ['url' => (string)$a['cover']]] : []);
+    if (!$embeds) return;
+    $more = count($embeds) - 10;
+    $payload = ['username' => 'RecompLauncher', 'embeds' => array_slice($embeds, 0, 10), 'allowed_mentions' => ['parse' => []]];
+    if ($more > 0) $payload['content'] = 'And ' . $more . ' more on https://recomplauncher.com/all';
+    $ok = rs_pc_discord_post($payload, $why);
+    rs_log('discord', 'pc-post', $ok ? count($embeds) . ' posted' : 'not posted: ' . $why);
+}
+
+// ---- (4.0) Team notes: short notes from the RecompStore team, pinned on top of the developer hub
+// and/or the site until you take them down (players can close one; it stays closed for them).
+function rs_notes_tables(): void {
+    static $done = false;
+    if ($done) return;
+    rs_db()->exec('CREATE TABLE IF NOT EXISTS team_notes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        body VARCHAR(400) NOT NULL,
+        link VARCHAR(300) NOT NULL DEFAULT \'\',
+        link_text VARCHAR(40) NOT NULL DEFAULT \'\',
+        place VARCHAR(8) NOT NULL DEFAULT \'devs\',
+        tone VARCHAR(8) NOT NULL DEFAULT \'cyan\',
+        active TINYINT NOT NULL DEFAULT 1,
+        created DATETIME NOT NULL
+    ) CHARACTER SET utf8mb4');
+    $done = true;
+}
+const RS_NOTE_PLACES = ['devs' => 'Developer hub', 'site' => 'Website (players)', 'both' => 'Both'];
+const RS_NOTE_TONES = ['cyan' => 'News (cyan)', 'gold' => 'Heads-up (gold)', 'violet' => 'Developers (violet)'];
+function rs_notes(bool $activeOnly = true, string $for = ''): array {
+    rs_notes_tables();
+    $rows = rs_db()->query('SELECT * FROM team_notes' . ($activeOnly ? ' WHERE active = 1' : '') . ' ORDER BY id DESC LIMIT 50')->fetchAll();
+    if ($for !== '') $rows = array_values(array_filter($rows, fn($r) => $r['place'] === 'both' || $r['place'] === $for));
+    return array_map(fn($r) => ['id' => (int)$r['id'], 'body' => (string)$r['body'], 'link' => (string)$r['link'], 'linkText' => (string)$r['link_text'],
+        'place' => (string)$r['place'], 'tone' => (string)$r['tone'], 'active' => (bool)$r['active'], 'created' => (string)$r['created']], $rows);
+}
