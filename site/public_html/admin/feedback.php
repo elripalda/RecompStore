@@ -10,14 +10,14 @@ rs_require_login();
 rs_inbox_table();
 rs_inbox_feedback_columns();
 $db = rs_db();
-$names = [];
-foreach (rs_games() as $g) $names[$g['id']] = $g['name'];
+$names = rs_admin_app_names();
 $app = (string)($_GET['app'] ?? '');
 if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $app)) $app = '';
 
 // Each app and build: how many said what.
-$sum = $db->query("SELECT app_id, build, feedback, COUNT(*) n, MAX(created) last, MAX(id) lastid FROM inbox
-                   WHERE kind = 'logs' AND feedback <> '' GROUP BY app_id, build, feedback")->fetchAll();
+// (4.1) RecompLauncher's own feedback apart from OpenGOAL Launcher's (both arrive as "launcher").
+$sum = $db->query("SELECT " . RS_FEEDBACK_APP_SQL . " app_id, build, feedback, COUNT(*) n, MAX(created) last, MAX(id) lastid FROM inbox
+                   WHERE kind = 'logs' AND feedback <> '' GROUP BY 1, build, feedback")->fetchAll();
 $byApp = [];
 foreach ($sum as $r) {
     $a = (string)$r['app_id'];
@@ -38,7 +38,7 @@ unset($x);
 
 $notes = [];
 if ($app !== '') {
-    $st = $db->prepare("SELECT id, build, feedback, body, contact, created FROM inbox WHERE kind = 'logs' AND feedback <> '' AND app_id = ? ORDER BY created DESC LIMIT 200");
+    $st = $db->prepare("SELECT id, build, feedback, body, contact, created FROM inbox WHERE kind = 'logs' AND feedback <> '' AND " . RS_FEEDBACK_APP_SQL . " = ? ORDER BY created DESC LIMIT 200");
     $st->execute([$app]);
     $notes = $st->fetchAll();
 }

@@ -330,9 +330,10 @@ $pfPill = function (array $r) use ($pfOf): string {
     $p = $pfOf($r);
     return $p === 'pc' ? '<span class="tag pf-pc" title="RecompLauncher">PC</span>' : ($p === 'ps5' ? '<span class="tag pf-ps5" title="RecompStore">PS5</span>' : '');
 };
-$names = [];
-foreach (rs_games() as $g) $names[$g['id']] = $g['name'];
+$names = rs_admin_app_names();
 $names['store'] = 'RecompStore itself';
+// (4.1) "launcher" is OpenGOAL Launcher only with its Game line; otherwise it's RecompLauncher's own.
+$nameOf = fn(array $r): string => $names[rs_feedback_app((string)$r['app_id'], (string)($r['body'] ?? ''))] ?? (string)$r['app_id'];
 // Logs: each message's files (not their text, which opens on its own page).
 $files = [];
 $logIds = array_map(fn($r) => (int)$r['id'], array_filter($rows, fn($r) => $r['kind'] === 'logs'));
@@ -381,8 +382,8 @@ $replySubject = function (array $r) use ($names): string {
     $d = json_decode((string)($r['data'] ?? ''), true);
     return match ($r['kind']) {
         'submit' => 'Your RecompStore submission' . (is_array($d) && ($d['name'] ?? '') !== '' ? ': ' . $d['name'] : ''),
-        'bug' => 'Your bug report for ' . ($names[$r['app_id']] ?? $r['app_id']),
-        'logs' => 'The logs you sent for ' . ($names[$r['app_id']] ?? $r['app_id']),
+        'bug' => 'Your bug report for ' . $nameOf($r),
+        'logs' => 'The logs you sent for ' . $nameOf($r),
         default => 'Re: your message to RecompStore',
     };
 };
@@ -488,7 +489,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
       <span class="tag cyan">Logs</span><?= $pfPill($r) ?>
       <?php if (($r['feedback'] ?? '') !== ''): ?><span class="tag fb-<?= h($r['feedback']) ?>" title="Tester feedback<?= ($r['build'] ?? '') !== '' ? ' on ' . h($r['build']) : '' ?>">Feedback · <?= h(RS_VERDICTS[$r['feedback']] ?? 'Other') ?></span>
       <?php else: ?><span class="tag cat-<?= h($r['category'] ?? '') ?>"><?= h(RS_LOG_CATEGORIES[$r['category'] ?? ''] ?? 'No category') ?></span><?php endif; ?>
-      <strong><?= h($names[$r['app_id']] ?? $r['app_id']) ?></strong>
+      <strong><?= h($nameOf($r)) ?></strong>
       <?php if (isset($sigOf[(int)$r['id']]) && ($sc = $sigCount[$sigOf[(int)$r['id']][0] . '|' . $sigOf[(int)$r['id']][1]] ?? 0) > 1): ?><span class="tag bad" title="<?= h($sigOf[(int)$r['id']][1]) ?>">Same problem in <?= (int)$sc ?> logs</span><?php endif; ?>
       <span class="muted"><?= $r['version'] !== '' ? 'version ' . h($r['version']) : 'not installed' ?><?= $r['name'] !== '' ? ' · ' . h($r['name']) : '' ?></span>
       <span class="tag who" title="<?= $r['contact'] !== '' ? 'Console ' . h($r['contact']) : 'No console code: named from their address' ?>"><?= h(rs_log_person($r)) ?></span>
@@ -601,7 +602,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
         <strong><?= h($r['repo']) ?></strong>
         <span class="muted">Add it to Blocked sources in Settings to take it down.</span>
       <?php elseif ($bug): ?>
-        <strong><?= h($names[$r['app_id']] ?? $r['app_id']) ?></strong>
+        <strong><?= h($nameOf($r)) ?></strong>
         <?php if ($r['version'] !== ''): ?><span class="muted">version <?= h($r['version']) ?></span><?php endif; ?>
       <?php else: ?>
         <strong><?= h($r['name']) ?></strong>

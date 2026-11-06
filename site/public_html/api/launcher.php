@@ -11,6 +11,8 @@
 //   PUT  a=save-put&game=&hash=&made=&played=&device=   body: the copy (zip) -> {v, used, quota}
 //   GET  a=save-get&game=&v=                  -> the copy (zip)
 //   POST a=save-delete {game, v}
+//   (4.1) While cloud saves are paused (Settings), these four and the account page's cloud calls answer
+//         423 {ok: false, error: "Cloud saves are paused ..."}.
 //   (3.2) GET a=inbox -> {items[]} (games sent from the website)   POST a=inbox-done {id, result}
 //   (3.2) GET a=betas -> {betas[]}   POST a=beta-join {id}   POST a=beta-leave {id}
 // The launcher, signed in or not (an install ID it made itself):
@@ -47,6 +49,13 @@ if ($method === 'POST') {
     if (!is_array($in)) $in = [];
 }
 $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+
+// (4.1) Cloud saves paused (Settings, Cloud saves): the launcher's cloud calls, and the account page's,
+// answer 423 with a plain reason, before anything touches the account or the storage.
+const RS_RL_SAVES_PAUSED = 'Cloud saves are paused while we move them to new storage. Your saves on this PC are safe.';
+if (in_array($a, ['saves', 'save-get', 'save-put', 'save-delete', 'cloud', 'cloud-get', 'cloud-delete'], true) && rs_setting('rl_saves_paused', '0') === '1') {
+    rs_rl_err(423, RS_RL_SAVES_PAUSED);
+}
 
 try {
     if (!rs_acct_on() && !in_array($a, ['report', 'hello', 'events'], true)) rs_rl_err(503, 'Accounts aren\'t open yet. They\'re coming soon.');

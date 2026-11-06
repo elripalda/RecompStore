@@ -84,12 +84,21 @@ function rs_pc_defaults(): array {
         'icon' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'tags' => '', 'links' => [],
         'featured' => false, 'hidden' => true, 'soon' => false, 'added' => '', 'live_at' => '', 'checked' => '', 'features' => '', 'features_read' => false, 'license' => '',
         'genre' => '', 'media' => '', 'issues' => 0, 'releases' => 0, 'first' => '',
-        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => '', 'host' => '',
+        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'copy_ids' => '', 'report_url' => '', 'host' => '',
         'status' => '', 'status_note' => '', 'archived' => false];
 }
 
 // (3.9) Where a recomp's project lives: '' GitHub, 'gitlab' GitLab. Its key ('owner/name', or
 // 'gitlab.com/group/project') is what the finder and the security checks file it under.
+// (4.1) Copy IDs as the launcher reads them: upper case, letters and digits, 3 to 12 long, no repeats.
+function rs_pc_copy_ids(string $s): array {
+    $out = [];
+    foreach (preg_split('/[\s,;]+/', strtoupper($s)) ?: [] as $x) {
+        $x = preg_replace('/[^A-Z0-9]/', '', $x);
+        if (strlen($x) >= 3 && strlen($x) <= 12 && !in_array($x, $out, true)) $out[] = $x;
+    }
+    return array_slice($out, 0, 24);
+}
 function rs_pc_host(array $a): string { return rs_host_norm((string)($a['host'] ?? '')); }
 function rs_pc_key(array $a): string { return rs_repo_key(rs_pc_host($a), (string)($a['repo'] ?? '')); }
 
@@ -360,11 +369,13 @@ function rs_sgdb(string $path): ?array {
 // The best art SteamGridDB has for a game: [game, cover, hero, logo, icon] (URLs, '' when none).
 // $avoid: per kind, pictures another recomp already wears (two recomps of one game get their own);
 // $skip: how many more to pass over, for "Different art".
-function rs_sgdb_art(string $game, array $avoid = [], int $skip = 0): array {
+// (4.1) $year: the original's release year (from About the game), so a remake doesn't wear the
+// original's art (Ratchet & Clank on PS4 is the 2016 game, not the 2002 one).
+function rs_sgdb_art(string $game, array $avoid = [], int $skip = 0, string $year = ''): array {
     $out = ['game' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'icon' => ''];
     $hits = rs_sgdb('/search/autocomplete/' . rawurlencode($game));
     if (!$hits) return $out;
-    $g = $hits[0];
+    $g = rs_sgdb_pick($hits, $game, $year);
     $out['game'] = (string)($g['name'] ?? '');
     $id = (int)($g['id'] ?? 0);
     $pick = function (?array $list, string $kind) use ($avoid, $skip): string {
@@ -377,6 +388,31 @@ function rs_sgdb_art(string $game, array $avoid = [], int $skip = 0): array {
     $out['logo'] = $pick(rs_sgdb('/logos/game/' . $id . '?types=static&nsfw=false&humor=false'), 'logo');
     $out['icon'] = $pick(rs_sgdb('/icons/game/' . $id . '?types=static&nsfw=false&humor=false'), 'icon');
     return $out;
+}
+
+// (4.1) Which SteamGridDB game a search means: the one named like it from the same year when the
+// year is known (a remake shares its name with the original), else the first hit.
+function rs_sgdb_pick(array $hits, string $game, string $year = ''): array {
+    $year = preg_match('/^\d{4}/', $year) ? (int)substr($year, 0, 4) : 0;
+    if ($year) {
+        $want = rs_pc_about_norm($game);
+        $best = null; $bestScore = 0;
+        foreach (array_slice($hits, 0, 20) as $i => $h) {
+            if (!is_array($h) || empty($h['release_date'])) continue;
+            $d = abs((int)gmdate('Y', (int)$h['release_date']) - $year);
+            if ($d > 1) continue;
+            $n = rs_pc_about_norm((string)($h['name'] ?? ''));
+            $score = ($n === $want ? 100 : (str_contains($n, $want) || str_contains($want, $n) ? 40 : 0)) + ($d === 0 ? 10 : 0) - $i;
+            if ($score > $bestScore) { $bestScore = $score; $best = $h; }
+        }
+        if ($best && $bestScore >= 30) return $best;
+    }
+    return (array)$hits[0];
+}
+// The year of the original game, from its About the game card, or ''.
+function rs_pc_about_year(array $a): string {
+    $r = is_array($a['about'] ?? null) ? (string)($a['about']['released'] ?? '') : '';
+    return preg_match('/^\d{4}/', $r) ? substr($r, 0, 4) : '';
 }
 
 // The SteamGridDB pictures the other recomps already wear: [kind => [url, ...]].
@@ -610,7 +646,7 @@ function rs_pc_feedback_list(string $app, bool $withHidden = false, int $limit =
 
 // (3.5) About the game: the original game's facts from IGDB (release date, who made it, genres,
 // modes, a short summary), shown in its own card. Uses the IGDB keys from Settings.
-const RS_IGDB_PLATFORMS = ['n64' => 4, 'x360' => 12, 'xbox' => 11, 'ps1' => 7, 'ps2' => 8, 'ps3' => 9, 'ps4' => 48, 'gc' => 21, 'wii' => 5, 'wiiu' => 41,
+const RS_IGDB_PLATFORMS = ['pc' => [6, 13], 'n64' => 4, 'x360' => 12, 'xbox' => 11, 'ps1' => 7, 'ps2' => 8, 'ps3' => 9, 'ps4' => 48, 'gc' => 21, 'wii' => 5, 'wiiu' => 41,
     'snes' => 19, 'gba' => 24, 'gb' => 33, 'ds' => 20, 'dc' => 23, 'saturn' => 32, 'psp' => 38, 'switch' => 130, 'nes' => 18, 'gbc' => 22, '3ds' => 37,
     'vb' => 87, 'ps5' => 167, 'genesis' => 29, 's32x' => 30, 'gg' => 35, 'arcade' => 52, 'cdi' => 117, 'amiga' => 16];
 
@@ -632,7 +668,9 @@ function rs_pc_about_fetch(array $a, int $igdbId = 0): ?array {
         $clean = trim(preg_replace('/\s*\((?:[^)]*)\)\s*/', ' ', $q));
         $list = (array)(rs_art_igdb('games', 'search "' . str_replace(['\\', '"'], '', $clean) . '"; ' . $F . ' where version_parent = null; limit 20;') ?? []);
     }
-    $want = rs_pc_about_norm($q); $plat = RS_IGDB_PLATFORMS[$a['origin']] ?? 0;
+    // (4.1) The console counts: a game of the same name on another one (Whiplash, the 2026 shooter,
+    // for ROLLER's 1995 PC racer) loses points, so a name alone isn't a match.
+    $want = rs_pc_about_norm($q); $plat = (array)(RS_IGDB_PLATFORMS[$a['origin']] ?? []);
     $best = null; $bestScore = 0;
     foreach ($list as $g) {
         if (!is_array($g) || empty($g['id'])) continue;
@@ -641,7 +679,9 @@ function rs_pc_about_fetch(array $a, int $igdbId = 0): ?array {
         if ($n === $want) $s += 100;
         elseif ($n !== '' && $want !== '' && (str_starts_with($n, $want) || str_starts_with($want, $n))) $s += 40;
         elseif ($n !== '' && $want !== '' && (str_contains($n, $want) || str_contains($want, $n))) $s += 20;
-        if ($plat && in_array($plat, array_map(fn($p) => (int)($p['id'] ?? 0), (array)($g['platforms'] ?? [])), true)) $s += 50;
+        $on = array_map(fn($p) => (int)($p['id'] ?? 0), (array)($g['platforms'] ?? []));
+        if ($plat && array_intersect($plat, $on)) $s += 50;
+        elseif ($plat && $on && $igdbId <= 0) $s -= 60;
         if (!empty($g['summary'])) $s += 5;
         $s += min(10, (int)(($g['total_rating_count'] ?? 0) / 20));
         if ($s > $bestScore) { $bestScore = $s; $best = $g; }
@@ -668,7 +708,7 @@ function rs_pc_art_upgrade(array $a, array $have): array {
     require_once __DIR__ . '/artsrc.php';
     $hits = rs_sgdb('/search/autocomplete/' . rawurlencode($a['game'] !== '' ? trim(preg_split('/[;\/]/', $a['game'])[0]) : $a['name']));
     if (!$hits) return [$a, []];
-    $gid = (int)($hits[0]['id'] ?? 0); $used = rs_pc_art_used($a['id']); $done = [];
+    $gid = (int)(rs_sgdb_pick($hits, $a['game'] !== '' ? trim(preg_split('/[;\/]/', $a['game'])[0]) : $a['name'], rs_pc_about_year($a))['id'] ?? 0); $used = rs_pc_art_used($a['id']); $done = [];
     $votes = fn(array $x) => preg_match('/(\d+) votes?/', (string)$x['label'], $m) ? (int)$m[1] : 0;
     foreach ($have as $k => $w) {
         if (!in_array($k, ['hero', 'logo'], true)) continue;
@@ -724,6 +764,7 @@ function rs_pc_catalog(): array {
         // (3.3) How RecompLauncher starts it and sets it up from the player's copy (CURATOR-SETUP-GUIDE.md).
         $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
         if (is_array($boot) && $boot) $e['boot'] = $boot;
+        if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
         $apps[] = $e;
     }
     $origins = [];
@@ -797,7 +838,7 @@ function rs_pc_write_files(array $cat): bool {
 function rs_pc_web_copy(array $cat): array {
     foreach ($cat['apps'] as &$a) {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
-        unset($a['about'], $a['boot'], $a['features']);
+        unset($a['about'], $a['boot'], $a['features'], $a['copy_ids']);
         if ($series !== '') $a['about'] = ['series' => $series];
         $a['lite'] = true;
     }

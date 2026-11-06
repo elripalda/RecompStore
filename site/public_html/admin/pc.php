@@ -68,6 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $boot = json_encode($bj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
             $a['boot'] = $boot;
+            // (4.1) The disc or cartridge IDs this recomp is made for (GZ2E01, SLUS-203.12...): the launcher
+            // reads the player's copy and says so when it's another release.
+            $a['copy_ids'] = implode(', ', rs_pc_copy_ids((string)($_POST['copy_ids'] ?? '')));
             $a = rs_ai_from_post($a); // (2.9) AI-assisted
             $wasSoon = !empty($a['soon']);
             $a['soon'] = !empty($_POST['soon']); // (2.9) no release yet: on Coming soon only
@@ -97,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // "Different art" moves on to the next cover and banner SteamGridDB has; the logo stays.
                 $next = $_POST['art'] === 'next';
                 $a['art_n'] = $next ? (int)($a['art_n'] ?? 0) + 1 : 0;
-                $art = rs_sgdb_art($a['game'] !== '' ? $a['game'] : $a['name'], rs_pc_art_used($a['id']), $a['art_n']);
+                $art = rs_sgdb_art($a['game'] !== '' ? $a['game'] : $a['name'], rs_pc_art_used($a['id']), $a['art_n'], rs_pc_about_year($a));
                 $got = [];
                 foreach ($next ? ['cover', 'hero'] : ['cover', 'hero', 'logo', 'icon'] as $k)
                     if ($art[$k] !== '' && ($m = rs_pc_media($art[$k], $k, $a['id']))) { unset($m['hero_web']); $a = array_merge($a, $m); $a[$k . '_src'] = $art[$k]; $got[] = $k; }
@@ -305,6 +308,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label class="span2">Key features<textarea name="features" rows="5" maxlength="1200" placeholder="One per line"><?= h($a['features']) ?></textarea><small>One per line, shown at the top of its page. Picked up from the README's Features list when it was added.</small></label>
     <label class="span2">Around the web<textarea name="media" rows="4" maxlength="5000" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.reddit.com/r/…/comments/…&#10;https://x.com/…/status/…"><?= h($a['media']) ?></textarea><small>Videos, posts and articles about it, one link per line. YouTube shows as a video, Reddit and X as cards.</small></label>
     <label class="span2">Boot profile<textarea name="boot" rows="8" maxlength="20000" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace;font-size:13px" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>How RecompLauncher starts it, sets it up from the player's copy (Easy Setup) and which of its settings to show. One JSON object, per the curator setup guide. Empty: the launcher works it out.</small></label>
+    <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label></div>
     <label>Setup steps<textarea name="setup_steps" rows="5" maxlength="2000"><?= h((string)($a['setup_steps'] ?? '')) ?></textarea><small>Only for Setup required. One step per line, in order. Shown with the yellow Set Up button and on its page, with a link to the README.</small></label>
     <?php $ab = is_array($a['about'] ?? null) ? $a['about'] : []; ?>

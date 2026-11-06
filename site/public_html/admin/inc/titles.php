@@ -164,7 +164,8 @@ function rs_title_catalog(array &$apps): array {
     return $out;
 }
 
-// Versions that look like the same game and aren't under one yet: PC recomps with the same game,
+// Versions that look like the same game and aren't under one yet: PC recomps with the same game
+// from the same console (4.1),
 // and PS5 apps named like one of them. -> [[name, origin, pc => [...ids], ps5 => [...ids]]]
 function rs_title_suggestions(): array {
     $norm = function (string $s): string {
@@ -179,13 +180,15 @@ function rs_title_suggestions(): array {
         if (isset($taken['pc'][$a['id']])) continue;
         $key = $norm($a['game'] !== '' ? $a['game'] : $a['name']);
         if ($key === '') continue;
+        // (4.1) The same name on another console is another game (Ratchet & Clank on PS2 and its PS4 remake).
+        $key .= '|' . $a['origin'];
         $groups[$key] ??= ['name' => $a['game'] !== '' ? $a['game'] : $a['name'], 'origin' => $a['origin'], 'pc' => [], 'ps5' => []];
         $groups[$key]['pc'][] = $a['id'];
     }
     foreach (rs_games() as $g) {
         if (isset($taken['ps5'][$g['id']])) continue;
         $key = $norm((string)$g['name']);
-        if (isset($groups[$key])) $groups[$key]['ps5'][] = $g['id'];
+        foreach ($groups as $k => $x) if (strstr($k, '|', true) === $key) { $groups[$k]['ps5'][] = $g['id']; break; }
     }
     return array_values(array_filter($groups, fn($x) => count($x['pc']) + count($x['ps5']) >= 2));
 }

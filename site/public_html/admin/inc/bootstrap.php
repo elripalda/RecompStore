@@ -864,6 +864,24 @@ function rs_abs(string $p): string {
     return $p === '' ? '' : (preg_match('#^https?://#', $p) ? $p : rtrim($base, '/') . $p);
 }
 
+// (4.1) OpenGOAL Launcher's catalog id is "launcher", and RecompLauncher sends feedback about itself as
+// app=launcher too. A report about a game always carries a "Game: <name> (<id> <version>)" line, so:
+// "launcher" with "Game: OpenGOAL Launcher" is that game, the rest is RecompLauncher (id "recomplauncher").
+const RS_RL_SELF = 'recomplauncher';
+function rs_feedback_app(string $appId, string $body): string {
+    if ($appId !== 'launcher') return $appId;
+    return preg_match('/^\s*Game:\s*OpenGOAL Launcher\b/mi', $body) ? 'launcher' : RS_RL_SELF;
+}
+// The SQL for the same, on inbox rows (a column expression).
+const RS_FEEDBACK_APP_SQL = "IF(app_id = 'launcher', IF(body REGEXP '(^|\\n)[[:space:]]*Game:[[:space:]]*OpenGOAL Launcher', 'launcher', 'recomplauncher'), app_id)";
+// Names for the admin's lists: the PS5 games, the PC recomps, RecompLauncher itself.
+function rs_admin_app_names(): array {
+    $n = [];
+    try { foreach (rs_pc_apps(true) as $a) $n[(string)$a['id']] = (string)$a['name']; } catch (Throwable $e) {}
+    foreach (rs_games() as $g) $n[$g['id']] = $g['name'];
+    $n[RS_RL_SELF] = 'RecompLauncher';
+    return $n;
+}
 // One game as the store reads it (an entry of catalog.json's apps or newerStoreApps).
 function rs_app_entry(array $g, int $order): array {
     $abs = 'rs_abs';

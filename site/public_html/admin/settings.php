@@ -256,6 +256,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($h['status'] === 404 ? 'Saved, but there\'s no bucket called ' . $bucket . ' on that account.' : 'Saved, but Cloudflare answered HTTP ' . $h['status'] . '.'))),
                      $h['status'] === 200 ? 'ok' : 'err');
         }
+    } elseif (($_POST['action'] ?? '') === 'saves-pause') {
+        // (4.1) Pause cloud saves: the launcher hears 423 and a plain reason instead of an error.
+        $on = !empty($_POST['paused']);
+        rs_set_setting('rl_saves_paused', $on ? '1' : '0');
+        rs_log('saves-pause', $on ? 'paused' : 'on');
+        rs_flash($on ? 'Cloud saves are paused. The launcher tells players their saves on their PC are safe.' : 'Cloud saves are on again.');
     } elseif (($_POST['action'] ?? '') === 'b2') {
         // (3.5) Cloud saves on Backblaze B2: the bucket and an application key.
         require_once __DIR__ . '/inc/discord.php';
@@ -864,6 +870,13 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <label>keyID<input type="text" name="b2_key_id" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" placeholder="<?= $b2Id ? 'Saved. Paste a new one to replace it.' : 'From Application Keys' ?>"></label>
     <label>applicationKey<input type="text" name="b2_key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mono" style="-webkit-text-security: disc; text-security: disc" placeholder="<?= $b2Key ? 'Saved. Paste a new one to replace it.' : 'Shown once, when you make the key' ?>"></label>
     <div class="actions span2"><button class="btn">Save and check</button><?php if ($b2Key): ?><label class="check"><input type="checkbox" name="b2_clear" value="1"> Turn Backblaze off and forget the keys</label><?php endif; ?></div>
+  </form>
+  <?php $savesPaused = rs_setting('rl_saves_paused', '0') === '1'; ?>
+  <form method="post" class="saves-pause">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="saves-pause">
+    <input type="hidden" name="paused" value="<?= $savesPaused ? '' : '1' ?>">
+    <p><strong><?= $savesPaused ? 'Cloud saves are paused.' : 'Cloud saves are on.' ?></strong> <span class="muted">While they're paused, the launcher shows players "Cloud saves are paused while we move them to new storage. Your saves on this PC are safe." Nothing is uploaded or downloaded.</span></p>
+    <button class="btn <?= $savesPaused ? 'primary' : 'danger' ?>"><?= $savesPaused ? 'Turn cloud saves back on' : 'Pause cloud saves' ?></button>
   </form>
 </section>
 <section class="card">
