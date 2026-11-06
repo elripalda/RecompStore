@@ -29,7 +29,7 @@ def zip_names(url):
     names, p = [], 0
     while p + 46 <= len(cd) and cd[p:p + 4] == b"PK\x01\x02":
         n, e, c = struct.unpack("<HHH", cd[p + 28:p + 34])
-        names.append(cd[p + 46:p + 46 + n].decode("utf-8", "replace"))
+        names.append(cd[p + 46:p + 46 + n].decode("utf-8", "replace").replace("\\", "/"))
         p += 46 + n + e + c
     return names
 
