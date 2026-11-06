@@ -188,8 +188,20 @@ try {
             . (!empty($a['game']) && $a['game'] !== $a['name'] ? ' — ' . $e((string)$a['game']) : '') . '</li>', $pcApps)) . '</ul>';
         $pcDesc = t('Console games rebuilt to run natively on Windows, Linux and Mac. Bring your own copy, and play.');
         if ($p === 'pc') {
-            $m = ['title' => t('RecompLauncher — recompiled games for Windows, Linux and Mac'), 'ogTitle' => 'RecompLauncher', 'path' => $pp('/pc'), 'desc' => $pcDesc, 'noindex' => !$pcApps,
-                'body' => '<h1>' . $e(t('Recompiled games, native on PC.')) . '</h1><p>' . $e(t('Install and update recompiled PC games. No account, no game files: bring your own disc.')) . '</p>' . $pcNav . $pcList . $pcByo];
+            // (4.1) People search "recomp launcher", two words: the title, description, text and structured
+            // data all say it that way too, next to RecompLauncher.
+            $en = in_array(rs_seo_lang(), ['', 'en'], true);
+            $aka = 'RecompLauncher (Recomp Launcher)';
+            $homeDesc = $en ? 'RecompLauncher (Recomp Launcher) is a free, open-source launcher for PC recomps: console games rebuilt to run natively on Windows, Linux and Mac. Install them in one click and keep them up to date.' : $pcDesc;
+            $m = ['title' => preg_replace('/^RecompLauncher/', $aka, t('RecompLauncher — recompiled games for Windows, Linux and Mac')), 'ogTitle' => 'RecompLauncher', 'path' => $pp('/pc'), 'desc' => $homeDesc, 'noindex' => !$pcApps,
+                'body' => '<h1>' . $e(t('Recompiled games, native on PC.')) . '</h1><p>' . $e($homeDesc) . '</p><p>' . $e(t('Install and update recompiled PC games. No account, no game files: bring your own disc.')) . '</p>' . $pcNav . $pcList . $pcByo,
+                'jsonld' => ['@context' => 'https://schema.org', '@graph' => [
+                    ['@type' => 'WebSite', '@id' => $base . '/#site', 'name' => 'RecompLauncher', 'alternateName' => ['Recomp Launcher', 'RecompLauncher app', 'PC recomp launcher', 'Recompiled PC games'], 'url' => $base . '/'],
+                    ['@type' => 'SoftwareApplication', '@id' => $base . '/#app', 'name' => 'RecompLauncher', 'alternateName' => 'Recomp Launcher',
+                        'description' => 'A free, open-source launcher for PC recomps: it installs recompiled console games, keeps them up to date and sets them up from your own copy.',
+                        'applicationCategory' => 'GameApplication', 'operatingSystem' => 'Windows, Linux', 'url' => $base . '/', 'downloadUrl' => $base . '/get',
+                        'image' => $base . '/assets/launcher-card.png', 'isAccessibleForFree' => true, 'offers' => ['@type' => 'Offer', 'price' => '0', 'priceCurrency' => 'USD'],
+                        'sameAs' => ['https://github.com/elripalda/RecompLauncher']]]]];
         } elseif ($p === 'pc-all') {
             $m = ['title' => $name(t('All PC recomps')), 'path' => $pp('/pc/all'), 'desc' => $pcDesc, 'noindex' => !$pcApps,
                 'body' => '<h1>' . $e(t('All PC recomps')) . '</h1>' . $pcNav . $pcList . $pcByo];
@@ -219,8 +231,14 @@ try {
                 'body' => '<h1>' . $e(t('Press kit')) . '</h1><p><img src="/assets/press/launcher/badge-dark.svg" alt="Get it on RecompLauncher" height="56"></p><p><a href="/assets/press/launcher/recomplauncher-press-kit.zip">' . $e(t('Download everything (.zip)')) . '</a></p>' . $pcNav];
         } elseif (in_array($p, ['pc-top', 'pc-new', 'pc-consoles', 'pc-launcher'], true)) {
             $h1 = ['pc-top' => t('Top charts'), 'pc-new' => t('New'), 'pc-consoles' => t('Consoles'), 'pc-launcher' => t('Get RecompLauncher')][$p];
+            // (4.1) The download page, as people search for it.
+            if ($p === 'pc-launcher' && in_array(rs_seo_lang(), ['', 'en'], true)) {
+                $m = ['title' => 'Download RecompLauncher (Recomp Launcher) for Windows and Linux', 'ogTitle' => 'Get RecompLauncher', 'path' => $pp('/pc/launcher'),
+                    'desc' => 'Download RecompLauncher, the free Recomp Launcher for Windows and Linux: one app that installs PC recomps, keeps them up to date and sets them up from your own copy.',
+                    'body' => '<h1>' . $e($h1) . '</h1><p>Download RecompLauncher, the free Recomp Launcher for Windows and Linux: one app that installs PC recomps, keeps them up to date and sets them up from your own copy.</p>' . $pcNav . $pcByo];
+            }
             $d = $p === 'pc-launcher' ? t('One app for every PC recomp. It installs them, keeps them up to date, sets them up from your own copy, and gives every game the same simple settings.') : $pcDesc;
-            $m = ['title' => $name($h1), 'ogTitle' => $name($h1), 'path' => $pp('/' . str_replace('pc-', 'pc/', $p)), 'desc' => $d, 'noindex' => !$pcApps,
+            if ($m === null) $m = ['title' => $name($h1), 'ogTitle' => $name($h1), 'path' => $pp('/' . str_replace('pc-', 'pc/', $p)), 'desc' => $d, 'noindex' => !$pcApps,
                 'body' => '<h1>' . $e($h1) . '</h1><p>' . $e($d) . '</p>' . $pcNav . ($p === 'pc-launcher' ? '' : $pcList) . $pcByo];
         } elseif ($p === 'pc-how') {
             $m = ['title' => $name(t('How it works')) , 'path' => $pp('/pc/how'),

@@ -2273,6 +2273,7 @@
       <article class="page pc-home">
         <section class="intro home-intro pc-home-intro">
           <div class="intro-words">
+            <span class="kicker">Recomp Launcher</span>
             <h1 dir="auto">${t('Recompiled games, native on PC.')}</h1>
             <p>${t('Install and update recompiled PC games. No account, no game files: bring your own disc.')}</p>
           </div>
@@ -2611,7 +2612,7 @@
       view.querySelector('[data-snips]').innerHTML = block('snip-md', t('For your README (Markdown)'), `[![Get it on RecompLauncher](${svg})](${url})`)
         + block('snip-html', 'HTML', `<a href="${url}"><img src="${svg}" alt="Get it on RecompLauncher" height="56"></a>`)
         + block('snip-bb', t('For forums (BBCode)'), `[url=${url}][img]${png}[/img][/url]`);
-      view.querySelector('[data-words]').innerHTML = block('word-short', t('About RecompLauncher'), t('RecompLauncher: console games rebuilt to run natively on Windows, Linux and Mac, straight from their developers.'))
+      view.querySelector('[data-words]').innerHTML = block('word-short', t('About RecompLauncher'), t('RecompLauncher: console games rebuilt to run natively on Windows, Linux and Mac, straight from their developers.').replace(/^RecompLauncher/, 'RecompLauncher (Recomp Launcher)'))
         + (app ? block('word-app', t('About your app'), `${tf('{name} is on RecompLauncher, the free home for recompiled PC games. Get it straight from its developer:', { name: app.name })} ${url}`) : '');
     };
     draw();
@@ -5759,7 +5760,12 @@
     let seen = true;
     try { seen = localStorage.getItem(LAUNCH_SEEN) === L.version; } catch (e) { /* no pop-up then */ }
     if (seen || /^\/get\/?$/.test(location.pathname)) return;
-    setTimeout(() => { if (!/^\/get\/?$/.test(location.pathname) && !document.querySelector('dialog[open]')) pcLoad().then(() => launchPopup(L)); }, 1800);
+    // (4.1) After the visitor's first scroll, tap or key, not on a timer: shown by itself it was the
+    // biggest thing to paint, so Google timed the page by it and called it slow.
+    const go = () => { if (!/^\/get\/?$/.test(location.pathname) && !document.querySelector('dialog[open]')) pcLoad().then(() => launchPopup(L)); };
+    const evs = ['scroll', 'wheel', 'touchstart', 'pointerdown', 'keydown'];
+    const arm = () => { evs.forEach((ev) => removeEventListener(ev, arm, true)); setTimeout(go, 1200); };
+    evs.forEach((ev) => addEventListener(ev, arm, { capture: true, passive: true }));
   }
   function launchPopup(L) {
     if (document.getElementById('beta-pop')) return;
