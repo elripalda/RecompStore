@@ -58,7 +58,11 @@ function rs_dc_ready(): bool {
     return $c['client'] !== '' && $c['secret'] !== '' && $c['guild'] !== '';
 }
 
+// (4.1) Back to the site they came from: a RecompLauncher developer signs in on recomplauncher.com, and
+// that site's cookies (the hub sign-in, this sign-in's state) aren't on recompstore.com. Both addresses
+// are in the Discord app's Redirects.
 function rs_dc_redirect(): string {
+    if (preg_match('/(^|\.)recomplauncher\.com(:\d+)?$/i', (string)($_SERVER['HTTP_HOST'] ?? ''))) return 'https://recomplauncher.com/api/discord.php';
     return rs_abs('/api/discord.php');
 }
 

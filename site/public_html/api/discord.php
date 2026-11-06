@@ -33,16 +33,17 @@ try {
         setcookie('rs_dc_state', '', ['expires' => time() - 3600] + $cookie);
         [$state, $game] = array_pad(explode('|', $saved, 2), 2, '');
         $game = preg_replace('/[^A-Za-z0-9_-]/', '', $game) ?? '';
-        if ($state === '' || !hash_equals($state, (string)($_GET['state'] ?? ''))) $back('again', $game);
+        if ($state === '' || !hash_equals($state, (string)($_GET['state'] ?? ''))) { if ($game === 'hub' || ($_GET['hub'] ?? '') !== '') { header('Location: /hub?dc=again'); exit; } $back('again', $game); }
         if (isset($_GET['error'])) { if ($game === 'hub') { header('Location: /hub?dc=no'); exit; } $back('no', $game); }
         $user = rs_dc_finish((string)$_GET['code']);
         rs_dc_set($user);
         // (2.7.2) From the developer hub: Discord linked to their developer account (and the role).
-        if ($game === 'hub' && ($dev = rs_dev_current())) {
+        if ($game === 'hub') {
+            $dev = rs_dev_current();
+            if (!$dev) { header('Location: /hub?dc=signin'); exit; }
             rs_db()->prepare('UPDATE dev_accounts SET discord_id = ?, discord_name = ? WHERE id = ?')->execute([(string)$user['id'], mb_substr((string)($user['handle'] ?: $user['name']), 0, 64), $dev['id']]);
             $dev['discord_id'] = (string)$user['id'];
-            rs_dev_discord_role($dev);
-            header('Location: /hub?dc=ok');
+            header('Location: /hub?dc=' . (rs_dev_discord_role($dev) ? 'ok' : 'role'));
             exit;
         }
         $back('ok', $game);
@@ -52,5 +53,7 @@ try {
     header('Location: ' . rs_dc_login_url($state));
     exit;
 } catch (Throwable $e) {
+    rs_log('discord', 'sign-in', mb_substr($e->getMessage(), 0, 200));
+    if (($game ?? '') === 'hub') { header('Location: /hub?dc=err'); exit; }
     $back('err', $game ?? '');
 }

@@ -4115,9 +4115,13 @@
     const say = (el, res, okText) => { el.textContent = res.ok ? (res.message || okText || t('Saved.')) : (res.error || t('That didn\'t go through.')); el.className = 'status ' + (res.ok ? 'ok' : 'bad'); };
     const num = (n) => Number(n || 0).toLocaleString(lang);
     const q = new URLSearchParams(location.search);
-    const dcNote = q.get('dc') === 'ok' ? t('Discord is linked.') : q.get('dc') === 'no' ? t('You didn\'t finish linking Discord.')
+    // (4.1) Every way linking Discord can end, said plainly.
+    const dcMsgs = { ok: t('Discord is linked.'), no: t('You didn\'t finish linking Discord.'),
+      role: t('Discord is linked, but the Developer role couldn\'t be given yet. Make sure you\'re in the RecompStore Discord server; the team has been told.'),
+      again: t('Linking Discord timed out. Press Link Discord again.'), signin: t('Sign in to your hub first, then link Discord.'), err: t('Discord didn\'t answer. Try Link Discord again in a minute.') };
+    const dcNote = dcMsgs[q.get('dc')] ? dcMsgs[q.get('dc')]
       : q.get('gh') === 'linked' ? t('GitHub is linked. Your apps are found from your repositories now.') : q.get('gh') === 'taken' ? t('That GitHub account already has its own developer account. Sign in with GitHub instead.') : '';
-    const dcBad = q.get('dc') === 'no' || q.get('gh') === 'taken';
+    const dcBad = ['no', 'role', 'again', 'signin', 'err'].includes(q.get('dc')) || q.get('gh') === 'taken';
     if (q.get('dc') || q.get('gh')) history.replaceState(history.state, '', '/hub');
     let data = null;
     const load = () => fetch('/api/dev.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => {
