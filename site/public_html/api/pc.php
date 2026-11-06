@@ -19,6 +19,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/rl_cloud.php'; // (3.9) RecompLauncher's sign-in
+require_once dirname(__DIR__) . '/admin/inc/catcache.php';
 
 header('X-Content-Type-Options: nosniff');
 header('Content-Type: application/json; charset=utf-8');
@@ -33,36 +34,8 @@ function rs_pc_out(int $code, array $body, int $cache = 0): void {
 // Only recomps on the PC store's published list.
 function rs_pc_listed(string $id): ?array {
     if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) return null;
-    // (4.1) One small file per recomp, made once per published catalog, so a page or the launcher asking
-    // about one game doesn't read and decode the whole catalog (it's a few MB) on every request.
-    clearstatcache(true, RS_PC_CATALOG);
-    $ver = (string)@filemtime(RS_PC_CATALOG) . '-' . (string)@filesize(RS_PC_CATALOG);
-    $dir = dirname(RS_PUBLIC) . '/recompstore-private/pc-apps/' . $ver;
-    if (!is_file("$dir/.done")) {
-        $base = dirname($dir);
-        if (!is_dir($base)) @mkdir($base, 0755, true);
-        $lock = @fopen("$base/.lock", 'c');
-        if ($lock && flock($lock, LOCK_EX)) {
-            if (!is_file("$dir/.done")) {
-                $cat = json_decode((string)@file_get_contents(RS_PC_CATALOG), true);
-                if (is_array($cat) && !empty($cat['apps'])) {
-                    @mkdir($dir, 0755, true);
-                    foreach ($cat['apps'] as $a) if (preg_match('/^[a-z0-9-]{1,64}$/', (string)($a['id'] ?? '')))
-                        @file_put_contents("$dir/" . $a['id'] . '.json', json_encode($a, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-                    @touch("$dir/.done");
-                    // Older catalogs' copies go.
-                    foreach (glob("$base/*", GLOB_ONLYDIR) ?: [] as $old) if ($old !== $dir) { array_map('unlink', glob("$old/*") ?: []); @unlink("$old/.done"); @rmdir($old); }
-                }
-            }
-            flock($lock, LOCK_UN);
-        }
-        if ($lock) fclose($lock);
-    }
-    if (is_file("$dir/.done")) {
-        $j = @file_get_contents("$dir/$id.json");
-        return $j === false ? null : (json_decode($j, true) ?: null);
-    }
-    $cat = json_decode((string)@file_get_contents(RS_PC_CATALOG), true);
+    // (4.1) The catalog as opcache's cached array, not decoded again on every request (admin/inc/catcache.php).
+    $cat = rs_json_cached(RS_PC_CATALOG);
     foreach ((array)($cat['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
     return null;
 }

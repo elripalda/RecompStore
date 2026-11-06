@@ -180,7 +180,8 @@ try {
         $L = rs_launcher();
         $pp = fn(string $u): string => !$L ? $u : ($u === '/pc/launcher' ? '/get' : (preg_replace('#^/pc#', '', $u) ?: '/'));
         $name = fn(string $title) => $title . ' · RecompLauncher';
-        $pc = json_decode((string)@file_get_contents(__DIR__ . '/pc-catalog.json'), true);
+        require_once __DIR__ . '/admin/inc/catcache.php'; // (4.1) opcache's copy, not decoded per page
+        $pc = rs_json_cached(__DIR__ . '/pc-catalog.json');
         $pcApps = is_array($pc['apps'] ?? null) ? $pc['apps'] : [];
         $pcByo = '<p><strong>' . $e(t('No game files here')) . '</strong> ' . $e(t('RecompLauncher lists only each recomp, from its developer\'s own GitHub. Every game needs your own legally owned copy.')) . '</p>';
         $pcNav = '<nav><a href="' . $pp('/pc') . '">RecompLauncher</a> · <a href="' . $pp('/pc/all') . '">' . $e(t('All PC recomps')) . '</a> · <a href="' . $pp('/pc/how') . '">' . $e(t('How it works')) . '</a> · <a href="' . $e(rs_store_base()) . '/">RecompStore for PS5</a></nav>';

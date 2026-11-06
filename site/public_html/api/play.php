@@ -11,6 +11,7 @@
 // Posts come from the website (its own address, with the X-RS header).
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
+require_once dirname(__DIR__) . '/admin/inc/catcache.php';
 
 header('X-Content-Type-Options: nosniff');
 header('Content-Type: application/json; charset=utf-8');
@@ -26,7 +27,8 @@ function rs_pl_out(int $code, array $body, int $cache = 0): void {
 function rs_pl_version(string $kind, string $id): ?array {
     if ($kind === 'pc') {
         if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) return null;
-        foreach (rs_pc_apps(false) as $a) if ($a['id'] === $id) return $a;
+        // (4.1) From the published catalog (opcache's copy), not every recomp decoded from the database.
+        foreach ((array)(rs_json_cached(RS_PC_CATALOG)['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
         return null;
     }
     if ($kind === 'ps5') {
@@ -70,7 +72,7 @@ try {
             if (!$t) rs_pl_out(404, ['ok' => false, 'error' => 'No such game.']);
             $scores = rs_play_scores();
             $pcAll = [];
-            foreach (rs_pc_apps(false) as $x) $pcAll[$x['id']] = $x;
+            foreach ((array)(rs_json_cached(RS_PC_CATALOG)['apps'] ?? []) as $x) $pcAll[$x['id']] = $x;
             $repos = [];
             foreach ($t['pc'] as $id) if (isset($pcAll[$id])) $repos[strtolower((string)$pcAll[$id]['repo'])] = $id;
             $rows = []; $out = [];

@@ -52,7 +52,8 @@ if (!function_exists('N_')) { function N_(string $en): string { return $en; } }
 function rs_seo_catalog(): array {
     static $cat = null;
     if ($cat === null) {
-        $cat = json_decode((string)@file_get_contents(rs_seo_public() . '/catalog.json'), true);
+        require_once __DIR__ . '/catcache.php'; // (4.1)
+        $cat = rs_json_cached(rs_seo_public() . '/catalog.json');
         if (!is_array($cat)) $cat = [];
     }
     return $cat;
