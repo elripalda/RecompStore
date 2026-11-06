@@ -1597,6 +1597,33 @@
   };
   const aiChip = (a, pc) => (isAI(a) ? `<a class="${pc ? 'pc-pill' : 'tag'} ai-tag" href="#ai-note" title="${esc(tf('AI tools helped with its {uses}.', { uses: aiUses(a) }))}">${SVG_AI}${t('AI-assisted')}</a>` : '');
   const SVG_AI = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
+  // (4.0) How alive a project is: ended (no more updates, or archived on GitHub), on hold, or quiet
+  // (no release in 2 months or more). Shown as a label on its page; ended and on hold on its tile too.
+  const PC_QUIET_DAYS = 60;
+  const pcLife = (a) => {
+    if (!a || a.soon) return null;
+    if (a.status === 'ended' || a.archived) return { kind: 'ended', note: a.status_note || '' };
+    if (a.status === 'paused') return { kind: 'paused', note: a.status_note || '' };
+    const at = a.released ? Date.parse(a.released + 'T12:00:00Z') : NaN;
+    const days = (Date.now() - at) / 864e5;
+    return days >= PC_QUIET_DAYS ? { kind: 'quiet', days } : null;
+  };
+  const LIFE_SVG = {
+    ended: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    paused: '<path d="M9 5v14M15 5v14"/>',
+    quiet: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>' };
+  const lifeIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LIFE_SVG[k]}</svg>`;
+  const lifeText = (l) => {
+    if (l.kind === 'ended') return t('Project ended');
+    if (l.kind === 'paused') return t('On hold');
+    const m = Math.floor(l.days / 30.4);
+    return m >= 24 ? tf('No updates in {n} years', { n: Math.floor(m / 12) }) : m >= 12 ? t('No updates in over a year') : tf('No updates in {n} months', { n: m });
+  };
+  const lifeWhy = (a, l) => l.kind === 'ended' ? (a.archived && !a.status ? t('The developer archived this project, so no more updates are coming.') : t('The developer isn\'t planning any more updates.'))
+    : l.kind === 'paused' ? t('The developer has put it on hold. Updates may pick up again later.') : t('No new release in a while. It may still get updates.');
+  const lifePill = (a) => { const l = pcLife(a); return l ? `<span class="pc-pill life-${l.kind}" title="${esc(lifeWhy(a, l))}">${lifeIcon(l.kind)}${esc(lifeText(l))}</span>` : ''; };
+  const lifeBadge = (a) => { const l = pcLife(a); return l && l.kind !== 'quiet' ? `<span class="pc-life-b life-${l.kind}">${lifeIcon(l.kind)}${esc(l.kind === 'ended' ? t('Ended') : t('On hold'))}</span>` : ''; };
+  const lifeNotice = (a) => { const l = pcLife(a); return l && l.kind !== 'quiet' ? `<div class="pc-life life-${l.kind}"><strong>${lifeIcon(l.kind)}${esc(lifeText(l))}</strong><p dir="auto">${esc(l.note || lifeWhy(a, l))}</p></div>` : ''; };
   function aiNoteHTML(a, pc) {
     if (!isAI(a)) return '';
     const by = a.ai.by === 'developer' ? tf('Its developer says AI tools helped with its {uses}.', { uses: aiUses(a) }) : tf('Its project on GitHub shows AI tools helped with its {uses}.', { uses: aiUses(a) });
@@ -1986,7 +2013,7 @@
   const starCount = (n) => { try { return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n); } catch (e) { return fmtNum(n); } };
   const osBadges = (a) => (OS_LOGOS.length && (a.systems || []).length ? `<span class="pc-os" aria-label="${esc((a.systems || []).map((k) => SYS_NAMES[k] || k).join(', '))}">${['windows', 'macos', 'linux'].filter((k) => a.systems.includes(k)).map(osIcon).join('')}</span>` : '');
   const pcPoster = (a) => `<a class="pc-tile" href="/pc/game/${encodeURIComponent(a.id)}">
-      <span class="pc-poster">${osBadges(a)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
+      <span class="pc-poster">${osBadges(a)}${lifeBadge(a)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
       <strong class="pc-name pc-fit" dir="auto" title="${esc(a.name)}"${fitAttrs(a.name, shortName(a.name).toLowerCase() === String(a.game || '').toLowerCase() ? '' : shortName(a.name))}>${esc(a.name)}</strong>
       <small class="pc-game pc-fit" dir="auto"${a.game && a.game !== a.name ? ` title="${esc(a.game)}"${fitAttrs(a.game, shortGame(a.game))}>${esc(a.game)}` : '>&nbsp;'}</small>
       ${consoleTag(a.origin)}${a.stars ? `<span class="pc-stars" aria-label="${esc(tn(a.stars, '1 star on GitHub', '{n} stars on GitHub'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.8 6.6 19.8l1.2-6.1-4.5-4.2 6.1-.7z"/></svg>${esc(starCount(a.stars))}</span>` : ''}</a>`;
@@ -2688,7 +2715,7 @@
             <div class="pc-game-head">
               ${a.cover ? `<img class="pc-game-cover" src="${esc(thumb(a.cover, 400))}" alt="" width="200" height="300">` : ''}
               <div class="pc-game-words">
-                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}</div>
+                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}</div>
                 <h1 dir="auto">${esc(a.name)}</h1>
                 ${a.game && a.game !== a.name ? `<p class="pc-based big">${SVG_DISC}${tf('Rebuilt from {game}', { game: `<strong dir="auto">${esc(a.game)}</strong>` })}</p>` : ''}
                 ${pcByLine(a)}
@@ -2726,6 +2753,7 @@
                 <a href="${ghIssues}" target="_blank" rel="noopener">${t('Report an issue')}<span aria-hidden="true">↗</span></a>
               </div>
               ${a.setup_required ? `<div class="pc-setup"><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</strong><p>${t('This one needs a few things on your PC before it plays. Do these once, in order:')}</p>${(a.setup_steps || []).length ? `<ol>${a.setup_steps.map((x) => `<li dir="auto">${esc(x)}</li>`).join('')}</ol>` : ''}<p class="pc-setup-l">${t('In RecompLauncher it shows a yellow Set Up button until you\'re done.')}</p><a href="${gl ? gh : gh + '#readme'}" target="_blank" rel="noopener">${t('Full steps in the README')}<span aria-hidden="true">↗</span></a></div>` : ''}
+              ${lifeNotice(a)}
               ${a.needs ? `<p class="note needs"><strong>${t('You bring')}:</strong> ${esc(a.needs)}</p>` : ''}
               <dl class="pc-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd dir="auto">${v}</dd></div>`).join('')}</dl>
               <p class="note">${gl ? t('Each download comes straight from the developer\'s own GitLab release.') : t('Each download comes straight from the developer\'s own GitHub release.')}</p>

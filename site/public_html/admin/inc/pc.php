@@ -67,6 +67,9 @@ function rs_pc_tables(): void {
     $done = true;
 }
 
+// (4.0) A project's standing, when it's not just active: on hold, or no more updates coming.
+const RS_PC_STATUSES = ['paused', 'ended'];
+
 function rs_pc_defaults(): array {
     return ['id' => '', 'name' => '', 'game' => '', 'origin' => 'other', 'repo' => '', 'asset_win' => '', 'asset_linux' => '', 'asset_mac' => '',
         'version' => '', 'released' => '', 'size' => '', 'downloads' => 0, 'stars' => 0,
@@ -74,7 +77,8 @@ function rs_pc_defaults(): array {
         'icon' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'tags' => '', 'links' => [],
         'featured' => false, 'hidden' => true, 'soon' => false, 'added' => '', 'live_at' => '', 'checked' => '', 'features' => '', 'features_read' => false, 'license' => '',
         'genre' => '', 'media' => '', 'issues' => 0, 'releases' => 0, 'first' => '',
-        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => '', 'host' => ''];
+        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'report_url' => '', 'host' => '',
+        'status' => '', 'status_note' => '', 'archived' => false];
 }
 
 // (3.9) Where a recomp's project lives: '' GitHub, 'gitlab' GitLab. Its key ('owner/name', or
@@ -701,6 +705,12 @@ function rs_pc_catalog(): array {
         if (!empty($a['about']) && is_array($a['about'])) $e['about'] = $a['about'];
         if (!empty($a['setup_required'])) { $e['setup_required'] = true; $e['setup_steps'] = array_values(array_filter(array_map('trim', explode("\n", (string)($a['setup_steps'] ?? ''))))); }
         if ($a['links']) $e['links'] = $a['links'];
+        // (4.0) Where the project stands: 'ended' (no more updates) or 'paused' (on hold), set on its edit
+        // page, with the developer's own words if any. "archived": closed on GitHub, shown as ended too.
+        $life = in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) ? (string)$a['status'] : '';
+        if ($life !== '') $e['status'] = $life;
+        if (!empty($a['archived'])) $e['archived'] = true;
+        if (($life !== '' || !empty($a['archived'])) && trim((string)($a['status_note'] ?? '')) !== '') $e['status_note'] = trim((string)$a['status_note']);
         $e += rs_ai_entry($a); // (2.9)
         // (3.3) How RecompLauncher starts it and sets it up from the player's copy (CURATOR-SETUP-GUIDE.md).
         $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
@@ -899,6 +909,8 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         foreach (['features', 'features_read', 'features_v'] as $k) if (array_key_exists($k, $f)) $a[$k] = $f[$k];
         $a['gh_at'] = time();
         if (!empty($r['ok'])) $a = rs_pc_heal_assets($a, $r);
+        // (4.0) Archived on GitHub: the developer has closed it. The site and launcher show it as ended.
+        if (!empty($r['ok'])) $a['archived'] = !empty($r['archived']);
         if (empty($r['ok']) || $r['version'] === '') { rs_pc_save($a); continue; }
         if (!empty($r['license'])) $a['license'] = (string)$r['license'];
         $a['issues'] = (int)($r['issues'] ?? 0); $a['releases'] = (int)($r['releases'] ?? 0); $a['first'] = (string)($r['first'] ?? '');

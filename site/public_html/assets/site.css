@@ -2650,3 +2650,21 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .acct-rep-head a{color:var(--frost);text-decoration:none}.acct-rep-head a:hover{text-decoration:underline}
 .acct-rep-head .pr-verdict{font-size:14px}
 .acct-rep-form textarea{width:100%;box-sizing:border-box}
+
+/* (4.0) Project status: ended, on hold, or no updates in a while */
+.pc-pill.life-quiet{--c:#a7b3c4;color:#dfe6ef}
+.pc-pill.life-paused{--c:#ffb84d}
+.pc-pill.life-ended{--c:#ff6b6b}
+.pc-pill svg{width:13px;height:13px;flex:none}
+.pc-life-b{position:absolute;z-index:2;left:8px;top:8px;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;font:700 11px/1 Figtree,sans-serif;letter-spacing:.01em;background:rgba(11,18,32,.88);backdrop-filter:blur(6px)}
+.pc-life-b svg{width:12px;height:12px}
+.pc-life-b.life-ended{color:#ff8a8a;border:1px solid rgba(255,107,107,.45)}
+.pc-life-b.life-paused{color:#ffc773;border:1px solid rgba(255,184,77,.45)}
+.pc-life{margin:0 0 12px;padding:12px 14px;border-radius:14px}
+.pc-life strong{display:flex;align-items:center;gap:7px;font-size:15px}
+.pc-life strong svg{width:17px;height:17px}
+.pc-life p{margin:6px 0 0;line-height:1.45}
+.pc-life.life-ended{background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.4);color:#f6d0d0}
+.pc-life.life-ended strong{color:#ff8a8a}
+.pc-life.life-paused{background:rgba(255,184,77,.08);border:1px solid rgba(255,184,77,.4);color:#f6e2c2}
+.pc-life.life-paused strong{color:#ffc773}
