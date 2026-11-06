@@ -39,7 +39,7 @@ for line in sys.stdin:
         continue
     gid, repo, pat, start = line.split("|")
     try:
-        rels, _ = get("http://127.0.0.1/api/gh.php?repo=" + repo)
+        rels, _ = get("https://recompstore.com/api/gh.php?repo=" + repo)
         rels = json.loads(rels)
         url = None
         for r in rels:
