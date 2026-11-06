@@ -1859,6 +1859,9 @@
     // it's a PC one, else the most downloaded. Its page shows the others to pick from.
     pcCat.apps = pcCat.listed.filter((a) => { const tt = pcTitleOf('pc', a.id); return !tt || pcLeadOf(tt, pcCat.listed) === a.id; });
   }
+  // Top charts and the home page's ranked rows are for console recomps. Old PC games and their
+  // open-source remakes carry decades of GitHub downloads, so they keep to their own PC page.
+  const pcCharted = (a) => a.origin !== 'pc';
   // How many recomps a list of tiles stands for: a game's tile counts each of its listed versions.
   const pcVersions = (list) => list.reduce((n, a) => {
     const tt = pcTitleOf('pc', a.id);
@@ -2173,12 +2176,12 @@
     const bInfo = (a) => (pcCat.bannerInfo && pcCat.bannerInfo[a.id]) || {};
     // Newest arrivals: the latest to join RecompLauncher, then the latest release.
     const newest = apps.slice().sort((x, y) => String(y.added || '').localeCompare(String(x.added || '')) || String(y.released || '').localeCompare(String(x.released || ''))).slice(0, 16);
-    const charts = apps.slice().sort(byDl).slice(0, 16);
-    // (3.1e) Recently updated: the newest releases first.
-    const updated = apps.filter((a) => a.released).sort((x, y) => String(y.released).localeCompare(String(x.released))).slice(0, 16);
+    const charts = apps.filter(pcCharted).sort(byDl).slice(0, 16);
+    // (3.1e) Recently updated: the newest releases first (console recomps; PC games have their own page).
+    const updated = apps.filter((a) => a.released && pcCharted(a)).sort((x, y) => String(y.released).localeCompare(String(x.released))).slice(0, 16);
     // (2.9.1) Each row's title opens its full page: Top charts, Newest arrivals, each category.
     const row = (title, items, href, cls) => items.length ? `<section class="games pc-row${cls ? ' ' + cls : ''}"><div class="pc-row-head"><h2>${href ? `<a class="pc-row-link" href="${href}">${title}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>` : title}</h2></div><div class="rowscroll pc-posters">${items.map(pcPoster).join('')}</div></section>` : '';
-    const inCat = (k) => apps.filter((a) => a.genre === k).sort(byDl);
+    const inCat = (k) => apps.filter((a) => a.genre === k).sort((x, y) => (pcCharted(y) - pcCharted(x)) || byDl(x, y));
     const ranked = (html) => { let n = 0; return html.replace(/<span class="pc-poster">/g, () => `<span class="pc-poster"><b class="pc-rank" aria-hidden="true">${fmtNum(++n)}</b>`); };
     // Every category with enough recomps to fill a row, the biggest first.
     const cats = PC_CATS.filter((k) => inCat(k).length >= 3).sort((x, y) => inCat(y).length - inCat(x).length);
@@ -2347,7 +2350,7 @@
     const top = kind === 'top';
     const title = top ? t('Top charts') : t('New');
     pcTitle = `${title} · RecompLauncher`;
-    const apps = pcCat.apps.slice().sort(top
+    const apps = (top ? pcCat.apps.filter(pcCharted) : pcCat.apps.slice()).sort(top
       ? (x, y) => (y.downloads || 0) - (x.downloads || 0)
       : (x, y) => String(y.added || '').localeCompare(String(x.added || '')) || String(y.released || '').localeCompare(String(x.released || ''))).slice(0, top ? 70 : undefined);
     let html = apps.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${reduced ? '' : ' pop'}" style="--i:${Math.min(i, 14)}"`)).join('');
@@ -2500,7 +2503,7 @@
   // (2.8) RecompLauncher: what's coming to Windows.
   function pcLauncher() {
     pcTitle = `${t('Get RecompLauncher')} · RecompLauncher`;
-    const covers = pcCat.apps.filter((a) => a.cover && !['n64', 'gc', 'wii', 'wiiu', 'switch', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'].includes(a.origin) && !/doax/i.test(a.id)).sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).slice(0, 8);
+    const covers = pcCat.apps.filter((a) => a.cover && pcCharted(a) && !['n64', 'gc', 'wii', 'wiiu', 'switch', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'].includes(a.origin) && !/doax/i.test(a.id)).sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).slice(0, 8);
     const feats = [
       ['library', t('Your whole library'), t('Every recomp in one place, with covers, play time and updates, including the ones you already have.')],
       ['disc', t('Set up from your disc'), t('Point it at your own disc image or ROM once. It checks it, and puts what each game needs where it goes.')],
@@ -4851,7 +4854,7 @@
   const PROMO_COVERS = ['unleashedrecomp', 'bloodborne-pc', 'tenkaichi3decomp', 'skate3recomp', 'lostodysseyrecomp', 'iss-pc', 'symphonyrecomp', 'octr-nitrofueled-pc'];
   const PROMO_APPS = ['PS5SX2', 'Playden', 'PS5X360'];
   function promoCovers(n) {
-    const apps = ((pcCat && pcCat.apps) || []).filter((a) => a.cover && !NINTENDO.includes(a.origin) && !/doax/i.test(a.id));
+    const apps = ((pcCat && pcCat.apps) || []).filter((a) => a.cover && a.origin !== 'pc' && !NINTENDO.includes(a.origin) && !/doax/i.test(a.id));
     const picked = PROMO_COVERS.map((id) => apps.find((a) => a.id === id)).filter(Boolean);
     apps.sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).forEach((a) => { if (!picked.includes(a)) picked.push(a); });
     return picked.slice(0, n).map((a) => a.cover);
