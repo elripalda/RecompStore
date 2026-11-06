@@ -366,6 +366,35 @@ function rs_sgdb(string $path): ?array {
     return $j['data'] ?? [];
 }
 
+// (4.1) Several SteamGridDB lists at once: [key => path] -> [key => data or null]. Cached ones come from the cache.
+function rs_sgdb_many(array $paths): array {
+    $key = rs_sgdb_key();
+    $out = []; $ask = [];
+    foreach ($paths as $k => $path) {
+        $c = rs_kv_get('sgdb:' . $path);
+        if ($c && $c['age'] < 7 * 86400) $out[$k] = json_decode($c['v'], true);
+        elseif ($key !== '') $ask[$k] = ['https://www.steamgriddb.com/api/v2' . $path, ['Authorization: Bearer ' . $key]];
+        else $out[$k] = null;
+    }
+    foreach ($ask ? rs_http_many($ask, 15, 2 << 20) : [] as $k => $r) {
+        $j = $r['status'] === 200 ? json_decode($r['body'], true) : null;
+        if (is_array($j) && !empty($j['success'])) { rs_kv_put('sgdb:' . $paths[$k], json_encode($j['data'] ?? [])); $out[$k] = $j['data'] ?? []; }
+        else $out[$k] = null;
+    }
+    return $out;
+}
+// (4.1) The chosen pictures downloaded at once, then made into the store's sizes. [kind => url] -> fields to merge
+function rs_pc_media_many(array $urls, string $id): array {
+    $got = rs_http_many(array_filter($urls, fn($u) => is_string($u) && $u !== ''), 30);
+    $out = [];
+    foreach ($urls as $k => $u) {
+        $body = ($got[$k]['status'] ?? 0) === 200 ? (string)$got[$k]['body'] : null;
+        $m = $body !== null && $body !== '' ? rs_pc_media($u, $k, $id, $body) : rs_pc_media($u, $k, $id);
+        if ($m) { unset($m['hero_web']); $out = array_merge($out, $m); $out[$k . '_src'] = $u; }
+    }
+    return $out;
+}
+
 // The best art SteamGridDB has for a game: [game, cover, hero, logo, icon] (URLs, '' when none).
 // $avoid: per kind, pictures another recomp already wears (two recomps of one game get their own);
 // $skip: how many more to pass over, for "Different art".
@@ -383,10 +412,11 @@ function rs_sgdb_art(string $game, array $avoid = [], int $skip = 0, string $yea
         if (!$urls) return $list ? (string)($list[0]['url'] ?? '') : '';
         return $urls[$skip % count($urls)];
     };
-    $out['cover'] = $pick(rs_sgdb('/grids/game/' . $id . '?dimensions=600x900&types=static&nsfw=false&humor=false'), 'cover');
-    $out['hero'] = $pick(rs_sgdb('/heroes/game/' . $id . '?types=static&nsfw=false&humor=false'), 'hero');
-    $out['logo'] = $pick(rs_sgdb('/logos/game/' . $id . '?types=static&nsfw=false&humor=false'), 'logo');
-    $out['icon'] = $pick(rs_sgdb('/icons/game/' . $id . '?types=static&nsfw=false&humor=false'), 'icon');
+    // (4.1) The four lists asked of SteamGridDB at once, not one after another.
+    $lists = rs_sgdb_many(['cover' => '/grids/game/' . $id . '?dimensions=600x900&types=static&nsfw=false&humor=false',
+        'hero' => '/heroes/game/' . $id . '?types=static&nsfw=false&humor=false', 'logo' => '/logos/game/' . $id . '?types=static&nsfw=false&humor=false',
+        'icon' => '/icons/game/' . $id . '?types=static&nsfw=false&humor=false']);
+    foreach (['cover', 'hero', 'logo', 'icon'] as $k) $out[$k] = $pick($lists[$k] ?? null, $k);
     return $out;
 }
 
@@ -424,9 +454,10 @@ function rs_pc_art_used(string $exceptId): array {
 
 // A picture from the web into /media, as the PS5 games' are (icon 512, hero 3840 + 1920, logo
 // 1600x800 PNG) or a cover (600x900 JPEG). -> fields to merge, or [].
-function rs_pc_media(string $url, string $kind, string $id): array {
+function rs_pc_media(string $url, string $kind, string $id, ?string $body = null): array {
     if (!preg_match('#^https://#', $url)) return [];
-    $r = rs_http($url, ['max' => 25 << 20, 'timeout' => 30]);
+    // (4.1) $body: the picture already downloaded (rs_pc_media_many).
+    $r = $body !== null ? ['status' => 200, 'body' => $body] : rs_http($url, ['max' => 25 << 20, 'timeout' => 30]);
     if ($r['status'] !== 200 || $r['body'] === '') return [];
     $tmp = tempnam(sys_get_temp_dir(), 'pcart');
     file_put_contents($tmp, $r['body']);
@@ -477,10 +508,15 @@ function rs_pc_add(string $repo): array {
         'author' => (string)$f['owner'], 'needs' => 'Your own copy of ' . ($f['game'] ?: 'the game'), 'hidden' => true, 'added' => gmdate('Y-m-d'),
         'host' => $host,
     ]);
+    // (4.1) About the game from IGDB right away (by game and console), so the art can be picked for the
+    // right year and nothing has to be asked again after adding.
+    if ($a['game'] !== '') {
+        try { if ($ab = rs_pc_about_fetch($a)) $a['about'] = $ab; else $a['about_none'] = gmdate('Y-m-d'); } catch (Throwable $e) { /* IGDB not set up: later */ }
+    }
     if (rs_sgdb_key() !== '' && $a['game'] !== '') {
-        $art = rs_sgdb_art($a['game'], rs_pc_art_used($id));
+        $art = rs_sgdb_art($a['game'], rs_pc_art_used($id), 0, rs_pc_about_year($a));
         if ($art['game'] !== '') $a['game'] = $art['game'];
-        foreach (['cover', 'hero', 'logo', 'icon'] as $k) if ($art[$k] !== '' && ($m = rs_pc_media($art[$k], $k, $id))) { $a = array_merge($a, $m); $a[$k . '_src'] = $art[$k]; }
+        $a = array_merge($a, rs_pc_media_many(array_intersect_key($art, array_flip(['cover', 'hero', 'logo', 'icon'])), $id));
     }
     if ($a['icon'] === '' && preg_match('#^https://avatars\.githubusercontent\.com/#', (string)$f['avatar'])) $a = array_merge($a, rs_pc_media((string)$f['avatar'] . '&s=512', 'icon', $id));
     elseif ($a['icon'] === '' && $host === 'gitlab' && preg_match('#^https://gitlab\.com/uploads/#', (string)$f['avatar'])) $a = array_merge($a, rs_pc_media((string)$f['avatar'], 'icon', $id));

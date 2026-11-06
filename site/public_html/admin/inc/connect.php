@@ -354,6 +354,45 @@ function rs_http(string $url, array $o = []): array {
     return $out;
 }
 
+// (4.1) Several plain GETs at once (art pictures, SteamGridDB lists): [key => url] or [key => [url, headers]]
+// -> [key => ['status' => int, 'body' => string]]. Each is capped at $max bytes.
+function rs_http_many(array $reqs, int $timeout = 30, int $max = 25 << 20): array {
+    $mh = curl_multi_init();
+    $hs = []; $bodies = [];
+    $ca = getenv('RS_CA_BUNDLE');
+    foreach ($reqs as $k => $r) {
+        [$url, $headers] = is_array($r) ? [$r[0], $r[1] ?? []] : [$r, []];
+        if (!is_string($url) || !preg_match('#^https://#', $url)) continue;
+        $bodies[$k] = '';
+        $c = curl_init($url);
+        curl_setopt_array($c, [
+            CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 4, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_USERAGENT => 'RecompStore-site', CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$bodies, $k, $max) {
+                if (strlen($bodies[$k]) + strlen($chunk) > $max) return 0;
+                $bodies[$k] .= $chunk;
+                return strlen($chunk);
+            },
+        ]);
+        if (is_string($ca) && $ca !== '' && is_file($ca)) curl_setopt($c, CURLOPT_CAINFO, $ca);
+        curl_multi_add_handle($mh, $c);
+        $hs[$k] = $c;
+    }
+    do {
+        $st = curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 1.0);
+    } while ($running && $st === CURLM_OK);
+    $out = [];
+    foreach ($hs as $k => $c) {
+        $out[$k] = ['status' => curl_errno($c) ? 0 : (int)curl_getinfo($c, CURLINFO_RESPONSE_CODE), 'body' => $bodies[$k]];
+        curl_multi_remove_handle($mh, $c);
+        curl_close($c);
+    }
+    curl_multi_close($mh);
+    return $out;
+}
+
 function rs_cache_tables(): void {
     static $done = false;
     if ($done) return;

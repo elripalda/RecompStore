@@ -102,8 +102,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $a['art_n'] = $next ? (int)($a['art_n'] ?? 0) + 1 : 0;
                 $art = rs_sgdb_art($a['game'] !== '' ? $a['game'] : $a['name'], rs_pc_art_used($a['id']), $a['art_n'], rs_pc_about_year($a));
                 $got = [];
-                foreach ($next ? ['cover', 'hero'] : ['cover', 'hero', 'logo', 'icon'] as $k)
-                    if ($art[$k] !== '' && ($m = rs_pc_media($art[$k], $k, $a['id']))) { unset($m['hero_web']); $a = array_merge($a, $m); $a[$k . '_src'] = $art[$k]; $got[] = $k; }
+                $m = rs_pc_media_many(array_intersect_key($art, array_flip($next ? ['cover', 'hero'] : ['cover', 'hero', 'logo', 'icon'])), $a['id']); // (4.1) at once
+                $a = array_merge($a, $m);
+                foreach (['cover', 'hero', 'logo', 'icon'] as $k) if (isset($m[$k . '_src'])) $got[] = $k;
                 rs_flash($got ? 'Art from SteamGridDB: ' . implode(', ', $got) . '.' : (rs_sgdb_key() === '' ? 'Add your SteamGridDB key in Settings first.' : 'SteamGridDB has no art for "' . ($a['game'] ?: $a['name']) . '". Try the game\'s exact name.'), $got ? 'ok' : 'err');
             }
             rs_pc_save($a);
