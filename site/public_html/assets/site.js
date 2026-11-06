@@ -1325,7 +1325,7 @@
       if (!view.contains(form)) return;
       if (!j || !j.account) {
         who.innerHTML = `<aside class="glass sub-dev"><div><strong>${t('Get a free developer account')}</strong>
-          <ul class="sub-perks"><li>${t('Faster review: submissions from developer accounts go to the front of the line')}</li><li>${t('This form fills itself in from your GitHub')}</li><li>${t('Your own verified page with a check mark')}</li><li>${t('Download numbers and players\' crash logs')}</li></ul>
+          <ul class="sub-perks"><li>${t('Faster review: submissions from developer accounts go to the front of the line')}</li><li>${t('This form fills itself in from your GitHub')}</li><li>${t('Your own verified page with a check mark')}</li><li>${t('Faster updates: once you\'re verified, your new versions go out as soon as they pass the safety check')}</li><li>${t('Download numbers and players\' crash logs')}</li></ul>
           <span>${tf('Building for PC? The {sdk} is free and open to everyone.', { sdk: `<a href="/pc/sdk" target="_blank" rel="noopener">${t('RecompLauncher SDK')}</a>` })}</span></div>
           <div class="sub-dev-btns"><a class="btn primary" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/developers?signin=1">${t('Sign in')}</a></div></aside>`;
         return;
@@ -2022,6 +2022,37 @@
   const fitAttrs = (full, short) => (short && short !== full ? ` data-short="${esc(short)}" data-full="${esc(full)}"` : '');
   const starCount = (n) => { try { return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n); } catch (e) { return fmtNum(n); } };
   const osBadges = (a) => (OS_LOGOS.length && (a.systems || []).length ? `<span class="pc-os" aria-label="${esc((a.systems || []).map((k) => SYS_NAMES[k] || k).join(', '))}">${['windows', 'macos', 'linux'].filter((k) => a.systems.includes(k)).map(osIcon).join('')}</span>` : '');
+  // (4.1) Long lists come in pages: 84 tiles (12 rows of 7, even at 6, 4, 3 and 2 across too), so
+  // the browser never draws a thousand covers at once.
+  const PC_PER_PAGE = 84;
+  const pcPagerHTML = (page, pages, total) => {
+    if (pages < 2) return '';
+    const keep = new Set([1, pages, page - 1, page, page + 1]);
+    if (page <= 3) [2, 3, 4].forEach((n) => keep.add(n));
+    if (page >= pages - 2) [pages - 1, pages - 2, pages - 3].forEach((n) => keep.add(n));
+    let prev = 0, nums = '';
+    [...keep].filter((n) => n >= 1 && n <= pages).sort((x, y) => x - y).forEach((n) => {
+      if (n - prev > 1) nums += '<span class="pc-pager-gap" aria-hidden="true">…</span>';
+      nums += `<button type="button" data-page="${n}"${n === page ? ' class="on" aria-current="page"' : ''} aria-label="${esc(tf('Page {n}', { n }))}">${fmtNum(n)}</button>`;
+      prev = n;
+    });
+    const from = (page - 1) * PC_PER_PAGE + 1, to = Math.min(total, page * PC_PER_PAGE);
+    return `<button type="button" class="pc-pager-step" data-page="${page - 1}"${page <= 1 ? ' disabled' : ''} aria-label="${esc(t('Back'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="pc-pager-word">${t('Back')}</span></button>
+      <span class="pc-pager-nums">${nums}</span>
+      <button type="button" class="pc-pager-step" data-page="${page + 1}"${page >= pages ? ' disabled' : ''} aria-label="${esc(t('Next'))}"><span class="pc-pager-word">${t('Next')}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      <span class="pc-pager-of">${esc(tf('{from}–{to} of {total}', { from, to, total }))}</span>`;
+  };
+  const pcPageFromUrl = () => Math.max(1, parseInt(new URLSearchParams(location.search).get('page'), 10) || 1);
+  const pcPageToUrl = (page) => {
+    const u = new URL(location.href);
+    if (page > 1) u.searchParams.set('page', String(page)); else u.searchParams.delete('page');
+    if (u.href !== location.href) { history.replaceState(history.state, '', u.pathname + u.search + u.hash); routed = location.href; }
+  };
+  // Back to the top of the list after changing page, when it's out of sight.
+  const pcPageScroll = (el) => {
+    const y = el.getBoundingClientRect().top + scrollY - 96;
+    if (scrollY > y) scrollTo({ top: Math.max(0, y), behavior: reduced ? 'auto' : 'smooth' });
+  };
   const pcPoster = (a) => `<a class="pc-tile" href="/pc/game/${encodeURIComponent(a.id)}">
       <span class="pc-poster">${osBadges(a)}${lifeBadge(a)}${deckBadge(a.id)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
       <strong class="pc-name pc-fit" dir="auto" title="${esc(a.name)}"${fitAttrs(a.name, shortName(a.name).toLowerCase() === String(a.game || '').toLowerCase() ? '' : shortName(a.name))}>${esc(a.name)}</strong>
@@ -2090,7 +2121,15 @@
     if (!w) return false;
     const name = el.classList.contains('pc-name');
     const base = parseFloat(getComputedStyle(el).fontSize);
-    const shrink = (floor) => { let size = parseFloat(el.style.fontSize) || base; while (el.scrollWidth > w + 0.5 && size > floor) { size -= 0.5; el.style.fontSize = size + 'px'; } };
+    // Text width follows the font size, so one jump lands close; at most two small steps after it.
+    const shrink = (floor) => {
+      let size = parseFloat(el.style.fontSize) || base;
+      let sw = el.scrollWidth;
+      if (sw <= w + 0.5 || size <= floor) return;
+      size = Math.max(floor, Math.floor(size * (w / sw) * 2) / 2);
+      el.style.fontSize = size + 'px';
+      for (let i = 0; i < 2 && size > floor && el.scrollWidth > w + 0.5; i++) { size = Math.max(floor, size - 0.5); el.style.fontSize = size + 'px'; }
+    };
     // The whole line, a little smaller; then the short way to say it; then smaller still.
     shrink(name ? 14 : 12);
     if (el.scrollWidth > w + 0.5 && el.dataset.short) { el.textContent = el.dataset.short; el.style.fontSize = ''; shrink(name ? 14 : 12); }
@@ -2305,9 +2344,17 @@
         <div class="pc-filters"><label class="ids2-search glass pc-find"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" placeholder="${t('Search PC recomps')}" aria-label="${t('Search PC recomps')}"></label>
           <div class="pc-filter-rows"><div class="pc-tagbar" data-tagbar></div><nav class="ids2-tabs" data-genres></nav><nav class="ids2-tabs" data-origins></nav><nav class="ids2-tabs" data-oses></nav></div></div>
         <div class="pc-grid" data-grid></div>
+        <nav class="pc-pager" data-pager aria-label="${esc(t('Pages'))}"></nav>
         ${pcNoFiles()}
       </article>`;
     const input = view.querySelector('.pc-find input'), grid = view.querySelector('[data-grid]'), gtabs = view.querySelector('[data-genres]'), otabs = view.querySelector('[data-origins]');
+    const pager = view.querySelector('[data-pager]');
+    let page = pcPageFromUrl(), consOpen = false;
+    // (4.1) Consoles, most recomps first. A short row with the biggest ones; the rest open in an even grid.
+    const conCount = {};
+    pcCat.apps.forEach((a) => { conCount[a.origin] = (conCount[a.origin] || 0) + 1; });
+    const consoles = (pcCat.origins || []).filter((o) => conCount[o.id]).sort((x, y) => (x.id === 'other') - (y.id === 'other') || conCount[y.id] - conCount[x.id]);
+    const CON_TOP = 5;
     const genresHere = Object.keys(PC_GENRES).filter((k) => pcCat.apps.some((a) => (a.genre || 'other') === k));
     // (2.9.1) How many recomps the page shows right now. It follows every filter and the search, and
     // counts up or down to the new number instead of jumping.
@@ -2329,18 +2376,39 @@
       };
       countAnim = requestAnimationFrame(step);
     };
-    const draw = (animate) => {
+    const draw = (animate, fresh) => {
+      if (fresh) page = 1;
       const q = fold(input.value.trim());
       const list = pcCat.apps.filter((a) => (!genre || (a.genre || 'other') === genre) && (!origin || a.origin === origin) && (!tag || (a.tags || []).includes(tag))
         && (!q || fold([a.name, a.game, a.author, originName(a.origin), t(PC_GENRES[a.genre || 'other']), ...(a.tags || [])].join(' ')).includes(q)));
       const tagbar = view.querySelector('[data-tagbar]');
       tagbar.innerHTML = tag ? `<button type="button" class="pc-tagchip" data-untag aria-label="${esc(tf('Stop showing only {tag}', { tag }))}"><span>${esc(t('Tag'))}</span><b>${esc(tag)}</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>` : '';
       const un = tagbar.querySelector('[data-untag]');
-      if (un) un.addEventListener('click', () => { tag = ''; const u = new URL(location.href); u.searchParams.delete('tag'); history.replaceState(history.state, '', u.pathname + u.search); routed = location.href; draw(true); });
+      if (un) un.addEventListener('click', () => { tag = ''; const u = new URL(location.href); u.searchParams.delete('tag'); history.replaceState(history.state, '', u.pathname + u.search); routed = location.href; draw(true, true); });
       setCount(pcVersions(list));
-      grid.innerHTML = list.length ? list.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${animate && !reduced ? ' pop' : ''}" style="--i:${Math.min(i, 14)}"`)).join('') : `<p class="muted">${t('Nothing matches that.')}</p>`;
+      const pages = Math.max(1, Math.ceil(list.length / PC_PER_PAGE));
+      if (page > pages) page = pages;
+      const part = list.slice((page - 1) * PC_PER_PAGE, page * PC_PER_PAGE);
+      grid.innerHTML = part.length ? part.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${animate && !reduced ? ' pop' : ''}" style="--i:${Math.min(i, 14)}"`)).join('') : `<p class="muted">${t('Nothing matches that.')}</p>`;
+      pager.innerHTML = pcPagerHTML(page, pages, list.length);
+      pager.hidden = pages < 2;
+      pcPageToUrl(page);
       gtabs.innerHTML = [['', t('All')], ...genresHere.map((k) => [k, t(PC_GENRES[k])])].map(([k, n]) => `<button type="button" class="${genre === k ? 'on' : ''}" data-g="${esc(k)}">${esc(n)}</button>`).join('');
-      otabs.innerHTML = [['', t('Every console')], ...(pcCat.origins || []).map((o) => [o.id, originName(o.id)])].map(([k, n]) => `<button type="button" class="${origin === k ? 'on' : ''}" data-o="${esc(k)}">${esc(n)}</button>`).join('');
+      let cons = consOpen ? consoles : consoles.slice(0, CON_TOP);
+      if (!consOpen && origin && !cons.some((o) => o.id === origin)) cons = cons.concat(consoles.filter((o) => o.id === origin));
+      const conBtn = (k, n, c) => `<button type="button" class="${origin === k ? 'on' : ''}" data-o="${esc(k)}">${esc(n)}<span>${fmtNum(c)}</span></button>`;
+      const moreN = consoles.length - CON_TOP;
+      otabs.innerHTML = conBtn('', t('Every console'), pcCat.apps.length) + cons.map((o) => conBtn(o.id, originName(o.id), conCount[o.id])).join('')
+        + (moreN > 0 ? `<button type="button" class="pc-con-more" data-more aria-expanded="${consOpen}">${consOpen ? esc(t('Fewer consoles')) : esc(tf('{n} more', { n: moreN }))}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>` : '');
+      otabs.classList.toggle('pc-con-open', consOpen);
+      if (consOpen) {
+        // Even rows: as many across as divides the buttons evenly.
+        // Same-size buttons, the last row centred, never one on its own.
+        const n = cons.length + 2, opts = PHONE.matches ? [2, 3] : [5, 6, 4];
+        otabs.style.setProperty('--cols', String(opts.find((c) => n % c === 0 || n % c > 1) || opts[0]));
+      }
+      const more = otabs.querySelector('[data-more]');
+      if (more) more.addEventListener('click', () => { consOpen = !consOpen; draw(false); });
       gtabs.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
         genre = b.dataset.g;
         // The four categories keep their own address; the rest stay on /pc/all.
@@ -2350,15 +2418,22 @@
         view.querySelector('[data-title]').textContent = title();
         document.title = pcTitle = `${title()} · RecompLauncher`;
         document.querySelectorAll('[data-nav]').forEach((n) => { if (n.dataset.nav === 'pc-all') n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current'); });
-        draw(true);
+        draw(true, true);
       }));
-      otabs.querySelectorAll('[data-o]').forEach((b) => b.addEventListener('click', () => { origin = b.dataset.o; draw(true); }));
+      otabs.querySelectorAll('[data-o]').forEach((b) => b.addEventListener('click', () => { origin = b.dataset.o; draw(true, true); }));
       // (2.9) Which system: the same choice as in Settings, kept for every page.
       const stabs = view.querySelector('[data-oses]');
       stabs.innerHTML = [['', t('Every system')], ...OS_CHOICES().slice(1)].map(([k, n]) => `<button type="button" class="${onlyOS === k ? 'on' : ''}" data-os="${k}">${osIcon(k)}${esc(n)}</button>`).join('');
-      stabs.querySelectorAll('[data-os]').forEach((b) => b.addEventListener('click', () => { setOS(b.dataset.os, true); draw(true); }));
+      stabs.querySelectorAll('[data-os]').forEach((b) => b.addEventListener('click', () => { setOS(b.dataset.os, true); draw(true, true); }));
     };
-    input.addEventListener('input', () => draw(false));
+    pager.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-page]');
+      if (!b || b.disabled) return;
+      page = +b.dataset.page;
+      draw(true);
+      pcPageScroll(grid);
+    });
+    input.addEventListener('input', () => draw(false, true));
     draw(true);
   }
 
@@ -2390,15 +2465,36 @@
     const apps = (top ? pcCat.apps.filter(pcCharted) : pcCat.apps.slice()).sort(top
       ? (x, y) => (y.downloads || 0) - (x.downloads || 0)
       : (x, y) => String(y.added || '').localeCompare(String(x.added || '')) || String(y.released || '').localeCompare(String(x.released || ''))).slice(0, top ? 70 : undefined);
-    let html = apps.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${reduced ? '' : ' pop'}" style="--i:${Math.min(i, 14)}"`)).join('');
-    if (top) { let n = 0; html = html.replace(/<span class="pc-poster">/g, () => `<span class="pc-poster"><b class="pc-rank" aria-hidden="true">${fmtNum(++n)}</b>`); }
+    // (4.1) New comes in pages like All Recomps; Top charts is already the top 70.
+    let page = top ? 1 : pcPageFromUrl();
+    const pages = top ? 1 : Math.max(1, Math.ceil(apps.length / PC_PER_PAGE));
+    if (page > pages) page = pages;
+    const tiles = () => {
+      const part = top ? apps : apps.slice((page - 1) * PC_PER_PAGE, page * PC_PER_PAGE);
+      let html = part.map((a, i) => pcPoster(a).replace('<a class="pc-tile"', `<a class="pc-tile${reduced ? '' : ' pop'}" style="--i:${Math.min(i, 14)}"`)).join('');
+      if (top) { let n = 0; html = html.replace(/<span class="pc-poster">/g, () => `<span class="pc-poster"><b class="pc-rank" aria-hidden="true">${fmtNum(++n)}</b>`); }
+      return html;
+    };
     view.innerHTML = `
       <article class="page pc-all">
         <header class="page-head"><span class="kicker">RecompLauncher</span><h1>${title}</h1>
           <p class="lead">${top ? t('The most downloaded PC recomps, counted from their developers\' GitHub releases.') : t('The latest recomps to arrive on RecompLauncher.')}</p></header>
-        <div class="pc-grid${top ? ' pc-charts' : ''}">${html || `<p class="muted">${t('The first PC recomps are on their way.')}</p>`}</div>
+        <div class="pc-grid${top ? ' pc-charts' : ''}" data-grid>${tiles() || `<p class="muted">${t('The first PC recomps are on their way.')}</p>`}</div>
+        <nav class="pc-pager" data-pager aria-label="${esc(t('Pages'))}"${pages < 2 ? ' hidden' : ''}>${pcPagerHTML(page, pages, apps.length)}</nav>
         ${pcNoFiles()}
       </article>`;
+    if (pages < 2) return;
+    pcPageToUrl(page);
+    const grid = view.querySelector('[data-grid]'), pager = view.querySelector('[data-pager]');
+    pager.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-page]');
+      if (!b || b.disabled) return;
+      page = +b.dataset.page;
+      grid.innerHTML = tiles();
+      pager.innerHTML = pcPagerHTML(page, pages, apps.length);
+      pcPageToUrl(page);
+      pcPageScroll(grid);
+    });
   }
 
   // (2.9) Coming soon: recomps being worked on, with no release to download yet.
@@ -3891,7 +3987,7 @@
     if (q.get('gh') || q.has('signin') || q.has('signup') || q.get('mail') || reset) history.replaceState(history.state, '', '/developers' + (invite ? '?invite=' + invite : ''));
     const signIn = '/api/dev.php?a=login' + (invite ? '&invite=' + encodeURIComponent(invite) : '');
     const perks = [
-      ['★', t('A verified developer page'), t('Your apps, your links and a Verified developer badge, on a page you look after yourself.')],
+      ['★', t('A verified developer page'), t('Your apps, your links and a Verified developer badge, on a page you look after yourself. Verified developers\' updates also go out faster.')],
       ['↗', t('Your numbers'), t('How many PS5s have each of your apps, new installs this week, GitHub downloads and likes.')],
       ['✉', t('Your players\' logs'), t('The logs players send from RecompStore when something goes wrong with your app, with what they say happened.')],
       ['♥', t('Support from players'), t('Your Ko-fi, Patreon or PayPal as a Support button on every one of your app pages.')],

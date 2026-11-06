@@ -2692,3 +2692,30 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .team-note a:hover{text-decoration:underline}
 .team-note-x{position:absolute;top:8px;right:8px;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:#9fb0c4;font:400 20px/1 Figtree,sans-serif;cursor:pointer}
 .team-note-x:hover{background:rgba(244,248,252,.08);color:#fff}
+
+/* ===== 4.1: All Recomps in pages, a tidier console filter, room under row titles ========== */
+.pc-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 10px;margin:44px 0 8px}
+.pc-pager[hidden]{display:none}
+.pc-pager button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:40px;height:40px;padding:0 12px;border-radius:10px;border:1px solid var(--edge);background:var(--panel);color:var(--frost);font:600 14px Figtree,sans-serif;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.pc-pager button:hover:not(:disabled){border-color:rgba(52,242,232,.45);color:#fff}
+.pc-pager button.on{background:#F4F8FC;color:#0B1220;border-color:#F4F8FC}
+.pc-pager button:disabled{opacity:.35;cursor:default}
+.pc-pager button svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.pc-pager-step{padding:0 16px!important}
+.pc-pager-nums{display:inline-flex;align-items:center;gap:6px}
+.pc-pager-gap{color:var(--muted);padding:0 2px}
+.pc-pager-of{flex-basis:100%;text-align:center;color:var(--muted);font:500 13px Figtree,sans-serif;font-variant-numeric:tabular-nums}
+.pc-filter-rows .ids2-tabs button span{font-size:12px;font-variant-numeric:tabular-nums}
+.pc-con-more{display:inline-flex;align-items:center;gap:6px;color:var(--cyan)!important}
+.pc-con-more svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+.pc-con-more[aria-expanded="true"] svg{transform:rotate(180deg)}
+.pc-filter-rows .ids2-tabs.pc-con-open{display:flex;flex-wrap:wrap;justify-content:center;width:min(100%,1000px);gap:6px}
+.pc-filter-rows .ids2-tabs.pc-con-open button{flex:0 0 calc((100% - (var(--cols,5) - 1) * 6px) / var(--cols,5));display:inline-flex;align-items:baseline;justify-content:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:8px 8px}
+.pc-filter-rows .ids2-tabs.pc-con-open button span{margin:0}
+@media (max-width:860px){
+  .pc-filter-rows .ids2-tabs.pc-con-open{flex-wrap:wrap;overflow:visible}
+  .pc-pager-nums button{min-width:36px;height:38px;padding:0 9px}
+  .pc-pager-step{padding:0 12px!important}
+}
+.pc-row-head h2{margin-bottom:14px}
+@media (max-width:600px){.pc-pager{gap:8px 6px}.pc-pager-word{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.pc-pager-step{padding:0 10px!important;min-width:38px}}
