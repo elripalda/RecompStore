@@ -28,6 +28,10 @@ const RS_PC_TOOLKITS = ['n64recomp/n64recomp', 'n64recomp/n64modernruntime', 'he
     'hollywoodakeem/rexglue-sdk-yukes', 'ghidraninja/ps2recomp', 'ran-j/ps2recomp', 'ran-j/psxrecomp', 'grumpycoders/pcsx-redux'];
 const RS_PC_SEARCHES = ['topic:n64recomp', 'topic:recomp', 'topic:static-recompilation', 'topic:recompilation', 'topic:xenonrecomp', 'topic:rexglue',
     'recompiled in:name', 'recomp in:name', 'recompiled pc port in:description'];
+// (4.1) The above take the top 50 by stars, so new and small projects never showed up. These look at
+// everything pushed in the last 30 days, newest first, 100 a search.
+const RS_PC_SEARCHES_RECENT = ['recomp in:name', 'recompiled in:name', 'recompilation in:name', '"static recompilation"', '"native pc port"',
+    '"pc port" in:description', 'decomp "pc port"', 'decompilation port in:description', 'rexglue', 'xenonrecomp', 'ps2recomp', 'ps3recomp', 'psxrecomp', 'n64recomp'];
 
 function rs_pc_tables(): void {
     static $done = false;
@@ -259,10 +263,12 @@ function rs_pc_find(int $budget = 25): array {
     foreach (rs_games(true) as $g) if ((string)$g['repo'] !== '') $ps5[strtolower((string)$g['repo'])] = true;
     $put = $db->prepare('INSERT INTO pc_found (repo, data, found, checked, state) VALUES (?, ?, NOW(), NOW(), ?) ON DUPLICATE KEY UPDATE data = VALUES(data), checked = NOW(),
         state = IF(state IN (\'skip\', \'added\'), state, VALUES(state))');
-    foreach (RS_PC_SEARCHES as $q) {
+    $since = gmdate('Y-m-d', time() - 30 * 86400);
+    $searches = array_merge(array_map(fn($q) => [$q, 'stars', 50], RS_PC_SEARCHES), array_map(fn($q) => [$q . ' pushed:>' . $since, 'updated', 100], RS_PC_SEARCHES_RECENT));
+    foreach ($searches as [$q, $sort, $per]) {
         if (microtime(true) - $start > $budget) break;
-        $s = rs_gh_cached('pcsearch:' . $q, rs_gh_api() . '/search/repositories?q=' . rawurlencode($q . ' fork:false archived:false') . '&sort=stars&per_page=50', 86400,
-            fn(array $r): array => ['items' => array_map(fn($x) => ['full_name' => (string)($x['full_name'] ?? '')], array_slice((array)($r['items'] ?? []), 0, 50))]);
+        $s = rs_gh_cached('pcsearch:' . $sort . ':' . $q, rs_gh_api() . '/search/repositories?q=' . rawurlencode($q . ' fork:false archived:false') . '&sort=' . $sort . '&per_page=' . $per, 86400,
+            fn(array $r): array => ['items' => array_map(fn($x) => ['full_name' => (string)($x['full_name'] ?? '')], array_slice((array)($r['items'] ?? []), 0, 100))]);
         $items = $s['status'] === 200 ? (json_decode((string)$s['body'], true)['items'] ?? []) : [];
         foreach ($items as $x) {
             if (microtime(true) - $start > $budget) break 2;
