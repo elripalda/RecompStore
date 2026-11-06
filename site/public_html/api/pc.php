@@ -17,6 +17,35 @@
 //   POST a=report-reply id text        -> {ok, replies[]}  the player answers the developer
 // Signed in on the website, POSTs come from this site's own pages (Origin and the X-RS header).
 declare(strict_types=1);
+
+// (4.1) The two questions asked most (a game's entry, and what players say about it) are answered here,
+// before the rest of the site loads: the entry from the cached catalog, the reports from a copy at most
+// a minute old. Thousands of these a minute were most of the server's CPU.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? null) && is_string($_GET['id'] ?? null)
+    && preg_match('/^[a-z0-9-]{1,64}$/', $_GET['id'])) {
+    $fastId = $_GET['id'];
+    if ($_GET['a'] === 'app') {
+        require_once dirname(__DIR__) . '/admin/inc/catcache.php';
+        foreach ((array)(rs_json_cached(dirname(__DIR__) . '/pc-catalog.json')['apps'] ?? []) as $fx) {
+            if (($fx['id'] ?? '') !== $fastId) continue;
+            header('X-Content-Type-Options: nosniff');
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: public, max-age=120');
+            echo json_encode(['ok' => true, 'app' => $fx], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    } elseif ($_GET['a'] === 'feedback') {
+        $fastF = dirname(__DIR__, 2) . '/recompstore-private/pc-fb/' . $fastId . '.json';
+        if (is_file($fastF) && time() - (int)@filemtime($fastF) < 60) {
+            header('X-Content-Type-Options: nosniff');
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: public, max-age=60');
+            readfile($fastF);
+            exit;
+        }
+    }
+}
+
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/rl_cloud.php'; // (3.9) RecompLauncher's sign-in
 require_once dirname(__DIR__) . '/admin/inc/catcache.php';
@@ -140,8 +169,14 @@ try {
             'when' => gmdate('c', strtotime((string)$x['created']))], $list);
         // (4.0) Of the reports played through Proton: how many, and how many say it plays great.
         $px = array_filter($list, fn($x) => !empty($x['proton']));
-        rs_pc_out(200, ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items,
-            'proton' => ['n' => count($px), 'runs' => count(array_filter($px, fn($x) => $x['verdict'] === 'runs'))]]);
+        $fbBody = ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items,
+            'proton' => ['n' => count($px), 'runs' => count(array_filter($px, fn($x) => $x['verdict'] === 'runs'))]];
+        // (4.1) A copy for the next minute's askers (answered at the top, before the site loads).
+        $fbDir = dirname(RS_PUBLIC) . '/recompstore-private/pc-fb';
+        if (!is_dir($fbDir)) @mkdir($fbDir, 0755, true);
+        $fbJson = json_encode($fbBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($fbJson !== false && @file_put_contents($fbDir . '/' . $app['id'] . '.json.' . getmypid(), $fbJson) !== false) @rename($fbDir . '/' . $app['id'] . '.json.' . getmypid(), $fbDir . '/' . $app['id'] . '.json');
+        rs_pc_out(200, $fbBody);
     }
     if ($a === 'feedback' && $post) {
         if ($s('website', 100) !== '') rs_pc_out(200, ['ok' => true]); // the hidden field: a bot
@@ -175,9 +210,10 @@ try {
         $rid = rs_play_from_pcfb((int)$fb->fetchColumn(), ['app' => $app['id'], 'who' => $who, 'verdict' => $verdict, 'sys' => $sys, 'version' => $version,
             'note' => $note, 'specs' => $specs, 'proton' => $proton], $me ? (int)$me['id'] : null);
         if ($log && $rid) {
-            try { rs_play_log_save($rid, $log); } catch (RuntimeException $e) { rs_pc_out(200, ['ok' => true, 'id' => $rid, 'warning' => 'Your report is in, but the log couldn\'t be kept.']); }
+            try { rs_play_log_save($rid, $log); } catch (RuntimeException $e) { @unlink(dirname(RS_PUBLIC) . '/recompstore-private/pc-fb/' . $app['id'] . '.json'); rs_pc_out(200, ['ok' => true, 'id' => $rid, 'warning' => 'Your report is in, but the log couldn\'t be kept.']); }
         }
         if ($verdict !== 'runs') rs_play_dev_ping($app['id']);
+        @unlink(dirname(RS_PUBLIC) . '/recompstore-private/pc-fb/' . $app['id'] . '.json'); // (4.1) its reports changed
         rs_pc_out(200, ['ok' => true, 'id' => $rid]);
     }
     rs_pc_out(400, ['ok' => false, 'error' => 'Unknown request.']);
