@@ -5,6 +5,8 @@
 //   GET  ?a=app&id=<app>              -> {app: {...}}            (one recomp's whole entry, for its page)
 //   GET  ?a=counts                     -> {counts: {app: {runs, issues, broken}}}
 //   POST a=feedback id verdict sys note version   (one per player and recomp: a new one replaces theirs)
+// (4.0) POST a=feedback also takes proton=1 (Linux or Steam Deck, the Windows build through Proton). GET
+//        feedback gives each item's proton, and proton: {n, runs} for the summary line.
 // (3.9) Reports developers can act on:
 //   POST a=feedback also takes specs (OS, CPU, GPU, RAM, driver; 600 characters) and, as multipart, a
 //        log file (text, 2 MB). Has problems / Won't run need a note of 15 characters or more. Signed
@@ -113,11 +115,14 @@ try {
             foreach ($st->fetchAll() as $p) $play[(int)$p['legacy_id']] = $p;
         }
         $replies = rs_play_replies(array_map(fn($p) => (int)$p['id'], $play));
-        $items = array_map(fn($x) => ['verdict' => $x['verdict'], 'sys' => $x['sys'], 'version' => $x['version'], 'note' => $x['note'],
+        $items = array_map(fn($x) => ['verdict' => $x['verdict'], 'sys' => $x['sys'], 'proton' => !empty($x['proton']), 'version' => $x['version'], 'note' => $x['note'],
             'specs' => rs_play_specs_line($x), 'log' => !empty($play[(int)$x['id']]['has_log']),
             'replies' => isset($play[(int)$x['id']]) ? ($replies[(int)$play[(int)$x['id']]['id']] ?? []) : [],
             'when' => gmdate('c', strtotime((string)$x['created']))], $list);
-        rs_pc_out(200, ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items]);
+        // (4.0) Of the reports played through Proton: how many, and how many say it plays great.
+        $px = array_filter($list, fn($x) => !empty($x['proton']));
+        rs_pc_out(200, ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items,
+            'proton' => ['n' => count($px), 'runs' => count(array_filter($px, fn($x) => $x['verdict'] === 'runs'))]]);
     }
     if ($a === 'feedback' && $post) {
         if ($s('website', 100) !== '') rs_pc_out(200, ['ok' => true]); // the hidden field: a bot
@@ -130,6 +135,8 @@ try {
         if ($verdict !== 'runs' && mb_strlen(trim($note)) < 15) rs_pc_out(422, ['ok' => false, 'error' => 'Tell the developer what happened and when.', 'field' => 'note']);
         $version = preg_replace('/[^\w .+-]/u', '', $s('version', 40)) ?? '';
         $specs = rs_play_specs_clean(isset($in['specs']) && is_string($in['specs']) ? $in['specs'] : '');
+        // (4.0) RecompLauncher says when a Linux or Steam Deck player ran the Windows build through Proton.
+        $proton = in_array($sys, ['linux', 'deck'], true) && in_array(strtolower($s('proton', 5)), ['1', 'true', 'yes', 'on'], true) ? 1 : 0;
         // (3.9) A log, checked before anything is saved: text only, 2 MB at most.
         $log = !empty($_FILES['log']) && (int)($_FILES['log']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE ? $_FILES['log'] : null;
         if ($log && ($e = rs_play_log_error($log)) !== null) rs_pc_out(422, ['ok' => false, 'error' => $e, 'field' => 'log']);
@@ -140,14 +147,14 @@ try {
         $me = rs_pc_me(true);
         $who = $me ? hash('sha256', 'acct:' . $me['id']) : rs_ip_hash();
         $db = rs_db();
-        $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, account_id, specs) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+        $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, account_id, specs, proton) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)
             ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), created = NOW(), hidden = 0,
-            account_id = COALESCE(VALUES(account_id), account_id), specs = IF(VALUES(specs) <> \'\', VALUES(specs), specs)')
-            ->execute([$app['id'], $verdict, $sys, $version, $note, $who, $me ? (int)$me['id'] : null, $specs]);
+            account_id = COALESCE(VALUES(account_id), account_id), specs = IF(VALUES(specs) <> \'\', VALUES(specs), specs), proton = VALUES(proton)')
+            ->execute([$app['id'], $verdict, $sys, $version, $note, $who, $me ? (int)$me['id'] : null, $specs, $proton]);
         $fb = $db->prepare('SELECT id FROM pc_feedback WHERE app = ? AND ip_hash = ?');
         $fb->execute([$app['id'], $who]);
         $rid = rs_play_from_pcfb((int)$fb->fetchColumn(), ['app' => $app['id'], 'who' => $who, 'verdict' => $verdict, 'sys' => $sys, 'version' => $version,
-            'note' => $note, 'specs' => $specs], $me ? (int)$me['id'] : null);
+            'note' => $note, 'specs' => $specs, 'proton' => $proton], $me ? (int)$me['id'] : null);
         if ($log && $rid) {
             try { rs_play_log_save($rid, $log); } catch (RuntimeException $e) { rs_pc_out(200, ['ok' => true, 'id' => $rid, 'warning' => 'Your report is in, but the log couldn\'t be kept.']); }
         }

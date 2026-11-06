@@ -114,3 +114,20 @@
 .ft-btns form{margin:0}
 .ft-btns button{padding:7px 12px}
 @media (max-width:900px){.ftr{grid-template-columns:minmax(0,1fr) auto}.ftr>span:nth-child(2),.ftr>span:nth-child(3),.ftr>span:nth-child(4){display:none}.fth{display:none}}
+/* (4.0) The PC recomps list in pages: search, sort, page size, what to show, page links */
+.pc-ls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:4px 0 14px}
+.pc-ls .pc-find-box{flex:1 1 280px;display:flex}
+.pc-ls .pc-find-box input{width:100%;height:40px;border-radius:999px;padding:0 16px}
+.card form.pc-ls label.pc-ls-sel{display:flex;flex-direction:row;align-items:center;gap:8px;font-weight:600;margin:0;white-space:nowrap}
+.card form.pc-ls label.pc-ls-sel select{width:auto;min-width:0;height:40px;margin:0;padding:0 34px 0 12px;border-radius:12px}
+.pc-ls-chips{margin:0 0 10px}
+.pc-ls-note{margin:0 0 12px}
+.pc-pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 16px}
+.pc-cards+.pc-pager{margin:20px 0 0}
+.pc-pager a,.pc-pager span{display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:rgba(244,248,252,.04);color:var(--frost);text-decoration:none;font:600 14px Figtree,sans-serif}
+.pc-pager a:hover{border-color:var(--cyan)}
+.pc-pager .on{background:var(--cyan);border-color:var(--cyan);color:var(--midnight,#0B1220)}
+.pc-pager .off{opacity:.4}
+.pc-pager .gap{border:0;background:none;min-width:0;padding:0 2px;color:var(--muted)}
+.pc-card.here .pc-card-cover{box-shadow:0 0 0 2px var(--cyan)}
+.pc-card-cover em.life{top:auto;bottom:8px;color:#ff9a9a}

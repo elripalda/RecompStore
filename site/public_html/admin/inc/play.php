@@ -72,6 +72,9 @@ function rs_play_tables(): void {
             ADD COLUMN has_log TINYINT NOT NULL DEFAULT 0, ADD COLUMN dev_seen TINYINT NOT NULL DEFAULT 0");
         $db->exec('UPDATE play_reports SET dev_seen = 1'); // the ones from before aren't news
     }
+    // (4.0) Played through Proton (a Windows build on Linux or Steam Deck), as RecompLauncher reports it.
+    if (!$db->query("SHOW COLUMNS FROM play_reports LIKE 'proton'")->fetch())
+        $db->exec("ALTER TABLE play_reports ADD COLUMN proton TINYINT NOT NULL DEFAULT 0");
     // (3.9) Developers answer reports, and the player can answer back. Shown under the report.
     $db->exec('CREATE TABLE IF NOT EXISTS play_report_replies (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -180,7 +183,7 @@ function rs_play_item(array $x, ?string $myWho, array $voted, array $replies = [
         // log itself), and the developer's answers.
         'specs' => rs_play_specs_line($x), 'log' => !empty($x['has_log']),
         'replies' => array_map(fn($r) => $r['dev'] ? $r : ['name' => $named ? (string)$x['username'] : null] + $r, $replies[(int)$x['id']] ?? []),
-        'id' => (int)$x['id'], 'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'], 'version' => (string)$x['version'],
+        'id' => (int)$x['id'], 'verdict' => (string)$x['verdict'], 'sys' => (string)$x['sys'], 'proton' => !empty($x['proton']), 'version' => (string)$x['version'],
         'progress' => (string)$x['progress'], 'fps' => (string)$x['fps'], 'res' => (string)$x['res'],
         'problems' => (object)rs_play_problems_decode((string)$x['problems']),
         'gpu' => (string)$x['gpu'], 'cpu' => (string)$x['cpu'], 'ram' => (int)$x['ram'],
@@ -299,13 +302,13 @@ function rs_play_replies(array $ids): array {
 function rs_play_from_pcfb(int $fbId, array $r, ?int $accountId): int {
     rs_play_tables();
     $db = rs_db();
-    $db->prepare("INSERT INTO play_reports (kind, app, who, account_id, show_name, verdict, sys, version, note, gpu, cpu, ram, specs, source, legacy_id, created, updated)
-        VALUES ('pc', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'pcfb', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-        ON DUPLICATE KEY UPDATE account_id = COALESCE(VALUES(account_id), account_id), show_name = 0, verdict = VALUES(verdict), sys = VALUES(sys),
+    $db->prepare("INSERT INTO play_reports (kind, app, who, account_id, show_name, verdict, sys, version, note, gpu, cpu, ram, specs, source, legacy_id, proton, created, updated)
+        VALUES ('pc', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'pcfb', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE account_id = COALESCE(VALUES(account_id), account_id), show_name = 0, verdict = VALUES(verdict), sys = VALUES(sys), proton = VALUES(proton),
         version = VALUES(version), note = VALUES(note), gpu = IF(VALUES(gpu) <> '', VALUES(gpu), gpu), cpu = IF(VALUES(cpu) <> '', VALUES(cpu), cpu),
         ram = IF(VALUES(ram) > 0, VALUES(ram), ram), specs = IF(VALUES(specs) <> '', VALUES(specs), specs), hidden = 0, flags = 0, dev_seen = 0, updated = UTC_TIMESTAMP()")
         ->execute([$r['app'], $r['who'], $accountId, $r['verdict'], $r['sys'], $r['version'], $r['note'], mb_substr((string)($r['gpu'] ?? ''), 0, 80),
-            mb_substr((string)($r['cpu'] ?? ''), 0, 80), min(32767, (int)($r['ram'] ?? 0)), (string)($r['specs'] ?? ''), $fbId]);
+            mb_substr((string)($r['cpu'] ?? ''), 0, 80), min(32767, (int)($r['ram'] ?? 0)), (string)($r['specs'] ?? ''), $fbId, !empty($r['proton']) ? 1 : 0]);
     $st = $db->prepare("SELECT id FROM play_reports WHERE kind = 'pc' AND app = ? AND who = ?");
     $st->execute([$r['app'], $r['who']]);
     rs_play_scores_forget();

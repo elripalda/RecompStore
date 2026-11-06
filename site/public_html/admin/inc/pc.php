@@ -64,6 +64,9 @@ function rs_pc_tables(): void {
     // their account when they were signed in (never shown; it's how they hear back from the developer).
     if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE 'specs'")->fetch())
         $db->exec("ALTER TABLE pc_feedback MODIFY note VARCHAR(1200) NOT NULL DEFAULT '', ADD COLUMN account_id INT NULL, ADD COLUMN specs VARCHAR(600) NOT NULL DEFAULT ''");
+    // (4.0) Played through Proton: a Windows build on Linux or Steam Deck, as RecompLauncher reports it.
+    if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE 'proton'")->fetch())
+        $db->exec("ALTER TABLE pc_feedback ADD COLUMN proton TINYINT(1) NOT NULL DEFAULT 0");
     $done = true;
 }
 
@@ -592,7 +595,7 @@ function rs_pc_report_url(string $u): string {
 
 function rs_pc_feedback_list(string $app, bool $withHidden = false, int $limit = 60): array {
     rs_pc_tables();
-    $st = rs_db()->prepare('SELECT id, verdict, sys, version, note, specs, created, hidden FROM pc_feedback WHERE app = ?' . ($withHidden ? '' : ' AND hidden = 0') . ' ORDER BY created DESC LIMIT ' . max(1, min(500, $limit)));
+    $st = rs_db()->prepare('SELECT id, verdict, sys, version, note, specs, created, hidden, proton FROM pc_feedback WHERE app = ?' . ($withHidden ? '' : ' AND hidden = 0') . ' ORDER BY created DESC LIMIT ' . max(1, min(500, $limit)));
     $st->execute([$app]);
     return $st->fetchAll();
 }

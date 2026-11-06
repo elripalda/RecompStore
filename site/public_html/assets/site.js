@@ -5773,6 +5773,8 @@
         if (s.n < 2) return `<div class="pr-srow"><span>${esc(sysName(k))}</span><span class="pr-note">${tn(s.n, '1 report so far', '{n} reports so far')}</span></div>`;
         return `<div class="pr-srow"><span>${esc(sysName(k))}</span><span class="pr-track"><i class="${scoreTone(s.score)}" style="width:${s.score}%"></i></span><b>${s.score}</b></div>`;
       };
+      // (4.0) Reports from Linux and Steam Deck players who ran the Windows build through Proton.
+      const protonRow = (list) => { const px = (list || []).filter((x) => x.proton); return pc && px.length ? `<div class="pr-srow"><span>${t('Through Proton')}</span><span class="pr-note">${esc(tf('{a} of {b} say it plays great', { a: px.filter((x) => x.verdict === 'runs').length, b: px.length }))}</span></div>` : ''; };
       const probs = Object.keys(sc.problems || {});
       const fixes = items.filter((x) => x.fix).sort((x, y) => y.helpful - x.helpful).slice(0, 3);
       el.innerHTML = `<div class="pr-top">
@@ -5783,7 +5785,7 @@
             ${vrow('runs', 'great', 'Plays great')}${vrow('issues', 'mixed', 'Has problems')}${vrow('broken', 'bad', "Won't run")}</div>
         </div>
         <div class="pr-mid">
-          <div><h3>${pc ? t('On each system') : t('On each firmware')}</h3>${sysKeys.length ? sysKeys.map(sysRow).join('') : `<p class="pr-note">${t('No firmware given yet.')}</p>`}</div>
+          <div><h3>${pc ? t('On each system') : t('On each firmware')}</h3>${sysKeys.length ? sysKeys.map(sysRow).join('') : `<p class="pr-note">${t('No firmware given yet.')}</p>`}${protonRow(items)}</div>
           <div><h3>${t('What people run into')}</h3>${probs.length ? probs.map((k) => `<div class="pr-prow"><span>${esc(pName(PLAY_PROBLEMS, k))}</span><span class="pr-note">${esc(tf('{a} of {b}', { a: Math.max(1, Math.round(sc.problems[k] * sc.n)), b: sc.n }))}</span></div>`).join('')
             : `<p class="pr-note">${t('Nothing reported. Problems show here once someone reports them.')}</p>`}</div>
         </div>
@@ -5806,7 +5808,7 @@
       return `<article class="pr-item" data-id="${x.id}">
         <header>${av}<span class="pr-by"><strong>${x.user ? esc(x.user) : t('Guest')}</strong><small>${esc(ago(x.when))}${x.app === 'launcher' ? ' · ' + t('from RecompLauncher') : ''}</small></span>
           <span class="pr-verdict ${vcls}">${prSq(vcls)}${esc(pName(PLAY_VERDICTS, x.verdict))}</span></header>
-        ${facts.length || x.log ? `<p class="pr-facts">${esc(facts.join(' · '))}${x.log ? `<span class="pr-log-tag">${t('Log Attached')}</span>` : ''}</p>` : ''}
+        ${facts.length || x.log || x.proton ? `<p class="pr-facts">${esc(facts.join(' · '))}${x.proton ? `<span class="pr-log-tag">${t('Through Proton')}</span>` : ''}${x.log ? `<span class="pr-log-tag">${t('Log Attached')}</span>` : ''}</p>` : ''}
         ${rig ? `<p class="pr-rig">${esc(rig)}</p>` : ''}
         ${probs.length ? `<p class="pr-probs sev${worst}">${esc(probText)}.</p>` : ''}
         ${x.fix ? `<div class="pr-helped"><p class="pr-helped-h">${t('What helped')}</p><p dir="auto">${esc(x.fix)}</p></div>` : ''}

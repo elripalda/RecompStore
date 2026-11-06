@@ -166,14 +166,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         rs_flash($e->getMessage(), 'err');
     }
+    // (4.0) Back on the same list page (search, filter, sort, page) after a save from the edit page.
+    $lq = (string)($_POST['list'] ?? '');
+    if ($lq !== '' && preg_match('/^[\w%=&.+-]{1,300}$/', $lq) && str_starts_with($back, 'pc.php?edit=')) {
+        [$path, $hash] = array_pad(explode('#', $back, 2), 2, '');
+        $back = $path . '&' . $lq . ($hash !== '' ? '#' . $hash : '');
+    }
     header('Location: ' . $back);
     exit;
 }
 
 $apps = rs_pc_apps();
-$found = rs_pc_found('new');
-$skipped = rs_pc_found('skip');
-$lastFind = rs_kv_get('pc_find_run');
+$view = (string)($_GET['view'] ?? '');
+// (4.0) The finder's lists only on their own page: the recomps list doesn't wait on them.
+$found = $view === 'found' ? rs_pc_found('new') : [];
+$skipped = $view === 'found' ? rs_pc_found('skip') : [];
+$lastFind = $view === 'found' ? rs_kv_get('pc_find_run') : null;
+
+// (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
+// and page size are remembered (a cookie) so the list comes back the way you left it.
+$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover'],
+    'sort' => ['new' => 'Newest', 'old' => 'Oldest', 'az' => 'A to Z', 'za' => 'Z to A', 'updated' => 'Recently updated', 'downloads' => 'Most downloads', 'reports' => 'Most reports'],
+    'per' => [25, 50, 100, 200]];
+$lsPick = function (string $k, $def) use ($lsOpt) {
+    $v = $_GET[$k] ?? ($_COOKIE['rs_pc_' . $k] ?? $def);
+    $ok = $k === 'per' ? in_array((int)$v, $lsOpt['per'], true) : isset($lsOpt[$k][(string)$v]);
+    $v = $ok ? ($k === 'per' ? (int)$v : (string)$v) : $def;
+    if (isset($_GET[$k]) && $ok && in_array($k, ['sort', 'per'], true)) setcookie('rs_pc_' . $k, (string)$v, ['expires' => time() + 31536000, 'path' => '/admin/', 'samesite' => 'Lax', 'secure' => true, 'httponly' => true]);
+    return $v;
+};
+$ls = ['q' => mb_substr(trim((string)($_GET['q'] ?? '')), 0, 80), 'show' => $lsPick('show', 'all'), 'sort' => $lsPick('sort', 'new'), 'per' => $lsPick('per', 50), 'page' => max(1, (int)($_GET['page'] ?? 1))];
+$lsQs = fn(array $over = []): string => http_build_query(array_filter(array_merge(['q' => $ls['q'], 'show' => $ls['show'], 'sort' => $ls['sort'], 'per' => $ls['per'], 'page' => $ls['page']], $over), fn($v) => $v !== '' && $v !== null));
 $devs = rs_developers();
 $edit = $editId !== '' ? rs_pc_app($editId) : null;
 $origin = fn(string $k) => RS_PC_ORIGINS[$k] ?? 'Other';
@@ -224,14 +247,14 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
 
 <?php if ($edit): $a = $edit; ?>
 <section class="card" id="edit">
-  <div class="an-head"><h2><?= h($a['name']) ?></h2><a class="an-csv an-plain" href="pc.php">All PC recomps</a></div>
+  <div class="an-head"><h2><?= h($a['name']) ?></h2><a class="an-csv an-plain" href="pc.php?<?= h($lsQs()) ?>#list">All PC recomps</a></div>
   <?php // (3.8) Its release files, as VirusTotal saw them, and a held update.
   if (function_exists('rs_vt_on') && rs_vt_on()): $vb = rs_vt_repo_badge(rs_pc_key($a), (string)($a['pending']['tag'] ?? ($a['ok_tag'] ?? ''))); ?>
   <p class="vt-line"><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>Not checked yet</span>' ?>
     <?php if (!empty($a['pending']['tag'])): ?> <a href="security.php">Update to <?= h($a['pending']['version'] ?: $a['pending']['tag']) ?> is on hold</a><?php endif; ?></p>
   <?php endif; ?>
   <form method="post" enctype="multipart/form-data" class="grid2">
-    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><input type="hidden" name="list" value="<?= h($lsQs()) ?>">
     <label>Name<input name="name" value="<?= h($a['name']) ?>" maxlength="120"><small>The project's name, like Zelda 64: Recompiled.</small></label>
     <label>The game<input name="game" value="<?= h($a['game']) ?>" maxlength="120"><small>The original game, like The Legend of Zelda: Majora's Mask.</small></label>
     <label>From<select name="origin"><?php foreach (RS_PC_ORIGINS as $k => $n): ?><option value="<?= h($k) ?>"<?= $a['origin'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select></label>
@@ -279,21 +302,66 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
 </section>
 <?php endif; ?>
 
-<?php $view = (string)($_GET['view'] ?? ''); $counts = rs_pc_feedback_counts(); ?>
-<?php if ($view === ''): ?>
-<section class="card">
-  <div class="found-head"><h2>In the PC store <span class="pill cyan"><?= count($apps) ?></span></h2><label class="find pc-find-box"><input type="search" placeholder="Find a recomp" data-pc-find autocomplete="off"></label></div>
+<?php $counts = $view === '' ? rs_pc_feedback_counts() : []; ?>
+<?php if ($view === ''):
+    // (4.0) What each filter matches, its count, then the search, the order and the page.
+    $lifeOf = fn(array $a): bool => in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) || !empty($a['archived']);
+    $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'], 'soon' => fn($a) => !empty($a['soon']),
+        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === ''];
+    $q = mb_strtolower($ls['q']);
+    $inQ = $q === '' ? $apps : array_values(array_filter($apps, fn($a) => str_contains(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id'] . ' ' . $a['author']), $q)));
+    $lsCount = array_map(fn($f) => count(array_filter($inQ, $f)), $lsMatch);
+    $list = array_values(array_filter($inQ, $lsMatch[$ls['show']]));
+    $when = fn($a) => (string)(($a['live_at'] ?? '') !== '' ? $a['live_at'] : ($a['added'] ?? ''));
+    $rep = fn($a) => array_sum($counts[$a['id']] ?? []);
+    $cmp = ['new' => fn($x, $y) => strcmp($when($y), $when($x)), 'old' => fn($x, $y) => strcmp($when($x), $when($y)),
+        'az' => fn($x, $y) => strnatcasecmp($x['name'], $y['name']), 'za' => fn($x, $y) => strnatcasecmp($y['name'], $x['name']),
+        'updated' => fn($x, $y) => strcmp((string)$y['released'], (string)$x['released']), 'downloads' => fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads'],
+        'reports' => fn($x, $y) => $rep($y) <=> $rep($x)][$ls['sort']];
+    usort($list, fn($x, $y) => $cmp($x, $y) ?: strnatcasecmp($x['name'], $y['name']));
+    $pages = max(1, (int)ceil(count($list) / $ls['per']));
+    $ls['page'] = min($ls['page'], $pages);
+    $shown = array_slice($list, ($ls['page'] - 1) * $ls['per'], $ls['per']);
+    $listQs = $lsQs();
+    $pager = function () use ($ls, $pages, $lsQs, $list): string {
+        if ($pages < 2) return '';
+        $nums = array_unique(array_filter([1, 2, $ls['page'] - 1, $ls['page'], $ls['page'] + 1, $pages - 1, $pages], fn($n) => $n >= 1 && $n <= $pages));
+        sort($nums);
+        $o = '<nav class="pc-pager" aria-label="Pages">';
+        $o .= $ls['page'] > 1 ? '<a href="pc.php?' . h($lsQs(['page' => $ls['page'] - 1])) . '" rel="prev">‹ Back</a>' : '<span class="off">‹ Back</span>';
+        $last = 0;
+        foreach ($nums as $n) { if ($n - $last > 1) $o .= '<span class="gap">…</span>'; $o .= $n === $ls['page'] ? '<span class="on" aria-current="page">' . $n . '</span>' : '<a href="pc.php?' . h($lsQs(['page' => $n])) . '">' . $n . '</a>'; $last = $n; }
+        $o .= $ls['page'] < $pages ? '<a href="pc.php?' . h($lsQs(['page' => $ls['page'] + 1])) . '" rel="next">Next ›</a>' : '<span class="off">Next ›</span>';
+        return $o . '</nav>';
+    };
+?>
+<section class="card" id="list">
+  <div class="found-head"><h2>In the PC store <span class="pill cyan"><?= count($apps) ?></span></h2></div>
   <?php if (!$apps): ?><p class="muted">Nothing yet. Add what the finder found, under Found on GitHub.</p><?php else: ?>
+  <form class="pc-ls" method="get" action="pc.php#list" data-pc-ls>
+    <label class="find pc-find-box"><input type="search" name="q" value="<?= h($ls['q']) ?>" placeholder="Find a recomp, game, repo or developer" autocomplete="off" data-pc-q></label>
+    <input type="hidden" name="show" value="<?= h($ls['show']) ?>">
+    <label class="pc-ls-sel">Sort<select name="sort" data-pc-auto><?php foreach ($lsOpt['sort'] as $k => $n): ?><option value="<?= h($k) ?>"<?= $ls['sort'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select></label>
+    <label class="pc-ls-sel">Per page<select name="per" data-pc-auto><?php foreach ($lsOpt['per'] as $n): ?><option value="<?= $n ?>"<?= $ls['per'] === $n ? ' selected' : '' ?>><?= $n ?></option><?php endforeach; ?></select></label>
+  </form>
+  <div class="chips pc-ls-chips" role="group" aria-label="Show">
+    <?php foreach ($lsOpt['show'] as $k => $n): if ($k !== 'all' && $k !== $ls['show'] && !$lsCount[$k]) continue; ?>
+    <a class="chip<?= $ls['show'] === $k ? ' on' : '' ?>" href="pc.php?<?= h($lsQs(['show' => $k, 'page' => null])) ?>#list"<?= $ls['show'] === $k ? ' aria-current="true"' : '' ?>><?= h($n) ?><span class="n"><?= $lsCount[$k] ?></span></a>
+    <?php endforeach; ?>
+  </div>
+  <p class="muted small-note pc-ls-note"><?= $list ? 'Showing ' . (($ls['page'] - 1) * $ls['per'] + 1) . '–' . (($ls['page'] - 1) * $ls['per'] + count($shown)) . ' of ' . count($list) . ($ls['q'] !== '' ? ' for “' . h($ls['q']) . '”' : '') . '.' : 'Nothing matches.' ?><?= $ls['q'] !== '' || $ls['show'] !== 'all' ? ' <a href="pc.php?' . h(http_build_query(['sort' => $ls['sort'], 'per' => $ls['per']])) . '#list">Clear</a>' : '' ?></p>
+  <?= $pager() ?>
   <div class="pc-cards">
-    <?php foreach ($apps as $a): $c = $counts[$a['id']] ?? []; $n = array_sum($c); ?>
-    <a class="pc-card<?= $a['hidden'] ? ' dim' : '' ?>" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>#edit" data-text="<?= h(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'])) ?>">
-      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?></span>
+    <?php foreach ($shown as $a): $c = $counts[$a['id']] ?? []; $n = array_sum($c); $life = (string)($a['status'] ?? '') === 'paused' ? 'On hold' : ($lifeOf($a) ? 'Ended' : ''); ?>
+    <a class="pc-card<?= $a['hidden'] ? ' dim' : '' ?><?= $editId === $a['id'] ? ' here' : '' ?>" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>&amp;<?= h($listQs) ?>#edit">
+      <span class="pc-card-cover"><?= $a['cover'] ? '<img src="' . h($thumb($a['cover'], 256)) . '" alt="" loading="lazy" decoding="async" width="150" height="225">' : '<span>' . h(mb_substr($a['name'], 0, 2)) . '</span>' ?><?= $a['hidden'] ? '<em>Hidden</em>' : (!empty($a['soon']) ? '<em>Soon</em>' : ($a['featured'] ? '<em class="ok">Featured</em>' : '')) ?><?= $life !== '' ? '<em class="life">' . $life . '</em>' : '' ?></span>
       <span class="pc-card-words"><strong><?= h($a['name']) ?></strong><small><?= h($a['game'] ?: '?') ?></small>
         <small class="muted"><?= h($origin($a['origin'])) ?> · <?= h(RS_PC_GENRES[$a['genre']] ?? 'No kind yet') ?></small>
         <small class="muted"><?= h($a['version'] ?: 'no release') ?><?= $n ? ' · ' . $n . ($n === 1 ? ' report' : ' reports') : '' ?></small></span>
     </a>
     <?php endforeach; ?>
   </div>
+  <?= $pager() ?>
   <?php endif; ?>
 </section>
 <?php elseif ($view === 'found'): ?>
@@ -344,12 +412,15 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
 <?php endif; ?>
 <script>
 (function () {
-  var box = document.querySelector('[data-pc-find]');
-  if (!box) return;
-  box.addEventListener('input', function () {
-    var q = box.value.trim().toLowerCase();
-    document.querySelectorAll('.pc-card[data-text]').forEach(function (c) { c.hidden = q !== '' && c.dataset.text.indexOf(q) < 0; });
-  });
+  var form = document.querySelector('[data-pc-ls]');
+  if (!form) return;
+  // Search after a short pause in typing, and the selects as soon as they change. Back to page 1.
+  var q = form.querySelector('[data-pc-q]'), timer = null, last = q.value;
+  var go = function () { if (q.value.trim() === last.trim() && !go.force) return; form.submit(); };
+  q.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(go, 450); });
+  q.addEventListener('search', function () { clearTimeout(timer); go.force = true; go(); });
+  form.querySelectorAll('[data-pc-auto]').forEach(function (s) { s.addEventListener('change', function () { go.force = true; form.submit(); }); });
+  if (q.value) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 })();
 </script>
 <?php rs_foot(['assets/artpick.js']);
