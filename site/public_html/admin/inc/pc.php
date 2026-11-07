@@ -933,11 +933,16 @@ function rs_pc_pattern(string $name, string $tag): string {
     return $p !== $name ? $p : $name;
 }
 function rs_pc_heal_assets(array $a, array $r): array {
-    if (rs_pc_release_for($a)) return $a; // (3.8) a recent release still has its files: the newest just has other ones (Switch, Android)
-    $rel = rs_host_releases(rs_pc_host($a), $a['repo'], 3600);
-    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
-    $latest = null;
-    foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
+    // (4.1) Looked at per system: one system's file still matching (Linux) used to stop a renamed
+    // Windows file from being followed, and the launcher said there was no Windows build.
+    // (3.8) The release players get when one still has their files (the newest may just have other
+    // ones: Switch, Android), else the newest full release.
+    $latest = rs_pc_release_for($a);
+    if (!$latest) {
+        $rel = rs_host_releases(rs_pc_host($a), $a['repo'], 3600);
+        $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+        foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
+    }
     if (!$latest) return $a;
     $names = array_map(fn($x) => (string)$x['name'], (array)$latest['assets']);
     foreach (['win' => 'asset_win', 'linux' => 'asset_linux', 'mac' => 'asset_mac'] as $sys => $k) {
@@ -946,7 +951,7 @@ function rs_pc_heal_assets(array $a, array $r): array {
         if ($p === '' || $new === '') continue;
         $hit = false;
         foreach ($names as $n) if (rs_pattern_matches($p, $n)) { $hit = true; break; }
-        if ($hit) continue;
+        if ($hit || !in_array($new, $names, true)) continue; // the new name has to be in that same release
         $np = rs_pc_pattern($new, (string)$latest['tag_name']);
         if ($np !== '' && $np !== $p) { $a[$k] = $np; rs_log('pc-asset', $a['id'], "$sys: $p -> $np"); }
     }
