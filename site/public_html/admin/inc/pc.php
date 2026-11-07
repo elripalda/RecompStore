@@ -298,6 +298,64 @@ function rs_pc_find(int $budget = 25): array {
     return [$new, $looked];
 }
 
+// (4.1) The Discord server's #recomp-suggestions: links people post there land in the found list too,
+// read with the site's bot (it needs View Channel and Read Message History there, and the Message
+// Content Intent switched on for the app). Each link is looked at once, then again after 3 days if it
+// had nothing to download. -> [new found, looked at, problem ('' when fine)]
+const RS_DC_SUGGEST_CHANNEL = '1565266599353516132';
+const RS_DC_SUGGEST_GUILD = '1556689421896654858';
+function rs_pc_find_discord(int $budget = 30): array {
+    rs_pc_tables();
+    $start = microtime(true);
+    $bot = function_exists('rs_dc_conf') ? (string)rs_dc_conf()['bot'] : '';
+    $chan = trim((string)rs_setting('dc_suggest_channel', RS_DC_SUGGEST_CHANNEL));
+    $done = function (int $new, int $looked, string $why) {
+        rs_kv_put('pc_find_dc', (string)json_encode(['at' => time(), 'new' => $new, 'looked' => $looked, 'why' => $why]));
+        return [$new, $looked, $why];
+    };
+    if ($bot === '' || !preg_match('/^\d{5,25}$/', $chan)) return $done(0, 0, 'The site\'s Discord bot isn\'t set up.');
+    [$st, $msgs] = rs_dc_call('GET', '/channels/' . $chan . '/messages?limit=100', ['bot' => $bot]);
+    if ($st === 403 || $st === 404) return $done(0, 0, 'The bot can\'t read #recomp-suggestions. Add it to the server and let it see that channel and its history.');
+    if ($st !== 200 || !is_array($msgs)) return $done(0, 0, 'Discord didn\'t answer (' . $st . '). It tries again later.');
+    $db = rs_db();
+    $have = [];
+    foreach ($db->query('SELECT repo, state, UNIX_TIMESTAMP(checked) t FROM pc_found')->fetchAll() as $r) $have[strtolower((string)$r['repo'])] = [(string)$r['state'], (int)$r['t']];
+    $listed = [];
+    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') $listed[strtolower(rs_pc_key($a))] = true;
+    $put = $db->prepare('INSERT INTO pc_found (repo, data, found, checked, state) VALUES (?, ?, NOW(), NOW(), ?) ON DUPLICATE KEY UPDATE data = VALUES(data), checked = NOW(),
+        state = IF(state IN (\'skip\', \'added\'), state, VALUES(state))');
+    $new = $looked = 0;
+    $blank = 0;
+    foreach ($msgs as $m) {
+        $text = (string)($m['content'] ?? '');
+        foreach ((array)($m['embeds'] ?? []) as $e) $text .= ' ' . (string)($e['url'] ?? '') . ' ' . (string)($e['description'] ?? '');
+        if (trim($text) === '' && empty($m['attachments'])) ++$blank;
+        if (!preg_match_all('#https?://(?:www\.)?(?:github\.com|gitlab\.com)/[\w.-]+/[\w.-]+#i', $text, $mm)) continue;
+        foreach (array_unique($mm[0]) as $url) {
+            if (microtime(true) - $start > $budget) break 2;
+            $l = rs_repo_from_link($url);
+            if (!$l) continue;
+            $k = strtolower(rs_repo_key($l['host'], $l['repo']));
+            if (isset($listed[$k])) continue;
+            if (isset($have[$k]) && ($have[$k][0] !== 'none' || $have[$k][1] > time() - 3 * 86400)) continue;
+            ++$looked;
+            $r = rs_pc_read_repo($l['repo'], $l['host']);
+            $have[$k] = ['none', time()];
+            if (!$r['ok']) continue;
+            $r['via'] = 'discord';
+            $r['by'] = (string)($m['author']['global_name'] ?? $m['author']['username'] ?? '');
+            $r['msg'] = 'https://discord.com/channels/' . RS_DC_SUGGEST_GUILD . '/' . $chan . '/' . (string)($m['id'] ?? '');
+            $state = ($r['assets']['win'] === '' && $r['assets']['linux'] === '' && $r['assets']['mac'] === '') ? 'none' : 'new';
+            $put->execute([rs_repo_key($l['host'], (string)$r['repo']), json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $state]);
+            $have[$k] = [$state, time()];
+            if ($state === 'new') ++$new;
+        }
+    }
+    // Messages come back empty when the app's Message Content Intent is off.
+    $why = $msgs && $blank === count($msgs) ? 'Discord hides the messages\' text from the bot. Turn on Message Content Intent for the app in the Discord Developer Portal (Bot page).' : '';
+    return $done($new, $looked, $why);
+}
+
 // Looks a repo up by hand (the admin's box): it lands in the found list either way.
 // (3.9) A gitlab.com link is read from GitLab; it's filed as gitlab.com/<project>.
 function rs_pc_find_one(string $repo): array {
@@ -346,6 +404,19 @@ function rs_pc_find_maybe(): void {
         elseif (function_exists('litespeed_finish_request')) @litespeed_finish_request();
         @set_time_limit(90);
         try { rs_pc_find(40); } catch (Throwable $e) { /* next time */ }
+    });
+}
+// (4.1) The Discord suggestions, every half hour while the found list is open, after the page has gone.
+function rs_pc_find_discord_maybe(): void {
+    $last = rs_kv_get('pc_find_dc');
+    if ($last && $last['age'] < 1800) return;
+    rs_kv_put('pc_find_dc', (string)json_encode(['at' => time(), 'new' => 0, 'looked' => 0, 'why' => ''] + (json_decode((string)($last['v'] ?? ''), true) ?: [])));
+    register_shutdown_function(function () {
+        if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+        ignore_user_abort(true);
+        if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+        @set_time_limit(60);
+        try { rs_pc_find_discord(40); } catch (Throwable $e) { /* next time */ }
     });
 }
 

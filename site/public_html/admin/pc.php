@@ -24,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($act === 'find') {
             [$n, $looked] = rs_pc_find(45);
+            try { [$dn, $dl] = rs_pc_find_discord(25); $n += $dn; $looked += $dl; } catch (Throwable $e) { /* GitHub's still counted */ } // (4.1)
             rs_flash($n ? 'Found ' . $n . ' new PC ' . ($n === 1 ? 'recomp' : 'recomps') . '.' : 'Nothing new' . ($looked ? ' (' . $looked . ' looked at)' : '') . '.');
             $back = 'pc.php?view=found';
         } elseif ($act === 'lookup') {
@@ -203,6 +204,9 @@ $view = (string)($_GET['view'] ?? '');
 $found = $view === 'found' ? rs_pc_found('new') : [];
 $skipped = $view === 'found' ? rs_pc_found('skip') : [];
 $lastFind = $view === 'found' ? rs_kv_get('pc_find_run') : null;
+// (4.1) Links from the Discord server's #recomp-suggestions, and how the last read went.
+$dcFind = $view === 'found' ? (json_decode((string)(rs_kv_get('pc_find_dc')['v'] ?? ''), true) ?: null) : null;
+if ($view === 'found') rs_pc_find_discord_maybe();
 
 // (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
 // and page size are remembered (a cookie) so the list comes back the way you left it.
@@ -404,13 +408,14 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="find"><button>Look again</button></form>
     </div>
   </div>
-  <p class="muted small-note">Repos that look like PC recomps, with a download in their latest release. Looked for every morning<?= $lastFind ? ', last ' . h(rs_date('M j, g:i a', (int)$lastFind['v'])) : '' ?>. Check each one is the developer's own build with no game files in it, and that it plays well, before you add it.</p>
+  <p class="muted small-note">Repos that look like PC recomps, with a download in their latest release. Looked for every morning<?= $lastFind ? ', last ' . h(rs_date('M j, g:i a', (int)$lastFind['v'])) : '' ?>. Check each one is the developer's own build with no game files in it, and that it plays well, before you add it.<?= $dcFind ? ' Links posted in #recomp-suggestions on Discord come in too' . (!empty($dcFind['at']) ? ', last read ' . h(rs_date('M j, g:i a', (int)$dcFind['at'])) : '') . '.' : '' ?></p>
+  <?php if ($dcFind && ($dcFind['why'] ?? '') !== ''): ?><p class="bad-text small-note"><?= h((string)$dcFind['why']) ?></p><?php endif; ?>
   <?php if (!$found): ?><p class="muted">Nothing waiting.</p><?php else: ?>
   <div class="ftable" role="table">
     <div class="ftr fth" role="row"><span>Project</span><span>Console</span><span>Release</span><span>Stars</span><span></span></div>
     <?php foreach ($found as $f): $flags = (array)($f['flags'] ?? []); ?>
     <div class="ftr" role="row">
-      <span class="ft-name"><?= !empty($f['avatar']) ? '<img src="' . h($f['avatar']) . '" alt="" loading="lazy">' : '<i></i>' ?><span><a href="<?= h(rs_host_web($f['host'], $f['repo'])) ?>" target="_blank" rel="noopener"><?= h($f['repo']) ?></a><?= $f['host'] === 'gitlab' ? ' <span class="pill">GitLab</span>' : '' ?><small title="<?= h((string)($f['description'] ?? '')) ?>"><?= h($f['game'] ?: mb_strimwidth((string)($f['description'] ?? ''), 0, 80, '…')) ?></small><?php if (!empty($flags['gamefiles']) || !empty($flags['huge'])): ?><small class="bad-text"><?= !empty($flags['gamefiles']) ? 'Has a file that looks like game data' : 'Has a very large file' ?></small><?php endif; ?></span></span>
+      <span class="ft-name"><?= !empty($f['avatar']) ? '<img src="' . h($f['avatar']) . '" alt="" loading="lazy">' : '<i></i>' ?><span><a href="<?= h(rs_host_web($f['host'], $f['repo'])) ?>" target="_blank" rel="noopener"><?= h($f['repo']) ?></a><?= $f['host'] === 'gitlab' ? ' <span class="pill">GitLab</span>' : '' ?><?= ($f['via'] ?? '') === 'discord' ? ' <a class="pill cyan" href="' . h((string)($f['msg'] ?? '')) . '" target="_blank" rel="noopener" title="Posted in #recomp-suggestions">Discord' . (($f['by'] ?? '') !== '' ? ' · ' . h((string)$f['by']) : '') . '</a>' : '' ?><small title="<?= h((string)($f['description'] ?? '')) ?>"><?= h($f['game'] ?: mb_strimwidth((string)($f['description'] ?? ''), 0, 80, '…')) ?></small><?php if (!empty($flags['gamefiles']) || !empty($flags['huge'])): ?><small class="bad-text"><?= !empty($flags['gamefiles']) ? 'Has a file that looks like game data' : 'Has a very large file' ?></small><?php endif; ?></span></span>
       <span><?= h($origin((string)$f['origin'])) ?></span>
       <span><?= h($f['version'] ?: 'none') ?><small class="muted"><?= h(implode(', ', array_keys(array_filter((array)$f['assets'])))) ?></small></span>
       <span><?= (int)$f['stars'] ?></span>
