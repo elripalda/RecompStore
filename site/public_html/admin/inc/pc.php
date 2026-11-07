@@ -799,7 +799,9 @@ function rs_pc_catalog(): array {
         $e += rs_ai_entry($a); // (2.9)
         // (3.3) How RecompLauncher starts it and sets it up from the player's copy (CURATOR-SETUP-GUIDE.md).
         $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
-        if (is_array($boot) && $boot) $e['boot'] = $boot;
+        // (4.1) A developer's own recomplauncher.json pasted in goes out as it is ("launcher"), so the
+        // launcher shows Easy Setup and its game settings before the game is installed too.
+        if (is_array($boot) && $boot) { if ((int)($boot['format'] ?? 0) === 1 && isset($boot['start'])) $e['launcher'] = $boot; else $e['boot'] = $boot; }
         if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
         $apps[] = $e;
     }
@@ -874,7 +876,7 @@ function rs_pc_write_files(array $cat): bool {
 function rs_pc_web_copy(array $cat): array {
     foreach ($cat['apps'] as &$a) {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
-        unset($a['about'], $a['boot'], $a['features'], $a['copy_ids']);
+        unset($a['about'], $a['boot'], $a['launcher'], $a['features'], $a['copy_ids']);
         if ($series !== '') $a['about'] = ['series' => $series];
         $a['lite'] = true;
     }
