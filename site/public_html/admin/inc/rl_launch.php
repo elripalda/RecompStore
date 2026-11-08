@@ -103,6 +103,17 @@ function rs_rl_launch_linux(): ?array {
     return ['version' => $g['version'], 'size' => $g['size'], 'sha256' => $g['sha256'], 'download' => '/api/launcher-beta.php?a=download&os=linux',
         'deb' => $g['deb'] ? ['size' => $g['deb']['size'], 'download' => '/api/launcher-beta.php?a=download&os=deb'] : null];
 }
+// (4.2) The Mac build (Apple Silicon), when the newest release on GitHub has one and the Launcher
+// beta page shows it.
+function rs_rl_launch_mac(): ?array {
+    try {
+        if (!function_exists('rs_lb_gh_latest')) require_once __DIR__ . '/betawave.php';
+        if (!rs_lb_mac_shown()) return null;
+        $g = rs_lb_gh_latest('macos');
+    } catch (Throwable $e) { error_log('launch mac: ' . $e->getMessage()); return null; }
+    if (!$g) return null;
+    return ['version' => $g['version'], 'size' => $g['size'], 'sha256' => $g['sha256'], 'download' => '/api/launcher-beta.php?a=download&os=mac'];
+}
 function rs_rl_launch_public(bool $preview): ?array {
     $v = rs_rl_version();
     // Nothing published yet: a preview shows the newest installer uploaded, so the page can be
@@ -125,6 +136,7 @@ function rs_rl_launch_public(bool $preview): ?array {
         'download' => $preview && !rs_rl_launch_live() ? (string)$v['url'] : '/api/launcher-beta.php?a=download',
         // (3.7) The Linux build, when the newest release on GitHub has one.
         'linux' => rs_rl_launch_linux(),
+        'mac' => rs_rl_launch_mac(),
         'page' => [
             'headline' => $p['headline'], 'intro' => $p['intro'], 'soon' => $p['soon'],
             'steps' => rs_rl_launch_lines($p['steps']), 'reqs' => rs_rl_launch_lines($p['reqs']),

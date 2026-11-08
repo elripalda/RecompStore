@@ -840,8 +840,9 @@ function rs_pc_catalog(): array {
             'downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'blurb' => $a['blurb'], 'adds' => (string)($a['adds'] ?? ''), 'description' => $a['description'],
             'needs' => $a['needs'], 'credits' => $a['credits'], 'author' => $a['author'],
             'icon' => $abs($a['icon']), 'cover' => $abs($a['cover']), 'hero' => $abs($a['hero']), 'logo' => $abs($a['logo']),
-            'systems' => array_keys(array_filter(['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => $a['asset_mac']])),
-            'assets' => array_filter(['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => $a['asset_mac']]),
+            // (4.2) Mac only with a download the launcher can install there: a .zip that isn't Intel-only.
+            'systems' => array_keys(array_filter(['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => rs_pc_mac_ok($a['asset_mac'])])),
+            'assets' => array_filter(['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => rs_pc_mac_ok($a['asset_mac'])]),
             'tags' => array_values(array_filter(array_map('trim', explode(',', (string)$a['tags'])))),
             // (2.9) Newest arrivals: when it went live (to the second), else the day it was added.
             'added' => (string)($a['live_at'] ?? '') !== '' ? (string)$a['live_at'] : $a['added'],
@@ -1133,6 +1134,19 @@ function rs_pc_switch_repo(array $a, string $to, string $host = ''): array {
 }
 
 // (4.0) What needs a look on a recomp: a download problem or a move you haven't marked as fine.
+// (4.2) RecompLauncher on Mac installs .zip files only, and runs on Apple Silicon. '' when a Mac
+// download pattern is fine, otherwise why it isn't.
+function rs_pc_mac_why(string $pat): string {
+    $p = strtolower(trim($pat));
+    if ($p === '') return '';
+    if (!str_ends_with($p, '.zip')) return 'The Mac download has to be a .zip. RecompLauncher on Mac can\'t install a .dmg, .rar, .tar.gz or a file with no type.';
+    if (preg_match('/(x86[_-]?64|amd64|intel)/', $p) && !preg_match('/(arm64|aarch64|universal|apple[-_ ]?silicon)/', $p))
+        return 'This Mac download looks Intel-only by its name. RecompLauncher on Mac needs an Apple Silicon or universal build.';
+    return '';
+}
+// The Mac pattern when it's fine, '' when it isn't.
+function rs_pc_mac_ok(string $pat): string { return rs_pc_mac_why($pat) === '' ? $pat : ''; }
+
 function rs_pc_alerts(array $a): array {
     $out = [];
     if ((string)($a['dl_state'] ?? '') !== '' && (string)($a['dl_ack'] ?? '') !== $a['dl_state'] . '|' . ($a['dl_why'] ?? '')) $out['dl'] = (string)$a['dl_why'];

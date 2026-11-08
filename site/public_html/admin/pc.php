@@ -41,9 +41,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'save') {
             $a = rs_pc_app((string)($_POST['id'] ?? ''));
             if (!$a) throw new RuntimeException('That app is gone.');
+            $macBefore = (string)$a['asset_mac'];
             foreach (['name' => 120, 'game' => 120, 'repo' => 160, 'asset_win' => 160, 'asset_linux' => 160, 'asset_mac' => 160, 'blurb' => 160, 'adds' => 120, 'description' => 8000,
                 'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000, 'report_url' => 300] as $k => $max)
                 $a[$k] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST[$k] ?? ''))), 0, $max);
+            // (4.2) A new Mac download has to be one RecompLauncher on Mac can install (a .zip, not Intel-only).
+            if ($a['asset_mac'] !== $macBefore && ($why = rs_pc_mac_why($a['asset_mac'])) !== '') throw new RuntimeException($why . ' Leave it empty if there isn\'t one.');
             // (3.9) The developer's "how to report bugs" page: https only.
             if ($a['report_url'] !== '' && rs_pc_report_url($a['report_url']) === '') throw new RuntimeException('The bug report link has to be a full https:// address.');
             $a['origin'] = isset(RS_PC_ORIGINS[$_POST['origin'] ?? '']) ? (string)$_POST['origin'] : 'other';
@@ -210,7 +213,7 @@ if ($view === 'found') rs_pc_find_discord_maybe();
 
 // (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
 // and page size are remembered (a cookie) so the list comes back the way you left it.
-$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look', 'blocked' => 'Not compatible'],
+$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look', 'blocked' => 'Not compatible', 'mac' => 'On Mac', 'macfix' => 'Mac needs a fix'],
     'sort' => ['new' => 'Newest', 'old' => 'Oldest', 'az' => 'A to Z', 'za' => 'Z to A', 'updated' => 'Recently updated', 'downloads' => 'Most downloads', 'reports' => 'Most reports'],
     'per' => [25, 50, 100, 200]];
 $lsPick = function (string $k, $def) use ($lsOpt) {
@@ -225,7 +228,7 @@ $lsQs = fn(array $over = []): string => http_build_query(array_filter(array_merg
 $devs = rs_developers();
 $edit = $editId !== '' ? rs_pc_app($editId) : null;
 $origin = fn(string $k) => RS_PC_ORIGINS[$k] ?? 'Other';
-$sys = fn(array $a) => implode(' · ', array_keys(array_filter(['Windows' => $a['asset_win'], 'Linux' => $a['asset_linux'], 'macOS' => $a['asset_mac']])));
+$sys = fn(array $a) => implode(' · ', array_keys(array_filter(['Windows' => $a['asset_win'], 'Linux' => $a['asset_linux'], 'macOS' => rs_pc_mac_ok((string)$a['asset_mac'])])));
 $published = is_file(RS_PC_CATALOG) ? (int)filemtime(RS_PC_CATALOG) : 0;
 // (3.5) The list shows small copies of the covers (made once, then kept), not the full pictures.
 // (3.9) Player reports on the game pages, from the website and RecompLauncher: what they said, their
@@ -296,7 +299,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>Project<span class="pc-repo-row"><select name="host" aria-label="Where it lives"><option value="">GitHub</option><option value="gitlab"<?= $aHost === 'gitlab' ? ' selected' : '' ?>>GitLab</option></select><input name="repo" value="<?= h($a['repo']) ?>" class="mono" placeholder="owner/name"></span><small><?php if ($a['repo'] !== ''): ?><a href="<?= h(rs_host_web($aHost, $a['repo'])) ?>" target="_blank" rel="noopener">Open on <?= h(rs_host_name($aHost)) ?></a>. <?php endif; ?>owner/name, or paste a github.com or gitlab.com link.</small></label>
     <label>Windows download<input name="asset_win" value="<?= h($a['asset_win']) ?>" class="mono" placeholder="Zelda64Recompiled-*-Windows.zip"><small>The release file, * for the part that changes.</small></label>
     <label>Linux download<input name="asset_linux" value="<?= h($a['asset_linux']) ?>" class="mono"></label>
-    <label>macOS download<input name="asset_mac" value="<?= h($a['asset_mac']) ?>" class="mono"></label>
+    <label>macOS download<input name="asset_mac" value="<?= h($a['asset_mac']) ?>" class="mono" placeholder="MyRecomp-*-macOS-arm64.zip"><?php $macWhy = rs_pc_mac_why((string)$a['asset_mac']); ?><small<?= $macWhy !== '' ? ' class="bad-text"' : '' ?>><?= $macWhy !== '' ? h($macWhy) . ' It isn\'t offered on Mac until it\'s fixed.' : 'A .zip with an Apple Silicon or universal build. RecompLauncher on Mac installs .zip files only.' ?></small></label>
     <label>Version<input name="version" value="<?= h($a['version']) ?>" maxlength="40"><small>Updated from <?= h(rs_host_name($aHost)) ?> on Publish.</small></label>
     <label class="span2">One-line summary<input name="blurb" value="<?= h($a['blurb']) ?>" maxlength="160"></label>
     <label class="span2">What this version adds<input name="adds" value="<?= h($a['adds'] ?? '') ?>" maxlength="120" placeholder="DLSS, FSR 4 and a 13-language launcher"><small>For games with more than one version: a few words on what sets this one apart. Shown in the versions list.</small></label>
@@ -342,7 +345,9 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     // (4.0) What each filter matches, its count, then the search, the order and the page.
     $lifeOf = fn(array $a): bool => in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) || !empty($a['archived']);
     $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) === '', 'soon' => fn($a) => !empty($a['soon']),
-        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a), 'blocked' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== ''];
+        'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a), 'blocked' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== '',
+        // (4.2) Mac: ones players get on Mac, and ones whose Mac download the launcher can't use.
+        'mac' => fn($a) => rs_pc_mac_ok((string)$a['asset_mac']) !== '', 'macfix' => fn($a) => rs_pc_mac_why((string)$a['asset_mac']) !== ''];
     $q = mb_strtolower($ls['q']);
     $inQ = $q === '' ? $apps : array_values(array_filter($apps, fn($a) => str_contains(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id'] . ' ' . $a['author']), $q)));
     $lsCount = array_map(fn($f) => count(array_filter($inQ, $f)), $lsMatch);

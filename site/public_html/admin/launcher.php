@@ -212,7 +212,7 @@ a.btn{display:inline-flex;align-items:center;padding:9px 14px;border-radius:10px
 <div class="rl-grid">
   <section class="card"><h2>Most played (players, this month)</h2><?= $games ? $bar($games) : '<p class="muted">Nothing yet.</p>' ?></section>
   <section class="card"><h2>Graphics cards</h2><?= $bar($by('gpu')) ?></section>
-  <section class="card"><h2>Windows</h2><?= $bar($by('osver')) ?></section>
+  <section class="card"><h2>Systems</h2><?= $bar($by('osver')) ?></section>
   <section class="card"><h2>Processors</h2><?= $bar($by('cpu')) ?></section>
   <section class="card"><h2>Memory</h2><?= $bar($ram) ?></section>
   <section class="card"><h2>Screens</h2><?= $bar($by('screen')) ?></section>

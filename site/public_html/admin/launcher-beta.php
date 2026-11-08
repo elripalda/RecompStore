@@ -52,6 +52,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $now = (string)(json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version.json'), true)['version'] ?? '');
             rs_flash($now !== $was ? 'Found ' . rs_lb_semver_name($now) . ' on GitHub. Launchers that are open were told to update.' : 'Up to date: ' . rs_lb_semver_name($now) . ' is the newest on GitHub.');
             $back = 'launcher-beta.php#github';
+        } elseif ($act === 'mac-save') {
+            // (4.2) The Mac build's own settings: whether the Get page offers it, and its optional
+            // "min" and "notes" in version.json. Windows and Linux aren't touched.
+            $min = trim((string)($_POST['mac_min'] ?? ''));
+            if ($min !== '' && !rs_lb_is_semver($min)) throw new RuntimeException('Write the minimum version like 0.90.0-beta.24, or leave it empty.');
+            rs_set_setting('lb_mac_show', !empty($_POST['mac_show']) ? '1' : '0');
+            rs_set_setting('lb_mac_min', $min);
+            rs_set_setting('lb_mac_notes', mb_substr(trim(str_replace("\r", '', (string)($_POST['mac_notes'] ?? ''))), 0, 4000));
+            rs_lb_publish_json();
+            rs_flash('Mac saved.');
+            $back = 'launcher-beta.php#mac';
         } elseif ($act === 'push') {
             // (3.1g) Tell launchers to look now, by hand.
             $kind = (string)($_POST['kind'] ?? '');
@@ -165,6 +176,7 @@ $ghTotal = array_sum(array_column($ghl, 'downloads'));
 $ghWin = array_sum(array_column($ghl, 'windows'));
 $ghApp = array_sum(array_column($ghl, 'appimage'));
 $ghDeb = array_sum(array_column($ghl, 'deb'));
+$ghMac = array_sum(array_column($ghl, 'macos'));
 $siteDl = rs_rl_launch_downloads();
 $feedNow = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version.json'), true) ?: [];
 ?>
@@ -172,26 +184,48 @@ $feedNow = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version
   <div class="gh-head">
     <div>
       <h2>Releases on GitHub</h2>
-      <p class="muted small">Launchers update to the newest release on <a href="https://github.com/<?= h(RS_LB_GH_REPO) ?>/releases" target="_blank" rel="noopener">GitHub</a> that has a build for their system (Windows installer, Linux AppImage). The server checks every 2 minutes on its own; Check now does it right away and tells open launchers.</p>
+      <p class="muted small">Launchers update to the newest release on <a href="https://github.com/<?= h(RS_LB_GH_REPO) ?>/releases" target="_blank" rel="noopener">GitHub</a> that has a build for their system (Windows installer, Linux AppImage, Mac .dmg for Apple Silicon). The server checks every 2 minutes on its own; Check now does it right away and tells open launchers.</p>
     </div>
     <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="gh-check"><button class="primary">Check GitHub now</button></form>
   </div>
   <div class="lb-stats gh-stats">
     <div class="card"><span class="muted small">Launchers are offered</span><b><?= h(rs_lb_semver_name((string)($feedNow['version'] ?? '')) ?: 'Nothing yet') ?></b><span class="muted small"><?= ($feedNow['source'] ?? '') === 'github' ? 'from GitHub' : 'from this server' ?><?= $ghNew && ($feedNow['version'] ?? '') !== $ghNew['version'] ? ' · GitHub has ' . h(rs_lb_semver_name($ghNew['version'])) . ', press Check now' : '' ?></span></div>
+    <div class="card"><span class="muted small">Macs are offered</span><b><?= h(rs_lb_semver_name((string)($feedNow['macos']['version'] ?? '')) ?: 'Nothing yet') ?></b><span class="muted small">Apple Silicon · <?= rs_lb_mac_shown() ? 'on the Get page' : 'hidden on the Get page' ?></span></div>
     <div class="card"><span class="muted small">Windows downloads on GitHub</span><b><?= number_format($ghWin) ?></b><span class="muted small">the installer, every beta (updates included)</span></div>
     <div class="card"><span class="muted small">Linux downloads on GitHub</span><b><?= number_format($ghApp + $ghDeb) ?></b><span class="muted small"><?= number_format($ghApp) ?> AppImage · <?= number_format($ghDeb) ?> .deb</span></div>
+    <div class="card"><span class="muted small">Mac downloads on GitHub</span><b><?= number_format($ghMac) ?></b><span class="muted small">the Apple Silicon .dmg, every beta</span></div>
     <div class="card"><span class="muted small">Downloads from the website</span><b><?= number_format($siteDl['total']) ?></b><span class="muted small"><?= number_format($siteDl['today']) ?> today, from the Download button on /get</span></div>
   </div>
   <?php if ($ghl): ?>
   <table class="gh-table">
-    <thead><tr><th>Version</th><th>Published</th><th class="num">Windows</th><th class="num">Linux</th><th class="num">Total</th></tr></thead>
+    <thead><tr><th>Version</th><th>Published</th><th class="num">Windows</th><th class="num">Linux</th><th class="num">Mac</th><th class="num">Total</th></tr></thead>
     <tbody>
     <?php foreach (array_slice($ghl, 0, 12) as $i => $r): ?>
-      <tr><td><a href="<?= h($r['page']) ?>" target="_blank" rel="noopener"><?= h(rs_lb_semver_name($r['version'])) ?></a><?= $i === 0 ? ' <span class="tag cyan">Newest</span>' : '' ?></td><td class="muted"><?= $r['published'] !== '' ? h(gmdate('M j, g:i a', strtotime($r['published']) + (int)date('Z'))) : '' ?></td><td class="num"><?= number_format($r['windows']) ?></td><td class="num"><?= $r['linux'] ? number_format($r['linux']) . ' <span class="muted small">(' . number_format($r['appimage']) . ' + ' . number_format($r['deb']) . ' .deb)</span>' : '–' ?></td><td class="num"><?= number_format($r['downloads']) ?></td></tr>
+      <tr><td><a href="<?= h($r['page']) ?>" target="_blank" rel="noopener"><?= h(rs_lb_semver_name($r['version'])) ?></a><?= $i === 0 ? ' <span class="tag cyan">Newest</span>' : '' ?></td><td class="muted"><?= $r['published'] !== '' ? h(gmdate('M j, g:i a', strtotime($r['published']) + (int)date('Z'))) : '' ?></td><td class="num"><?= number_format($r['windows']) ?></td><td class="num"><?= $r['linux'] ? number_format($r['linux']) . ' <span class="muted small">(' . number_format($r['appimage']) . ' + ' . number_format($r['deb']) . ' .deb)</span>' : '–' ?></td><td class="num"><?= !empty($r['macos']) ? number_format($r['macos']) : '–' ?></td><td class="num"><?= number_format($r['downloads']) ?></td></tr>
     <?php endforeach; ?>
     </tbody>
   </table>
   <?php else: ?><p class="muted">GitHub didn't answer just now. Reload in a minute.</p><?php endif; ?>
+</section>
+
+<?php $macNow = is_array($feedNow['macos'] ?? null) ? $feedNow['macos'] : null; ?>
+<section class="card" id="mac">
+  <h2>Mac (Apple Silicon)</h2>
+  <p class="muted small">The newest release on GitHub with an <code>_aarch64.dmg</code>, on its own: publishing a Windows or Linux build never changes it. M1 and newer only, not notarized by Apple. Mac updates are manual, so the launcher opens this link.</p>
+  <?php if ($macNow): ?>
+  <dl class="mac-facts">
+    <div><dt>Version</dt><dd><?= h(rs_lb_semver_name((string)($macNow['version'] ?? ''))) ?> <span class="muted small mono"><?= h((string)($macNow['version'] ?? '')) ?></span></dd></div>
+    <div><dt>Size</dt><dd><?= !empty($macNow['size']) ? h(rs_human_size((int)$macNow['size'])) . ' <span class="muted small">(' . number_format((int)$macNow['size']) . ' bytes)</span>' : '–' ?></dd></div>
+    <div class="wide"><dt>Download</dt><dd class="mono small"><a href="<?= h((string)$macNow['url']) ?>" target="_blank" rel="noopener"><?= h((string)$macNow['url']) ?></a></dd></div>
+    <div class="wide"><dt>SHA-256</dt><dd class="mono small"><?= h((string)($macNow['sha256'] ?? '')) ?: '<span class="muted">GitHub didn\'t give one</span>' ?></dd></div>
+  </dl>
+  <?php else: ?><p class="muted">No Mac build on GitHub yet. It shows up here once a release has an <code>_aarch64.dmg</code>.</p><?php endif; ?>
+  <form method="post" class="grid2"><?= $csrf ?><input type="hidden" name="action" value="mac-save">
+    <label>Minimum version <span class="muted">(optional)</span><input name="mac_min" class="mono" maxlength="40" placeholder="0.90.0-beta.24" value="<?= h((string)rs_setting('lb_mac_min', '')) ?>"><small>Mac launchers older than this are told they have to update. Its own, not the Windows one.</small></label>
+    <label>Notes <span class="muted">(optional)</span><textarea name="mac_notes" rows="2" maxlength="4000" placeholder="Shown with the Mac update."><?= h((string)rs_setting('lb_mac_notes', '')) ?></textarea></label>
+    <label class="check span2"><input type="checkbox" name="mac_show" value="1"<?= rs_lb_mac_shown() ? ' checked' : '' ?>> Show the Mac download on recomplauncher.com/get</label>
+    <div class="actions span2"><button class="primary">Save Mac</button></div>
+  </form>
 </section>
 
 <section class="lb-stats">
@@ -322,8 +356,10 @@ $feedNow = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version
 .lb-stats .card{display:flex;flex-direction:column;gap:4px;margin:0}
 .gh-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
 .gh-head h2{margin:0 0 4px}
-.gh-stats{margin:16px 0;grid-template-columns:repeat(4,minmax(0,1fr))}
+.gh-stats{margin:16px 0;grid-template-columns:repeat(3,minmax(0,1fr))}
 @media (max-width:1000px){.gh-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.mac-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}.mac-facts div{padding:12px 14px;border-radius:12px;background:rgba(244,248,252,.05);min-width:0}.mac-facts .wide{grid-column:span 2}
+.mac-facts dt{font-size:13px;color:#a7b3c4;margin:0 0 4px}.mac-facts dd{margin:0;overflow-wrap:anywhere}
 .gh-table{width:100%;border-collapse:collapse}
 .gh-table th,.gh-table td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)}
 .gh-table .num{text-align:right;font-variant-numeric:tabular-nums}

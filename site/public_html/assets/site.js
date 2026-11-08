@@ -5741,18 +5741,24 @@
     const discord = (cat && cat.site && cat.site.discord) || '';
     const list = (xs, tag) => `<${tag} class="launch-list">${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</${tag}>`;
     // (3.7) Linux too, once the newest release on GitHub has a build for it. The visitor's own
-    // system comes first and gets the bright button; both are the same size.
-    const LX = L.linux || null;
+    // system comes first and gets the bright button; all are the same size.
+    // (4.2) And Mac (Apple Silicon). Browsers can't tell an Intel Mac from an Apple Silicon one, so
+    // the button says which Macs it's for instead of guessing.
+    const LX = L.linux || null, MC = L.mac || null;
     const dlIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>';
     const sizeOf = (n) => (n ? (n / 1048576).toFixed(n > 104857600 ? 0 : 1) + ' MB' : '');
+    const mineOS = /Android|iPhone|iPad/i.test(navigator.userAgent) ? 'windows' : myOS();
+    const sysNames = [t('Windows'), ...(LX ? [t('Linux')] : []), ...(MC ? [t('Mac')] : [])];
+    const sysList = sysNames.length > 1 ? sysNames.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + sysNames[sysNames.length - 1] : sysNames[0];
     let dl;
-    if (LX) {
-      const onLinux = myOS() === 'linux' && !/Android/i.test(navigator.userAgent);
-      const win = `<div class="launch-os"><a class="btn${onLinux ? '' : ' primary'} launch-btn" href="${esc(L.download)}">${dlIcon}${t('Download for Windows')}</a>
-          <span class="launch-meta">${esc([t('Installer'), mb, t('Windows 10 or 11')].filter(Boolean).join(' · '))}</span></div>`;
-      const lin = `<div class="launch-os"><a class="btn${onLinux ? ' primary' : ''} launch-btn" href="${esc(LX.download)}">${dlIcon}${t('Download for Linux')}</a>
-          <span class="launch-meta">${esc([t('AppImage'), sizeOf(LX.size)].filter(Boolean).join(' · '))}${LX.deb ? ` · <a href="${esc(LX.deb.download)}">${t('Get the .deb')}</a>` : ''}</span></div>`;
-      dl = `<div class="launch-dl launch-dl-two">${onLinux ? lin + win : win + lin}</div>`;
+    if (LX || MC) {
+      const os = [['windows', L.download, t('Download for Windows'), esc([t('Installer'), mb, t('Windows 10 or 11')].filter(Boolean).join(' · '))]];
+      if (LX) os.push(['linux', LX.download, t('Download for Linux'), esc([t('AppImage'), sizeOf(LX.size)].filter(Boolean).join(' · ')) + (LX.deb ? ` · <a href="${esc(LX.deb.download)}">${t('Get the .deb')}</a>` : '')]);
+      if (MC) os.push(['macos', MC.download, t('Download for Mac (Apple Silicon)'), esc([t('M1 or newer'), sizeOf(MC.size)].filter(Boolean).join(' · ')) + `<br>${t('Intel Macs aren\'t supported yet.')}`]);
+      const first = os.find((o) => o[0] === mineOS) ? mineOS : 'windows';
+      os.sort((a, b) => (b[0] === first) - (a[0] === first));
+      dl = `<div class="launch-dl launch-dl-${os.length === 3 ? 'three' : 'two'}">${os.map(([k, href, label, meta]) => `<div class="launch-os launch-os-${k}"><a class="btn${k === first ? ' primary' : ''} launch-btn" href="${esc(href)}">${dlIcon}${label}</a>
+          <span class="launch-meta">${meta}</span></div>`).join('')}</div>`;
     } else {
       dl = `<div class="launch-dl">
         <a class="btn primary launch-btn" href="${esc(L.download)}">${dlIcon}${t('Download for Windows')}</a>
@@ -5766,17 +5772,20 @@
         <a class="btn launch-gh" href="https://github.com/elripalda/RecompLauncher" target="_blank" rel="noopener">${ghIcon}${t('Source code on GitHub')}</a>
       </div>`;
     words.innerHTML = `
-      <span class="soon-badge launch-badge"><i aria-hidden="true"></i>${LX ? t('Beta out now on Windows and Linux') : t('Beta out now on Windows')}</span>
+      <span class="soon-badge launch-badge"><i aria-hidden="true"></i>${t('Beta out now on') + ' ' + sysList}</span>
       <h1>RecompLauncher</h1>
       ${P.headline ? `<p class="launch-head">${esc(P.headline)}</p>` : ''}
       ${P.intro ? `<p class="lead">${esc(P.intro)}</p>` : ''}
       ${dl}
       ${P.soon ? `<p class="launch-soon">${esc(P.soon)}</p>` : ''}`;
     const cards = [];
-    if ((P.steps || []).length) cards.push(['steps', LX ? t('Install on Windows') : t('Install it'), list(P.steps, 'ol')]);
+    if ((P.steps || []).length) cards.push(['steps', LX || MC ? t('Install on Windows') : t('Install it'), list(P.steps, 'ol')]);
     if (LX) cards.push(['linux', t('Install on Linux'), list([t('AppImage: right-click it, open Properties, turn on "Allow executing as program", then open it. In a terminal, chmod +x on the file does the same.'),
       ...(LX.deb ? [t('On Ubuntu, Mint, Pop!_OS or Debian you can take the .deb instead: open it in your software installer, or run sudo apt install ./ followed by its file name.')] : []),
       t('Steam Deck: switch to Desktop Mode and use the AppImage.')], 'ol')]);
+    if (MC) cards.push(['mac', t('Install on Mac'), list([t('Open the .dmg and drag RecompLauncher into Applications.'),
+      t('The first time, macOS may block it. Open System Settings → Privacy & Security and choose Open Anyway.'),
+      t('It runs on Apple Silicon Macs (M1 and newer). Intel Macs aren\'t supported yet.')], 'ol')]);
     if (P.warn) cards.push(['warn', P.warnTitle || t('Windows may warn you'), `<p>${esc(P.warn)}</p>`]);
     if ((P.reqs || []).length) cards.push(['reqs', t('What you need'), list(P.reqs, 'ul')]);
     if ((P.issues || []).length) cards.push(['issues', t('Known issues'), list(P.issues, 'ul')]);
@@ -5817,7 +5826,7 @@
     d.id = 'beta-pop';
     d.className = 'beta-pop';
     d.innerHTML = `<div class="beta-pop-art" aria-hidden="true">${covers.map((u, i) => `<img class="bp${i}" src="${esc(thumb(u, 400))}" alt="">`).join('')}</div>
-      <div class="beta-pop-words"><span class="soon-badge launch-badge"><i aria-hidden="true"></i>${L.linux ? t('Out now on Windows and Linux') : t('Out now on Windows')}</span><h2>${t('RecompLauncher Beta has fully launched')}</h2>
+      <div class="beta-pop-words"><span class="soon-badge launch-badge"><i aria-hidden="true"></i>${L.linux && L.mac ? t('Out now on Windows, Linux and Mac') : L.linux ? t('Out now on Windows and Linux') : L.mac ? t('Out now on Windows and Mac') : t('Out now on Windows')}</span><h2>${t('RecompLauncher Beta has fully launched')}</h2>
         ${L.page && L.page.intro ? `<p>${esc(L.page.intro)}</p>` : ''}
         <p class="launch-pop-acts"><a class="btn primary" href="/pc/launcher" data-launch-go>${t('Download now')}</a></p>
         <button type="button" class="linkish beta-later" data-beta-close>${t('Not now')}</button></div>

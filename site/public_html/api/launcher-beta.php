@@ -55,6 +55,15 @@ try {
             header('Location: ' . $u, true, 302);
             exit;
         }
+        // (4.2) The Mac build: the Apple Silicon .dmg.
+        if ($os === 'mac') {
+            $g = function_exists('rs_lb_gh_latest') && rs_lb_mac_shown() ? rs_lb_gh_latest('macos') : null;
+            $u = $g ? (string)$g['url'] : '';
+            if (!rs_rl_launch_live() || $u === '') { header('Location: https://recomplauncher.com/get', true, 302); exit; }
+            try { rs_rl_launch_count(); } catch (Throwable $e) { error_log('launcher-beta.php count: ' . $e->getMessage()); }
+            header('Location: ' . $u, true, 302);
+            exit;
+        }
         if (!rs_rl_launch_live() || empty($v['url'])) { header('Location: https://recomplauncher.com/get', true, 302); exit; }
         try { rs_rl_launch_count(); } catch (Throwable $e) { error_log('launcher-beta.php count: ' . $e->getMessage()); }
         header('Location: ' . (string)$v['url'], true, 302);

@@ -268,13 +268,36 @@ function rs_lb_publish_json(): void {
 
 // (3.7) What version.json says: the Windows build, and the Linux AppImage under "linux"
 // (0.9 and later read it there and replace their AppImage in place).
+// (4.2) And the Mac build under "macos": Apple Silicon only, updated by hand (the launcher opens the
+// link). It's worked out on its own, from the newest release with an _aarch64.dmg, so publishing a
+// Windows or Linux build never changes it. When GitHub can't say, the Mac entry already in
+// version.json is kept as it is. Its optional "min" and "notes" come from the Launcher beta page.
 function rs_lb_json_feed(): array {
     $feed = rs_lb_feed('windows');
     try { $lx = rs_lb_gh_latest('linux'); } catch (Throwable $e) { $lx = null; }
     if ($lx) $feed['linux'] = ['version' => $lx['version'], 'url' => $lx['url'], 'sha256' => $lx['sha256'], 'size' => $lx['size'],
         'deb' => (string)($lx['deb']['url'] ?? '')];
+    if (($mac = rs_lb_mac_entry()) !== null) $feed['macos'] = $mac;
     return $feed;
 }
+
+// (4.2) The "macos" entry of version.json, or null when there's none to give.
+function rs_lb_mac_entry(): ?array {
+    $have = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version.json'), true) ?: [];
+    try { $g = rs_lb_gh_latest('macos'); } catch (Throwable $e) { $g = null; }
+    if ($g && $g['sha256'] === '' && (string)($have['macos']['url'] ?? '') === $g['url']) $g['sha256'] = (string)($have['macos']['sha256'] ?? '');
+    $e = $g ? ['arch' => 'arm64', 'url' => $g['url'], 'sha256' => $g['sha256'], 'version' => $g['version'], 'size' => (int)$g['size']]
+        : (is_array($have['macos'] ?? null) && !empty($have['macos']['url']) ? $have['macos'] : null);
+    if (!$e) return null;
+    $min = trim((string)rs_setting('lb_mac_min', ''));
+    if ($min !== '' && rs_lb_is_semver($min)) $e['min'] = $min; else unset($e['min']);
+    $notes = trim((string)rs_setting('lb_mac_notes', ''));
+    if ($notes !== '') $e['notes'] = $notes; else unset($e['notes']);
+    return $e;
+}
+// (4.2) Whether recomplauncher.com/get offers the Mac download (the launcher's own update check
+// always sees the Mac entry).
+function rs_lb_mac_shown(): bool { return rs_setting('lb_mac_show', '1') === '1'; }
 
 // Sends the build: from Cloudflare R2 when it's there, otherwise straight from this server.
 function rs_lb_send(array $b, bool $count = true): void {
@@ -338,7 +361,8 @@ function rs_lb_semver_of(array $b): string {
 const RS_LB_GH_REPO = 'elripalda/RecompLauncher';
 function rs_lb_gh_on(): bool { return (string)rs_setting('lb_github', '1') !== '0'; }
 // (3.7) Linux too: the newest release with an AppImage, plus its .deb when it has one.
-const RS_LB_GH_ASSET = ['windows' => '/_x64-setup\\.exe$/i', 'linux' => '/_amd64\\.AppImage$/i'];
+// (4.2) Mac: the Apple Silicon .dmg.
+const RS_LB_GH_ASSET = ['windows' => '/_x64-setup\\.exe$/i', 'linux' => '/_amd64\\.AppImage$/i', 'macos' => '/_aarch64\\.dmg$/i'];
 function rs_lb_gh_latest(string $platform = 'windows', int $maxAge = 120): ?array {
     if (!isset(RS_LB_GH_ASSET[$platform]) || !rs_lb_gh_on() || !function_exists('rs_gh_releases')) return null;
     if (!is_array($GLOBALS['rs_lb_gh_memo'] ?? null)) $GLOBALS['rs_lb_gh_memo'] = [];
@@ -380,16 +404,18 @@ function rs_lb_gh_list(int $maxAge = 120): array {
     foreach (json_decode((string)$r['body'], true) ?: [] as $rel) {
         if (!is_array($rel) || !empty($rel['draft'])) continue;
         // (3.7) Windows and Linux counted apart: the installer; the AppImage and the .deb.
-        $win = 0; $appimage = 0; $deb = 0; $file = '';
+        // (4.2) Mac too: the Apple Silicon .dmg.
+        $win = 0; $appimage = 0; $deb = 0; $mac = 0; $file = '';
         foreach ((array)($rel['assets'] ?? []) as $a) {
             $nm = (string)($a['name'] ?? ''); $c = (int)($a['download_count'] ?? 0);
             if (preg_match('/_x64-setup\.exe$/i', $nm)) { $win += $c; $file = $nm; }
             elseif (preg_match('/_amd64\.AppImage$/i', $nm)) { $appimage += $c; $file = $nm; }
             elseif (preg_match('/_amd64\.deb$/i', $nm)) { $deb += $c; $file = $nm; }
+            elseif (preg_match('/_aarch64\.dmg$/i', $nm)) { $mac += $c; $file = $nm; }
         }
         if ($file === '') continue;
-        $out[] = ['version' => ltrim((string)$rel['tag_name'], 'vV'), 'published' => (string)($rel['published_at'] ?? ''), 'downloads' => $win + $appimage + $deb,
-            'windows' => $win, 'appimage' => $appimage, 'deb' => $deb, 'linux' => $appimage + $deb,
+        $out[] = ['version' => ltrim((string)$rel['tag_name'], 'vV'), 'published' => (string)($rel['published_at'] ?? ''), 'downloads' => $win + $appimage + $deb + $mac,
+            'windows' => $win, 'appimage' => $appimage, 'deb' => $deb, 'linux' => $appimage + $deb, 'macos' => $mac,
             'pre' => !empty($rel['prerelease']), 'page' => (string)($rel['html_url'] ?? '')];
     }
     return $out;
@@ -418,6 +444,8 @@ function rs_lb_refresh_json(): void {
         if (empty($want['version'])) return;
         foreach (['version', 'url', 'sha256', 'notes'] as $k) if ((string)($have[$k] ?? '') !== (string)($want[$k] ?? '')) { rs_lb_publish_json(); return; }
         if ((string)($have['linux']['url'] ?? '') !== (string)($want['linux']['url'] ?? '')) { rs_lb_publish_json(); return; }
+        // (4.2) The Mac entry on its own: a new Mac build, or its min or notes changed.
+        foreach (['url', 'sha256', 'min', 'notes'] as $k) if ((string)($have['macos'][$k] ?? '') !== (string)($want['macos'][$k] ?? '')) { rs_lb_publish_json(); return; }
     } catch (Throwable $e) { error_log('version.json refresh: ' . $e->getMessage()); }
 }
 
