@@ -2590,7 +2590,8 @@ ol.launch-list li::marker{color:var(--cyan);font-weight:700}
 /* (4.2) Windows, Linux and Mac: three the same size, one under another on small screens */
 .launch-dl-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;max-width:960px}
 .launch-dl-three + .launch-src{max-width:960px}
-.launch-dl-three .launch-btn{padding-left:16px;padding-right:16px}
+.launch-dl-three .launch-btn{padding-left:14px;padding-right:14px;white-space:nowrap}
+.launch-dl-three .launch-os .launch-btn svg{margin-left:0}
 @media (max-width:1100px){.launch-dl-three{grid-template-columns:1fr;max-width:420px}.launch-dl-three + .launch-src{max-width:420px}}
 /* (3.7) The label centered in the download buttons, the arrow just to its left */
 .launch-os .launch-btn svg{margin-left:-30px}

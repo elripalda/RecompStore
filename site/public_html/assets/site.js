@@ -5752,9 +5752,11 @@
     const sysList = sysNames.length > 1 ? sysNames.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + sysNames[sysNames.length - 1] : sysNames[0];
     let dl;
     if (LX || MC) {
-      const os = [['windows', L.download, t('Download for Windows'), esc([t('Installer'), mb, t('Windows 10 or 11')].filter(Boolean).join(' · '))]];
-      if (LX) os.push(['linux', LX.download, t('Download for Linux'), esc([t('AppImage'), sizeOf(LX.size)].filter(Boolean).join(' · ')) + (LX.deb ? ` · <a href="${esc(LX.deb.download)}">${t('Get the .deb')}</a>` : '')]);
-      if (MC) os.push(['macos', MC.download, t('Download for Mac (Apple Silicon)'), esc([t('M1 or newer'), sizeOf(MC.size)].filter(Boolean).join(' · ')) + `<br>${t('Intel Macs aren\'t supported yet.')}`]);
+      // Three side by side: the system's name alone fits the button.
+      const three = !!(LX && MC);
+      const os = [['windows', L.download, three ? t('Windows') : t('Download for Windows'), esc([t('Installer'), mb, t('Windows 10 or 11')].filter(Boolean).join(' · '))]];
+      if (LX) os.push(['linux', LX.download, three ? t('Linux') : t('Download for Linux'), esc([t('AppImage'), sizeOf(LX.size)].filter(Boolean).join(' · ')) + (LX.deb ? ` · <a href="${esc(LX.deb.download)}">${t('Get the .deb')}</a>` : '')]);
+      if (MC) os.push(['macos', MC.download, three ? t('Mac (Apple Silicon)') : t('Download for Mac (Apple Silicon)'), esc([t('M1 or newer'), sizeOf(MC.size)].filter(Boolean).join(' · ')) + `<br>${t('Intel Macs aren\'t supported yet.')}`]);
       const first = os.find((o) => o[0] === mineOS) ? mineOS : 'windows';
       os.sort((a, b) => (b[0] === first) - (a[0] === first));
       dl = `<div class="launch-dl launch-dl-${os.length === 3 ? 'three' : 'two'}">${os.map(([k, href, label, meta]) => `<div class="launch-os launch-os-${k}"><a class="btn${k === first ? ' primary' : ''} launch-btn" href="${esc(href)}">${dlIcon}${label}</a>
