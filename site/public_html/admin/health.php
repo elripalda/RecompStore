@@ -33,9 +33,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             [$n, $looked] = rs_found_refresh(25);
             rs_flash($n ? 'Found ' . $n . ' new ' . ($n === 1 ? 'app' : 'apps') . '.' : 'Nothing new this time' . ($looked ? ' (' . $looked . ' looked at)' : '') . '.');
             $back .= '#found';
-        } elseif ($act === 'clash_ok') {
+        } elseif ($act === 'clash_ok' || $act === 'clash_separate') {
+            // (4.3) Settled either way: the same app under another name, or separate apps you know about.
             rs_radar_ok((string)($_POST['sig'] ?? ''));
-            rs_flash('Marked as fine. It comes back if another app turns up with that ID.');
+            $tid = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)($_POST['tid'] ?? '')));
+            rs_log('radar', $tid, $act === 'clash_ok' ? 'same app' : 'separate apps');
+            rs_flash($act === 'clash_ok' ? 'Settled: the same app. It comes back only if another app turns up with that ID.' : 'Settled: separate apps. It comes back only if another app turns up with that ID.');
             $back .= '#radar';
         } elseif ($act === 'skip' || $act === 'unskip') {
             rs_db()->prepare('UPDATE found_apps SET state = ? WHERE k = ?')->execute([$act === 'skip' ? 'skip' : 'new', (string)($_POST['k'] ?? '')]);
@@ -100,7 +103,7 @@ rs_head('Health', true, ['assets/health.css']);
   <div class="clash">
     <p><strong class="mono"><?= h($tid) ?></strong> is used by <?= count(array_unique(array_column($c['uses'], 'key'))) ?> different apps:</p>
     <ul class="uses"><?php foreach ($c['uses'] as $u) echo $useRow($u); ?></ul>
-    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="clash_ok"><input type="hidden" name="sig" value="<?= h($c['sig']) ?>"><button>It's fine (the same app)</button></form>
+    <form method="post" class="clash-pick"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="sig" value="<?= h($c['sig']) ?>"><input type="hidden" name="tid" value="<?= h($tid) ?>"><button name="action" value="clash_ok">Same app</button><button name="action" value="clash_separate">Separate apps</button></form>
   </div>
   <?php endforeach; ?>
   <form method="get" class="tid-look" action="health.php#radar">

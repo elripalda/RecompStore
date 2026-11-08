@@ -692,3 +692,14 @@ body.adm{display:block}
 .side-nav a.on,.side-kids a.on{border-bottom:0}
 .side .brand em{font-size:11px;padding:2px 8px}.side .brand{gap:9px}
 @media (max-width:720px){.adm .card{padding:18px;border-radius:18px}.dash-hello h1{font-size:24px}.me-menu .role-chip{display:none}}
+/* (4.3) Header fixes: the brand fits the sidebar, and View site lines up with the account button. */
+.side .brand{font-size:16px;gap:8px;padding:2px 6px 12px;white-space:nowrap;min-width:0}
+.side .brand img{width:26px;height:26px}
+.side .brand em{font-size:10px;padding:2px 7px;line-height:1.4}
+.me-menu{margin:0;padding:0;border:0;background:none}
+.top-site{height:40px;padding:0 12px}
+.side-foot .side-link{margin:0}
+.me-menu summary{margin:0;color:var(--frost)}
+.count.red{background:#e5484d;color:#fff}
+.side-kids a{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.side-kids a .count{margin:0}

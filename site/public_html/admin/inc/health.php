@@ -395,7 +395,7 @@ function rs_health_maybe(): void {
 // radar puts every title ID it knows side by side: the store's (and the IDs in their zips), the
 // taken list in Settings, apps in the Inbox, and the PS5 apps found on GitHub and in Prospero
 // Store's catalog (above, refreshed daily). An ID used by two different apps, one of them the
-// store's or a submission, is a clash and shows in red on the Dashboard and on Health.
+// store's or a submission, is a clash and shows in red on Found on GitHub (and its count in the menu).
 
 // Every use of every title ID: [ID => [[where, name, repo, link, key]]]. key tells apps apart:
 // their repo (lowercase), else where + ID.
@@ -461,6 +461,18 @@ function rs_radar_ok(string $sig): void {
     $ok = json_decode((string)(rs_kv_get('radar_ok')['v'] ?? '[]'), true) ?: [];
     if (!in_array($sig, $ok, true)) $ok[] = mb_substr($sig, 0, 600);
     rs_kv_put('radar_ok', json_encode(array_slice($ok, -300)));
+    rs_kv_put('radar_count', (string)count(rs_radar_clashes()));
+}
+// (4.3) How many clashes are open, for the red count beside Found on GitHub in the menu.
+// Worked out at most every 10 minutes.
+function rs_radar_count(): int {
+    try {
+        $c = rs_kv_get('radar_count');
+        if ($c && $c['age'] < 600) return (int)$c['v'];
+        $n = count(rs_radar_clashes());
+        rs_kv_put('radar_count', (string)$n);
+        return $n;
+    } catch (Throwable $e) { return 0; }
 }
 
 // Where a use comes from, in words.

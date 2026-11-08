@@ -66,6 +66,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
     // it's the file in the address (and, for pc.php, the ?view=).
     $pcAt = fn(string $v) => fn() => $here === 'pc.php' && $view === $v;
+    // Title ID clashes: a red count beside the PS5 store's Found on GitHub.
+    $radar = rs_can_page('health.php') && function_exists('rs_radar_count') ? rs_radar_count() : 0;
+    $red = fn(int $n) => $n ? ' <span class="count red" title="Title ID ' . ($n === 1 ? 'clash' : 'clashes') . '">' . $n . '</span>' : '';
     $sections = [
         'Overview' => [
             ['dashboard.php', 'Dashboard', 'home', [], 0],
@@ -78,7 +81,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
             ['index.php', 'PS5 · RecompStore', 'ps5', [
                 ['index.php', 'Games', fn() => in_array($here, ['index.php', 'edit.php'], true)], ['discover.php', 'Discover', null], ['collections.php', 'Collections', null],
                 ['beta.php', 'Beta', fn() => in_array($here, ['beta.php', 'beta-upload.php'], true)], ['feedback.php', 'Feedback', null], ['import.php', 'Import', null],
-                ['health.php', 'Found on GitHub', null], ['icons.php', 'Icons', null]], 0],
+                ['health.php', 'Found on GitHub' . $red($radar), null], ['icons.php', 'Icons', null]], $radar],
         ],
         'Curation' => [
             ['developers.php', 'Developers', 'dev', [
@@ -122,9 +125,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
       <?php foreach ($shown as [$href, $label, $icon, $pages, $n]):
           $kids = array_values(array_filter($pages, fn($pg) => rs_can_page($pg[0])));
           $on = $here === basename($href) || in_array($here, $also[$href] ?? [], true);
-          foreach ($kids as $pg) if ($isOn($pg)) { $on = true; $crumb = [strip_tags($label), strip_tags($pg[1])]; }
+          foreach ($kids as $pg) if ($isOn($pg)) { $on = true; $crumb = [strip_tags($label), trim(strip_tags(preg_replace('#<span class="count.*?</span>#', '', $pg[1])))]; }
           if ($on && $crumb[0] === '') $crumb = [$group, strip_tags($label)]; ?>
-      <a class="side-link<?= $on ? ' on' : '' ?>" href="<?= h($href) ?>"<?= $on && !$kids ? ' aria-current="page"' : '' ?>><?= rs_icon($icon) ?><span><?= h($label) ?></span><?= $n ? '<span class="count">' . $n . '</span>' : '' ?></a>
+      <a class="side-link<?= $on ? ' on' : '' ?>" href="<?= h($href) ?>"<?= $on && !$kids ? ' aria-current="page"' : '' ?>><?= rs_icon($icon) ?><span><?= h($label) ?></span><?= $n ? '<span class="count' . ($href === 'index.php' ? ' red' : '') . '">' . $n . '</span>' : '' ?></a>
       <?php if ($on && count($kids) > 1): ?>
       <div class="side-kids">
         <?php foreach ($kids as $pg): $k = $isOn($pg); ?><a href="<?= h($pg[0]) ?>"<?= $k ? ' class="on" aria-current="page"' : '' ?>><?= $pg[1] ?></a><?php endforeach; ?>

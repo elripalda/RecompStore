@@ -47,8 +47,6 @@ $tasks = [];
 $task = function (int $n, string $one, string $many, string $note, string $href, string $store = '', string $role = 'curator') use (&$tasks) {
     $tasks[] = compact('n', 'note', 'href', 'store', 'role') + ['label' => $n === 1 ? $one : $many];
 };
-$clashes = [];
-if ($showPs5 && rs_has_store('ps5')) $clashes = $safe(fn() => rs_radar_clashes(), []);
 if ($owner && rs_sign_on()) $task(rs_sign_waiting(), 'Thing to sign', 'Things to sign', 'In RecompStore Signer on your PC. Until then they reach no one.', 'settings.php#signer', '', 'owner');
 // PC
 $pcFound = $safe(fn() => count(rs_pc_found('new')));
@@ -183,10 +181,6 @@ rs_head('Dashboard', true, ['assets/analytics.css', 'assets/dashboard.css']);
   </div>
 </section>
 
-<?php if ($clashes): ?>
-<a class="dash-alert" href="health.php#radar"><strong><?= count($clashes) === 1 ? 'Title ID clash' : count($clashes) . ' title ID clashes' ?></strong>
-  <span><?= h(implode(', ', array_keys(array_slice($clashes, 0, 6, true)))) ?><?= count($clashes) > 6 ? ' and more' : '' ?> <?= count($clashes) === 1 ? 'is' : 'are' ?> used by two different apps. On a PS5 one writes over the other.</span><span aria-hidden="true">→</span></a>
-<?php endif; ?>
 
 <div class="dash-cols">
 <div class="dash-main">
