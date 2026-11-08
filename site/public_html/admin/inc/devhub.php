@@ -436,10 +436,12 @@ function rs_dev_logs(array $ids, int $limit = 100): array {
         WHERE i.kind = 'logs' AND i.app_id IN ($in) ORDER BY i.created DESC LIMIT " . (int)$limit)->fetchAll();
     if (!$rows) return [];
     $files = $sigs = [];
+    $appOf = [];
+    foreach ($rows as $r) $appOf[(int)$r['id']] = (string)$r['app_id'];
     foreach ($db->query('SELECT id, inbox_id, name, size, RIGHT(body, 65536) AS tail FROM inbox_files WHERE inbox_id IN (' . implode(',', array_map(fn($r) => (int)$r['id'], $rows)) . ') ORDER BY id') as $f) {
         $files[(int)$f['inbox_id']][] = ['id' => (int)$f['id'], 'name' => (string)$f['name'], 'size' => (int)$f['size']];
         // (2.7.3) What went wrong, the same for every player, so one problem shows once.
-        $s = rs_log_signature((string)$f['tail']);
+        $s = rs_log_signature((string)$f['tail'], $appOf[(int)$f['inbox_id']] ?? '', (string)$f['name']);
         if ($s !== '') $sigs[(int)$f['inbox_id']] = $s;
     }
     return array_map(fn($r) => [

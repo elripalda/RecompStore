@@ -7,10 +7,15 @@ declare(strict_types=1);
 // The line in a log that says what went wrong, made the same for every player: addresses, numbers,
 // paths and times become #, so "Segfault at 0x7f12a0 in thread 3" and "Segfault at 0x812ff in
 // thread 9" are one problem. '' when nothing looks like an error.
-function rs_log_signature(string $text): string {
+// (3.4) $appId and $file: a RecompLauncher launcher-trail.txt only counts for the report's own game
+// (rs_log_trail_lines), and the launcher's own chatter (notes, GitHub fallbacks, pictures) is never
+// the headline.
+function rs_log_signature(string $text, string $appId = '', string $file = ''): string {
     if ($text === '') return '';
     $text = substr($text, -262144); // the end of a log is where it went wrong
     $lines = preg_split('/\r\n|\r|\n/', $text) ?: [];
+    if (rs_log_is_trail($file, $text)) $lines = rs_log_trail_lines($lines, $appId);
+    $lines = array_values(array_filter($lines, fn($l) => !rs_log_noise((string)$l)));
     $strong = '/\b(panic|fatal|segfault|segmentation fault|sigsegv|sigabrt|sigbus|sigill|access violation|unhandled exception|uncaught|assert(ion)?( failed)?|abort(ed)?|crash(ed)?|core dump|stack overflow|out of memory|kernel panic)\b/i';
     $weak = '/\b(error|exception|failed|failure|cannot|can\'t|couldn\'t|unable to|not found|missing|denied|invalid)\b/i';
     $pick = '';
@@ -21,6 +26,7 @@ function rs_log_signature(string $text): string {
     $s = $pick;
     $s = preg_replace('/^\s*(\[[^\]]{0,40}\]\s*)+/', '', $s) ?? $s;                       // [12:01:02] [INFO]
     $s = preg_replace('/^\s*\d{2,4}[-\/.]\d{1,2}[-\/.]\d{1,4}[ T][\d:.,]+\S*\s*/', '', $s) ?? $s; // 2026-10-25 12:01:02.123
+    $s = preg_replace('/^\s*\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?\s+/', '', $s) ?? $s;          // 12:01:02 (3.4)
     $s = preg_replace('/^\s*(\[[^\]]{0,40}\]\s*)+/', '', $s) ?? $s;
     $s = preg_replace('/0x[0-9a-f]+/i', '#', $s) ?? $s;
     $s = preg_replace('/\b[0-9a-f]{8,}\b/i', '#', $s) ?? $s;
@@ -30,12 +36,66 @@ function rs_log_signature(string $text): string {
     return mb_substr($s, 0, 160);
 }
 
+// (3.4) Whether a report's file is RecompLauncher's launcher-trail.txt (by its name, or, for files
+// sent without one, by Beta 22's section line).
+function rs_log_is_trail(string $file, string $text): bool {
+    $base = strtolower(basename(str_replace('\\', '/', $file)));
+    if ($base !== '') return $base === 'launcher-trail.txt';
+    return preg_match('/^== Everything, newest ==\s*$/m', $text) === 1;
+}
+
+// (3.4) The lines of a launcher trail that are about the report's game. Beta 22 and later send
+// "== <app id> ==" with that game's own lines, then "== Everything, newest ==": only the first part
+// counts. Older launchers send one list for every game: lines that name another game's id go.
+function rs_log_trail_lines(array $lines, string $appId): array {
+    $appId = strtolower(trim($appId));
+    if ($appId === '' || $appId === 'launcher' || $appId === 'store') return $lines;
+    $own = null;
+    $in = false;
+    foreach ($lines as $l) {
+        if (preg_match('/^\s*==\s*(.+?)\s*==\s*$/', (string)$l, $m)) {
+            $in = strtolower($m[1]) === $appId;
+            if ($in) $own = [];
+            continue;
+        }
+        if ($in) $own[] = $l;
+    }
+    if ($own !== null) return $own;
+    $ids = rs_log_known_ids();
+    return array_values(array_filter($lines, function ($l) use ($ids, $appId) {
+        if (!preg_match_all('/(?<![a-z0-9._-])[a-z0-9]+(?:[._-][a-z0-9]+)+(?![a-z0-9_-])/', strtolower((string)$l), $m)) return true;
+        foreach ($m[0] as $tok) if ($tok !== $appId && isset($ids[$tok])) return false;
+        return true;
+    }));
+}
+
+// (3.4) Every game id in the catalogs (PC and PS5), lowercase, as keys.
+function rs_log_known_ids(): array {
+    static $ids = null;
+    if ($ids !== null) return $ids;
+    $ids = [];
+    try { foreach (rs_db()->query('SELECT id FROM pc_apps')->fetchAll(PDO::FETCH_COLUMN) as $i) $ids[strtolower((string)$i)] = true; } catch (Throwable $e) {}
+    try { foreach (array_keys(rs_games()) as $i) $ids[strtolower((string)$i)] = true; } catch (Throwable $e) {}
+    return $ids;
+}
+
+// (3.4) The launcher's own chatter, never a log's headline: its notes, release info and pictures that
+// came another way, and GitHub being slow. Times and [tags] at the start are looked past.
+function rs_log_noise(string $line): bool {
+    $s = preg_replace('/^\s*(\[[^\]]{0,40}\]\s*)+/', '', $line) ?? $line;
+    $s = preg_replace('/^\s*\d{2,4}[-\/.]\d{1,2}[-\/.]\d{1,4}[ T][\d:.,]+\S*\s*/', '', $s) ?? $s;
+    $s = preg_replace('/^\s*\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?\s*/', '', $s) ?? $s;
+    $s = preg_replace('/^\s*(\[[^\]]{0,40}\]\s*)+/', '', $s) ?? $s;
+    $s = ltrim($s, " \t-·•|");
+    return preg_match('/^(note:|release info for .* came from github|pictures from .* (didn\'t|didn’t|did not) (come|load)|github\.com had a problem sending)/iu', $s) === 1;
+}
+
 // The signature of one report: from its files, newest file last.
-function rs_log_report_signature(int $inboxId): string {
-    $st = rs_db()->prepare('SELECT RIGHT(body, 65536) AS b FROM inbox_files WHERE inbox_id = ? ORDER BY id');
+function rs_log_report_signature(int $inboxId, string $appId = ''): string {
+    $st = rs_db()->prepare('SELECT name, RIGHT(body, 65536) AS b FROM inbox_files WHERE inbox_id = ? ORDER BY id');
     $st->execute([$inboxId]);
     $sig = '';
-    foreach ($st->fetchAll() as $f) { $s = rs_log_signature((string)$f['b']); if ($s !== '') $sig = $s; }
+    foreach ($st->fetchAll() as $f) { $s = rs_log_signature((string)$f['b'], $appId, (string)$f['name']); if ($s !== '') $sig = $s; }
     return $sig;
 }
 
@@ -71,7 +131,7 @@ function rs_log_report_items(array $r, bool $forDev = false): array {
         if (trim((string)$p['before_text']) !== '') $text[] = 'Right before: ' . trim((string)$p['before_text']);
         if (!$forDev && trim((string)$p['contact']) !== '') $text[] = 'Contact: ' . trim((string)$p['contact']);
     }
-    $sig = rs_log_report_signature((int)$r['id']);
+    $sig = rs_log_report_signature((int)$r['id'], (string)$r['app_id']);
     if ($sig !== '') { $text[] = ''; $text[] = 'Looks like: ' . $sig; }
     $items['message.txt'] = implode("\r\n", $text) . "\r\n";
     $seen = ['message.txt' => true];
@@ -161,12 +221,17 @@ function rs_inbox_sig_column(): void {
         if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'sig'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN sig VARCHAR(255) NOT NULL DEFAULT '', ADD INDEX sig_app (kind, app_id, sig(64))");
         @touch($f);
     }
+    // (3.4) Headlines worked out again: launcher trails now count only for the report's own game.
+    $f2 = dirname(RS_PUBLIC) . '/recompstore-private/inbox-sig-v2.done';
+    if (!is_file($f2)) {
+        try { $db->exec("UPDATE inbox SET sig = '' WHERE kind = 'logs'"); @touch($f2); } catch (Throwable $e) {}
+    }
     $done = true;
 }
 function rs_log_sig_of(array &$r): string {
     $s = (string)($r['sig'] ?? '');
     if ($s === '') {
-        $s = mb_substr(rs_log_report_signature((int)$r['id']), 0, 250);
+        $s = mb_substr(rs_log_report_signature((int)$r['id'], (string)($r['app_id'] ?? '')), 0, 250);
         if ($s === '') $s = '-';
         try { rs_db()->prepare('UPDATE inbox SET sig = ? WHERE id = ?')->execute([$s, (int)$r['id']]); } catch (Throwable $e) {}
         $r['sig'] = $s;

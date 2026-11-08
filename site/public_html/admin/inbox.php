@@ -353,6 +353,14 @@ if ($logIds) {
     }
     unset($lr);
     if ($sigOf) {
+        // (3.4) Logs of these apps whose headline isn't worked out yet (since 3.4 changed how), a
+        // batch each time the Inbox opens, so "Same problem" counts them too.
+        try {
+            $apps = array_values(array_unique(array_column($sigOf, 0)));
+            $st = rs_db()->prepare("SELECT id, app_id, sig FROM inbox WHERE kind = 'logs' AND sig = '' AND created > (NOW() - INTERVAL 90 DAY) AND app_id IN (" . implode(',', array_fill(0, count($apps), '?')) . ') ORDER BY id DESC LIMIT 150');
+            $st->execute($apps);
+            foreach ($st->fetchAll() as $old) rs_log_sig_of($old);
+        } catch (Throwable $e) {}
         $st = rs_db()->prepare("SELECT app_id, sig, COUNT(*) n FROM inbox WHERE kind = 'logs' AND sig NOT IN ('', '-') AND created > (NOW() - INTERVAL 90 DAY) AND app_id IN (" . implode(',', array_fill(0, count(array_unique(array_column($sigOf, 0))), '?')) . ') GROUP BY app_id, sig');
         $st->execute(array_values(array_unique(array_column($sigOf, 0))));
         foreach ($st->fetchAll() as $c) $sigCount[$c['app_id'] . '|' . $c['sig']] = (int)$c['n'];
