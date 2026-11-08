@@ -53,14 +53,28 @@ if ($owner && rs_sign_on()) $task(rs_sign_waiting(), 'Thing to sign', 'Things to
 // PC
 $pcFound = $safe(fn() => count(rs_pc_found('new')));
 $pcPub = $safe(fn() => (string)rs_db()->query("SELECT MAX(at) FROM admin_log WHERE action = 'publish' AND target = 'pc-catalog'")->fetchColumn(), '');
-$pcChanged = $safe(fn() => $pcPub !== '' ? (int)rs_db()->query('SELECT COUNT(*) FROM pc_apps WHERE updated > ' . rs_db()->quote($pcPub))->fetchColumn() : 0);
-$pcReports = $safe(fn() => (int)rs_db()->query("SELECT COUNT(*) FROM play_reports WHERE kind = 'pc' AND hidden = 0 AND updated > DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetchColumn());
+// Changed since Publish PC: what the catalog would say now against what's live, on the fields a
+// curator changes (not downloads or stars, which GitHub moves all day). Worked out every 5 minutes.
+$pcChanged = !$showPc || !rs_can_page('pc.php') ? 0 : $safe(function () {
+    $c = function_exists('rs_kv_get') ? rs_kv_get('dash_pc_changed') : null;
+    if ($c && $c['age'] < 300) return (int)$c['v'];
+    $keys = array_flip(['name', 'game', 'blurb', 'adds', 'description', 'needs', 'credits', 'icon', 'cover', 'hero', 'logo', 'assets', 'tags', 'genre', 'tag', 'soon', 'featured', 'boot', 'launcher', 'copy_ids', 'setup_required', 'setup_steps', 'status', 'status_note', 'links', 'dev', 'report_url', 'media', 'features']);
+    $fp = function (array $e) use ($keys) { $x = array_intersect_key($e, $keys); ksort($x); return md5((string)json_encode($x)); };
+    $live = [];
+    foreach ((json_decode((string)@file_get_contents(RS_PC_CATALOG), true)['apps'] ?? []) as $e) $live[(string)$e['id']] = $fp($e);
+    $n = 0; $seen = [];
+    foreach (rs_pc_catalog()['apps'] as $e) { $seen[$e['id']] = 1; if (($live[$e['id']] ?? '') !== $fp($e)) $n++; }
+    $n += count(array_diff_key($live, $seen));
+    if (function_exists('rs_kv_put')) rs_kv_put('dash_pc_changed', (string)$n);
+    return $n;
+});
+$pcReports = $safe(fn() => (int)rs_db()->query("SELECT COUNT(*) FROM play_reports WHERE kind = 'pc' AND hidden = 0 AND flags > 0")->fetchColumn());
 $pcHeld = $safe(fn() => count(array_filter(rs_pc_apps(), fn($x) => !empty($x['pending']['tag']))));
 $task($pcFound, 'Recomp found on GitHub', 'Recomps found on GitHub', 'New ones the finder spotted. Add the good ones, skip the rest.', 'pc.php?view=found', 'pc');
 $task($pcChanged, 'Recomp changed, not published', 'Recomps changed, not published', 'Players see them after Publish PC' . ($pcPub !== '' ? ' (last ' . rs_date('M j, g:i a', (int)strtotime($pcPub)) . ')' : '') . '.', 'pc.php', 'pc');
 $task($subs['pc'], 'PC submission', 'PC submissions', 'Recomps developers sent in.', 'submissions.php' . ($both ? '?pf=pc' : ''), 'pc');
 $task($pcHeld, 'Update on hold', 'Updates on hold', 'New releases waiting for their virus check or for you.', 'security.php', 'pc');
-$task($pcReports, 'Player report this week', 'Player reports this week', 'What players said works and what doesn\'t.', 'pc.php?view=reports', 'pc');
+$task($pcReports, 'Flagged player report', 'Flagged player reports', 'Other players flagged these. Hide them or keep them.', 'pc.php?view=reports', 'pc');
 // PS5
 $published = (string)rs_setting('published_at', '');
 $psChanged = $safe(fn() => $published !== '' ? rs_an_int('SELECT COUNT(*) FROM games WHERE UNIX_TIMESTAMP(updated) > ?', [(int)strtotime($published)]) : rs_an_int('SELECT COUNT(*) FROM games'));

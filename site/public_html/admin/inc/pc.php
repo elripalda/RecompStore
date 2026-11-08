@@ -1281,6 +1281,7 @@ function rs_pc_publish(): int {
     if (!rs_pc_write_files($cat))
         throw new RuntimeException('Could not write pc-catalog.json. Check that public_html is writable.');
     rs_log('publish', 'pc-catalog', count($cat['apps']) . ' apps');
+    if (function_exists('rs_kv_put')) rs_kv_put('dash_pc_changed', '0'); // (4.3) the Dashboard's count
     // (4.0) Players waiting on a game that just came out hear about it; and new ones go to Discord.
     try { if (($n = rs_pc_notify_send(40)) > 0) rs_log('publish', 'notify', $n . ' Notify Me emails'); } catch (Throwable $e) { /* tried again next Publish */ }
     try { rs_pc_discord_announce($cat); } catch (Throwable $e) { /* best effort */ }
