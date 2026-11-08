@@ -78,6 +78,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . $back);
         exit;
     }
+    // (4.3) The Submissions page only acts on submissions (curators can open it but not the Inbox).
+    if ($SUBS && $id > 0) {
+        $k = $db->prepare('SELECT kind FROM inbox WHERE id = ?');
+        $k->execute([$id]);
+        if ($k->fetchColumn() !== 'submit') { rs_flash('That isn\'t a submission.', 'error'); header('Location: submissions.php'); exit; }
+    }
     if ($action === 'unlist') {
         // (2.9) A copyright notice: the listing it names comes off at once. A PC recomp leaves
         // RecompLauncher straight away; a PS5 app is hidden and leaves on the next Publish.
@@ -300,6 +306,9 @@ $rows = rs_db()->query("SELECT * FROM inbox $where ORDER BY created " . ($sort =
 // (2.8) Which store: PC submissions are the PC store's; logs, bug reports and sources the PS5
 // store's; messages belong to both.
 $pf = in_array($_GET['pf'] ?? '', ['ps5', 'pc'], true) ? (string)$_GET['pf'] : '';
+// (4.3) Someone who works on one store only sees that store's.
+$oneStore = count(rs_me()['stores_list'] ?? []) === 1 ? rs_me()['stores_list'][0] : '';
+if ($oneStore !== '') $pf = $oneStore;
 // (3.1g) Crash reports and feedback from RecompLauncher ("RecompLauncher <version> on windows", app
 // "launcher" or a PC recomp's id) are PC's.
 $pcIds = (function (): array {
@@ -427,7 +436,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     <p class="muted">Games, apps and recomps developers sent in for RecompStore and RecompLauncher.</p>
     <?php else: ?>
     <h1>Inbox</h1>
-    <p class="muted">Bug reports and messages from the website, and logs sent from the store and the launcher. Submissions are under Developers. Only you see these.</p>
+    <p class="muted">Bug reports and messages from the website, and logs sent from the store and the launcher. Submissions are under Developers. Only the admin team sees these.</p>
     <?php endif; ?>
   </div>
 </section>
@@ -443,9 +452,11 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
 </nav>
 <nav class="chips pf-chips" aria-label="Store and order">
   <?php $pfq = fn(string $v) => $self . '?' . http_build_query(array_filter(['show' => $show, 'cat' => $cat, 'pf' => $v, 'sort' => $sort], fn($x) => $x !== '')); ?>
+  <?php if ($oneStore === ''): ?>
   <a href="<?= h($pfq('')) ?>" <?= $pf === '' ? 'aria-current="page"' : '' ?>>Both stores</a>
   <a href="<?= h($pfq('ps5')) ?>" <?= $pf === 'ps5' ? 'aria-current="page"' : '' ?>>PS5</a>
   <a href="<?= h($pfq('pc')) ?>" <?= $pf === 'pc' ? 'aria-current="page"' : '' ?>>PC</a>
+  <?php endif; ?>
   <span class="chip-gap" aria-hidden="true"></span>
   <a href="<?= h($here(['sort' => '', 'page' => 1])) ?>" <?= $sort === '' ? 'aria-current="page"' : '' ?>>Newest first</a>
   <a href="<?= h($here(['sort' => 'old', 'page' => 1])) ?>" <?= $sort === 'old' ? 'aria-current="page"' : '' ?>>Oldest first</a>
@@ -701,7 +712,7 @@ if ($rows) {
 }
 ?>
 <style>
-.decline summary{color:#ff9b8a}
+.decline summary{color:var(--bad)}
 .dec-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;margin:10px 0 12px}
 @media (max-width:820px){.dec-presets{grid-template-columns:1fr}}
 </style>

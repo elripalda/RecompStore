@@ -1,0 +1,56 @@
+/* (4.3) My account and Team. */
+.acct-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
+.acct-grid .card{margin:0}
+.acct-grid .card.wide{grid-column:1/-1}
+@media (max-width:860px){.acct-grid{grid-template-columns:minmax(0,1fr)}}
+.stack{display:flex;flex-direction:column}
+.stack label{margin-bottom:12px}
+.who{display:flex;gap:14px;align-items:center;margin:4px 0 12px}
+.who strong{font-size:18px}
+.chips-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.theme-pick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.theme-card{flex-direction:column;align-items:stretch;gap:10px;padding:10px;min-height:0;border-radius:14px;font-size:14px}
+.theme-card.on{outline:2px solid var(--cyan);outline-offset:1px}
+.swatch{display:grid;grid-template-columns:1fr 2fr;grid-template-rows:1fr 1fr;gap:4px;height:64px;padding:6px;border-radius:10px;border:1px solid var(--line)}
+.swatch i{border-radius:5px}
+.swatch i:first-child{grid-row:span 2}
+.t-midnight .swatch{background:#0B1220}.t-midnight .swatch i{background:rgba(244,248,252,.1)}.t-midnight .swatch i:nth-child(2){background:#34F2E8}
+.t-oled .swatch{background:#000}.t-oled .swatch i{background:rgba(255,255,255,.08)}.t-oled .swatch i:nth-child(2){background:#34F2E8}
+.t-light .swatch{background:#F3F5F9}.t-light .swatch i{background:#fff;box-shadow:0 1px 2px rgba(15,26,42,.12)}.t-light .swatch i:nth-child(2){background:#2CD9D0}
+.keep-list{list-style:none;padding:0;margin:8px 0 14px;display:flex;flex-direction:column;gap:6px}
+.keep-list li{padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.once{border:1px solid rgba(52,242,232,.45);background:rgba(52,242,232,.08);border-radius:14px;padding:14px 16px;margin:0 0 14px}
+.codes{white-space:pre-wrap;font-size:14px;margin:10px 0}
+.qr{width:200px;margin:12px 0;background:#fff;border-radius:12px;padding:6px}
+.qr svg{display:block;width:100%;height:auto}
+.welcome .row{background:none;border:0;padding:0;gap:14px}
+.welcome .row .link,.link{background:none;border:0;color:var(--cyan-ink);padding:0;min-height:0}
+form.inline{display:inline-flex;gap:8px;align-items:center;margin:8px 8px 0 0}
+form.inline input{width:140px}
+.steps li{margin-bottom:14px}
+/* Team */
+.role-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0 0 20px}
+.role-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px 18px;position:relative}
+.role-card .n{position:absolute;top:12px;right:16px;font:700 26px Sora,sans-serif}
+.role-card p{margin:10px 0 0}
+@media (max-width:860px){.role-cards{grid-template-columns:minmax(0,1fr)}}
+.team-add{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:0 14px;align-items:end}
+.team-add fieldset{border:0;padding:0;margin:0 0 14px}
+.team-add legend{font-weight:600;font-size:15px;margin-bottom:6px}
+.team-add fieldset .row{background:none;border:0;padding:8px 0 4px;gap:16px}
+.team-add label.check{margin:0}
+.team-add .go{margin-bottom:14px}
+@media (max-width:980px){.team-add{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.team-add{grid-template-columns:minmax(0,1fr)}}
+.team-list{display:flex;flex-direction:column;gap:10px}
+.member{border:1px solid var(--line);border-radius:16px;padding:12px 14px}
+.member.off{opacity:.6}
+.member-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.member-name{flex:1;min-width:180px}
+.member-edit summary{cursor:pointer;color:var(--cyan-ink);font-weight:600;font-size:14px;margin-top:8px}
+.member-edit[open] summary{margin-bottom:12px}
+.member-actions{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
+.member-actions form{margin:0}
+.member-remove{display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line)}
+.member-remove label{margin:0;flex:1;min-width:220px}
+.once-card{border-color:rgba(52,242,232,.45)}

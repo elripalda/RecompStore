@@ -106,17 +106,17 @@ $bar = function (array $rows, string $label = 'k') {
 rs_head('RecompLauncher');
 ?>
 <style>
-.rl-tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}.rl-tabs a{padding:8px 14px;border-radius:10px;background:rgba(244,248,252,.06);text-decoration:none}.rl-tabs a.on{background:#34F2E8;color:#06121A}
+.rl-tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}.rl-tabs a{padding:8px 14px;border-radius:10px;background:rgba(var(--ink-rgb),.06);text-decoration:none}.rl-tabs a.on{background:var(--cyan);color:var(--on-accent)}
 .rl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}@media (max-width:900px){.rl-grid{grid-template-columns:1fr}}
-.rl-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.rl-nums div{padding:14px;border-radius:12px;background:rgba(244,248,252,.05)}.rl-nums b{display:block;font-size:26px}.rl-nums span{color:#a7b3c4;font-size:13px}
+.rl-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.rl-nums div{padding:14px;border-radius:12px;background:rgba(var(--ink-rgb),.05)}.rl-nums b{display:block;font-size:26px}.rl-nums span{color:var(--muted);font-size:13px}
 .rl-launch-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}.rl-launch-top h2{margin-top:0}
 .rl-launch-acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.rl-launch-acts form{margin:0}
-a.btn{display:inline-flex;align-items:center;padding:9px 14px;border-radius:10px;background:rgba(244,248,252,.08);color:inherit;text-decoration:none}a.btn:hover{background:rgba(244,248,252,.14)}
+a.btn{display:inline-flex;align-items:center;padding:9px 14px;border-radius:10px;background:rgba(var(--ink-rgb),.08);color:inherit;text-decoration:none}a.btn:hover{background:rgba(var(--ink-rgb),.14)}
 .rl-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}@media (max-width:900px){.rl-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:560px){.rl-steps{grid-template-columns:1fr}}
-.rl-steps>div{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:12px;background:rgba(244,248,252,.05)}.rl-steps .status-pill{align-self:flex-start}
-.linkish{background:none;border:0;padding:0;color:#34F2E8;cursor:pointer;font:inherit;text-decoration:underline}
+.rl-steps>div{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:12px;background:rgba(var(--ink-rgb),.05)}.rl-steps .status-pill{align-self:flex-start}
+.linkish{background:none;border:0;padding:0;color:var(--cyan-ink);cursor:pointer;font:inherit;text-decoration:underline}
 .rl-grid>label{display:block;min-width:0}
-.rl-bars{display:grid;gap:6px}.rl-bar{display:grid;grid-template-columns:minmax(0,220px) 1fr 50px;gap:10px;align-items:center;font-size:13.5px}.rl-bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rl-bar i{height:8px;border-radius:99px;background:linear-gradient(90deg,#34F2E8,#377BB6);min-width:2px}.rl-bar b{text-align:right}
+.rl-bars{display:grid;gap:6px}.rl-bar{display:grid;grid-template-columns:minmax(0,220px) 1fr 50px;gap:10px;align-items:center;font-size:13.5px}.rl-bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rl-bar i{height:8px;border-radius:99px;background:linear-gradient(90deg,var(--cyan),#377BB6);min-width:2px}.rl-bar b{text-align:right}
 </style>
 <section class="head-row"><div><h1>RecompLauncher</h1><p class="muted">The app itself: its launch, who uses it and on what, what goes wrong, its betas and its updates. Usage comes from launchers with "Share usage and diagnostics" on (Settings, General).</p></div></section>
 <nav class="rl-tabs"><?php foreach (['launch' => 'Launch', 'players' => 'Players', 'problems' => 'Problems', 'betas' => 'Betas', 'updates' => 'Updates'] as $k => $n): ?><a href="?view=<?= $k ?>"<?= $view === $k ? ' class="on"' : '' ?>><?= $n ?></a><?php endforeach; ?></nav>

@@ -8,7 +8,7 @@
   'use strict';
   const DATA = window.RS_CHARTS || {};
   const COLORS = ['#1fa3c4', '#d95926'];
-  const SURFACE = '#172031';
+  const SURFACE = (getComputedStyle(document.documentElement).getPropertyValue('--surface') || '').trim() || '#172031';
   const NS = 'http://www.w3.org/2000/svg';
   const el = (tag, attrs, parent) => {
     const n = document.createElementNS(NS, tag);

@@ -2,18 +2,18 @@
 .msg-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;align-items:start}
 .msg-list{padding:10px;max-height:72vh;overflow:auto}
 .msg-who{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;color:var(--frost);text-decoration:none}
-.msg-who:hover{background:rgba(244,248,252,.06)}
-.msg-who.on{background:rgba(244,248,252,.12)}
+.msg-who:hover{background:rgba(var(--ink-rgb),.06)}
+.msg-who.on{background:rgba(var(--ink-rgb),.12)}
 .msg-who-words{flex:1;min-width:0;display:grid}
 .msg-who-words strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .msg-who-words .muted{font-size:13px}
 .msg-pic{width:36px;height:36px;border-radius:50%;flex:none;object-fit:cover}
-.msg-letter{display:grid;place-items:center;background:linear-gradient(135deg,#34f2e8,#377bb6);color:#0B1220;font:700 16px Sora,sans-serif}
+.msg-letter{display:grid;place-items:center;background:linear-gradient(135deg,var(--cyan),#377bb6);color:var(--on-accent);font:700 16px Sora,sans-serif}
 .msg-head{display:flex;align-items:center;gap:14px;margin:0 0 14px}
 .msg-head h2{margin:0}
 .msg-head .pill{margin-left:6px}
 .msg-flow{display:flex;flex-direction:column;gap:10px;max-height:56vh;overflow:auto;padding:4px 2px 12px}
-.msg-bubble{max-width:78%;align-self:flex-start;padding:12px 14px;border-radius:16px;background:rgba(244,248,252,.07);border:1px solid var(--line)}
+.msg-bubble{max-width:78%;align-self:flex-start;padding:12px 14px;border-radius:16px;background:rgba(var(--ink-rgb),.07);border:1px solid var(--line)}
 .msg-bubble.team{align-self:flex-end;background:rgba(52,242,232,.12);border-color:rgba(52,242,232,.3)}
 .msg-bubble.gone{opacity:.5}
 .msg-bubble p{margin:0 0 6px;overflow-wrap:anywhere}
@@ -37,7 +37,7 @@
 .cast-who legend{font-weight:600;margin-bottom:8px}
 .cast-pick{position:relative;cursor:pointer}
 .cast-pick input{position:absolute;opacity:0}
-.cast-pick span{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:14px;border:1.5px solid var(--line);background:rgba(11,18,32,.35)}
+.cast-pick span{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:14px;border:1.5px solid var(--line);background:rgba(var(--bg-rgb),.35)}
 .cast-pick input:checked+span{border-color:var(--cyan);background:rgba(52,242,232,.08)}
 .cast-pick input:focus-visible+span{outline:2px solid var(--cyan)}
 .cast-pick small{color:var(--muted)}

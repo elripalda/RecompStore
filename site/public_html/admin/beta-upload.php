@@ -21,6 +21,7 @@ function out(int $code, array $body): void {
 
 rs_session();
 if (empty($_SESSION['uid'])) out(401, ['ok' => false, 'error' => 'Sign in to the admin again, then drop the zip again.']);
+rs_gate(true); // (4.3) part of this login's role and stores
 $t = $_SERVER['HTTP_X_CSRF'] ?? '';
 if (!is_string($t) || empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $t)) out(400, ['ok' => false, 'error' => 'This page expired. Reload it and drop the zip again.']);
 session_write_close(); // the pieces mustn't hold up the rest of the admin

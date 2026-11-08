@@ -358,16 +358,16 @@ $feedNow = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version
 .gh-head h2{margin:0 0 4px}
 .gh-stats{margin:16px 0;grid-template-columns:repeat(3,minmax(0,1fr))}
 @media (max-width:1000px){.gh-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.mac-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}.mac-facts div{padding:12px 14px;border-radius:12px;background:rgba(244,248,252,.05);min-width:0}.mac-facts .wide{grid-column:span 2}
-.mac-facts dt{font-size:13px;color:#a7b3c4;margin:0 0 4px}.mac-facts dd{margin:0;overflow-wrap:anywhere}
+.mac-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}.mac-facts div{padding:12px 14px;border-radius:12px;background:rgba(var(--ink-rgb),.05);min-width:0}.mac-facts .wide{grid-column:span 2}
+.mac-facts dt{font-size:13px;color:var(--muted);margin:0 0 4px}.mac-facts dd{margin:0;overflow-wrap:anywhere}
 .gh-table{width:100%;border-collapse:collapse}
-.gh-table th,.gh-table td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)}
+.gh-table th,.gh-table td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(var(--ink-rgb),.08)}
 .gh-table .num{text-align:right;font-variant-numeric:tabular-nums}
 .lb-stats b{font-size:26px;line-height:1.15}
 .lb-up{display:grid;gap:12px;margin-top:12px}
 .lb-drop{display:flex;flex-direction:column;gap:6px;padding:18px;border:1.5px dashed var(--line);border-radius:14px}
 .lb-bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
-.lb-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#34F2E8,#377BB6);transition:width .2s}
+.lb-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan),#377BB6);transition:width .2s}
 .lsh-new{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid var(--line)}
 .lsh-new code{flex:1 1 260px;overflow-wrap:anywhere;font-size:13px}
 .lsh-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px;align-items:end}

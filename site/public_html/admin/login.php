@@ -35,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $keep = !empty($_SESSION['pending_keep']);
             unset($_SESSION['pending_uid'], $_SESSION['pending_at'], $_SESSION['pending_keep']);
             $_SESSION['uid'] = $uid;
+            rs_login_done($uid);
             if ($keep) rs_keep_issue($uid);
             $_SESSION['tries'] = 0;
             rs_log('login', (string)$u['username'], $recovery ? 'with a recovery code' : 'with the authenticator');
@@ -47,9 +48,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'That code didn\'t work. Use the newest one from your authenticator app.';
     } else {
         $name = trim((string)($_POST['username'] ?? ''));
-        $st = rs_db()->prepare('SELECT id, pass_hash, totp_secret FROM users WHERE username = ?');
+        rs_roles_schema();
+        $st = rs_db()->prepare('SELECT id, pass_hash, totp_secret, active FROM users WHERE username = ?');
         $st->execute([$name]);
         $u = $st->fetch();
+        // (4.3) A login the owner switched off can't sign in.
+        if ($u && !(int)$u['active']) $u = null;
         if ($u && password_verify((string)($_POST['password'] ?? ''), $u['pass_hash'])) {
             if ((string)$u['totp_secret'] !== '') {
                 session_regenerate_id(true);
@@ -61,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             session_regenerate_id(true);
             $_SESSION['uid'] = (int)$u['id'];
+            rs_login_done((int)$u['id']);
             $_SESSION['tries'] = 0;
             if (!empty($_POST['keep'])) rs_keep_issue((int)$u['id']);
             rs_log('login', $name, 'password only');

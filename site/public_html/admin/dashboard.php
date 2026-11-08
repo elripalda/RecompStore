@@ -1,10 +1,13 @@
 <?php
-// RecompStore admin (2.3): the Dashboard, where logging in lands. Today's numbers, what's waiting
-// (signatures, the Inbox, changes not published yet), the latest changes, and every game one click
-// away.
+// RecompStore admin: the Dashboard, where logging in lands.
+// (4.3) Made for the whole team: what needs doing first (for your role and your stores), then the
+// numbers, shortcuts and the latest changes. Owners and anyone on both stores can look at PC, PS5
+// or both at once.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
+require_once __DIR__ . '/inc/lstats.php';
+require_once __DIR__ . '/inc/maint.php';
 rs_require_login();
 rs_stats_tables();
 rs_link_tables();
@@ -13,143 +16,278 @@ rs_analytics_tables();
 rs_inbox_table();
 rs_log_table();
 
+$me = rs_me();
+$mine = $me['stores_list'];
+$both = count($mine) > 1;
+// Which store to look at: ?store=pc|ps5|both, remembered for the session.
+$pick = (string)($_GET['store'] ?? ($_SESSION['dash_store'] ?? 'both'));
+if (!in_array($pick, ['pc', 'ps5', 'both'], true) || ($pick === 'both' && !$both) || ($pick !== 'both' && !in_array($pick, $mine, true))) $pick = $both ? 'both' : $mine[0];
+$_SESSION['dash_store'] = $pick;
+$showPc = $pick !== 'ps5';
+$showPs5 = $pick !== 'pc';
+$mgr = rs_role_at_least('manager');
+$owner = rs_is_owner();
+$safe = function (callable $f, $fallback = 0) { try { return $f(); } catch (Throwable $e) { return $fallback; } };
 $today = gmdate('Y-m-d');
 $yday = gmdate('Y-m-d', time() - 86400);
-$two = fn(string $sql) => [rs_an_int($sql, [$today]), rs_an_int($sql, [$yday])];
-$consoles = $two('SELECT COUNT(*) FROM console_days WHERE day = ?');
-$installs = $two("SELECT COALESCE(SUM(n), 0) FROM app_events WHERE kind = 'install' AND day = ?");
-$updates = $two("SELECT COALESCE(SUM(n), 0) FROM app_events WHERE kind = 'update' AND day = ?");
-$newC = $two('SELECT COUNT(*) FROM beta_installs WHERE DATE(created) = ?');
-$visitors = $two('SELECT COUNT(*) FROM site_visitors WHERE day = ?');
-$views = rs_an_int('SELECT COALESCE(SUM(views), 0) FROM site_pages WHERE day = ?', [$today]);
-$betas = $two('SELECT COUNT(*) FROM beta_downloads WHERE day = ?');
-$inboxToday = rs_an_int('SELECT COUNT(*) FROM inbox WHERE DATE(created) = CURDATE()');
+$since14 = gmdate('Y-m-d', time() - 13 * 86400);
 
-// What's waiting.
-$open = rs_an_pairs("SELECT kind, COUNT(*) FROM inbox WHERE status = 'new' GROUP BY kind");
-$sign = rs_sign_waiting();
-$published = (string)rs_setting('published_at', '');
-$changed = $published !== '' ? rs_an_int('SELECT COUNT(*) FROM games WHERE UNIX_TIMESTAMP(updated) > ?', [(int)strtotime($published)]) : rs_an_int('SELECT COUNT(*) FROM games');
-$wait = [
-    ['n' => $sign, 'label' => $sign === 1 ? 'Thing to sign' : 'Things to sign', 'note' => 'In RecompStore Signer on your PC. Until then they reach no one.', 'href' => 'settings.php#signer', 'show' => rs_sign_on()],
-    ['n' => $changed, 'label' => $changed === 1 ? 'Game changed since the last publish' : 'Games changed since the last publish', 'note' => $published !== '' ? 'Last published ' . gmdate('M j, g:i a', (int)strtotime($published)) . ' UTC.' : 'Not published yet.', 'href' => 'index.php', 'show' => true],
-    ['n' => (int)($open['submit'] ?? 0), 'label' => 'Submissions', 'note' => 'Apps people sent in for the store.', 'href' => 'submissions.php', 'show' => true],
-    ['n' => (int)($open['logs'] ?? 0), 'label' => 'Logs', 'note' => 'Sent from consoles' . (rs_an_has('inbox', 'feedback') ? ', with testers\' feedback' : '') . '.', 'href' => 'inbox.php?show=logs', 'show' => true],
-    ['n' => (int)($open['bug'] ?? 0), 'label' => 'Bug reports', 'note' => 'From the website.', 'href' => 'inbox.php?show=bug', 'show' => true],
-    ['n' => (int)($open['message'] ?? 0) + (int)($open['source'] ?? 0), 'label' => 'Messages and sources', 'note' => 'Everything else in the Inbox.', 'href' => 'inbox.php', 'show' => true],
-];
-// (2.6) Listings that need a look, and new apps found (admin/health.php).
-rs_health_maybe();
-$health = rs_health_summary();
-$needLook = $health['bad'] + $health['warn'];
-$newFound = count(rs_found_list()['new']);
-$wait[] = ['n' => $needLook, 'label' => $needLook === 1 ? 'Listing needs a look' : 'Listings need a look', 'note' => 'A renamed repo, a missing zip, a changed title ID or a dead link.', 'href' => 'health.php', 'show' => true];
-$wait[] = ['n' => $newFound, 'label' => $newFound === 1 ? 'New app found' : 'New apps found', 'note' => 'PS5 apps on GitHub and in other catalogs that aren\'t in the store yet.', 'href' => 'health.php#found', 'show' => true];
-// (2.7.3) Title IDs used by two different apps: red, at the top.
+// ---- What needs doing ----------------------------------------------------------------------------
+// Each task: count, title, what it means, where to go, which store ('' = both), and who sees it.
+$open = $safe(fn() => rs_an_pairs("SELECT kind, COUNT(*) FROM inbox WHERE status = 'new' GROUP BY kind"), []);
+$subs = $safe(function () {
+    $n = ['pc' => 0, 'ps5' => 0];
+    foreach (rs_db()->query("SELECT data FROM inbox WHERE kind = 'submit' AND status = 'new'") as $r) {
+        $d = json_decode((string)$r['data'], true);
+        $n[is_array($d) && ($d['platform'] ?? '') === 'pc' ? 'pc' : 'ps5']++;
+    }
+    return $n;
+}, ['pc' => 0, 'ps5' => 0]);
+$tasks = [];
+$task = function (int $n, string $one, string $many, string $note, string $href, string $store = '', string $role = 'curator') use (&$tasks) {
+    $tasks[] = compact('n', 'note', 'href', 'store', 'role') + ['label' => $n === 1 ? $one : $many];
+};
 $clashes = [];
-try { $clashes = rs_radar_clashes(); } catch (Throwable $e) { /* next time */ }
-$wait = array_values(array_filter($wait, fn($w) => $w['show']));
-$anyWaiting = array_sum(array_column($wait, 'n')) > 0;
+if ($showPs5 && rs_has_store('ps5')) $clashes = $safe(fn() => rs_radar_clashes(), []);
+if ($owner && rs_sign_on()) $task(rs_sign_waiting(), 'Thing to sign', 'Things to sign', 'In RecompStore Signer on your PC. Until then they reach no one.', 'settings.php#signer', '', 'owner');
+// PC
+$pcFound = $safe(fn() => count(rs_pc_found('new')));
+$pcPub = $safe(fn() => (string)rs_db()->query("SELECT MAX(at) FROM admin_log WHERE action = 'publish' AND target = 'pc-catalog'")->fetchColumn(), '');
+$pcChanged = $safe(fn() => $pcPub !== '' ? (int)rs_db()->query('SELECT COUNT(*) FROM pc_apps WHERE updated > ' . rs_db()->quote($pcPub))->fetchColumn() : 0);
+$pcReports = $safe(fn() => (int)rs_db()->query("SELECT COUNT(*) FROM play_reports WHERE kind = 'pc' AND hidden = 0 AND updated > DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetchColumn());
+$pcHeld = $safe(fn() => count(array_filter(rs_pc_apps(), fn($x) => !empty($x['pending']['tag']))));
+$task($pcFound, 'Recomp found on GitHub', 'Recomps found on GitHub', 'New ones the finder spotted. Add the good ones, skip the rest.', 'pc.php?view=found', 'pc');
+$task($pcChanged, 'Recomp changed, not published', 'Recomps changed, not published', 'Players see them after Publish PC' . ($pcPub !== '' ? ' (last ' . rs_date('M j, g:i a', (int)strtotime($pcPub)) . ')' : '') . '.', 'pc.php', 'pc');
+$task($subs['pc'], 'PC submission', 'PC submissions', 'Recomps developers sent in.', 'submissions.php' . ($both ? '?pf=pc' : ''), 'pc');
+$task($pcHeld, 'Update on hold', 'Updates on hold', 'New releases waiting for their virus check or for you.', 'security.php', 'pc');
+$task($pcReports, 'Player report this week', 'Player reports this week', 'What players said works and what doesn\'t.', 'pc.php?view=reports', 'pc');
+// PS5
+$published = (string)rs_setting('published_at', '');
+$psChanged = $safe(fn() => $published !== '' ? rs_an_int('SELECT COUNT(*) FROM games WHERE UNIX_TIMESTAMP(updated) > ?', [(int)strtotime($published)]) : rs_an_int('SELECT COUNT(*) FROM games'));
+$health = $showPs5 && rs_has_store('ps5') ? $safe(function () { rs_health_maybe(); return rs_health_summary(); }, ['bad' => 0, 'warn' => 0]) : ['bad' => 0, 'warn' => 0];
+$psFound = $showPs5 && rs_has_store('ps5') ? $safe(fn() => count(rs_found_list()['new'])) : 0;
+$task($psFound, 'PS5 app found', 'PS5 apps found', 'On GitHub and in other catalogs, not in the store yet.', 'health.php#found', 'ps5');
+$task($psChanged, 'Game changed, not published', 'Games changed, not published', $published !== '' ? 'Last published ' . rs_date('M j, g:i a', (int)strtotime($published)) . '.' : 'Not published yet.', 'index.php', 'ps5');
+$task($subs['ps5'], 'PS5 submission', 'PS5 submissions', 'Apps developers sent in for the store.', 'submissions.php' . ($both ? '?pf=ps5' : ''), 'ps5');
+$task((int)$health['bad'] + (int)$health['warn'], 'Listing needs a look', 'Listings need a look', 'A renamed repo, a missing zip, a changed title ID or a dead link.', 'health.php', 'ps5');
+// Both stores
+$task($safe(fn() => rs_vt_need_count()), 'Download flagged', 'Downloads flagged', 'Flagged by several virus scanners. Look before it goes out.', 'security.php');
+$task($safe(fn() => rs_dev_waiting()), 'Developer request', 'Developer requests', 'New developer accounts, page changes and claims to approve.', 'developers.php');
+$task($safe(fn() => rs_dev_admin_unread()), 'Unread developer message', 'Unread developer messages', 'Replies stay between the team and the developer.', 'messages.php');
+// Managers
+$task((int)($open['bug'] ?? 0), 'Bug report', 'Bug reports', 'From the website.', 'inbox.php?show=bug', '', 'manager');
+$task((int)($open['logs'] ?? 0), 'Log sent in', 'Logs sent in', 'From the launcher and consoles, grouped by what went wrong.', 'inbox.php?show=logs', '', 'manager');
+$task((int)($open['message'] ?? 0) + (int)($open['source'] ?? 0) + (int)($open['copyright'] ?? 0), 'Inbox message', 'Inbox messages', 'Messages, reported sources and notices.', 'inbox.php', '', 'manager');
+$tasks = array_values(array_filter($tasks, fn($t) => rs_role_at_least($t['role']) && rs_can_page($t['href'])
+    && ($t['store'] === '' || ($t['store'] === 'pc' ? $showPc : $showPs5))));
+usort($tasks, fn($a, $b) => ($b['n'] > 0) <=> ($a['n'] > 0));
+$todo = count(array_filter($tasks, fn($t) => $t['n'] > 0));
 
-$acts = rs_an_rows('SELECT at, who, action, target, detail FROM admin_log ORDER BY at DESC, id DESC LIMIT 8');
+// ---- Numbers (managers and owners) ---------------------------------------------------------------
+$kpi = fn(string $label, int $v, string $small = '') => '<div class="kpi"><span>' . h($label) . '</span><strong>' . rs_an_fmt($v) . '</strong>' . ($small !== '' ? '<small>' . $small . '</small>' : '') . '</div>';
+$vs = function (int $now, int $then): string {
+    if ($now === $then) return 'Same as yesterday';
+    return '<span class="' . ($now > $then ? 'up' : 'down') . '">' . ($now > $then ? '+' : '−') . number_format(abs($now - $then)) . '</span> on yesterday';
+};
+$charts = [];
+$pcKpis = $psKpis = '';
+if ($mgr) {
+    if ($showPc && rs_has_store('pc')) {
+        $ls = $safe(fn() => rs_ls_summary(), []);
+        $live = $safe(fn() => rs_ls_live(), ['open' => 0, 'playing' => 0]);
+        $pcKpis = $kpi('Open right now', (int)$live['open'], number_format((int)$live['playing']) . ' playing a game')
+            . $kpi('Players today', (int)($ls['today'] ?? 0), number_format((int)($ls['new_today'] ?? 0)) . ' new')
+            . $kpi('This week', (int)($ls['week'] ?? 0), number_format((int)($ls['month'] ?? 0)) . ' this month')
+            . $kpi('Hours played today', (int)round((float)($ls['hours_today'] ?? 0)), '<a href="launcher-stats.php">Launcher stats</a>');
+        if (!empty($ls['series'])) $charts['PC players'] = $ls['series'];
+    }
+    if ($showPs5 && rs_has_store('ps5')) {
+        $two = fn(string $sql) => [$safe(fn() => rs_an_int($sql, [$today])), $safe(fn() => rs_an_int($sql, [$yday]))];
+        $consoles = $two('SELECT COUNT(*) FROM console_days WHERE day = ?');
+        $installs = $two("SELECT COALESCE(SUM(n), 0) FROM app_events WHERE kind = 'install' AND day = ?");
+        $newC = $two('SELECT COUNT(*) FROM beta_installs WHERE DATE(created) = ?');
+        $betas = $two('SELECT COUNT(*) FROM beta_downloads WHERE day = ?');
+        $psKpis = $kpi('Consoles today', $consoles[0], $vs($consoles[0], $consoles[1]))
+            . $kpi('New consoles', $newC[0], $vs($newC[0], $newC[1]))
+            . $kpi('Installs today', $installs[0], $vs($installs[0], $installs[1]))
+            . $kpi('Beta downloads', $betas[0], 'Yesterday ' . number_format($betas[1]));
+        $charts['PS5 consoles'] = $safe(fn() => rs_series('SELECT day, COUNT(*) FROM console_days WHERE day >= ? GROUP BY day', [$since14], 14), []);
+    }
+    $visitors = $safe(fn() => rs_an_int('SELECT COUNT(*) FROM site_visitors WHERE day = ?', [$today]));
+}
+$charts = array_filter($charts);
+$chartData = $charts ? ['week' => rs_an_chart($charts)] : [];
+
+// ---- The side column -----------------------------------------------------------------------------
+$pcApps = $showPc && rs_has_store('pc') ? $safe(fn() => rs_pc_apps(), []) : [];
+$pcListed = count(array_filter($pcApps, fn($a) => empty($a['hidden']) && empty($a['soon'])));
+$pcSoon = count(array_filter($pcApps, fn($a) => empty($a['hidden']) && !empty($a['soon'])));
+$pcHidden = count(array_filter($pcApps, fn($a) => !empty($a['hidden'])));
+$psGames = $showPs5 && rs_has_store('ps5') ? $safe(fn() => rs_games(true), []) : [];
+$psListed = count(array_filter($psGames, fn($g) => empty($g['hidden'])));
+$psHidden = count($psGames) - $psListed;
+$mt = $safe(fn() => rs_maint_state(), ['ps5' => ['on' => false], 'pc' => ['on' => false]]);
+$acts = $safe(fn() => $mgr
+    ? rs_an_rows('SELECT at, who, action, target, detail FROM admin_log ORDER BY at DESC, id DESC LIMIT 8')
+    : rs_an_rows('SELECT at, who, action, target, detail FROM admin_log WHERE who = ? ORDER BY at DESC, id DESC LIMIT 8', [(string)$me['username']]), []);
 $actNames = ['login' => 'Logged in', 'login-failed' => 'Failed login', 'publish' => 'Published', 'signed' => 'Signed', 'change' => 'Changed',
-    'settings' => 'Settings', 'signer' => 'Signer', 'two-step' => 'Two-step login', 'discover' => 'Discover'];
+    'settings' => 'Settings', 'signer' => 'Signer', 'two-step' => 'Two-step login', 'discover' => 'Discover', 'team' => 'Team', 'password' => 'Password'];
 $ago = function (string $at): string {
-    $t = strtotime($at) ?: 0;
-    $s = time() - $t;
+    $s = time() - (strtotime($at) ?: 0);
     if ($s < 60) return 'just now';
     if ($s < 3600) return floor($s / 60) . ' min ago';
     if ($s < 86400) return floor($s / 3600) . ' h ago';
-    return rs_date('M j', $t);
+    return rs_date('M j', strtotime($at) ?: 0);
 };
+// Shortcuts: the pages people use most, for this role and these stores.
+$jump = array_filter([
+    ['pc.php', 'PC recomps', 'pc'], ['pc.php?view=found', 'Found on GitHub (PC)', 'pc'], ['titles.php', 'Versions', 'pc'], ['launcher-beta.php', 'Launcher beta', 'pc'],
+    ['index.php', 'PS5 games', 'ps5'], ['edit.php', 'Add a PS5 game', 'ps5'], ['health.php', 'Found on GitHub (PS5)', 'ps5'], ['discover.php', 'Discover page', 'ps5'],
+    ['submissions.php', 'Submissions', ''], ['developers.php', 'Developers', ''], ['security.php', 'Security', ''], ['inbox.php', 'Inbox', ''],
+    ['analytics.php', 'Analytics', ''], ['status.php', 'Status', ''], ['docs.php', 'Developer docs', ''],
+], fn($j) => rs_can_page($j[0]) && ($j[2] === '' || ($j[2] === 'pc' ? $showPc : $showPs5)));
+$hour = (int)rs_date('G');
+$hello = $hour < 5 ? 'Up late' : ($hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening'));
+$where = $pick === 'both' ? 'PC and PS5' : RS_STORES[$pick];
+$csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 
-$games = rs_games(true);
-$installed = rs_an_pairs('SELECT app_id, COUNT(*) FROM app_installs WHERE removed_at IS NULL GROUP BY app_id');
-
-// The last 14 days, small.
-$charts = ['week' => rs_an_chart([
-    'Consoles' => rs_series('SELECT day, COUNT(*) FROM console_days WHERE day >= ? GROUP BY day', [gmdate('Y-m-d', time() - 13 * 86400)], 14),
-    'Installs' => rs_series("SELECT day, SUM(n) FROM app_events WHERE kind = 'install' AND day >= ? GROUP BY day", [gmdate('Y-m-d', time() - 13 * 86400)], 14)])];
-
-$vs = function (int $now, int $then): string {
-    if ($now === $then) return 'Same as yesterday';
-    return '<span class="' . ($now > $then ? 'up' : 'down') . '">' . ($now > $then ? '+' : '−') . number_format(abs($now - $then)) . '</span> on yesterday (' . number_format($then) . ')';
-};
-$kpi = fn(string $label, int $v, string $small = '') => '<div class="kpi"><span>' . h($label) . '</span><strong>' . rs_an_fmt($v) . '</strong>' . ($small !== '' ? '<small>' . $small . '</small>' : '') . '</div>';
-$catNames = RS_CATEGORIES;
-
-rs_head('Dashboard', true, ['assets/analytics.css']);
+rs_head('Dashboard', true, ['assets/analytics.css', 'assets/dashboard.css']);
 ?>
-<section class="head-row">
-  <div><h1>Dashboard</h1><p class="muted">Today so far, in UTC (<?= h(gmdate('D M j, g:i a')) ?>).</p></div>
-  <div class="actions">
-    <a class="btn" href="edit.php">Add a game</a>
-    <form method="post" action="index.php"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="publish"><button class="primary">Publish</button></form>
+<section class="dash-hello">
+  <div>
+    <h1><?= h($hello) ?>, <?= h(rs_me_name()) ?></h1>
+    <p class="muted"><?= $todo ? ($todo === 1 ? 'One thing needs' : $todo . ' things need') . ' you on ' . h($where) . '.' : 'All caught up on ' . h($where) . '. Nice.' ?></p>
+  </div>
+  <div class="dash-tools">
+    <?php if ($both): ?>
+    <nav class="seg-store" aria-label="Which store">
+      <?php foreach (['both' => 'Both', 'pc' => 'PC', 'ps5' => 'PS5'] as $k => $n): ?><a href="dashboard.php?store=<?= $k ?>"<?= $pick === $k ? ' class="on" aria-current="true"' : '' ?>><?= $n ?></a><?php endforeach; ?>
+    </nav>
+    <?php endif; ?>
+    <?php if ($showPc && rs_can_page('pc.php')): ?><form method="post" action="pc.php"><?= $csrf ?><input type="hidden" name="action" value="publish"><button class="primary" title="Put the PC catalog's changes live">Publish PC</button></form><?php endif; ?>
+    <?php if ($showPs5 && rs_can_page('index.php')): ?><form method="post" action="index.php"><?= $csrf ?><input type="hidden" name="action" value="publish"><button class="<?= $showPc ? '' : 'primary' ?>" title="Put the PS5 store's changes live">Publish PS5</button></form><?php endif; ?>
   </div>
 </section>
+
 <?php if ($clashes): ?>
 <a class="dash-alert" href="health.php#radar"><strong><?= count($clashes) === 1 ? 'Title ID clash' : count($clashes) . ' title ID clashes' ?></strong>
   <span><?= h(implode(', ', array_keys(array_slice($clashes, 0, 6, true)))) ?><?= count($clashes) > 6 ? ' and more' : '' ?> <?= count($clashes) === 1 ? 'is' : 'are' ?> used by two different apps. On a PS5 one writes over the other.</span><span aria-hidden="true">→</span></a>
 <?php endif; ?>
-<nav class="dash-links" aria-label="Go to">
-  <a href="index.php">Games</a><a href="discover.php">Discover</a><a href="beta.php">Beta</a><a href="inbox.php">Inbox</a>
-  <a href="analytics.php">Analytics</a><a href="analytics.php?tab=apps">Apps</a><a href="analytics.php?tab=downloads">Downloads</a>
-  <a href="import.php">Import</a><a href="health.php">Health</a><a href="icons.php">Icons</a><a href="settings.php">Settings</a><a href="log.php">Change log</a><a href="/" target="_blank" rel="noopener">View site</a>
-</nav>
-<div class="kpis k6">
-  <?= $kpi('Consoles today', $consoles[0], $vs($consoles[0], $consoles[1])) ?>
-  <?= $kpi('New consoles', $newC[0], $vs($newC[0], $newC[1])) ?>
-  <?= $kpi('Installs today', $installs[0], number_format($updates[0]) . ($updates[0] === 1 ? ' update' : ' updates') . ' · yesterday ' . number_format($installs[1])) ?>
-  <?= $kpi('Website visitors', $visitors[0], number_format($views) . ' page views · yesterday ' . number_format($visitors[1])) ?>
-  <?= $kpi('Beta downloads', $betas[0], 'Yesterday ' . number_format($betas[1])) ?>
-  <?= $kpi('Inbox today', $inboxToday, '<a href="inbox.php">' . (array_sum($open) ? number_format(array_sum($open)) . ' not read' : 'All read') . '</a>') ?>
-</div>
-<div class="dash-grid">
+
+<div class="dash-cols">
+<div class="dash-main">
   <section class="card">
-    <h2>Waiting for you</h2>
-    <?php if (!$anyWaiting): ?><p class="muted small-note">Nothing waiting. Everything's signed, published and read.</p><?php endif; ?>
-    <ul class="wait">
-      <?php foreach ($wait as $w): ?>
-      <li><a href="<?= h($w['href']) ?>"<?= $w['n'] ? '' : ' class="zero"' ?>><span class="n"><?= (int)$w['n'] ?></span><span><?= h($w['label']) ?><small><?= h($w['note']) ?></small></span><span class="go" aria-hidden="true">→</span></a></li>
+    <div class="an-head"><h2>Needs you</h2><span class="muted small">Click one to go straight there.</span></div>
+    <?php $busy = array_values(array_filter($tasks, fn($t) => $t['n'] > 0)); $clear = array_values(array_filter($tasks, fn($t) => !$t['n'])); ?>
+    <?php if ($busy): ?>
+    <div class="tasks<?= count($busy) % 2 ? ' odd' : '' ?>">
+      <?php foreach ($busy as $t): ?>
+      <a class="task" href="<?= h($t['href']) ?>">
+        <span class="n"><?= number_format((int)$t['n']) ?></span>
+        <span class="tx"><strong><?= h($t['label']) ?><?php if ($t['store'] !== '' && $pick === 'both'): ?> <em class="store-chip store-<?= h($t['store']) ?>"><?= h(RS_STORES[$t['store']]) ?></em><?php endif; ?></strong><small><?= h($t['note']) ?></small></span>
+        <span class="go" aria-hidden="true">→</span>
+      </a>
       <?php endforeach; ?>
-    </ul>
+    </div>
+    <?php else: ?>
+    <p class="all-clear">Nothing waiting. Everything's checked, published and read.</p>
+    <?php endif; ?>
+    <?php if ($clear): ?>
+    <div class="clear-row"><span class="muted small">All clear:</span>
+      <?php foreach ($clear as $t): ?><a href="<?= h($t['href']) ?>" title="<?= h($t['note']) ?>"><?= h($t['label']) ?></a><?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+  </section>
+
+  <?php if ($pcKpis !== ''): ?>
+  <section class="dash-block">
+    <div class="an-head"><h2><span class="store-dot pc"></span>RecompLauncher</h2><a class="an-csv an-plain" href="launcher-stats.php">More</a></div>
+    <div class="kpis k4"><?= $pcKpis ?></div>
+  </section>
+  <?php endif; ?>
+  <?php if ($psKpis !== ''): ?>
+  <section class="dash-block">
+    <div class="an-head"><h2><span class="store-dot ps5"></span>RecompStore on PS5</h2><a class="an-csv an-plain" href="analytics.php">More</a></div>
+    <div class="kpis k4"><?= $psKpis ?></div>
+  </section>
+  <?php endif; ?>
+  <?php if ($chartData): ?>
+  <section class="card chart-card">
+    <div class="an-head"><h2>The last 14 days</h2><?php if (isset($visitors)): ?><span class="muted small"><?= number_format($visitors) ?> website visitors today</span><?php endif; ?></div>
+    <div class="chart" data-chart="week" tabindex="0" role="img" aria-label="Players per day for the last 14 days. Use the arrow keys to read each day."></div>
+  </section>
+  <?php endif; ?>
+  <?php if (!$mgr): ?>
+  <section class="card">
+    <h2>Shortcuts</h2>
+    <div class="jump">
+      <?php foreach ($jump as [$href, $label]): ?><a href="<?= h($href) ?>"><?= h($label) ?></a><?php endforeach; ?>
+    </div>
   </section>
   <section class="card">
-    <div class="an-head"><h2>Latest changes</h2><a class="an-csv an-plain" href="log.php">Change log</a></div>
+    <div class="an-head"><h2><?= $mgr ? 'Latest changes' : 'Your latest changes' ?></h2><?php if (rs_can_page('log.php')): ?><a class="an-csv an-plain" href="log.php">Change log</a><?php endif; ?></div>
     <?php if (!$acts): ?><p class="muted">Nothing yet.</p><?php else: ?>
     <ul class="acts">
       <?php foreach ($acts as $r): ?>
       <li><time datetime="<?= h(rs_date('c', strtotime((string)$r['at']) ?: 0)) ?>" title="<?= h((string)$r['at']) ?>"><?= h($ago((string)$r['at'])) ?></time>
-        <span class="what"><?= h($actNames[(string)$r['action']] ?? ucfirst(str_replace('phone ', 'Phone: ', (string)$r['action']))) ?><?= (string)$r['target'] !== '' ? ': ' . h((string)$r['target']) : '' ?><small><?= h(trim(((string)$r['who'] !== '' ? (string)$r['who'] . ' · ' : '') . mb_strimwidth((string)$r['detail'], 0, 120, '…'), ' ·')) ?></small></span></li>
+        <span class="what"><?= h($actNames[(string)$r['action']] ?? ucfirst((string)$r['action'])) ?><?= (string)$r['target'] !== '' ? ': ' . h((string)$r['target']) : '' ?><small><?= h(trim(((string)$r['who'] !== '' && $mgr ? (string)$r['who'] . ' · ' : '') . mb_strimwidth((string)$r['detail'], 0, 90, '…'), ' ·')) ?></small></span></li>
       <?php endforeach; ?>
     </ul>
     <?php endif; ?>
   </section>
-</div>
-<section class="card chart-card">
-  <div class="an-head"><h2>The last 14 days</h2><a class="an-csv an-plain" href="analytics.php">Analytics</a></div>
-  <div class="chart" data-chart="week" tabindex="0" role="img" aria-label="Consoles that opened the store and installs, per day for the last 14 days. Use the arrow keys to read each day."></div>
-</section>
-<section class="card">
-  <div class="an-head"><h2>Games</h2><span class="muted an-count"><?= count($games) ?></span><a class="an-csv an-plain" href="index.php">Order and publish</a></div>
-  <?php if (!$games): ?><p class="muted">No games yet. <a href="edit.php">Add one</a>.</p><?php else: ?>
-  <div class="dash-games">
-    <?php foreach ($games as $g):
-      $tags = [];
-      if ($g['hidden']) $tags[] = 'Hidden';
-      if (!empty($g['testers'])) $tags[] = 'Testers only';
-      if ($g['beta']) $tags[] = 'Beta';
-      if ($g['soon']) $tags[] = 'Coming soon';
-      if ($g['featured']) $tags[] = 'Featured';
-      $line = $tags ? implode(' · ', $tags) : (($catNames[rs_category((string)$g['category'])] ?? '') . ($g['version'] !== '' ? ' · ' . $g['version'] : ''));
-      if (!empty($installed[$g['id']])) $line .= ' · ' . number_format($installed[$g['id']]) . ' on consoles'; ?>
-    <a class="g<?= $g['hidden'] ? ' dim' : '' ?>" href="edit.php?id=<?= h(rawurlencode($g['id'])) ?>">
-      <?php if ($g['icon']): ?><img src="<?= h($g['icon']) ?>" alt="" loading="lazy"><?php else: ?><span class="icon"><?= h(mb_substr($g['name'] ?: '?', 0, 2)) ?></span><?php endif; ?>
-      <span class="nm"><strong><?= h($g['name'] ?: 'Untitled') ?></strong><small><?= h($line) ?></small></span>
-    </a>
-    <?php endforeach; ?>
-  </div>
   <?php endif; ?>
-</section>
-<script>window.RS_CHARTS = <?= json_encode((object)$charts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+</div>
+
+<aside class="dash-side">
+  <?php if (!$owner): ?>
+  <section class="card role-card-dash">
+    <div class="chips-row"><span class="role-chip role-<?= h((string)$me['role']) ?>"><?= h(RS_ROLES[$me['role']]) ?></span><?php foreach ($mine as $s): ?><span class="store-chip store-<?= h($s) ?>"><?= h(RS_STORES[$s]) ?></span><?php endforeach; ?></div>
+    <p class="muted small"><?= h(RS_ROLE_ABOUT[$me['role']]) ?></p>
+    <p class="small"><a href="account.php">My account</a></p>
+  </section>
+  <?php endif; ?>
+
+  <section class="card">
+    <h2>In the catalog</h2>
+    <div class="cat-nums">
+      <?php if ($pcApps): ?>
+      <a href="pc.php"><span class="store-dot pc"></span><span><strong><?= number_format($pcListed) ?></strong> PC recomps</span><small><?= number_format($pcSoon) ?> coming soon · <?= number_format($pcHidden) ?> hidden</small></a>
+      <?php endif; ?>
+      <?php if ($psGames): ?>
+      <a href="index.php"><span class="store-dot ps5"></span><span><strong><?= number_format($psListed) ?></strong> PS5 games and apps</span><small><?= number_format($psHidden) ?> hidden</small></a>
+      <?php endif; ?>
+    </div>
+  </section>
+
+
+  <section class="card">
+    <div class="an-head"><h2>Sites</h2><a class="an-csv an-plain" href="status.php">Status</a></div>
+    <ul class="site-state">
+      <li><span class="dot<?= !empty($mt['pc']['on']) ? ' warn' : '' ?>"></span>recomplauncher.com<small><?= !empty($mt['pc']['on']) ? 'Maintenance mode' : 'Up' ?></small></li>
+      <li><span class="dot<?= !empty($mt['ps5']['on']) ? ' warn' : '' ?>"></span>recompstore.com<small><?= !empty($mt['ps5']['on']) ? 'Maintenance mode' : 'Up' ?></small></li>
+    </ul>
+  </section>
+
+  <?php if ($mgr): ?>
+  <section class="card">
+    <h2>Shortcuts</h2>
+    <div class="jump">
+      <?php foreach ($jump as [$href, $label]): ?><a href="<?= h($href) ?>"><?= h($label) ?></a><?php endforeach; ?>
+    </div>
+  </section>
+  <section class="card">
+    <div class="an-head"><h2><?= $mgr ? 'Latest changes' : 'Your latest changes' ?></h2><?php if (rs_can_page('log.php')): ?><a class="an-csv an-plain" href="log.php">Change log</a><?php endif; ?></div>
+    <?php if (!$acts): ?><p class="muted">Nothing yet.</p><?php else: ?>
+    <ul class="acts">
+      <?php foreach ($acts as $r): ?>
+      <li><time datetime="<?= h(rs_date('c', strtotime((string)$r['at']) ?: 0)) ?>" title="<?= h((string)$r['at']) ?>"><?= h($ago((string)$r['at'])) ?></time>
+        <span class="what"><?= h($actNames[(string)$r['action']] ?? ucfirst((string)$r['action'])) ?><?= (string)$r['target'] !== '' ? ': ' . h((string)$r['target']) : '' ?><small><?= h(trim(((string)$r['who'] !== '' && $mgr ? (string)$r['who'] . ' · ' : '') . mb_strimwidth((string)$r['detail'], 0, 90, '…'), ' ·')) ?></small></span></li>
+      <?php endforeach; ?>
+    </ul>
+    <?php endif; ?>
+  </section>
+  <?php endif; ?>
+</aside>
+</div>
+<script>window.RS_CHARTS = <?= json_encode((object)$chartData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <?php rs_foot(['assets/analytics.js']);

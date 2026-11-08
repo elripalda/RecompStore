@@ -24,7 +24,7 @@
   });
   const GROUPS = [
     ['Site', [['maintenance', 'Maintenance mode']]],
-    ['Security', [['twostep', 'Two-step login'], ['password', 'Admin password']]],
+    ['Security', [['logins', 'Logins and team'], ['account.php', 'My account ↗'], ['team.php', 'Team ↗']]],
     ['Signer', [['signer', 'Signer']]],
     ['Store', [['general', 'Release and links'], ['tabs', 'Store tabs'], ['smp', 'ShadowMountPlus'], ['title-ids', 'Title IDs taken'], ['blocked', 'Blocked sources']]],
     ['Discover', [['whats-new', 'What\'s new'], ['discover.php', 'Discover page ↗']]],
@@ -49,7 +49,7 @@
 .set-nav h3{font:700 11.5px Figtree,sans-serif;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
 .set-nav a{display:block;padding:5px 10px;border-radius:10px;color:var(--frost);text-decoration:none;font-size:14.5px;opacity:.85}
 .set-nav a:hover{background:rgba(244,248,252,.07);opacity:1}
-.set-nav a[aria-current]{background:rgba(53,214,244,.14);color:var(--cyan);opacity:1;font-weight:600}
+.set-nav a[aria-current]{background:rgba(53,214,244,.14);color:var(--cyan-ink);opacity:1;font-weight:600}
 .set-cards{min-width:0}
 .set-cards > section.card{scroll-margin-top:var(--set-top,96px)}
 @media (max-width:999px){

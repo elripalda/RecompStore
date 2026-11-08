@@ -355,7 +355,7 @@ rs_head('Developer accounts');
 <section class="card" id="edits">
   <h2>Changes developers made</h2>
   <p class="muted">Verified developers change their own app pages. On PS5 apps: words, pictures, screenshots and video, out with your next Publish. On PC recomps: the words go live at once, and new pictures wait under App page changes to review until you approve them. You get an email for each one. PC changes can be undone here. Want something done differently? Send them a note.</p>
-<style>.dev-art{max-width:100%;max-height:180px;border-radius:8px;background:rgba(255,255,255,.04)}.dev-art-cover{max-height:220px}.dev-art-icon{max-height:96px}</style>
+<style>.dev-art{max-width:100%;max-height:180px;border-radius:8px;background:rgba(var(--ink-rgb),.04)}.dev-art-cover{max-height:220px}.dev-art-icon{max-height:96px}</style>
   <?php if (!$edits): ?><p class="muted">Nothing yet.</p><?php endif; ?>
   <?php foreach ($edits as $c): $g = $appOf((string)$c['app_id']); $data = json_decode((string)$c['data'], true) ?: []; ?>
   <div class="dev-change">
@@ -464,7 +464,7 @@ rs_head('Developer accounts');
 <?php ?>
 <style>
 .dev-decline{margin-top:10px;grid-column:1/-1}
-.dev-decline summary{cursor:pointer;color:#ff9b8a}
+.dev-decline summary{cursor:pointer;color:var(--bad)}
 .dev-decline form{display:grid;gap:10px;margin-top:10px}
 .dec-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px}
 @media (max-width:820px){.dec-presets{grid-template-columns:1fr}}

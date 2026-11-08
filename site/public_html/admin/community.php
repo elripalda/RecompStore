@@ -112,7 +112,7 @@ rs_head('Discord & notes', true, ['assets/health.css']);
   <p class="muted">The bot is in the server. <b>Set up</b> makes (or finds) these, and pressing it again changes nothing:</p>
   <?php endif; ?>
   <ul class="dc-list">
-    <li><span class="dc-dot" style="background:#34F2E8"></span><b>Developer</b> role, in RecompStore cyan, shown apart in the member list. Approved developers get it when they link Discord in their hub. <?= $state['role'] !== '' ? '<span class="pill ok">made</span>' : '' ?></li>
+    <li><span class="dc-dot" style="background:var(--cyan)"></span><b>Developer</b> role, in RecompStore cyan, shown apart in the member list. Approved developers get it when they link Discord in their hub. <?= $state['role'] !== '' ? '<span class="pill ok">made</span>' : '' ?></li>
     <li><b>Developers</b> category, only developers can see it:
       <b>#dev-chat</b> <?= ($u = $chan('dc_dev_chat')) ? '<a href="' . h($u) . '" target="_blank" rel="noopener">open</a>' : '' ?> for talking, and
       <b>#dev-announcements</b> <?= ($u = $chan('dc_dev_news')) ? '<a href="' . h($u) . '" target="_blank" rel="noopener">open</a>' : '' ?> where only the team posts.</li>
@@ -129,7 +129,7 @@ rs_head('Discord & notes', true, ['assets/health.css']);
   <p class="muted">When you press Publish PC, new recomps and new versions are posted with their cover and a link (up to 10 a post). Old PC games' updates are left out, so the channel stays about recomps. <?= $pcHook === '' ? 'Off until there\'s a webhook.' : ($pcHookOwn ? 'Posting to its own channel.' : 'Posting to the PS5 webhook\'s channel; paste another webhook to give PC its own.') ?></p>
   <form method="post" class="form">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="pc-posts">
-    <label>Webhook link for PC<input type="text" name="discord_pc_webhook" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security: disc" placeholder="<?= $pcHookOwn ? h('Saved: ' . rs_discord_hook_shown((string)rs_setting('discord_pc_webhook', '')) . '. Paste a new one to replace it.') : 'Paste the webhook link' ?>"><small>In Discord: the channel's settings, Integrations, Webhooks, New Webhook, Copy Webhook URL. Anyone with it can post there, so only its end is shown here again.</small></label>
+    <label>Webhook link for PC<input type="text" name="discord_pc_webhook" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc" placeholder="<?= $pcHookOwn ? h('Saved: ' . rs_discord_hook_shown((string)rs_setting('discord_pc_webhook', '')) . '. Paste a new one to replace it.') : 'Paste the webhook link' ?>"><small>In Discord: the channel's settings, Integrations, Webhooks, New Webhook, Copy Webhook URL. Anyone with it can post there, so only its end is shown here again.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="new" value="1"<?= !empty($pcPosts['new']) ? ' checked' : '' ?>> New recomps</label><label class="check"><input type="checkbox" name="update" value="1"<?= !empty($pcPosts['update']) ? ' checked' : '' ?>> New versions</label></div>
     <div class="actions"><button class="btn primary">Save</button><?php if ($pcHook !== ''): ?><button class="btn" name="do" value="test">Send a test</button><?php endif; ?><?php if ($pcHookOwn): ?><label class="check"><input type="checkbox" name="clear" value="1"> Remove the PC webhook</label><?php endif; ?></div>
   </form>

@@ -138,7 +138,9 @@ rs_head('Security', true, ['assets/vt.css']);
   <div class="vt-state <?= $on ? 'on' : '' ?>"><i></i><?= $on ? 'VirusTotal connected · ' . max(0, RS_VT_PER_DAY - rs_vt_today()) . ' checks left today' : 'VirusTotal not connected' ?></div>
 </section>
 
-<?php if (!$on): ?>
+<?php if (!$on && !rs_is_owner()): ?>
+<section class="card"><h2>VirusTotal isn't connected yet</h2><p class="muted">The owner connects it. Until then, nothing new is checked.</p></section>
+<?php elseif (!$on): ?>
 <section class="card vt-setup">
   <h2>Connect VirusTotal</h2>
   <ol class="vt-steps">
@@ -236,6 +238,7 @@ rs_head('Security', true, ['assets/vt.css']);
   <?php endif; ?>
 </section>
 
+<?php if (rs_is_owner()): ?>
 <section class="card" id="settings">
   <h2>Settings</h2>
   <form method="post" class="vt-settings"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="settings"><input type="hidden" name="back" value="settings">
@@ -253,4 +256,5 @@ rs_head('Security', true, ['assets/vt.css']);
     <button>Save and test</button></form>
   <?php endif; ?>
 </section>
+<?php endif; ?>
 <?php rs_foot(['assets/vt.js']);

@@ -197,6 +197,8 @@ function rs_keep_restore(): bool {
     session_regenerate_id(true);
     $_SESSION['uid'] = (int)$r['uid'];
     $_SESSION['keep'] = $m[1];
+    // (4.3) The login's "signed in" mark, so Sign out everywhere still works for it later.
+    try { rs_roles_schema(); $sv = rs_db()->prepare('SELECT sess_v FROM users WHERE id = ?'); $sv->execute([(int)$r['uid']]); $_SESSION['sess_v'] = (int)$sv->fetchColumn(); } catch (Throwable $e) { /* older table */ }
     return true;
 }
 
@@ -213,6 +215,8 @@ function rs_require_login(): void {
     rs_session();
     if (!rs_config()) { header('Location: setup.php'); exit; }
     if (empty($_SESSION['uid'])) { header('Location: login.php'); exit; }
+    // (4.3) The team: an active login, and a page that's part of its role and stores.
+    rs_gate();
 }
 
 function rs_csrf(): string {
@@ -1528,5 +1532,7 @@ require __DIR__ . '/discord.php';
 require __DIR__ . '/devhub.php';
 // (3.8) Security: VirusTotal checks of every download the stores point at (admin/security.php).
 require __DIR__ . '/vt.php';
+// (4.3) The admin team: roles (owner, manager, curator), stores, and the pages each may open.
+require __DIR__ . '/roles.php';
 // (3.8) Mornings: GitHub finds, PS5 renamed downloads, versions grouping; submission pre-checks.
 require __DIR__ . '/autopilot.php';

@@ -9,6 +9,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/artsrc.php';
 rs_session();
 if (empty($_SESSION['uid'])) { http_response_code(403); header('Content-Type: application/json'); echo '{"ok":false,"error":"Sign in again."}'; exit; }
+rs_gate(true); // (4.3) part of this login's role and stores
 session_write_close();
 @set_time_limit(60);
 

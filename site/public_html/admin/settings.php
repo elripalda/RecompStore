@@ -508,68 +508,10 @@ unset($_SESSION['recovery_once']);
   </details>
   <?php endif; ?>
 </section>
-<section class="card" id="twostep">
-  <h2>Two-step login <?= $twoOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
-  <?php if ($recovery): ?>
-  <div class="once">
-    <strong>Recovery codes</strong> <span class="muted">(shown once: save them somewhere safe, like a password manager or on paper)</span>
-    <pre class="mono codes" id="recovery-codes"><?= h(implode("\n", $recovery)) ?></pre>
-    <button type="button" class="btn" data-copy="recovery-codes">Copy</button>
-    <p class="muted">Each one logs you in once if your phone is lost.</p>
-  </div>
-  <?php endif; ?>
-  <?php if ($twoOn): ?>
-  <p class="muted">Logging in asks for your password and then the 6-digit code from your authenticator app. <?= $codesLeft ?> recovery code<?= $codesLeft === 1 ? '' : 's' ?> left.</p>
-  <details><summary>Turn two-step login off</summary>
-  <form method="post" class="grid2">
-    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_off">
-    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
-    <label>Code from the app (or a recovery code)<input name="code" required autocomplete="one-time-code" class="mono"></label>
-    <div><button class="btn">Turn it off</button></div>
-  </form>
-  </details>
-  <?php elseif ($newSecret !== ''): ?>
-  <ol class="steps">
-    <li>Open an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, 1Password, Authy) and add an account by scanning this:
-      <div class="qr" id="totp-qr" data-uri="<?= h(rs_totp_uri($newSecret, (string)$me['username'])) ?>"></div>
-      <small class="muted">Can't scan? Type this key instead: <code><?= h(trim(chunk_split($newSecret, 4, ' '))) ?></code></small></li>
-    <li>Type the 6-digit code the app shows:
-      <form method="post" class="inline">
-        <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_confirm">
-        <input name="code" required autocomplete="one-time-code" inputmode="numeric" maxlength="7" class="mono" placeholder="123456" aria-label="Code">
-        <button class="btn primary">Turn it on</button>
-      </form>
-      <form method="post" class="inline"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_cancel"><button class="link">Cancel</button></form></li>
-  </ol>
-  <?php else: ?>
-  <p class="muted">With it on, your password alone isn't enough to log in: a code from your phone is needed too. Strongly recommended, since this admin decides what every PS5 installs.</p>
-  <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="totp_start"><button class="btn primary">Set up two-step login</button></form>
-  <?php endif; ?>
-</section>
-<?php
-// (3.8) Devices that stay signed in ("Keep me signed in" on the login page).
-rs_keep_table();
-$kst = rs_db()->prepare('SELECT selector, ua, used FROM admin_keep WHERE uid = ? AND expires > ? ORDER BY used DESC');
-$kst->execute([(int)$_SESSION['uid'], time()]);
-$keepRows = $kst->fetchAll();
-$keepName = function (string $ua): string {
-    $b = preg_match('/Edg\//', $ua) ? 'Edge' : (preg_match('/Chrome\//', $ua) ? 'Chrome' : (preg_match('/Firefox\//', $ua) ? 'Firefox' : (preg_match('/Safari\//', $ua) ? 'Safari' : 'A browser')));
-    $o = preg_match('/Windows/', $ua) ? 'Windows' : (preg_match('/iPhone|iPad/', $ua) ? 'iPhone or iPad' : (preg_match('/Android/', $ua) ? 'Android' : (preg_match('/Mac OS X/', $ua) ? 'Mac' : (preg_match('/Linux/', $ua) ? 'Linux' : ''))));
-    return $b . ($o !== '' ? ' on ' . $o : '');
-};
-?>
-<style>.keep-list{list-style:none;padding:0;margin:8px 0 14px;display:flex;flex-direction:column;gap:6px}.keep-list li{padding:10px 12px;border:1px solid var(--line);border-radius:12px}</style>
-<section class="card" id="devices">
-  <h2>Signed-in devices <?php if ($keepRows): ?><span class="count"><?= count($keepRows) ?></span><?php endif; ?></h2>
-  <?php if (!$keepRows): ?>
-  <p class="muted">None. Tick "Keep me signed in" when you log in, and that browser stays signed in for 30 days.</p>
-  <?php else: ?>
-  <p class="muted">These stay signed in for 30 days after they were last used. Changing your password or two-step login signs them all out.</p>
-  <ul class="keep-list">
-    <?php foreach ($keepRows as $k): ?><li><strong><?= h($keepName((string)$k['ua'])) ?></strong><?= ($_SESSION['keep'] ?? '') === $k['selector'] ? ' <span class="pill ok">This one</span>' : '' ?> <span class="muted">· last used <?= h(rs_date('M j, g:i a', (int)$k['used'])) ?></span></li><?php endforeach; ?>
-  </ul>
-  <form method="post" onsubmit="return confirm('Sign out every device? You stay logged in here until you close the browser.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="keep_clear"><button class="btn danger">Sign out everywhere</button></form>
-  <?php endif; ?>
+<section class="card" id="logins">
+  <h2>Your login and the team</h2>
+  <p class="muted">Your password, two-step login, signed-in devices and how the admin looks are on <a href="account.php">My account</a>, the same page everyone on the team uses. Logins for curators and managers are on <a href="team.php">Team</a>.</p>
+  <div class="actions"><a class="btn" href="account.php">My account</a><a class="btn" href="team.php">Team</a></div>
 </section>
 <section class="card">
   <form method="post">
@@ -885,15 +827,6 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="blocked">
     <label><span>One per line: a GitHub repo (owner/name) or a list's address</span><textarea name="blocked_sources" rows="5" class="mono" placeholder="someone/bad-repo"><?= h((string)rs_setting('blocked_sources', '')) ?></textarea><small>Custom sources people add in the store can be anything. Ones listed here are refused, and stores that already added them drop them on their next refresh. Reports people send about a source are in the Inbox, under Sources.</small></label>
     <button class="btn">Save the list</button>
-  </form>
-</section>
-<section class="card">
-  <h2>Change your admin password</h2>
-  <form method="post" class="grid2">
-    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="password">
-    <label>New password<input type="password" name="password" minlength="10" required autocomplete="new-password"></label>
-    <label>New password again<input type="password" name="password2" minlength="10" required autocomplete="new-password"></label>
-    <div><button class="btn">Change password</button></div>
   </form>
 </section>
 <?php rs_foot(['assets/qrcode.js', 'assets/security.js', 'assets/settings.js']);
