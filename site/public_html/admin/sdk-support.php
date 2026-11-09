@@ -65,7 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_db()->exec("DELETE FROM kv_cache WHERE k LIKE 'sdk:%'");
         rs_flash('Checking everything again in the background. Reload in a minute or two.');
     }
-    header('Location: sdk-support.php' . ($id !== '' ? '#r-' . rawurlencode($id) : ''));
+    $back = trim((string)($_POST['q'] ?? ''));
+    header('Location: sdk-support.php' . ($back !== '' ? '?q=' . rawurlencode($back) . ($id !== '' ? '#s-' . rawurlencode($id) : '') : ($id !== '' ? '#r-' . rawurlencode($id) : '')));
     exit;
 }
 
@@ -125,6 +126,29 @@ $nowLabel = [
 ];
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 
+// Search: any listed PC recomp, not only the top of the list, so a pull request sent to a smaller
+// project can be found and marked too. Unchecked ones are checked right here (a few at a time).
+$q = trim((string)($_GET['q'] ?? ''));
+$found = [];
+if (mb_strlen($q) >= 2) {
+    $ql = mb_strtolower($q);
+    $all = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && (string)$a['repo'] !== ''
+        && (str_contains(mb_strtolower((string)$a['name']), $ql) || str_contains(mb_strtolower((string)$a['game']), $ql)
+            || str_contains(mb_strtolower((string)$a['repo']), $ql) || str_contains(mb_strtolower((string)$a['id']), $ql))));
+    usort($all, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
+    $live = 0;
+    foreach (array_slice($all, 0, 15) as $a) {
+        $c = rs_kv_get('sdk:' . $a['id']);
+        $r = $c && $c['age'] < 7 * 86400 ? json_decode($c['v'], true) : null;
+        if (!is_array($r) && $live < 5) { ++$live; try { $r = rs_pc_sdk_check($a); } catch (Throwable $e) { $r = null; } }
+        $has = is_array($r) ? (string)($r['has'] ?? 'unknown') : 'waiting';
+        $mk = $marks[$a['id']] ?? null;
+        $state = in_array($has, ['release', 'repo'], true) ? 'ships' : ($mk ? ($mk['kind'] === 'pr' ? 'pr' : 'no') : ($has === 'none' ? 'missing' : 'unknown'));
+        $found[] = ['a' => $a, 'state' => $state, 'm' => $mk];
+    }
+}
+$stateLabel = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ''], 'no' => ['Won\'t support it', ' warn'], 'missing' => ['No file yet', ''], 'unknown' => ['Couldn\'t check yet', ' warn']];
+
 rs_head('SDK support', true, ['assets/account.css']);
 ?>
 <section class="head-row">
@@ -139,6 +163,41 @@ rs_head('SDK support', true, ['assets/account.css']);
   <div class="role-card"><span class="muted small">On this list</span><span class="n"><?= count($missing) ?></span><p class="muted small">Most downloaded first. Pick one and send a pull request.</p></div>
   <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= $waiting ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background. Reload in a minute.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
 </div>
+<section class="card">
+  <form method="get" class="sdk-search">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="Find any recomp by name or repo, also ones not in the top <?= RS_SDK_TOP ?>" spellcheck="false" autocomplete="off">
+    <button class="btn primary">Search</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
+  </form>
+  <?php if ($q !== ''): ?>
+  <div class="sdk-list" style="margin-top:12px">
+  <?php foreach ($found as $f): $a = $f['a']; [$sl, $sc] = $stateLabel[$f['state']]; ?>
+    <article class="sdk-row sdk-row-s" id="s-<?= h($a['id']) ?>">
+      <div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads<?= $f['m'] ? ' · marked by ' . h((string)$f['m']['who']) . ' on ' . h((string)$f['m']['at']) : '' ?></span></div>
+      <span class="pill<?= $sc ?>"><?= h($f['state'] === 'pr' && ($st = rs_sdk_pr_state($a, (string)$f['m']['url'])) !== '' ? 'Pull request ' . ($st === 'merged' ? 'merged' : ($st === 'closed' ? 'closed' : 'open')) : $sl) ?></span>
+      <div class="sdk-btns">
+        <a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
+        <?php if ($f['state'] === 'pr' && (string)$f['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$f['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a><?php endif; ?>
+        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
+        <form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
+        <?php if ($f['m']): ?><form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><?php endif; ?>
+      </div>
+      <?php if (!$f['m'] && $f['state'] !== 'ships'): ?>
+      <details class="sdk-mark">
+        <summary>Mark it</summary>
+        <div class="sdk-mark-forms">
+          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="mark_pr"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
+            <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
+          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
+            <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Remove</button></form>
+        </div>
+      </details>
+      <?php endif; ?>
+    </article>
+  <?php endforeach; ?>
+  <?php if (!$found): ?><p class="muted">No listed recomp matches "<?= h($q) ?>".</p><?php endif; ?>
+  </div>
+  <?php endif; ?>
+</section>
 <section class="card">
   <div class="sdk-list">
   <?php foreach ($missing as $m): $a = $m['a']; [$nl, $nw] = $nowLabel[$m['now']]; $gh = 'https://github.com/' . $a['repo']; ?>
@@ -213,7 +272,9 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-name{display:flex;flex-direction:column;min-width:0}
 .sdk-name a{color:var(--frost);text-decoration:none}
 .sdk-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sdk-btns{display:flex;gap:8px;align-items:center}
+.sdk-btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.sdk-search{display:flex;gap:8px;align-items:center}
+.sdk-search input{flex:1;min-width:0}
 .sdk-btns form{margin:0}
 .sdk-btns .btn{min-height:38px;padding:7px 12px;font-size:14px}
 .sdk-row-s{grid-template-columns:minmax(0,1fr) auto auto}

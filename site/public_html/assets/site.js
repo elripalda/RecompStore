@@ -2315,10 +2315,15 @@
     '   - Level 2, settings in the launcher ("config" and "settings"): if the project has a settings file or command-line options, show them in the launcher.',
     '   - Level 3, full setup ("prepare" and "game.dumps"): if the project does work before the first start (extracting assets, fonts or menu art from the disc, building a cache), add a "prepare" step that runs it without a window and prints progress lines; add "dumps" with the known good copies of the game (name, size and CRC32 from Redump) so players get the verified badge.',
     '4. Ship it in every release: put recomplauncher.json at the top of each release zip, next to the executable, and inside the AppImage at /recomplauncher.json if there is one. Update the release workflow or packaging script so it\'s always included.',
-    '5. Check the file against the schema. Don\'t change how the game runs, and never add any game files.',
+    '5. Check the file against the schema. Never add any game files. Small source changes to the recomp are allowed where Levels 1 and 3 need them, for example a `--game <path>` option that points the installer at the player\'s copy, or a `--prepare` mode that runs the install without a window, prints `progress 0.4 Text` lines and exits 0 on success. Rules for these changes:',
+    '   - They are opt-in. Without the new arguments the game starts and behaves exactly as before, with its own installer UI.',
+    '   - Reuse the existing installer and integrity-check code. Don\'t rewrite it.',
+    '   - Keep the project\'s code style and the diff small, and put the code changes in their own commit.',
+    '   - Don\'t change gameplay, graphics, saves or config formats.',
+    '   For the "dumps" list, only use size and CRC32 values you can verify from Redump or the project\'s own docs. Never invent one.',
     '6. Add "Works with RecompLauncher" to the README with a link to https://recomplauncher.com.',
     '',
-    'When you\'re done, tell me what you set up and anything you weren\'t sure about.',
+    'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.',
   ].join('\n');
   const SVG_AGENT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
   const agentBtn = (cls = '') => `<button type="button" class="btn agent-btn${cls ? ' ' + cls : ''}" data-agent-prompt>${SVG_AGENT}<span>${t('Copy a prompt for your AI agent')}</span></button>`;

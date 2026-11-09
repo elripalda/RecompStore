@@ -570,7 +570,11 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
     $repo = (string)$a['repo'];
     if (rs_pc_host($a) === '' && $repo !== '') {
         $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
-        if ($r['status'] === 200) $out['has'] = 'repo';
+        if ($r['status'] === 200) {
+            $out['has'] = 'repo';
+            $j = json_decode((string)$r['body'], true);
+            if (is_array($j) && isset($j['content'])) $out += rs_pc_sdk_keys((string)base64_decode((string)$j['content']));
+        }
         elseif ($r['status'] === 404) $out['has'] = 'none';
     }
     if ($out['has'] !== 'repo') {
@@ -582,12 +586,49 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
                 $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
                 if (empty($z['ok'])) break;
                 $out['has'] = 'none';
-                foreach (array_keys((array)$z['entries']) as $n) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) { $out['has'] = 'release'; break; }
+                foreach ((array)$z['entries'] as $n => $en) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) {
+                    $out['has'] = 'release';
+                    $txt = rs_zip_file((string)$f['browser_download_url'], $en, 400000);
+                    if (is_string($txt)) $out += rs_pc_sdk_keys($txt);
+                    break;
+                }
                 break;
             }
         } catch (Throwable $e) { /* unknown for now */ }
     }
     rs_kv_put($k, (string)json_encode($out));
+    return $out;
+}
+
+// What a developer's own recomplauncher.json covers, for the launcher's "Launcher support" list:
+// its top-level keys, and whether it lists verified copies (game.dumps).
+function rs_pc_sdk_keys(string $json): array {
+    $j = json_decode($json, true);
+    if (!is_array($j)) return [];
+    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps'])];
+}
+
+// (4.3) The catalog's "support" list per recomp: which launcher features it has, and who made each
+// one work: "dev" (the recomp's own recomplauncher.json) or "launcher" (our profile in the catalog).
+// Only cached SDK checks are read here; nothing goes to GitHub while the catalog is built.
+function rs_pc_support(array $a): array {
+    if (!function_exists('rs_boot_effective')) require_once __DIR__ . '/boot.php';
+    $c = rs_kv_get('sdk:' . $a['id']);
+    $sdk = $c ? (json_decode($c['v'], true) ?: []) : [];
+    $keys = (array)($sdk['keys'] ?? []);
+    $dev = fn(string $k) => in_array($k, $keys, true);
+    $b = rs_boot_effective($a);
+    $full = (int)($b['format'] ?? 0) === 1;
+    $files = (array)($b['files'] ?? []);
+    $out = ['sdk' => in_array($sdk['has'] ?? '', ['release', 'repo', 'none'], true) ? $sdk['has'] : 'unknown'];
+    if ($dev('game') && $dev('start')) $out['easy_setup'] = 'dev';
+    elseif ($full ? !empty($b['game']) : in_array((string)($files['how'] ?? ''), RS_BOOT_EASY, true)) $out['easy_setup'] = 'launcher';
+    if ($dev('settings')) $out['settings'] = 'dev';
+    elseif ($full ? !empty($b['settings']) : !empty($b['settings']['settings'])) $out['settings'] = 'launcher';
+    if ($dev('prepare')) $out['prepare'] = 'dev';
+    if (!empty($sdk['dumps'])) $out['verified'] = 'dev';
+    elseif (!$full && (($files['id'] ?? '') !== '' || ($files['n64_id'] ?? '') !== '')) $out['verified'] = 'launcher';
+    foreach (['saves', 'mods', 'looks', 'actions'] as $k) if ($dev($k)) $out[$k] = 'dev';
     return $out;
 }
 
@@ -1149,6 +1190,7 @@ function rs_pc_catalog(): array {
         // launcher shows Easy Setup and its game settings before the game is installed too.
         if (is_array($boot) && $boot) { if ((int)($boot['format'] ?? 0) === 1 && isset($boot['start'])) $e['launcher'] = $boot; else $e['boot'] = $boot; }
         if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
+        $e['support'] = rs_pc_support($a);
         $apps[] = $e;
     }
     // (4.3) Entries only newer launchers can read go in "apps_min": [{min, apps}], which older ones
