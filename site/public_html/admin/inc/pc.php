@@ -85,7 +85,7 @@ function rs_pc_defaults(): array {
         'icon' => '', 'cover' => '', 'hero' => '', 'logo' => '', 'tags' => '', 'links' => [],
         'featured' => false, 'hidden' => true, 'soon' => false, 'added' => '', 'live_at' => '', 'checked' => '', 'features' => '', 'features_read' => false, 'license' => '',
         'genre' => '', 'media' => '', 'issues' => 0, 'releases' => 0, 'first' => '',
-        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'copy_ids' => '', 'report_url' => '', 'host' => '',
+        'ai' => '', 'ai_uses' => [], 'ai_note' => '', 'ai_by' => '', 'boot' => '', 'copy_ids' => '', 'report_url' => '', 'host' => '', 'follow' => '',
         'status' => '', 'status_note' => '', 'archived' => false];
 }
 
@@ -692,6 +692,21 @@ function rs_pc_media_file(string $tmp, string $id): array {
 // A found recomp, added as a hidden PC app (you look it over, then show it): its GitHub facts, and
 // its art from SteamGridDB when there's a key (else the developer's GitHub picture as its icon).
 // (3.9) $repo: owner/name, a GitHub link, or a GitLab project (gitlab.com/group/project, with or without https://).
+// (4.3) A Coming soon game that has no repo yet (announced on X, say): its name, game, and where to
+// follow it. Shown on Coming soon only; it gets its repo (and downloads) later, through its edit page.
+function rs_pc_add_soon(string $name, string $follow): array {
+    $name = trim(preg_replace('/\s+/', ' ', $name));
+    if ($name === '' || mb_strlen($name) > 120) throw new RuntimeException('Give it a name.');
+    if (rs_pc_report_url($follow) === '') throw new RuntimeException('The follow link has to be a full https:// address.');
+    $id = rs_pc_slug($name);
+    $taken = array_column(rs_pc_apps(), 'id');
+    for ($n = 2; in_array($id, $taken, true); ++$n) $id = rs_pc_slug($name) . '-' . $n;
+    $a = array_merge(rs_pc_defaults(), ['id' => $id, 'name' => $name, 'game' => $name, 'follow' => rs_pc_report_url($follow), 'soon' => true, 'hidden' => true, 'added' => gmdate('Y-m-d')]);
+    rs_pc_save($a);
+    rs_log('pc', 'add', $id . ' (Coming soon, no repo yet)');
+    return $a;
+}
+
 function rs_pc_add(string $repo): array {
     $l = rs_repo_from_link($repo);
     $want = $l ? rs_repo_key($l['host'], $l['repo']) : trim($repo);
@@ -992,6 +1007,8 @@ function rs_pc_catalog(): array {
         if (rs_pc_host($a) !== '') $e['host'] = rs_pc_host($a); // (4.3) 'gitlab' or 'sourceforge'
         // (3.9) Where its developer wants bugs reported (their own page or issue form).
         if (($ru = rs_pc_report_url((string)($a['report_url'] ?? ''))) !== '') $e['report_url'] = $ru;
+        // (4.3) A Coming soon game with no repo yet: where to follow it (the developer's post or page).
+        if ((string)$a['repo'] === '' && ($fu = rs_pc_report_url((string)($a['follow'] ?? ''))) !== '') $e['follow'] = $fu;
         // (3.8) The release that's out (the launcher installs this one) and its checked files.
         if ((string)($a['ok_tag'] ?? '') !== '') $e['tag'] = (string)$a['ok_tag'];
         if (function_exists('rs_vt_catalog_files') && ($vf = rs_vt_catalog_files($a))) $e['files'] = $vf;

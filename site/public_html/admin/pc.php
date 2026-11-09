@@ -35,6 +35,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a = rs_pc_add((string)($_POST['repo'] ?? ''));
             rs_flash($a['name'] . ' is in, hidden. Look it over, then show it and Publish.');
             $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
+        } elseif ($act === 'add_soon') {
+            $a = rs_pc_add_soon((string)($_POST['name'] ?? ''), (string)($_POST['follow'] ?? ''));
+            rs_flash($a['name'] . ' is in, on Coming soon and hidden. Set its game and art, then show it and Publish.');
+            $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
         } elseif ($act === 'skip' || $act === 'unskip') {
             rs_db()->prepare('UPDATE pc_found SET state = ? WHERE repo = ?')->execute([$act === 'skip' ? 'skip' : 'new', (string)($_POST['repo'] ?? '')]);
             $back = 'pc.php?view=found';
@@ -44,12 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $macBefore = (string)$a['asset_mac'];
             $keyBefore = rs_pc_key($a); // (4.3)
             foreach (['name' => 120, 'game' => 120, 'repo' => 160, 'asset_win' => 160, 'asset_linux' => 160, 'asset_mac' => 160, 'blurb' => 160, 'adds' => 120, 'description' => 8000,
-                'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000, 'report_url' => 300] as $k => $max)
+                'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000, 'report_url' => 300, 'follow' => 300] as $k => $max)
                 $a[$k] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST[$k] ?? ''))), 0, $max);
             // (4.2) A new Mac download has to be one RecompLauncher on Mac can install (a .zip, not Intel-only).
             if ($a['asset_mac'] !== $macBefore && ($why = rs_pc_mac_why($a['asset_mac'])) !== '') throw new RuntimeException($why . ' Leave it empty if there isn\'t one.');
             // (3.9) The developer's "how to report bugs" page: https only.
             if ($a['report_url'] !== '' && rs_pc_report_url($a['report_url']) === '') throw new RuntimeException('The bug report link has to be a full https:// address.');
+            if ($a['follow'] !== '' && rs_pc_report_url($a['follow']) === '') throw new RuntimeException('The follow link has to be a full https:// address.');
             $a['origin'] = isset(RS_PC_ORIGINS[$_POST['origin'] ?? '']) ? (string)$_POST['origin'] : 'other';
             $a['genre'] = isset(RS_PC_GENRES[$_POST['genre'] ?? '']) ? (string)$_POST['genre'] : '';
             $a['dev'] = preg_match('/^[a-z0-9-]{1,40}$/', (string)($_POST['dev'] ?? '')) ? (string)$_POST['dev'] : '';
@@ -321,6 +326,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>Made by<input name="author" value="<?= h($a['author']) ?>" maxlength="80"></label>
     <label>Developer page<select name="dev"><option value="">None</option><?php foreach ($devs as $slug => $d): ?><option value="<?= h($slug) ?>"<?= $a['dev'] === $slug ? ' selected' : '' ?>><?= h((string)$d['name']) ?></option><?php endforeach; ?></select></label>
     <label>Labels<input name="tags" value="<?= h($a['tags']) ?>" maxlength="120" placeholder="Recomp, 4K, Mods"><small>Shown as pills on its page, comma between.</small></label>
+ <?php if ((string)$a['repo'] === ''): ?><label>Where to follow it<input name="follow" value="<?= h((string)($a['follow'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://x.com/dev/status/…"><small>No repo yet: the Coming soon page links here (the developer's post or page). https only.</small></label><?php endif; ?>
     <label>How to report bugs<input name="report_url" value="<?= h((string)($a['report_url'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://github.com/owner/name/issues/new/choose"><small>The developer's own page for bug reports. Shown next to the report form. https only.</small></label>
     <label>Project status<select name="status"><option value="">Active</option><option value="complete"<?= ($a['status'] ?? '') === 'complete' ? ' selected' : '' ?>>Feature complete (finished)</option><option value="paused"<?= ($a['status'] ?? '') === 'paused' ? ' selected' : '' ?>>On hold</option><option value="ended"<?= ($a['status'] ?? '') === 'ended' ? ' selected' : '' ?>>Ended (no more updates)</option></select><small><?= !empty($a['archived']) ? 'Archived on GitHub, so it shows as ended unless you pick Feature complete.' : 'Feature complete: finished, never shown as abandoned or quiet. On hold or Ended show a label on its tile and page. Archived GitHub projects show as ended by themselves.' ?></small></label>
     <label>Status note<input name="status_note" value="<?= h((string)($a['status_note'] ?? '')) ?>" maxlength="200" placeholder="The developer moved on to the sequel."><small>Optional. A short line shown under the label, ideally the developer's own words.</small></label>
@@ -422,6 +428,9 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <h2>Found on GitHub <span class="pill<?= $found ? ' cyan' : '' ?>"><?= count($found) ?></span></h2>
     <div class="found-acts">
       <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="lookup"><input name="repo" placeholder="github.com/owner/repo, gitlab.com/group/project or sourceforge.net/projects/name" class="mono" required><button>Look up</button></form>
+      <details class="pc-soon-add"><summary>Announced, but no repo yet? Add it to Coming soon</summary>
+        <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="add_soon"><input name="name" placeholder="Name (e.g. Ultimate Alliance 3 Native PC Port)" maxlength="120" required><input name="follow" placeholder="https://x.com/dev/status/… (where to follow it)" class="mono" maxlength="300" required><button>Add</button></form>
+      </details>
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="find"><button>Look again</button></form>
     </div>
   </div>
