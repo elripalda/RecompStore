@@ -24,7 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Listed recomps, most downloaded first. The page only reads what's been checked; the checking runs
 // after the page has gone (a minute at a time), so it never keeps anyone waiting.
-$apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''));
+// Only today's console recomps: not PC games, and projects that started in 2025 or later (older
+// projects with big download counts would crowd out the ones worth a pull request).
+const RS_SDK_SINCE = '2025-01-01';
+$apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''
+    && !in_array((string)$a['origin'], ['pc', 'other'], true)
+    && ((string)$a['first'] !== '' ? (string)$a['first'] : (string)$a['released']) >= RS_SDK_SINCE));
 usort($apps, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
 $missing = [];
 $has = 0;
@@ -73,7 +78,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result.</p>
+    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
