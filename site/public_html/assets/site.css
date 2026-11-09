@@ -2763,7 +2763,7 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .launch-dev .cta-row{margin:0;flex:none;flex-wrap:nowrap}
 @media (max-width:760px){.launch-dev .cta-row{flex-wrap:wrap}}
 /* (4.3) A recomp's page: Open in RecompLauncher first, its direct downloads under it, side by side. */
-.pc-open-rl img{width:18px;height:18px;margin-inline-start:10px;filter:brightness(0) saturate(100%)}
+.pc-open-rl img{width:18px;height:18px;margin-inline-end:9px;filter:brightness(0) saturate(100%)}
 .pc-open-help{margin:-2px 0 0;font-size:14px;color:var(--muted);text-align:center}
 .pc-open-help a{color:var(--cyan)}
 .pc-dl-direct{display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr));gap:10px}
