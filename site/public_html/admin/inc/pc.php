@@ -204,6 +204,7 @@ function rs_pc_assets(array $assets, array &$flags): array {
 function rs_pc_read_repo(string $repo, string $host = ''): array {
     $host = rs_host_norm($host);
     if ($host === 'gitlab') return rs_pc_read_gitlab($repo);
+    if ($host === 'sourceforge') return rs_pc_read_sourceforge($repo);
     if (!rs_repo_ok($repo)) return ['ok' => false, 'why' => 'Not a GitHub repo.'];
     if (in_array(strtolower($repo), RS_PC_TOOLKITS, true)) return ['ok' => false, 'why' => 'A recompiler, not a game.'];
     $info = rs_gh_cached($repo . '#pcinfo', rs_gh_api() . '/repos/' . $repo, 3600, fn(array $j): array => [
@@ -230,7 +231,18 @@ function rs_pc_read_gitlab(string $repo): array {
     return rs_pc_read_releases((string)$i['full_name'], 'gitlab', $i);
 }
 
-// What both hosts share: the newest release, its files per system, the numbers.
+// (4.3) A SourceForge project: its facts from its project API, its releases from its file feed.
+function rs_pc_read_sourceforge(string $repo): array {
+    if (!rs_sf_name_ok($repo)) return ['ok' => false, 'why' => 'Not a SourceForge project.'];
+    $i = rs_sf_project($repo, 3600);
+    $st = (int)($i['_status'] ?? 200);
+    if ($st === 404) return ['ok' => false, 'why' => 'That SourceForge project doesn\'t exist.'];
+    if ($st !== 200 || !$i) return ['ok' => false, 'why' => 'SourceForge didn\'t answer. Try again later.'];
+    $i['full_name'] = $repo;
+    return rs_pc_read_releases($repo, 'sourceforge', $i);
+}
+
+// What every host shares: the newest release, its files per system, the numbers.
 function rs_pc_read_releases(string $repo, string $host, array $i): array {
     $rel = rs_host_releases($host, $repo, 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
@@ -254,7 +266,7 @@ function rs_pc_read_releases(string $repo, string $host, array $i): array {
             'win' => $assets['win'] !== '' && $latest ? rs_asset_pattern($assets['win'], (string)$latest['tag_name']) : '',
             'linux' => $assets['linux'] !== '' && $latest ? rs_asset_pattern($assets['linux'], (string)$latest['tag_name']) : '',
             'mac' => $assets['mac'] !== '' && $latest ? rs_asset_pattern($assets['mac'], (string)$latest['tag_name']) : '']]
-        + ($host === 'gitlab' ? ['host' => 'gitlab'] : []);
+        + ($host !== '' ? ['host' => $host] : []);
 }
 
 // ---- The finder -------------------------------------------------------------------------------
@@ -728,6 +740,7 @@ function rs_pc_add(string $repo): array {
 // A repo's README as Markdown (cached a day), and where its relative pictures live.
 function rs_pc_readme(string $repo, string $host = ''): array {
     if (rs_host_norm($host) === 'gitlab') return rs_pc_readme_gitlab($repo);
+    if (rs_host_norm($host) === 'sourceforge') return ['status' => 404, 'md' => '']; // (4.3) its page has the README
     if (!rs_repo_ok($repo)) return ['status' => 400, 'md' => ''];
     $r = rs_gh_cached($repo . '#readme', rs_gh_api() . '/repos/' . $repo . '/readme', 86400, function (array $j): array {
         $md = (string)base64_decode((string)($j['content'] ?? ''), false);
@@ -958,6 +971,8 @@ function rs_pc_catalog(): array {
     $abs = 'rs_abs';
     $apps = [];
     foreach (rs_pc_apps(false) as $i => $a) {
+        // (4.3) A SourceForge project goes out only once one of its releases has been checked.
+        if (rs_pc_host($a) === 'sourceforge' && ((string)($a['ok_tag'] ?? '') === '' || str_starts_with((string)$a['ok_tag'], 'moved:'))) continue;
         $e = ['id' => $a['id'], 'name' => $a['name'], 'game' => $a['game'], 'origin' => $a['origin'], 'order' => $i,
             'repo' => $a['repo'], 'version' => $a['version'], 'released' => $a['released'], 'size' => $a['size'],
             'downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'blurb' => $a['blurb'], 'adds' => (string)($a['adds'] ?? ''), 'description' => $a['description'],
@@ -974,7 +989,7 @@ function rs_pc_catalog(): array {
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
         // (3.9) A GitLab project: "repo" is its path there (group/project). Left out for GitHub.
-        if (rs_pc_host($a) === 'gitlab') $e['host'] = 'gitlab';
+        if (rs_pc_host($a) !== '') $e['host'] = rs_pc_host($a); // (4.3) 'gitlab' or 'sourceforge'
         // (3.9) Where its developer wants bugs reported (their own page or issue form).
         if (($ru = rs_pc_report_url((string)($a['report_url'] ?? ''))) !== '') $e['report_url'] = $ru;
         // (3.8) The release that's out (the launcher installs this one) and its checked files.
@@ -1224,7 +1239,7 @@ function rs_pc_dl_check(array $a): ?array {
 // (4.0) Does its README say development moved to another repo? -> 'owner/name' or ''. Only the top of
 // the README counts: that's where a "this project has moved" note goes.
 function rs_pc_moved_check(array $a): string {
-    if ((string)$a['repo'] === '' || rs_pc_host($a) === 'gitlab') return '';
+    if ((string)$a['repo'] === '' || rs_pc_host($a) !== '') return '';
     $md = substr((string)(rs_pc_readme((string)$a['repo'])['md'] ?? ''), 0, 4000);
     $re = '/(?:has moved|have moved|moved to|moving to|migrated to|development (?:continues|has moved|now happens)|continues (?:at|in|on)|continued (?:at|in|on)|new (?:home|repo(?:sitory)?|location)|now lives (?:at|in)|(?:project|repo(?:sitory)?) (?:has been|was) (?:moved|transferred|renamed))[\s\S]{0,200}?github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i';
     if (!preg_match_all($re, $md, $m)) return '';
@@ -1328,7 +1343,9 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         foreach ((array)$latest['assets'] as $x) if ($a['asset_win'] !== '' && rs_pattern_matches((string)$a['asset_win'], (string)$x['name'])) { $r['size'] = (int)($x['size'] ?? 0); break; }
         $tag = (string)$latest['tag_name'];
         $okTag = (string)($a['ok_tag'] ?? '');
-        if (!function_exists('rs_vt_on') || !rs_vt_on() || $tag === '' || $okTag === '' || $tag === $okTag) {
+        // (4.3) A SourceForge release is checked even when it's the first one.
+        $sfFirst = rs_pc_host($a) === 'sourceforge' && $okTag === '' && $tag !== '' && function_exists('rs_vt_on') && rs_vt_on();
+        if (!$sfFirst && (!function_exists('rs_vt_on') || !rs_vt_on() || $tag === '' || $okTag === '' || $tag === $okTag)) {
             $a['version'] = $r['version']; $a['released'] = $r['released'];
             if ($r['size']) $a['size'] = rs_human_size((int)$r['size']);
             if ($tag !== '') $a['ok_tag'] = $tag;

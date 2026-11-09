@@ -256,7 +256,7 @@ try {
                 $m = ['title' => $name(tf('{name} — PC recomp of {game}', ['name' => $an, 'game' => $gn])), 'ogTitle' => $an, 'path' => $pp('/pc/game/') . $id,
                     'desc' => rs_seo_short($about), 'image' => !empty($a['hero']) ? (string)$a['hero'] : (!empty($a['cover']) ? (string)$a['cover'] : null),
                     'body' => '<h1>' . $e($an) . '</h1><p>' . $e($about) . '</p>' . $pcNav
-                        . (!empty($a['repo']) ? '<p><a href="' . $e((($a['host'] ?? '') === 'gitlab' ? 'https://gitlab.com/' : 'https://github.com/') . (string)$a['repo']) . '">' . $e(($a['host'] ?? '') === 'gitlab' ? t('Source on GitLab') : t('Source on GitHub')) . '</a></p>' : '') . $pcByo, // (3.9)
+                        . (!empty($a['repo']) ? '<p><a href="' . $e((['gitlab' => 'https://gitlab.com/', 'sourceforge' => 'https://sourceforge.net/projects/'][(string)($a['host'] ?? '')] ?? 'https://github.com/') . (string)$a['repo']) . '">' . $e(['gitlab' => t('Source on GitLab'), 'sourceforge' => t('Files on SourceForge')][(string)($a['host'] ?? '')] ?? t('Source on GitHub')) . '</a></p>' : '') . $pcByo, // (3.9)
                     'jsonld' => ['@context' => 'https://schema.org', '@type' => 'SoftwareApplication', 'name' => $an, 'url' => $base . $pp('/pc/game/') . $id,
                         'applicationCategory' => 'GameApplication', 'operatingSystem' => implode(', ', array_map(fn($s) => ['windows' => 'Windows', 'linux' => 'Linux', 'macos' => 'macOS'][$s] ?? $s, (array)($a['systems'] ?? []))),
                         'offers' => ['@type' => 'Offer', 'price' => 0, 'priceCurrency' => 'USD']]];

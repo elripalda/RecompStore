@@ -254,6 +254,7 @@ function rs_vt_pick(array $assets, array $patterns): array {
 function rs_vt_peek_releases(string $repo): array {
     $k = strtolower($repo);
     if (str_starts_with($k, 'gitlab.com/')) $k = 'gl:' . substr($k, 11);
+    elseif (str_starts_with($k, 'sourceforge.net/')) $k = 'sf:' . substr($k, 16); // (4.3)
     $st = rs_db()->prepare('SELECT body FROM gh_cache WHERE k = ? AND status = 200');
     $st->execute([$k]);
     $b = $st->fetchColumn();
@@ -468,6 +469,7 @@ function rs_vt_after(): void {
 
 function rs_vt_trusted(array $a): bool {
     if ((string)($a['dev'] ?? '') === '') return false;
+    if (function_exists('rs_pc_host') && rs_pc_host($a) === 'sourceforge') return false; // (4.3) the full hold every time
     static $devs = null;
     $devs ??= rs_developers();
     return !empty($devs[$a['dev']]['verified']);
@@ -525,6 +527,8 @@ function rs_vt_promote(): void {
         // (3.8) Not checked yet: it waits, but not forever. A busy day can use up the free key, and
         // players shouldn't be stuck on an old version because of that; it's still checked afterwards.
         if ($v === 'grey' && $waited < max($secs, RS_VT_GREY_HOURS * 3600)) continue;
+        // (4.3) A SourceForge release never goes out unchecked: it waits for its check (or for you).
+        if ($v === 'grey' && rs_pc_host($a) === 'sourceforge') continue;
         if ($waited < $secs) continue;
         if ($v === 'grey') rs_log('security', $a['id'], 'let out unchecked after ' . RS_VT_GREY_HOURS . ' h: ' . $p['tag']);
         rs_vt_release_go($a);
@@ -616,6 +620,30 @@ function rs_vt_check_link(string $url): array {
         foreach (rs_pc_apps() as $a) if (strcasecmp(rs_pc_key($a), $key) === 0) $where[] = 'PC: ' . $a['name'] . ($a['hidden'] ? ' (hidden)' : '');
         return ['ok' => true, 'repo' => $key, 'info' => $info, 'tag' => $r ? (string)$r['tag_name'] : '', 'when' => $r ? (string)$r['published_at'] : '',
             'pre' => $r ? !empty($r['prerelease']) : false, 'releases' => count($list), 'flags' => array_keys($flags), 'where' => $where,
+            'files' => array_map(fn($f) => (string)$f['name'], $files)];
+    }
+    // (4.3) A SourceForge project, or one of its version folders (/files/<version>/).
+    if (preg_match('#^(?:https?://)?(?:www\.)?sourceforge\.net/(?:projects|p)/#i', $url)) {
+        $tagWant = preg_match('#/files/([^/?\#]+)/#', $url, $tm) ? urldecode($tm[1]) : '';
+        $l = rs_repo_from_link($url);
+        if (!$l || $l['host'] !== 'sourceforge') return ['ok' => false, 'error' => 'That isn\'t a SourceForge project link.'];
+        $repo = $l['repo'];
+        $si = rs_sf_project($repo) ?: [];
+        if (isset($si['_status'])) $si = [];
+        $info = ['description' => (string)($si['description'] ?? ''), 'stars' => 0, 'owner' => (string)($si['owner'] ?? ''), 'archived' => false];
+        $list = rs_vt_list('sourceforge', $repo, 300);
+        $r = null;
+        foreach ($list as $x) if ($tagWant !== '' && (string)$x['tag_name'] === $tagWant) $r = $x;
+        $r ??= rs_vt_newest($list);
+        $key = rs_repo_key('sourceforge', $repo);
+        $files = $r ? rs_vt_pick((array)$r['assets'], []) : [];
+        foreach ($files as $f) rs_vt_add($key, (string)$r['tag_name'], $f, 'link', 'link', 1);
+        $flags = [];
+        if ($r) rs_pc_assets((array)$r['assets'], $flags);
+        $where = [];
+        foreach (rs_pc_apps() as $a) if (strcasecmp(rs_pc_key($a), $key) === 0) $where[] = 'PC: ' . $a['name'] . ($a['hidden'] ? ' (hidden)' : '');
+        return ['ok' => true, 'repo' => $key, 'info' => $info, 'tag' => $r ? (string)$r['tag_name'] : '', 'when' => $r ? (string)$r['published_at'] : '',
+            'pre' => false, 'releases' => count($list), 'flags' => array_keys($flags), 'where' => $where,
             'files' => array_map(fn($f) => (string)$f['name'], $files)];
     }
     if (preg_match('#^https://[^\s]+/([^/?\#\s]+)$#i', $url, $m)) {

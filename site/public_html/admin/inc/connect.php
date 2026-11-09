@@ -443,7 +443,7 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     $have = $st->fetch() ?: null;
     if ($have && (int)$have['age'] < $maxAge) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => false, 'age' => (int)$have['age']];
     $gl = $via === 'gitlab';
-    $who = $gl ? 'GitLab' : 'GitHub';
+    $who = ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge'][$via] ?? 'GitHub';
     $staleOut = fn() => ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
     // (4.1) While GitHub is slow or refusing (rs_gh_cool), nobody waits on it: the last copy goes out, or
     // "busy" at once. Before this, every page and PS5 asking held a PHP worker up to 20 s, and enough of
@@ -461,13 +461,14 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
         if ($have) return $staleOut();
     }
     try {
-        $r = rs_http($url, [$gl ? 'gitlab' : 'github' => true, 'max' => 16 << 20, 'timeout' => $have ? 6 : 12]);
+        $r = rs_http($url, ($via === 'sourceforge' ? [] : [$gl ? 'gitlab' : 'github' => true]) + ['max' => 16 << 20, 'timeout' => $have ? 6 : 12]);
     } finally {
         if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
     }
     if (!in_array((int)$r['status'], [200, 404], true)) rs_gh_cool($via, (int)$r['status'] === 403 || (int)$r['status'] === 429 ? 300 : 90);
     if ($r['status'] === 200) {
-        $j = json_decode($r['body'], true);
+        // (4.3) SourceForge's file feed is RSS; everything else is JSON.
+        $j = $via === 'sourceforge' && str_starts_with(ltrim($r['body']), '<') ? rs_sf_feed_parse($r['body']) : json_decode($r['body'], true);
         if (is_array($j)) {
             $body = json_encode($trim($j), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $db->prepare('INSERT INTO gh_cache (k, status, body, fetched) VALUES (?, 200, ?, NOW()) ON DUPLICATE KEY UPDATE status = 200, body = VALUES(body), fetched = NOW()')->execute([$k, $body]);
@@ -485,7 +486,7 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
 }
 
 // (4.1) GitHub (or GitLab) slow or refusing: a short pause in asking it, shared by every PHP worker.
-function rs_gh_cool_file(string $via): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-cool-' . ($via === 'gitlab' ? 'gitlab' : 'github'); }
+function rs_gh_cool_file(string $via): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-cool-' . (in_array($via, ['gitlab', 'sourceforge'], true) ? $via : 'github'); }
 function rs_gh_cooling(string $via): bool {
     $f = rs_gh_cool_file($via);
     clearstatcache(true, $f);
@@ -568,23 +569,37 @@ function rs_gl_path_ok(string $path): bool {
     return !preg_match('/\.(git|atom)$/i', $path);
 }
 
-// '' (GitHub) or 'gitlab'.
-function rs_host_norm(?string $host): string { return strtolower(trim((string)$host)) === 'gitlab' ? 'gitlab' : ''; }
-function rs_host_name(?string $host): string { return rs_host_norm($host) === 'gitlab' ? 'GitLab' : 'GitHub'; }
-function rs_host_repo_ok(?string $host, string $repo): bool { return rs_host_norm($host) === 'gitlab' ? rs_gl_path_ok($repo) : rs_repo_ok($repo); }
-// The project's page: https://github.com/owner/name or https://gitlab.com/group/project.
-function rs_host_web(?string $host, string $repo): string { return (rs_host_norm($host) === 'gitlab' ? 'https://gitlab.com/' : 'https://github.com/') . $repo; }
+// '' (GitHub), 'gitlab' or (4.3) 'sourceforge'.
+function rs_host_norm(?string $host): string { $h = strtolower(trim((string)$host)); return in_array($h, ['gitlab', 'sourceforge'], true) ? $h : ''; }
+function rs_host_name(?string $host): string { return ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge'][rs_host_norm($host)] ?? 'GitHub'; }
+function rs_host_repo_ok(?string $host, string $repo): bool {
+    $h = rs_host_norm($host);
+    return $h === 'gitlab' ? rs_gl_path_ok($repo) : ($h === 'sourceforge' ? rs_sf_name_ok($repo) : rs_repo_ok($repo));
+}
+// The project's page: https://github.com/owner/name, https://gitlab.com/group/project or
+// https://sourceforge.net/projects/name.
+function rs_host_web(?string $host, string $repo): string {
+    $h = rs_host_norm($host);
+    return $h === 'sourceforge' ? 'https://sourceforge.net/projects/' . $repo : ($h === 'gitlab' ? 'https://gitlab.com/' : 'https://github.com/') . $repo;
+}
 // Where its releases are listed, and where a bug goes.
-function rs_host_releases_url(?string $host, string $repo): string { return rs_host_web($host, $repo) . (rs_host_norm($host) === 'gitlab' ? '/-/releases' : '/releases'); }
-// One string for a project on either host: 'owner/name' for GitHub (as before), 'gitlab.com/group/project'
-// for GitLab. Used where one column holds both (the finder's list, the security checks).
-function rs_repo_key(?string $host, string $repo): string { return rs_host_norm($host) === 'gitlab' ? 'gitlab.com/' . $repo : $repo; }
+function rs_host_releases_url(?string $host, string $repo): string { return rs_host_web($host, $repo) . (['gitlab' => '/-/releases', 'sourceforge' => '/files/'][rs_host_norm($host)] ?? '/releases'); }
+// One string for a project on any host: 'owner/name' for GitHub (as before), 'gitlab.com/group/project'
+// for GitLab, 'sourceforge.net/name' for SourceForge. Used where one column holds them all (the finder's
+// list, the security checks).
+function rs_repo_key(?string $host, string $repo): string { return (['gitlab' => 'gitlab.com/', 'sourceforge' => 'sourceforge.net/'][rs_host_norm($host)] ?? '') . $repo; }
 
 // A pasted link or path -> ['host' => ''|'gitlab', 'repo' => path], or null. GitHub keeps its owner/name
 // (anything after is dropped, as before); GitLab stops at "/-/" (its pages under a project) and ".git".
 // A bare path is GitHub's unless $bare says otherwise.
 function rs_repo_from_link(string $s, string $bare = ''): ?array {
     $s = trim($s);
+    // (4.3) SourceForge: sourceforge.net/projects/<name>/... (its project pages, files, downloads).
+    if (preg_match('#^(?:https?://)?(?:www\.)?sourceforge\.net/(?:projects|p)/([A-Za-z0-9-]+)(?:[/?\#].*)?$#i', $s, $m)) {
+        $p = strtolower($m[1]);
+        return rs_sf_name_ok($p) ? ['host' => 'sourceforge', 'repo' => $p] : null;
+    }
+    if (rs_host_norm($bare) === 'sourceforge' && !preg_match('#[/.:]#', trim($s, '/ '))) { $p = strtolower(trim($s, '/ ')); return rs_sf_name_ok($p) ? ['host' => 'sourceforge', 'repo' => $p] : null; }
     if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/(.+)$#i', $s, $m)) {
         $p = preg_replace('#[?\#].*$#', '', $m[1]);
         $p = preg_replace('#/-(/.*)?$#', '', $p);
@@ -799,9 +814,118 @@ function rs_gl_project(string $path, int $maxAge = 3600): ?array {
     return is_array($j) ? $j : ['_status' => 502];
 }
 
-// Releases on either host. -> [status, body, stale, age]
+// Releases on any host. -> [status, body, stale, age]
 function rs_host_releases(?string $host, string $repo, int $maxAge = 900): array {
-    return rs_host_norm($host) === 'gitlab' ? rs_gl_releases($repo, $maxAge) : rs_gh_releases($repo, $maxAge);
+    $h = rs_host_norm($host);
+    return $h === 'gitlab' ? rs_gl_releases($repo, $maxAge) : ($h === 'sourceforge' ? rs_sf_releases($repo, $maxAge) : rs_gh_releases($repo, $maxAge));
+}
+
+// ---- (4.3) SourceForge ----------------------------------------------------------------------------
+// For a developer whose GitHub is gone (or who only ever used SourceForge). Only the admin picks it.
+// A project's files are read from its file feed (https://sourceforge.net/projects/<name>/rss): each
+// top folder is one release (0.4.8/), its files the release's downloads, newest folder first. Given
+// out in GitHub's release shape, like GitLab's, so the site, the security checks and RecompLauncher
+// treat it the same. A download is always https://sourceforge.net/projects/<name>/files/.../download
+// (SourceForge sends it on to a mirror). Source archives (...-source.7z) are never downloads.
+
+// A SourceForge project's short name: letters, digits and dashes (lowercase), 2 to 63.
+function rs_sf_name_ok(string $p): bool { return (bool)preg_match('/^[a-z0-9][a-z0-9-]{1,62}$/D', $p); }
+
+// The file feed -> [['path', 'url', 'size', 'md5', 'date' (unix)], ...], or null when it isn't one.
+function rs_sf_feed_parse(string $xml): ?array {
+    if (!str_contains($xml, '<rss') && !str_contains($xml, '<channel')) return null;
+    if (!preg_match_all('#<item\b[^>]*>(.*?)</item>#s', $xml, $mm)) return [];
+    $txt = fn(string $x): string => trim(html_entity_decode(preg_replace('#^<!\[CDATA\[(.*)\]\]>$#s', '$1', trim($x)), ENT_QUOTES | ENT_XML1, 'UTF-8'));
+    $out = [];
+    foreach (array_slice($mm[1], 0, 300) as $it) {
+        $path = preg_match('#<title>(.*?)</title>#s', $it, $m) ? $txt($m[1]) : '';
+        $url = preg_match('#<media:content\b[^>]*\burl="([^"]+)"#', $it, $m) ? $txt($m[1]) : (preg_match('#<link>(.*?)</link>#s', $it, $m) ? $txt($m[1]) : '');
+        $size = preg_match('#<media:content\b[^>]*\bfilesize="(\d+)"#', $it, $m) ? (int)$m[1] : 0;
+        $md5 = preg_match('#<media:hash\b[^>]*algo="md5"[^>]*>([0-9a-f]{32})</media:hash>#i', $it, $m) ? strtolower($m[1]) : '';
+        $date = preg_match('#<pubDate>(.*?)</pubDate>#s', $it, $m) ? (int)strtotime(str_replace(' UT', ' UTC', $txt($m[1]))) : 0;
+        if ($path === '' || $url === '') continue;
+        $out[] = ['path' => $path, 'url' => $url, 'size' => $size, 'md5' => $md5, 'date' => $date];
+    }
+    return $out;
+}
+
+// Is this download the project's own: https://sourceforge.net/projects/<name>/files/...?
+function rs_sf_own_url(string $url, string $p): bool {
+    $u = parse_url($url);
+    if (!is_array($u) || ($u['scheme'] ?? '') !== 'https' || strtolower((string)($u['host'] ?? '')) !== 'sourceforge.net' || isset($u['port']) || isset($u['user'])) return false;
+    return str_starts_with(strtolower((string)($u['path'] ?? '')), '/projects/' . strtolower($p) . '/files/');
+}
+
+// The feed's files -> releases in GitHub's shape, newest first.
+function rs_sf_release_list(array $files, string $p): array {
+    $ext = '/\.(zip|7z|rar|exe|msi|appimage|tar\.gz|tgz|tar\.xz|dmg|deb|rpm|flatpak|apk)$/i';
+    $groups = [];
+    foreach ($files as $f) {
+        $parts = array_values(array_filter(explode('/', trim((string)$f['path'], '/')), 'strlen'));
+        if (!$parts) continue;
+        $name = (string)end($parts);
+        if (!preg_match($ext, $name) || preg_match('/(^|[-_. ])(source|sources|src)([-_. ]|$)/i', $name)) continue;
+        $url = 'https://sourceforge.net/projects/' . $p . '/files/' . implode('/', array_map('rawurlencode', $parts)) . '/download';
+        if (!rs_sf_own_url($url, $p)) continue;
+        // A file at the top: its own release, named by the version in it (Game-1.2.zip -> 1.2), else its day.
+        if (count($parts) >= 2) $tag = $parts[0];
+        else $tag = preg_match('/(?:^|[-_ v])(\d+(?:\.\d+)+(?:-(?:alpha|beta|rc|pre)[.\d]*)?)/i', $name, $m) ? $m[1] : gmdate('Y.m.d', (int)$f['date']);
+        $g = &$groups[$tag];
+        $g['tag'] = $tag;
+        $g['dir'] = count($parts) >= 2 ? $parts[0] : '';
+        $g['date'] = max((int)($g['date'] ?? 0), (int)$f['date']);
+        $g['assets'][] = ['name' => $name, 'size' => (int)$f['size'], 'browser_download_url' => $url, 'download_count' => 0] + ($f['md5'] !== '' ? ['md5' => $f['md5']] : []);
+        unset($g);
+    }
+    usort($groups, fn($a, $b) => $b['date'] <=> $a['date']);
+    $out = [];
+    foreach (array_slice($groups, 0, 30) as $g) {
+        $out[] = ['tag_name' => (string)$g['tag'], 'name' => (string)$g['tag'], 'published_at' => gmdate('Y-m-d\TH:i:s\Z', (int)$g['date']),
+            'prerelease' => false, 'draft' => false, 'body' => '', 'html_url' => 'https://sourceforge.net/projects/' . $p . '/files/' . ($g['dir'] !== '' ? rawurlencode((string)$g['dir']) . '/' : ''),
+            'assets' => $g['assets']];
+    }
+    return $out;
+}
+
+// A SourceForge project's releases, newest first, in GitHub's shape. -> [status, body, stale, age]
+function rs_sf_releases(string $p, int $maxAge = 900): array {
+    if (!rs_sf_name_ok($p)) return ['status' => 400, 'body' => '{"message":"Not a SourceForge project."}', 'stale' => false, 'age' => 0];
+    return rs_gh_cached('sf:' . $p, 'https://sourceforge.net/projects/' . $p . '/rss?path=/&limit=200', $maxAge,
+        fn(array $files): array => rs_sf_release_list($files, $p), 'sourceforge');
+}
+
+// The project: its name, summary, icon and licence, from SourceForge's project API.
+function rs_sf_project(string $p, int $maxAge = 3600): ?array {
+    if (!rs_sf_name_ok($p)) return null;
+    $r = rs_gh_cached('sf:' . $p . '#info', 'https://sourceforge.net/rest/p/' . $p, $maxAge, function (array $j) use ($p): array {
+        $lic = '';
+        foreach ((array)($j['categories']['license'] ?? []) as $l) if (is_array($l) && ($l['fullname'] ?? '') !== '') { $lic = (string)$l['fullname']; break; }
+        $spdx = ['MIT License' => 'MIT', 'GNU General Public License version 3.0 (GPLv3)' => 'GPL-3.0', 'GNU General Public License version 2.0 (GPLv2)' => 'GPL-2.0',
+            'Apache License V2.0' => 'Apache-2.0', 'BSD License' => 'BSD-3-Clause', 'Mozilla Public License 2.0 (MPL 2.0)' => 'MPL-2.0', 'zlib License' => 'Zlib'];
+        return [
+            'full_name' => (string)($j['shortname'] ?? $p), 'name' => (string)($j['name'] ?? $p), 'description' => (string)(($j['short_description'] ?? '') ?: ($j['summary'] ?? '')),
+            'stars' => 0, 'topics' => [], 'owner' => (string)(((array)($j['developers'] ?? []))[0]['username'] ?? ''), 'avatar' => (string)($j['icon_url'] ?? ''),
+            'archived' => false, 'fork' => false, 'issues' => 0, 'license' => $spdx[$lic] ?? $lic,
+            'default_branch' => '', 'web_url' => 'https://sourceforge.net/projects/' . $p . '/',
+        ];
+    }, 'sourceforge');
+    if ($r['status'] !== 200) return ['_status' => $r['status']];
+    $j = json_decode($r['body'], true);
+    return is_array($j) ? $j : ['_status' => 502];
+}
+
+// /api/sf.php's 30-minute copy on disk.
+function rs_sf_disk_file(string $p): string { return dirname(RS_PUBLIC) . '/recompstore-private/sf/' . md5(strtolower($p)) . '.json'; }
+function rs_sf_disk_put(string $p, string $body): void {
+    $f = rs_sf_disk_file($p);
+    if (!is_dir(dirname($f))) @mkdir(dirname($f), 0755, true);
+    if (@file_put_contents($f . '.' . getmypid(), $body) !== false) @rename($f . '.' . getmypid(), $f);
+}
+// A project's public copies (/api/gh.php, gl.php or sf.php) after a new release, on any host.
+function rs_host_disk_put(?string $host, string $repo, string $body): void {
+    $h = rs_host_norm($host);
+    if ($h === 'gitlab') rs_gl_disk_put($repo, $body);
+    elseif ($h === 'sourceforge') rs_sf_disk_put($repo, $body);
 }
 
 // /api/gl.php's 30-minute copy on disk, and the folder it lives in.

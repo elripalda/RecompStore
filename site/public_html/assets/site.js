@@ -971,19 +971,23 @@
   // (2.8) Release notes go through the README renderer: GitHub's HTML in them (pictures, links,
   // line breaks, <details>) shows as it should, and their headings sit under the release's own.
   // (3.9) A PC recomp's project on GitLab (entry.host 'gitlab', repo its path there) or GitHub.
+  // (4.3) Or SourceForge (entry.host 'sourceforge', repo its short name): pick one of three by host.
   const isGL = (host) => host === 'gitlab';
-  const repoWeb = (repo, host) => (isGL(host) ? 'https://gitlab.com/' : 'https://github.com/') + repo;
-  const repoReleases = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/releases' : '/releases');
-  const repoLatest = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/releases/permalink/latest' : '/releases/latest');
-  const repoIssues = (repo, host) => repoWeb(repo, host) + (isGL(host) ? '/-/issues/new' : '/issues');
-  const relApi = (repo, host) => (isGL(host) ? '/api/gl.php?repo=' : '/api/gh.php?repo=') + encodeURIComponent(repo);
-  const notesMd = (text, repo, host) => (isGL(host) ? mdFull(text, `https://gitlab.com/${repo}/-/raw/HEAD/`, `https://gitlab.com/${repo}/-/blob/HEAD/`)
+  const isSF = (host) => host === 'sourceforge';
+  const byHost = (host, gh, gl, sf) => (isSF(host) ? sf : isGL(host) ? gl : gh);
+  const repoWeb = (repo, host) => byHost(host, 'https://github.com/' + repo, 'https://gitlab.com/' + repo, 'https://sourceforge.net/projects/' + repo + '/');
+  const repoReleases = (repo, host) => byHost(host, repoWeb(repo, host) + '/releases', repoWeb(repo, host) + '/-/releases', repoWeb(repo, host) + 'files/');
+  const repoLatest = (repo, host) => byHost(host, repoWeb(repo, host) + '/releases/latest', repoWeb(repo, host) + '/-/releases/permalink/latest', repoWeb(repo, host) + 'files/');
+  const repoIssues = (repo, host) => byHost(host, repoWeb(repo, host) + '/issues', repoWeb(repo, host) + '/-/issues/new', repoWeb(repo, host) + 'support');
+  const relApi = (repo, host) => byHost(host, '/api/gh.php?repo=', '/api/gl.php?repo=', '/api/sf.php?repo=') + encodeURIComponent(repo);
+  const notesMd = (text, repo, host) => (isSF(host) ? mdFull(text, `https://sourceforge.net/projects/${repo}/files/`, `https://sourceforge.net/projects/${repo}/files/`)
+    : isGL(host) ? mdFull(text, `https://gitlab.com/${repo}/-/raw/HEAD/`, `https://gitlab.com/${repo}/-/blob/HEAD/`)
     : mdFull(text, `https://raw.githubusercontent.com/${repo}/HEAD/`, `https://github.com/${repo}/blob/HEAD/`))
     .replace(/<(\/?)h[23]\b/g, '<$1h4');
   function loadNotes(repo, el, host) {
-    const gl = isGL(host);
+    const gl = isGL(host) || isSF(host); // through this site, not GitHub's API
     const show = (rel) => {
-      if (!rel || !rel.length) { el.innerHTML = `<p class="muted">${gl ? t('No releases on GitLab yet.') : t('No releases on GitHub yet.')}</p>`; return; }
+      if (!rel || !rel.length) { el.innerHTML = `<p class="muted">${byHost(host, t('No releases on GitHub yet.'), t('No releases on GitLab yet.'), t('No releases on SourceForge yet.'))}</p>`; return; }
       el.innerHTML = rel.filter((r) => !r.draft).map((r) => `
         <section class="release" dir="auto">
           <h3>${esc(r.name || r.tag_name)}</h3>
@@ -997,7 +1001,7 @@
         tx.forEach((x, i) => { if (x && bodies[i]) showTranslated(bodies[i], notesMd(x, repo, host), notesMd(shown[i].body, repo, host)); });
       });
     };
-    const ck = (gl ? 'gl:' : '') + repo;
+    const ck = byHost(host, '', 'gl:', 'sf:') + repo;
     if (notesCache[ck]) { show(notesCache[ck]); return; }
     (gl ? fetch(relApi(repo, host)) : fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, { headers: { Accept: 'application/vnd.github+json' } }))
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -2877,13 +2881,14 @@
       [t('Runs on'), (a.systems || []).length ? `<span class="pc-sys">${a.systems.map((x) => `<span>${osIcon(x)}${SYS_NAMES[x]}</span>`).join('')}</span>` : ''],
       [t('Last updated'), when ? `${esc(ago(when.toISOString()))}<small>${esc(when.toLocaleDateString(locale(), { dateStyle: 'medium' }))}</small>` : ''],
       [t('Version'), esc(a.version || '')], [t('Download'), esc(a.size || '')],
-      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [isGL(a.host) ? t('Stars on GitLab') : t('Stars on GitHub'), a.stars ? esc(fmtNum(a.stars)) : ''],
+      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [byHost(a.host, t('Stars on GitHub'), t('Stars on GitLab'), t('Stars')), a.stars ? esc(fmtNum(a.stars)) : ''],
       [t('Releases'), a.releases ? esc(fmtNum(a.releases)) : ''], [t('First release'), first ? esc(first.toLocaleDateString(locale(), { dateStyle: 'medium' })) : ''],
       [t('Open issues'), a.repo ? esc(fmtNum(a.issues || 0)) : ''], [t('License'), esc(a.license || '')]].filter(([, v]) => v);
     const tags = (a.tags || []).map((x) => `<a class="pc-tagpill" href="/pc/all?tag=${encodeURIComponent(x)}" title="${esc(tf('All recomps with {tag}', { tag: x }))}">${esc(x)}</a>`).join('');
     const genre = a.genre && a.genre !== 'other' ? `<a class="pc-pill plain" href="/pc/all?kind=${esc(a.genre)}">${esc(t(PC_GENRES[a.genre]))}</a>` : '';
     // (3.9) Its project page, releases and issues: on GitLab when its entry says so.
-    const gl = isGL(a.host);
+    const gl = isGL(a.host), sf = isSF(a.host);
+    const hostSay = (ghText, glText, sfText) => byHost(a.host, ghText, glText, sfText);
     const gh = esc(repoWeb(a.repo, a.host)), ghLatest = esc(repoLatest(a.repo, a.host)), ghRels = esc(repoReleases(a.repo, a.host)), ghIssues = esc(repoIssues(a.repo, a.host));
     const feats = (a.features || []).length ? `<section class="glass pc-side-card pc-feats"><h2>${t("What's in it")}</h2><ul>${a.features.map((f) => `<li dir="auto">${featIcon(f)}<span>${esc(f)}</span></li>`).join('')}</ul></section>` : '';
     const ab = a.about || null;
@@ -2937,7 +2942,7 @@
             </nav>
             <div class="pc-tab-wrap">
               <section class="pc-tab glass pc-readme" data-panel="readme"><p class="muted">${t('Loading…')}</p></section>
-              <section class="pc-tab glass notes pc-releases" data-panel="releases" hidden><p class="muted">${gl ? t('Loading the notes from GitLab…') : t('Loading the notes from GitHub…')}</p></section>
+              <section class="pc-tab glass notes pc-releases" data-panel="releases" hidden><p class="muted">${hostSay(t('Loading the notes from GitHub…'), t('Loading the notes from GitLab…'), t('Loading the notes from SourceForge…'))}</p></section>
               <section class="pc-tab" data-panel="feedback" hidden></section>
             </div>
             ${a.credits ? `<p class="credits" dir="auto">${esc(a.credits)}</p>` : ''}
@@ -2949,7 +2954,7 @@
           <aside class="pc-side">
             <div class="glass panel">
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
-              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div><a class="btn" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>
+              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div><a class="btn" href="${gh}" target="_blank" rel="noopener">${hostSay(t('Follow it on GitHub'), t('Follow it on GitLab'), t('Follow it on SourceForge'))}</a></div>` : `<div class="pc-dl" data-dl>
                 <a class="btn primary pc-open-rl" href="recomplauncher://game/${encodeURIComponent(a.id)}" data-rl-open aria-label="${t('Open in RecompLauncher')}"><img src="/assets/mark.svg" alt="" width="18" height="18">RecompLauncher</a>
                 <p class="pc-open-help" data-rl-help role="status" hidden>${tf('RecompLauncher didn\'t open? {get}, or update it, then try again. You can also download it directly below.', { get: `<a href="/get">${t('Get RecompLauncher')}</a>` })}</p>
                 <div class="pc-dl-direct" style="--n:${Math.max(1, Math.min(systems.length, 3))}">${systems.map((sx) => `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${systems.length > 1 ? esc(SYS_NAMES[sx]) : tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>
@@ -2957,7 +2962,7 @@
               <div data-acct-save></div>
               <div data-rl-send></div>
               <div class="pc-links">
-                <a href="${gh}" target="_blank" rel="noopener">${gl ? t('View on GitLab') : t('View on GitHub')}<span aria-hidden="true">↗</span></a>
+                <a href="${gh}" target="_blank" rel="noopener">${hostSay(t('View on GitHub'), t('View on GitLab'), t('View on SourceForge'))}<span aria-hidden="true">↗</span></a>
                 <a href="${ghRels}" target="_blank" rel="noopener">${t('All releases')}<span aria-hidden="true">↗</span></a>
                 <a href="${ghIssues}" target="_blank" rel="noopener">${t('Report an issue')}<span aria-hidden="true">↗</span></a>
               </div>
@@ -2965,7 +2970,7 @@
               ${lifeNotice(a)}
               ${a.needs ? `<p class="note needs"><strong>${t('You bring')}:</strong> ${esc(a.needs)}</p>` : ''}
               <dl class="pc-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd dir="auto">${v}</dd></div>`).join('')}</dl>
-              <p class="note">${gl ? t('Each download comes straight from the developer\'s own GitLab release.') : t('Each download comes straight from the developer\'s own GitHub release.')}</p>
+              <p class="note">${hostSay(t('Each download comes straight from the developer\'s own GitHub release.'), t('Each download comes straight from the developer\'s own GitLab release.'), t('Each download comes straight from the developer\'s own SourceForge files.'))}</p>
             </div>
             ${feats}
             ${gameCard}
@@ -2994,9 +2999,9 @@
       const panel = view.querySelector(`[data-panel="${name}"]`);
       if (name === 'readme') {
         fetch('/api/pc.php?a=readme&id=' + encodeURIComponent(a.id)).then((r) => r.json()).then((j) => {
-          if (!j.ok) { panel.innerHTML = `<p class="muted">${esc(j.error || (gl ? t('No README on its GitLab.') : t('No README on its GitHub.')))}</p>`; return; }
-          panel.innerHTML = `<div class="md-body" dir="auto">${mdFull(j.md, j.raw, j.blob)}</div><a class="src" href="${esc(j.url || repoWeb(a.repo, a.host))}" target="_blank" rel="noopener">${gl ? t('Read it on GitLab') : t('Read it on GitHub')} ↗</a>`;
-        }).catch(() => { panel.innerHTML = `<p class="muted">${gl ? t('GitLab didn\'t answer. Try again in a moment.') : t('GitHub didn\'t answer. Try again in a moment.')}</p>`; });
+          if (!j.ok) { panel.innerHTML = `<p class="muted">${esc(j.error || hostSay(t('No README on its GitHub.'), t('No README on its GitLab.'), t('The README is on its SourceForge page.')))}</p>`; return; }
+          panel.innerHTML = `<div class="md-body" dir="auto">${mdFull(j.md, j.raw, j.blob)}</div><a class="src" href="${esc(j.url || repoWeb(a.repo, a.host))}" target="_blank" rel="noopener">${hostSay(t('Read it on GitHub'), t('Read it on GitLab'), t('Read it on SourceForge'))} ↗</a>`;
+        }).catch(() => { panel.innerHTML = `<p class="muted">${hostSay(t('GitHub didn\'t answer. Try again in a moment.'), t('GitLab didn\'t answer. Try again in a moment.'), t('SourceForge didn\'t answer. Try again in a moment.'))}</p>`; });
       } else if (name === 'releases') loadNotes(a.repo, panel, a.host);
       else if (name === 'feedback') pcFeedback(a, panel);
     };

@@ -158,7 +158,7 @@ rs_head('Security', true, ['assets/vt.css']);
   <h2>Check a link</h2>
   <p class="muted">A GitHub repo, a GitLab project, a release page or a link to a file. You get its rundown and a VirusTotal result for each download, usually within a minute.</p>
   <form class="vt-checkform" data-vt-check>
-    <input type="url" name="url" placeholder="https://github.com/owner/repo or https://gitlab.com/group/project" required autocomplete="off" spellcheck="false">
+    <input type="url" name="url" placeholder="https://github.com/owner/repo, https://gitlab.com/group/project or https://sourceforge.net/projects/name" required autocomplete="off" spellcheck="false">
     <button class="primary">Check it</button>
   </form>
   <div class="vt-result" data-vt-result hidden></div>

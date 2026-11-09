@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a = rs_pc_app((string)($_POST['id'] ?? ''));
             if (!$a) throw new RuntimeException('That app is gone.');
             $macBefore = (string)$a['asset_mac'];
+            $keyBefore = rs_pc_key($a); // (4.3)
             foreach (['name' => 120, 'game' => 120, 'repo' => 160, 'asset_win' => 160, 'asset_linux' => 160, 'asset_mac' => 160, 'blurb' => 160, 'adds' => 120, 'description' => 8000,
                 'needs' => 200, 'credits' => 1000, 'author' => 80, 'tags' => 120, 'version' => 40, 'size' => 20, 'features' => 1200, 'media' => 5000, 'report_url' => 300] as $k => $max)
                 $a[$k] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST[$k] ?? ''))), 0, $max);
@@ -91,8 +92,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a['host'] = rs_host_norm((string)($_POST['host'] ?? ''));
             if ($a['repo'] !== '') {
                 $l = rs_repo_from_link($a['repo'], $a['host']);
-                if (!$l) throw new RuntimeException($a['host'] === 'gitlab' ? 'The GitLab project goes as group/project (or group/sub/project).' : 'The GitHub repo goes as owner/name.');
+                if (!$l) throw new RuntimeException(['gitlab' => 'The GitLab project goes as group/project (or group/sub/project).', 'sourceforge' => 'The SourceForge project goes as its short name (sourceforge.net/projects/<name>).'][$a['host']] ?? 'The GitHub repo goes as owner/name.');
                 $a['repo'] = $l['repo']; $a['host'] = $l['host'];
+            }
+            // (4.3) Moved to another project (another host): nothing from the old one carries over, and
+            // the new one's release is checked before it goes out, as with "Switch to it".
+            if ($keyBefore !== '' && strcasecmp($keyBefore, rs_pc_key($a)) !== 0 && $a['repo'] !== '') {
+                $a['ok_tag'] = 'moved:' . (string)($a['ok_tag'] ?? '');
+                unset($a['pending']);
+                $a['gh_at'] = 0;
+                rs_log('pc', 'move', $a['id'] . ': ' . $keyBefore . ' -> ' . rs_pc_key($a));
             }
             foreach (['icon_file' => 'icon', 'hero_file' => 'hero', 'logo_file' => 'logo'] as $field => $kind) {
                 if (empty($_FILES[$field]['name'])) continue;
@@ -299,7 +308,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label>From<select name="origin"><?php foreach (RS_PC_ORIGINS as $k => $n): ?><option value="<?= h($k) ?>"<?= $a['origin'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select></label>
     <label>Kind of game<select name="genre"><option value="">Pick one</option><?php foreach (RS_PC_GENRES as $k => $n): ?><option value="<?= h($k) ?>"<?= $a['genre'] === $k ? ' selected' : '' ?>><?= h($n) ?></option><?php endforeach; ?></select><small>Each kind is a category on the PC store, with its own row and page.</small></label>
     <?php $aHost = rs_pc_host($a); ?>
-    <label>Project<span class="pc-repo-row"><select name="host" aria-label="Where it lives"><option value="">GitHub</option><option value="gitlab"<?= $aHost === 'gitlab' ? ' selected' : '' ?>>GitLab</option></select><input name="repo" value="<?= h($a['repo']) ?>" class="mono" placeholder="owner/name"></span><small><?php if ($a['repo'] !== ''): ?><a href="<?= h(rs_host_web($aHost, $a['repo'])) ?>" target="_blank" rel="noopener">Open on <?= h(rs_host_name($aHost)) ?></a>. <?php endif; ?>owner/name, or paste a github.com or gitlab.com link.</small></label>
+    <label>Project<span class="pc-repo-row"><select name="host" aria-label="Where it lives"><option value="">GitHub</option><option value="gitlab"<?= $aHost === 'gitlab' ? ' selected' : '' ?>>GitLab</option><option value="sourceforge"<?= $aHost === 'sourceforge' ? ' selected' : '' ?>>SourceForge</option></select><input name="repo" value="<?= h($a['repo']) ?>" class="mono" placeholder="owner/name"></span><small><?php if ($a['repo'] !== ''): ?><a href="<?= h(rs_host_web($aHost, $a['repo'])) ?>" target="_blank" rel="noopener">Open on <?= h(rs_host_name($aHost)) ?></a>. <?php endif; ?>owner/name, or paste a github.com, gitlab.com or sourceforge.net link.<?php if ($aHost === 'sourceforge'): ?> Each new SourceForge release is held until its files are checked.<?php endif; ?></small></label>
     <label>Windows download<input name="asset_win" value="<?= h($a['asset_win']) ?>" class="mono" placeholder="Zelda64Recompiled-*-Windows.zip"><small>The release file, * for the part that changes.</small></label>
     <label>Linux download<input name="asset_linux" value="<?= h($a['asset_linux']) ?>" class="mono"></label>
     <label>macOS download<input name="asset_mac" value="<?= h($a['asset_mac']) ?>" class="mono" placeholder="MyRecomp-*-macOS-arm64.zip"><?php $macWhy = rs_pc_mac_why((string)$a['asset_mac']); ?><small<?= $macWhy !== '' ? ' class="bad-text"' : '' ?>><?= $macWhy !== '' ? h($macWhy) . ' It isn\'t offered on Mac until it\'s fixed.' : 'A .zip, .dmg, .rar or .7z with an Apple Silicon or universal build.' ?></small></label>
@@ -412,7 +421,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   <div class="found-head">
     <h2>Found on GitHub <span class="pill<?= $found ? ' cyan' : '' ?>"><?= count($found) ?></span></h2>
     <div class="found-acts">
-      <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="lookup"><input name="repo" placeholder="github.com/owner/repo or gitlab.com/group/project" class="mono" required><button>Look up</button></form>
+      <form method="post" class="pc-lookup"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="lookup"><input name="repo" placeholder="github.com/owner/repo, gitlab.com/group/project or sourceforge.net/projects/name" class="mono" required><button>Look up</button></form>
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="find"><button>Look again</button></form>
     </div>
   </div>
