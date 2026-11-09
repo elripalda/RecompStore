@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($boot !== '') {
                 $bj = json_decode($boot, true);
                 if (!is_array($bj) || $boot[0] !== '{') throw new RuntimeException('The boot profile isn\'t valid JSON. It has to be one { ... } object.');
-                if (strlen($boot) > 20000) throw new RuntimeException('The boot profile is too long.');
+                if (strlen($boot) > 100000) throw new RuntimeException('The boot profile is too long.');
                 // (4.3) Checked the way the launcher reads it: a mistake that would break it stops the save.
                 $bootProbs = rs_boot_check($bj);
                 $bootErr = array_values(array_filter($bootProbs, fn($p) => $p[0] === 'err'));
@@ -357,7 +357,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
       <div data-boot-form></div>
       <ul class="boot-probs" data-boot-probs></ul>
       <div class="boot-uses muted" data-boot-uses></div>
-      <details><summary>Edit as JSON</summary><textarea name="boot" rows="14" maxlength="20000" spellcheck="false" class="mono" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>One JSON object, per the curator setup guide. The fields above edit this; anything they don't show stays as it is.</small></details>
+      <details><summary>Edit as JSON</summary><textarea name="boot" rows="14" maxlength="100000" spellcheck="false" class="mono" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>One JSON object, per the curator setup guide. The fields above edit this; anything they don't show stays as it is.</small></details>
     </div>
     <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label><label class="check" title="Its release is only a setup .exe: RecompLauncher runs the installer, then finds where it installed (needs a launcher with the installer flow)"><input type="checkbox" name="installer" value="1"<?= !empty($a['installer']) ? ' checked' : '' ?>> Installer only</label></div>

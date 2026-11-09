@@ -129,6 +129,13 @@
 
   const render = () => {
     if (bad) { formEl.innerHTML = '<p class="bad-text">The JSON below isn\'t valid, so the fields are off until it is.</p>'; return; }
+    if (b && b.format === 1) {
+      // A full launcher profile (recomplauncher.json's shape): the catalog sends it as is.
+      const sets = Array.isArray(b.settings) ? b.settings : [];
+      const groups = [...new Set(sets.map((x) => x.group || 'Settings'))];
+      formEl.innerHTML = `<div class="boot-sec"><h4>Full launcher profile ${b.game ? '<span class="pill boot-easy">Easy Setup</span>' : ''}</h4><p class="muted">This one is written the long way (format 1, like a recomplauncher.json), so edit it as JSON below. ${esc(sets.length)} settings${groups.length ? ': ' + groups.map((gr) => `${esc(gr)} (${sets.filter((x) => (x.group || 'Settings') === gr).length})`).join(', ') : ''}.</p></div>`;
+      return;
+    }
     if (!b || !Object.keys(b).length) {
       formEl.innerHTML = `<p class="muted">No boot profile: the launcher works out how to start it${builtin ? ', from the profile it has built in' : ''}.</p><p>${builtin ? '<button type="button" class="primary boot-mini" data-x="from-builtin">Start from the launcher\'s built-in profile</button> ' : ''}<button type="button" class="boot-mini" data-x="new">Start a new profile</button></p>`;
       return;

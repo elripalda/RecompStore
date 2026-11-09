@@ -45,8 +45,9 @@ foreach ($apps as $a) {
     $eff = rs_boot_effective($a);
     $probs = rs_boot_check($eff);
     $e = count(array_filter($probs, fn($p) => $p[0] === 'err')); $w = count($probs) - $e;
-    $easy = in_array((string)($eff['files']['how'] ?? ''), RS_BOOT_EASY, true);
-    $ns = count((array)($eff['settings']['settings'] ?? []));
+    $full = (int)($eff['format'] ?? 0) === 1;
+    $easy = $full ? !empty($eff['game']) : in_array((string)($eff['files']['how'] ?? ''), RS_BOOT_EASY, true);
+    $ns = $full ? count((array)($eff['settings'] ?? [])) : count((array)($eff['settings']['settings'] ?? []));
     $count[$src]++; if ($easy) $count['easy']++; if ($ns) $count['settings']++; if ($e) $count['err']++; elseif ($w) $count['warn']++;
     if ($filter === 'problems' && !$e && !$w) continue;
     if ($filter === 'easy' && !$easy) continue;

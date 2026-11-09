@@ -117,7 +117,20 @@ function rs_boot_check(array $b): array {
     $e = function (string $m) use (&$out) { $out[] = ['err', $m]; };
     $w = function (string $m) use (&$out) { $out[] = ['warn', $m]; };
     if (array_is_list($b)) { $e('It has to be one { ... } object.'); return $out; }
-    if ((int)($b['format'] ?? 0) === 1) return $out; // a full launcher profile: its own rules
+    if ((int)($b['format'] ?? 0) === 1) { // a full launcher profile: its own rules, the basics checked
+        if (!isset($b['start']['program'])) $e('A launcher profile needs start.program: the program(s) to run.');
+        $ids = [];
+        foreach ((array)($b['settings'] ?? []) as $i => $st) {
+            $n = '"' . ($st['label'] ?? $st['id'] ?? '#' . $i) . '"';
+            if (!is_array($st) || ($st['id'] ?? '') === '' || ($st['label'] ?? '') === '') { $e("Setting $n needs an id and a label."); continue; }
+            if (isset($ids[$st['id']])) $e('Two settings have the id "' . $st['id'] . '".');
+            $ids[$st['id']] = true;
+            if (count((array)($st['choices'] ?? [])) < 2 && !isset($st['slider']) && !isset($st['bindings'])) $w("Setting $n has fewer than two choices.");
+            foreach ((array)($st['choices'] ?? []) as $ch) foreach ((array)($ch['set'] ?? []) as $v) if (!is_string($v)) { $e("Setting $n: values in set are text, quoted."); break 2; }
+            foreach ((array)($st['defaults'] ?? []) as $v) if (!is_string($v)) { $e("Setting $n: defaults are text, quoted."); break; }
+        }
+        return $out;
+    }
     foreach (array_keys($b) as $k) if (!in_array($k, RS_BOOT_TOP, true)) $w("\"$k\" isn't something the launcher reads. Check the spelling.");
     $kind = (string)($b['kind'] ?? '');
     if ($kind !== '' && !in_array($kind, RS_BOOT_KINDS, true)) $w("kind \"$kind\" isn't one the launcher knows (" . implode(', ', RS_BOOT_KINDS) . ').');
@@ -230,6 +243,10 @@ function rs_boot_uses(array $b): array {
 // A one-line summary for lists: "Easy Setup (folder) · 6 settings · note".
 function rs_boot_summary(array $b): string {
     if (!$b) return '';
+    if ((int)($b['format'] ?? 0) === 1) { // a full launcher profile: its own shape
+        $n = count((array)($b['settings'] ?? []));
+        return 'Launcher profile' . (!empty($b['game']) ? ' · Easy Setup (' . (string)($b['game']['kind'] ?? 'copy') . ')' : '') . ($n ? ' · ' . $n . ' setting' . ($n === 1 ? '' : 's') : '');
+    }
     $how = (string)($b['files']['how'] ?? '');
     $bits = [in_array($how, RS_BOOT_EASY, true) ? 'Easy Setup (' . $how . ')' : ($how !== '' ? 'copy: ' . $how : 'no files')];
     $n = count((array)($b['settings']['settings'] ?? []));
