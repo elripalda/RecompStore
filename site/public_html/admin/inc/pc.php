@@ -325,8 +325,8 @@ function rs_pc_find_discord(int $budget = 30): array {
     $db = rs_db();
     $have = [];
     foreach ($db->query('SELECT repo, state, UNIX_TIMESTAMP(checked) t FROM pc_found')->fetchAll() as $r) $have[strtolower((string)$r['repo'])] = [(string)$r['state'], (int)$r['t']];
-    $listed = [];
-    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') $listed[strtolower(rs_pc_key($a))] = true;
+    $listed = $shown = [];
+    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') { $listed[strtolower(rs_pc_key($a))] = true; if (empty($a['hidden'])) $shown[strtolower(rs_pc_key($a))] = true; }
     $put = $db->prepare('INSERT INTO pc_found (repo, data, found, checked, state) VALUES (?, ?, NOW(), NOW(), ?) ON DUPLICATE KEY UPDATE data = VALUES(data), checked = NOW(),
         state = IF(state IN (\'skip\', \'added\'), state, VALUES(state))');
     $new = $looked = 0;
@@ -342,7 +342,8 @@ function rs_pc_find_discord(int $budget = 30): array {
             if (!$l) continue;
             $k = strtolower(rs_repo_key($l['host'], $l['repo']));
             // (4.3) A forum post for a recomp that's already on RecompLauncher gets tagged and closed.
-            if (isset($listed[$k])) { if ($forum && !empty($m['thread'])) rs_dc_forum_close((string)$m['thread'], 'Already listed'); continue; }
+            // (A hidden draft is still being looked at: its post stays as it is.)
+            if (isset($listed[$k])) { if ($forum && !empty($m['thread']) && isset($shown[$k])) rs_dc_forum_close((string)$m['thread'], 'Already listed'); continue; }
             if (isset($have[$k]) && ($have[$k][0] !== 'none' || $have[$k][1] > time() - 3 * 86400)) continue;
             ++$looked;
             $r = rs_pc_read_repo($l['repo'], $l['host']);
