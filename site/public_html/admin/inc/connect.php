@@ -614,6 +614,12 @@ function rs_gl_own_url(string $url, string $path): bool {
     if (str_starts_with($up, '/' . strtolower($path) . '/')) return true;
     // (3.9) A file uploaded to the project, by its number: /-/project/<id>/uploads/...
     if (preg_match('#^/-/project/(\d+)/uploads/#', $up, $m)) { $id = rs_gl_project_id($path); return $id > 0 && (int)$m[1] === $id; }
+    // (4.3) A file in the project's own generic package registry, by its number or its path:
+    // /api/v4/projects/<id>/packages/generic/... or /api/v4/projects/group%2Fproject/packages/generic/...
+    if (preg_match('#^/api/v4/projects/([^/]+)/packages/generic/[^/]+/[^/]+/[^/]+$#', $up, $m)) {
+        if (ctype_digit($m[1])) { $id = rs_gl_project_id($path); return $id > 0 && (int)$m[1] === $id; }
+        return rawurldecode($m[1]) === strtolower($path);
+    }
     return false;
 }
 
@@ -677,6 +683,50 @@ function rs_gl_note_assets(string $body, string $path, int $pid): array {
     return $out;
 }
 
+// (4.3) A release link's name often has no extension ("Game-1.0-Windows-Release"), so nothing could
+// tell it's a zip. The real name comes from the link itself (a generic package's URL ends in it), or,
+// for a /-/package_files/<n>/download link, from the project's package list.
+function rs_gl_file_name(string $name, string $url, string $path, int $pid): string {
+    $ext = '/\.(zip|7z|rar|exe|appimage|tar\.gz|tgz|tar\.xz|dmg|msi)$/i';
+    if (preg_match($ext, $name)) return $name;
+    $base = rawurldecode(basename((string)(parse_url($url, PHP_URL_PATH) ?? '')));
+    if (preg_match($ext, $base) && preg_match('/^[\w.+() -]{1,200}$/', $base)) return $base;
+    if ($pid > 0 && preg_match('#/-/package_files/(\d+)/download$#', (string)(parse_url($url, PHP_URL_PATH) ?? ''), $m)) {
+        $real = rs_gl_package_names($pid, (int)$m[1])[(int)$m[1]] ?? '';
+        if (preg_match($ext, $real) && preg_match('/^[\w.+() -]{1,200}$/', $real)) return $real;
+    }
+    return $name;
+}
+
+// The file names in a project's newest packages: [file id => name]. Kept 6 hours; asked again sooner
+// (at most every 10 minutes) when a release names a file that isn't in it yet.
+function rs_gl_package_names(int $pid, int $want = 0): array {
+    static $mem = [];
+    if (isset($mem[$pid]) && ($want === 0 || isset($mem[$pid][$want]))) return $mem[$pid];
+    $k = 'glpkg:' . $pid;
+    $kv = function_exists('rs_kv_get') ? rs_kv_get($k) : null;
+    $map = $kv ? (json_decode($kv['v'], true) ?: []) : [];
+    $fresh = $kv && ($kv['age'] < 6 * 3600) && ($want === 0 || isset($map[$want]) || $kv['age'] < 600);
+    if (!$fresh) {
+        $got = [];
+        $r = rs_http(rs_gl_api() . '/projects/' . $pid . '/packages?per_page=20&order_by=created_at&sort=desc', ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
+        $list = $r['status'] === 200 ? (json_decode($r['body'], true) ?: []) : null;
+        if (is_array($list)) {
+            foreach (array_slice($list, 0, 20) as $p) {
+                if (!is_array($p) || (int)($p['id'] ?? 0) <= 0) continue;
+                $f = rs_http(rs_gl_api() . '/projects/' . $pid . '/packages/' . (int)$p['id'] . '/package_files?per_page=50', ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
+                foreach ($f['status'] === 200 ? (json_decode($f['body'], true) ?: []) : [] as $x)
+                    if (is_array($x) && (int)($x['id'] ?? 0) > 0) $got[(int)$x['id']] = (string)($x['file_name'] ?? '');
+            }
+            $map = $got;
+            if (function_exists('rs_kv_put')) rs_kv_put($k, json_encode($map));
+        }
+    }
+    $out = [];
+    foreach ($map as $id => $n) $out[(int)$id] = (string)$n;
+    return $mem[$pid] = $out;
+}
+
 // GitLab's /projects/:id/releases answer as GitHub's release list (what /api/gh.php gives):
 // released_at -> published_at, description -> body, _links.self -> html_url, upcoming_release ->
 // prerelease. Files are the release's links that are the project's own (assets.sources, GitLab's
@@ -692,7 +742,8 @@ function rs_gl_release_list(array $list, string $path): array {
             $name = trim((string)($l['name'] ?? ''));
             $u = (string)(($l['direct_asset_url'] ?? '') ?: ($l['url'] ?? ''));
             if ($name === '' || $u === '' || !rs_gl_own_url($u, $path)) continue;
-            $assets[] = ['name' => $name, 'size' => 0, 'browser_download_url' => $u, 'download_count' => 0];
+            $name = rs_gl_file_name($name, $u, $path, $pid);
+            $assets[] =['name' => $name, 'size' => 0, 'browser_download_url' => $u, 'download_count' => 0];
         }
         if (!$assets) $assets = rs_gl_note_assets((string)($r['description'] ?? ''), $path, $pid); // (3.9)
         $out[] = [
