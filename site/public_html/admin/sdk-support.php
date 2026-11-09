@@ -16,32 +16,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_flash($a['name'] . ($r['has'] === 'release' || $r['has'] === 'repo' ? ' ships its own recomplauncher.json now.' : ' still doesn\'t ship one.'));
     } elseif (($_POST['action'] ?? '') === 'recheck_all') {
         rs_db()->exec("DELETE FROM kv_cache WHERE k LIKE 'sdk:%'");
-        rs_flash('Checking everything again. It fills in as you reload.');
+        rs_flash('Checking everything again in the background. Reload in a minute or two.');
     }
     header('Location: sdk-support.php' . ($id !== '' ? '#r-' . rawurlencode($id) : ''));
     exit;
 }
 
-// Listed recomps, most downloaded first. Each one is checked once a week; a page load checks for at
-// most 20 seconds, so the first visit may need a reload or two.
+// Listed recomps, most downloaded first. The page only reads what's been checked; the checking runs
+// after the page has gone (a minute at a time), so it never keeps anyone waiting.
 $apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''));
 usort($apps, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
-$start = microtime(true);
 $missing = [];
 $has = 0;
 $waiting = 0;
+$toCheck = [];
 foreach ($apps as $rank => $a) {
     if (count($missing) >= RS_SDK_TOP) break;
     $c = rs_kv_get('sdk:' . $a['id']);
     $r = $c && $c['age'] < 7 * 86400 ? json_decode($c['v'], true) : null;
-    if (!is_array($r)) {
-        if (microtime(true) - $start > 20) { ++$waiting; continue; }
-        $r = rs_pc_sdk_check($a);
-    }
+    if (!is_array($r)) { ++$waiting; $toCheck[] = $a['id']; continue; }
     if ($r['has'] === 'release' || $r['has'] === 'repo') { ++$has; continue; }
     $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
     $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
     $missing[] = ['a' => $a, 'rank' => $rank + 1, 'now' => $now, 'unknown' => $r['has'] === 'unknown'];
+}
+// One background run at a time: the next unchecked ones, for up to a minute.
+if ($toCheck) {
+    $run = rs_kv_get('sdk_scan_run');
+    if (!$run || $run['age'] > 150) {
+        rs_kv_put('sdk_scan_run', (string)time());
+        register_shutdown_function(function () use ($toCheck) {
+            if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+            ignore_user_abort(true);
+            if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+            elseif (function_exists('litespeed_finish_request')) @litespeed_finish_request();
+            @set_time_limit(150);
+            $t0 = microtime(true);
+            foreach ($toCheck as $id) {
+                if (microtime(true) - $t0 > 60) break;
+                if ($a = rs_pc_app($id)) { try { rs_pc_sdk_check($a); } catch (Throwable $e) { /* next run */ } }
+            }
+            rs_db()->exec("DELETE FROM kv_cache WHERE k = 'sdk_scan_run'");
+        });
+    }
 }
 $nowLabel = [
     'json' => ['Its file, in our catalog', 'The developer\'s recomplauncher.json is pasted into the catalog. Shipping it in the release keeps it up to date.'],
@@ -63,7 +80,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <div class="role-cards">
   <div class="role-card"><span class="muted small">Ship their own file</span><span class="n"><?= number_format($has) ?></span><p class="muted small">Of the most downloaded checked so far.</p></div>
   <div class="role-card"><span class="muted small">On this list</span><span class="n"><?= count($missing) ?></span><p class="muted small">Most downloaded first. Pick one and send a pull request.</p></div>
-  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= $waiting ?></span><p class="muted small"><?= $waiting ? 'Reload in a moment to check more.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
+  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= $waiting ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background. Reload in a minute.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
 </div>
 <section class="card">
   <div class="sdk-list">

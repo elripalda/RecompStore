@@ -453,7 +453,7 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
     $out = ['has' => 'unknown', 'at' => time()];
     $repo = (string)$a['repo'];
     if (rs_pc_host($a) === '' && $repo !== '') {
-        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 10, 'max' => 400000]);
+        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
         if ($r['status'] === 200) $out['has'] = 'repo';
         elseif ($r['status'] === 404) $out['has'] = 'none';
     }
