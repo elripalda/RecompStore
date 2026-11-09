@@ -914,6 +914,30 @@ function rs_sf_project(string $p, int $maxAge = 3600): ?array {
     return is_array($j) ? $j : ['_status' => 502];
 }
 
+// (4.3) Each SourceForge file the security checks have hashed gets that SHA-256 as its "digest", the way
+// GitHub gives one: RecompLauncher then installs only the very file that was checked, whatever mirror
+// SourceForge sends it to. A file not checked yet has none.
+function rs_sf_with_digests(string $p, string $body): string {
+    $list = json_decode($body, true);
+    if (!is_array($list) || !$list) return $body;
+    try {
+        $st = rs_db()->prepare("SELECT tag, name, sha256 FROM vt_files WHERE repo = ? AND sha256 IS NOT NULL AND sha256 <> ''");
+        $st->execute([rs_repo_key('sourceforge', $p)]);
+        $have = [];
+        foreach ($st->fetchAll() as $r) $have[(string)$r['tag'] . "\n" . (string)$r['name']] = strtolower((string)$r['sha256']);
+    } catch (Throwable $e) { return $body; } // no checks table yet
+    if (!$have) return $body;
+    foreach ($list as &$rel) {
+        if (!is_array($rel)) continue;
+        foreach ($rel['assets'] ?? [] as $i => $a) {
+            $h = $have[(string)($rel['tag_name'] ?? '') . "\n" . (string)($a['name'] ?? '')] ?? '';
+            if (preg_match('/^[0-9a-f]{64}$/', $h)) $rel['assets'][$i]['digest'] = 'sha256:' . $h;
+        }
+    }
+    unset($rel);
+    return json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
 // /api/sf.php's 30-minute copy on disk.
 function rs_sf_disk_file(string $p): string { return dirname(RS_PUBLIC) . '/recompstore-private/sf/' . md5(strtolower($p)) . '.json'; }
 function rs_sf_disk_put(string $p, string $body): void {

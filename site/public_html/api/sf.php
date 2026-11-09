@@ -25,7 +25,7 @@ $gage = is_file($gf) ? time() - (int)filemtime($gf) : PHP_INT_MAX;
 if ($gage < 1800) {
     header('Cache-Control: public, max-age=120');
     header('X-RS-Cache-Age: ' . $gage);
-    readfile($gf);
+    echo rs_sf_with_digests($repo, (string)file_get_contents($gf));
     exit;
 }
 try {
@@ -35,7 +35,7 @@ try {
     if (is_file($gf)) {
         header('Cache-Control: public, max-age=30');
         header('X-RS-Stale: 1');
-        readfile($gf);
+        echo rs_sf_with_digests($repo, (string)file_get_contents($gf));
         exit;
     }
     http_response_code(503);
@@ -47,11 +47,11 @@ if ($r['status'] === 200 && !$r['stale']) rs_sf_disk_put($repo, $r['body']);
 if (($r['status'] === 429 || $r['status'] === 502) && is_file($gf)) {
     header('Cache-Control: public, max-age=30');
     header('X-RS-Stale: 1');
-    readfile($gf);
+    echo rs_sf_with_digests($repo, (string)file_get_contents($gf));
     exit;
 }
 http_response_code($r['status']);
 header('Cache-Control: public, max-age=' . ($r['status'] === 200 ? 120 : 30));
 header('X-RS-Cache-Age: ' . (int)$r['age']);
 if ($r['stale']) header('X-RS-Stale: 1');
-echo $r['body'];
+echo $r['status'] === 200 ? rs_sf_with_digests($repo, (string)$r['body']) : $r['body'];
