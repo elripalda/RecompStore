@@ -56,7 +56,7 @@ $pcPub = $safe(fn() => (string)rs_db()->query("SELECT MAX(at) FROM admin_log WHE
 $pcChanged = !$showPc || !rs_can_page('pc.php') ? 0 : $safe(function () {
     $c = function_exists('rs_kv_get') ? rs_kv_get('dash_pc_changed') : null;
     if ($c && $c['age'] < 300) return (int)$c['v'];
-    $keys = array_flip(['name', 'game', 'blurb', 'adds', 'description', 'needs', 'credits', 'icon', 'cover', 'hero', 'logo', 'assets', 'tags', 'genre', 'tag', 'soon', 'featured', 'boot', 'launcher', 'copy_ids', 'setup_required', 'setup_steps', 'status', 'status_note', 'links', 'dev', 'report_url', 'media', 'features']);
+    $keys = array_flip(['name', 'game', 'blurb', 'adds', 'description', 'needs', 'credits', 'icon', 'cover', 'hero', 'logo', 'assets', 'tags', 'genre', 'tag', 'soon', 'featured', 'boot', 'launcher', 'copy_ids', 'setup_required', 'installer', 'setup_steps', 'status', 'status_note', 'links', 'dev', 'report_url', 'media', 'features']);
     $fp = function (array $e) use ($keys) { $x = array_intersect_key($e, $keys); ksort($x); return md5((string)json_encode($x)); };
     $live = [];
     foreach ((json_decode((string)@file_get_contents(RS_PC_CATALOG), true)['apps'] ?? []) as $e) $live[(string)$e['id']] = $fp($e);

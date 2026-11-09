@@ -984,6 +984,11 @@ function rs_pc_catalog(): array {
         if (!empty($a['soon'])) $e['soon'] = true;
         if (!empty($a['about']) && is_array($a['about'])) $e['about'] = $a['about'];
         if (!empty($a['setup_required'])) { $e['setup_required'] = true; $e['setup_steps'] = array_values(array_filter(array_map('trim', explode("\n", (string)($a['setup_steps'] ?? ''))))); }
+        // (4.3) A setup .exe only: RecompLauncher runs it, then finds the folder it installed to.
+        if (!empty($a['installer'])) {
+            $e['installer'] = true; $e['setup_required'] = true;
+            if (empty($e['setup_steps'])) $e['setup_steps'] = ['Press Set Up in RecompLauncher and run the installer.', 'Keep the install folder it suggests.', 'When the installer closes, RecompLauncher finds the game and it\'s ready to play.'];
+        }
         if ($a['links']) $e['links'] = $a['links'];
         // (4.0) Where the project stands: 'ended' (no more updates) or 'paused' (on hold), set on its edit
         // page, with the developer's own words if any. "archived": closed on GitHub, shown as ended too.
