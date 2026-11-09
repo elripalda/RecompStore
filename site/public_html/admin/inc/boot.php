@@ -24,7 +24,7 @@ const RS_BOOT_HOW = [
 ];
 const RS_BOOT_EASY = ['folder', 'flag', 'env', 'setup'];
 const RS_BOOT_TOP = ['kind', 'start', 'start_linux', 'start_macos', 'start_is', 'args', 'setup', 'console', 'installer', 'clone', 'makes',
-    'files', 'settings', 'player_note', 'multiplayer', 'server', 'updates', 'requires', 'needs', 'min', 'format'];
+    'files', 'settings', 'player_note', 'multiplayer', 'server', 'updates', 'requires', 'needs', 'exit_codes', 'min', 'format'];
 const RS_BOOT_FILES = ['how', 'accepts', 'what', 'folder', 'flag', 'env', 'contains', 'extract', 'check_image', 'id', 'ids', 'region', 'n64_id', 'n64_rev', 'update'];
 // (4.3) What the PC needs for the setup step, checked on the game page (Beta 28): RecompLauncher's own names.
 const RS_BOOT_NEEDS = ['build_tools', 'clang', 'python'];
@@ -149,6 +149,14 @@ function rs_boot_check(array $b): array {
     if (isset($b['requires']) && (!is_array($b['requires']) || !array_is_list($b['requires']) || array_filter($b['requires'], fn($x) => !is_string($x)))) $e('requires is a list of feature names, like ["files.folder", "settings.toml"].');
     if (isset($b['needs']) && (!is_array($b['needs']) || !array_is_list($b['needs']) || array_filter($b['needs'], fn($x) => !is_string($x)))) $e('needs is a list, like ["build_tools", "clang", "python"].');
     foreach ((array)($b['needs'] ?? []) as $x) if (is_string($x) && !in_array($x, RS_BOOT_NEEDS, true)) $w("needs: \"$x\" isn't one the launcher checks yet (it knows " . implode(', ', RS_BOOT_NEEDS) . ').');
+    // (4.3) exit_codes: an exit code (as Windows shows it, signed, or 0x hex) to what it means for the player, or "ok".
+    if (isset($b['exit_codes'])) {
+        if (!is_array($b['exit_codes']) || array_is_list($b['exit_codes'])) $e('exit_codes is a list of code: text, like {"70": "What it means"}.');
+        else foreach ($b['exit_codes'] as $c => $t) {
+            if (!preg_match('/^(-?\d+|0x[0-9a-f]{1,8})$/i', (string)$c)) $e("exit_codes: \"$c\" isn't an exit code (write it like 70, 3221226356, -1073740940 or 0xC0000374).");
+            if (!is_string($t) || trim($t) === '') $e("exit_codes: code $c needs a text, or \"ok\" for a normal quit.");
+        }
+    }
     if (isset($b['min']) && !preg_match('/^\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/', (string)$b['min'])) $e('min is a launcher version, like 0.90.0-beta.27.');
 
     // files: where the player's copy goes.
