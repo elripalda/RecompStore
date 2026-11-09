@@ -24,7 +24,7 @@ foreach (rs_pc_apps() as $a) {
     $f = rs_pc_assets((array)$latest['assets'], $flags);
     $tag = (string)$latest['tag_name'];
     $ch = [];
-    if ($needWin && preg_match('/\.(rar|7z)$/i', $f['win'])) { $a['asset_win'] = rs_pc_pattern($f['win'], $tag); $ch[] = 'win ' . $a['asset_win']; ++$out['win']; }
+    if ($needWin && preg_match('/\.(rar|7z)$/i', $f['win']) && !preg_match('/installer|setup/i', $f['win'])) { $a['asset_win'] = rs_pc_pattern($f['win'], $tag); $ch[] = 'win ' . $a['asset_win']; ++$out['win']; }
     if ($needMac && preg_match('/\.(dmg|rar|7z)$/i', $f['mac']) && rs_pc_mac_why($p = rs_pc_pattern($f['mac'], $tag)) === '') { $a['asset_mac'] = $p; $ch[] = 'mac ' . $p; ++$out['mac']; }
     if (!$ch) continue;
     $back = $a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== '' && preg_match($noWin, (string)$a['blocked_why']) && $a['asset_win'] !== '';
