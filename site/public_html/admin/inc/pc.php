@@ -1151,6 +1151,14 @@ function rs_pc_catalog(): array {
         if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
         $apps[] = $e;
     }
+    // (4.3) Entries only newer launchers can read go in "apps_min": [{min, apps}], which older ones
+    // don't look at. Cloudflare keeps one copy of the catalog for everyone, so it can't be picked by
+    // the launcher's version. A SourceForge recomp needs Beta 27 (Beta 26 takes it for a GitHub repo).
+    $newer = [];
+    $apps = array_values(array_filter($apps, function ($e) use (&$newer) {
+        if (($e['host'] ?? '') === 'sourceforge') { $newer['0.90.0-beta.27'][] = $e; return false; }
+        return true;
+    }));
     $origins = [];
     foreach (RS_PC_ORIGINS as $k => $n) if (array_filter($apps, fn($x) => $x['origin'] === $k)) $origins[] = ['id' => $k, 'name' => $n];
     $devs = [];
@@ -1161,8 +1169,21 @@ function rs_pc_catalog(): array {
     // (3.6) The banner on top of the PC home page, in the order picked on the Banner page.
     $have = array_flip(array_column($apps, 'id'));
     $banner = array_values(array_filter(rs_pc_banner(), fn($id) => isset($have[$id])));
-    return ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $banner,
+    $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $banner,
         'bannerInfo' => (object)array_intersect_key(rs_pc_banner_info(), array_flip($banner))];
+    if ($newer) foreach ($newer as $min => $list) $cat['apps_min'][] = ['min' => $min, 'apps' => $list];
+    // (4.3) Every profile the launcher had built in is in the admin now: Beta 27 and newer use the
+    // catalog's alone (its built-in ones only when there's no catalog at all).
+    if (!function_exists('rs_boot_import_plan')) require_once __DIR__ . '/boot.php';
+    if (rs_boot_builtin() && !rs_boot_import_plan()) $cat['boot_all'] = true;
+    return $cat;
+}
+
+// (4.3) Every entry in a catalog, the ones in apps_min (for newer launchers) too.
+function rs_pc_cat_apps(array $cat): array {
+    $all = is_array($cat['apps'] ?? null) ? $cat['apps'] : [];
+    foreach ((array)($cat['apps_min'] ?? []) as $g) foreach ((array)($g['apps'] ?? []) as $e) $all[] = $e;
+    return $all;
 }
 
 // ---- (3.6) The PC home banner -------------------------------------------------------------------
@@ -1220,6 +1241,8 @@ function rs_pc_write_files(array $cat): bool {
     return true;
 }
 function rs_pc_web_copy(array $cat): array {
+    $cat['apps'] = rs_pc_cat_apps($cat); // the website shows every host
+    unset($cat['apps_min'], $cat['boot_all']);
     foreach ($cat['apps'] as &$a) {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
         unset($a['about'], $a['boot'], $a['launcher'], $a['features'], $a['copy_ids']);
@@ -1252,6 +1275,8 @@ function rs_pc_publish_one(string $id): bool {
     foreach (rs_pc_catalog()['apps'] as $e) if ($e['id'] === $id) $fresh = $e;
     $hit = false;
     foreach ($cat['apps'] as $i => $e) if (($e['id'] ?? '') === $id && $fresh) { $fresh['order'] = $e['order'] ?? $fresh['order']; $cat['apps'][$i] = $fresh; $hit = true; }
+    foreach ((array)($cat['apps_min'] ?? []) as $gi => $g) foreach ((array)($g['apps'] ?? []) as $i => $e)
+        if (($e['id'] ?? '') === $id && $fresh) { $fresh['order'] = $e['order'] ?? $fresh['order']; $cat['apps_min'][$gi]['apps'][$i] = $fresh; $hit = true; }
     if (!$hit) return false;
     $cat['updated'] = gmdate('c');
     return rs_pc_write_files($cat);

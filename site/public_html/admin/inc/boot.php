@@ -255,3 +255,32 @@ function rs_boot_summary(array $b): string {
     if (($b['kind'] ?? '') === 'installer') $bits[] = 'installer';
     return implode(' · ', $bits);
 }
+
+// (4.3) How profiles did on players' PCs (Beta 27+, from players who share usage): events of kind
+// "profile" with detail {"profile_hash", "step": files|settings|start, "ok", "error"}. Grouped by
+// recomp, profile and step, newest profile first, so a broken one stands out.
+function rs_boot_results(int $days = 30): array {
+    try {
+        if (function_exists('rs_rl_more_tables')) rs_rl_more_tables();
+        $st = rs_db()->prepare("SELECT game, version, detail, at FROM rl_events WHERE kind = 'profile' AND at > (UTC_TIMESTAMP() - INTERVAL ? DAY) ORDER BY at DESC LIMIT 20000");
+        $st->execute([$days]);
+        $rows = $st->fetchAll();
+    } catch (Throwable $e) { return []; }
+    $by = [];
+    foreach ($rows as $r) {
+        $d = json_decode((string)$r['detail'], true);
+        if (!is_array($d)) continue;
+        $hash = preg_match('/^[0-9a-f]{6,16}$/', (string)($d['profile_hash'] ?? '')) ? (string)$d['profile_hash'] : '?';
+        $step = in_array($d['step'] ?? '', ['files', 'settings', 'start'], true) ? (string)$d['step'] : '?';
+        $k = $r['game'] . '|' . $hash . '|' . $step;
+        $g = &$by[$k];
+        $g ??= ['game' => (string)$r['game'], 'hash' => $hash, 'step' => $step, 'ok' => 0, 'bad' => 0, 'errors' => [], 'last' => (string)$r['at'], 'first' => (string)$r['at']];
+        if (!empty($d['ok'])) $g['ok']++; else { $g['bad']++; $err = mb_substr(trim((string)($d['error'] ?? '')), 0, 120); if ($err !== '') $g['errors'][$err] = ($g['errors'][$err] ?? 0) + 1; }
+        $g['first'] = (string)$r['at'];
+        unset($g);
+    }
+    $out = array_values($by);
+    // Failing ones first, then the most played.
+    usort($out, fn($a, $b) => [$b['bad'] > 0, $b['bad'] / max(1, $b['ok'] + $b['bad']), $b['ok'] + $b['bad']] <=> [$a['bad'] > 0, $a['bad'] / max(1, $a['ok'] + $a['bad']), $a['ok'] + $a['bad']]);
+    return $out;
+}

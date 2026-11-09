@@ -73,6 +73,30 @@ $f = fn(string $k, string $label) => '<a class="btn' . ($filter === $k ? ' prima
   <?php if ($orphans): ?><p class="muted" style="margin-bottom:0"><?= count($orphans) ?> of the launcher's profiles are for ids that aren't in the admin (renamed or removed): <span class="mono"><?= h(implode(', ', $orphans)) ?></span></p><?php endif; ?>
 </div>
 
+<?php $res = rs_boot_results(30); $resBad = array_filter($res, fn($g) => $g['bad'] > 0); ?>
+<div class="card">
+  <h2 style="margin-top:0">On players' PCs <span class="muted" style="font-size:14px;font-weight:400">last 30 days</span></h2>
+  <?php if (!$res): ?><p class="muted" style="margin-bottom:0">Nothing yet. RecompLauncher Beta 27 and newer report how each profile's Easy Setup, settings and start went, for players who share usage.</p>
+  <?php else: ?>
+  <p class="muted"><?= count($resBad) ? count($resBad) . ' profile step' . (count($resBad) === 1 ? '' : 's') . ' failed for someone. Failing ones are on top.' : 'Every reported step worked.' ?> A profile is told apart by its hash: a new one after you change it.</p>
+  <table class="boot-table">
+    <thead><tr><th>Recomp</th><th>Step</th><th>Worked</th><th>Failed</th><th>Errors</th><th>Last</th></tr></thead>
+    <tbody>
+    <?php foreach (array_slice($res, 0, 60) as $g): arsort($g['errors']); ?>
+      <tr>
+        <td><a href="pc.php?edit=<?= h(rawurlencode($g['game'])) ?>#boot"><?= h($g['game']) ?></a><br><span class="muted mono" style="font-size:12px"><?= h($g['hash']) ?></span></td>
+        <td><?= h(['files' => 'Easy Setup', 'settings' => 'Settings', 'start' => 'Start'][$g['step']] ?? $g['step']) ?></td>
+        <td class="boot-n"><?= (int)$g['ok'] ?></td>
+        <td class="boot-n"<?= $g['bad'] ? ' style="color:var(--bad);font-weight:700"' : '' ?>><?= (int)$g['bad'] ?></td>
+        <td><?php if ($g['errors']): ?><ul class="boot-probs"><?php foreach (array_slice($g['errors'], 0, 3, true) as $m => $n): ?><li class="err"><?= h($m) ?><?= $n > 1 ? ' (' . (int)$n . ')' : '' ?></li><?php endforeach; ?></ul><?php endif; ?></td>
+        <td class="boot-n muted"><?= h(substr($g['last'], 0, 16)) ?></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  <?php endif; ?>
+</div>
+
 <div class="card">
   <p style="display:flex;flex-wrap:wrap;gap:8px;margin-top:0"><?= $f('', 'All (' . ($count['admin'] + $count['launcher']) . ')') ?> <?= $f('easy', 'Easy Setup (' . $count['easy'] . ')') ?> <?= $f('settings', 'With game settings (' . $count['settings'] . ')') ?> <?= $f('problems', 'Needs a look (' . ($count['err'] + $count['warn']) . ')') ?> <?= $f('launcher', 'Only in the launcher (' . count($plan) . ')') ?></p>
   <table class="boot-table">

@@ -460,7 +460,9 @@ function rs_rl_app(string $id): ?array {
     if ($apps === null) {
         $apps = [];
         $cat = is_file(RS_PUBLIC . '/pc-catalog.json') ? json_decode((string)file_get_contents(RS_PUBLIC . '/pc-catalog.json'), true) : null;
-        foreach (($cat['apps'] ?? []) as $a) if (isset($a['id'])) $apps[(string)$a['id']] = $a;
+        $all = (array)($cat['apps'] ?? []);
+        foreach ((array)($cat['apps_min'] ?? []) as $g) foreach ((array)($g['apps'] ?? []) as $a) $all[] = $a; // (4.3) newer launchers' entries
+        foreach ($all as $a) if (isset($a['id'])) $apps[(string)$a['id']] = $a;
     }
     return $apps[$id] ?? null;
 }
@@ -688,7 +690,7 @@ function rs_rl_hello(string $install, ?array $acc, array $in): void {
             $c('gpu', 160), $c('gpu_driver', 40), $c('screen', 40), $c('lang', 12), $c('pads', 80), $n('games', 999), empty($in['bigpicture']) ? 0 : 1]);
 }
 
-const RS_RL_EVENT_KINDS = ['session', 'install', 'update', 'uninstall', 'crash', 'error', 'setup'];
+const RS_RL_EVENT_KINDS = ['session', 'install', 'update', 'uninstall', 'crash', 'error', 'setup', 'profile']; // (4.3) profile: how a boot profile's step went
 
 function rs_rl_events(string $install, array $events): int {
     rs_rl_more_tables();

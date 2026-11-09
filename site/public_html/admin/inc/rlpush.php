@@ -74,6 +74,7 @@ function rl_push_watch(int $budget = 6): void {
     @touch($stamp);
     $cat = json_decode((string)@file_get_contents(RS_PUBLIC . '/pc-catalog.json'), true);
     if (!is_array($cat) || !is_array($cat['apps'] ?? null)) return;
+    foreach ((array)($cat['apps_min'] ?? []) as $g) foreach ((array)($g['apps'] ?? []) as $e) $cat['apps'][] = $e; // (4.3) newer launchers' entries
     $sf = $dir . '/rlpush-seen.json';
     $seen = json_decode((string)@file_get_contents($sf), true);
     if (!is_array($seen)) $seen = [];
