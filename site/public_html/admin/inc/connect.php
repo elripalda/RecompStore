@@ -890,7 +890,7 @@ function rs_sf_release_list(array $files, string $p): array {
 // A SourceForge project's releases, newest first, in GitHub's shape. -> [status, body, stale, age]
 function rs_sf_releases(string $p, int $maxAge = 900): array {
     if (!rs_sf_name_ok($p)) return ['status' => 400, 'body' => '{"message":"Not a SourceForge project."}', 'stale' => false, 'age' => 0];
-    return rs_gh_cached('sf:' . $p, 'https://sourceforge.net/projects/' . $p . '/rss?path=/&limit=200', $maxAge,
+    return rs_gh_cached('sf:' . $p, 'https://sourceforge.net/projects/' . $p . '/rss?path=/&limit=100', $maxAge,
         fn(array $files): array => rs_sf_release_list($files, $p), 'sourceforge');
 }
 
