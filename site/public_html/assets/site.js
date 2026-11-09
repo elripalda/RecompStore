@@ -2384,7 +2384,7 @@
             <h1 dir="auto">${t('Recompiled games, native on PC.')}</h1>
             <p>${t('Install and update recompiled PC games. No account, no game files: bring your own disc.')}</p>
           </div>
-          <div class="cta-row"><a class="btn ghost" href="/pc/how">${t('How it works')}</a></div>
+          <div class="cta-row"><a class="btn ghost" href="/pc/how">${t('How it works')}</a><a class="btn ghost" href="/pc/sdk">${t('For developers')}</a></div>
         </section>
         ${slides.length ? `
         <section class="slider pc-slider" aria-roledescription="carousel" aria-label="${t('Featured games')}">
@@ -3596,7 +3596,7 @@
     nav.innerHTML = [...document.querySelectorAll('.main-nav a')].filter((a) => !a.hidden && a.hasAttribute('data-pc') === (document.body.dataset.platform === 'pc'))
       .map((a) => `<a href="${a.getAttribute('href')}"${a.hasAttribute('aria-current') ? ' aria-current="page"' : ''}>${esc(a.textContent)}</a>`).join('');
     nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">${t('For developers')}</span>
-      <a href="/developers">${t('Developer accounts')}</a><a href="/developers?signin=1">${t('Developer sign in')}</a></div>`);
+      ${document.body.dataset.platform === 'pc' ? `<a href="/pc/sdk">${t('RecompLauncher SDK')}</a>` : ''}<a href="/developers">${t('Developer accounts')}</a><a href="/developers?signin=1">${t('Developer sign in')}</a></div>`);
   }
   function openDrawer() {
     fillDrawer();
@@ -6575,7 +6575,7 @@
     else if (dv) devPage(dv[1]);
     else home();
     // Which part of the menu this page is in.
-    const here = pcm ? (h === '/pc' ? 'pc' : h === '/pc/how' ? 'pc-how' : (h === '/pc/all' || PC_CAT_RE.test(h)) ? 'pc-all' : ['/pc/top', '/pc/new', '/pc/consoles', '/pc/soon'].includes(h) ? 'pc-' + h.slice(4) : '') : isCat ? h.slice(1) : h === '/how' ? 'how' : ['/link', '/my-ps5'].includes(h) || (coded && coded[1] === 'l') ? 'my'
+    const here = pcm ? (h === '/pc' ? 'pc' : h === '/pc/how' ? 'pc-how' : (h === '/pc/all' || PC_CAT_RE.test(h)) ? 'pc-all' : ['/pc/top', '/pc/new', '/pc/consoles', '/pc/soon', '/pc/sdk'].includes(h) ? 'pc-' + h.slice(4) : '') : isCat ? h.slice(1) : h === '/how' ? 'how' : ['/link', '/my-ps5'].includes(h) || (coded && coded[1] === 'l') ? 'my'
       : view.querySelector('.intro-words') ? 'home' : '';
     document.querySelectorAll('[data-nav]').forEach((n) => { if (n.dataset.nav === here) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current'); });
     document.querySelectorAll('a.get').forEach((n) => n.classList.toggle('on', h === '/get'));
