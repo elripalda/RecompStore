@@ -698,15 +698,27 @@ function rs_gl_file_name(string $name, string $url, string $path, int $pid): str
     return $name;
 }
 
+// (4.3) RecompLauncher takes a GitLab file only from the project's own pages (/<project>/...). A
+// generic package link (/api/v4/projects/<id>/packages/generic/...) goes as the same file's
+// /<project>/-/package_files/<n>/download link instead, found by its name in the package list.
+function rs_gl_launcher_url(string $url, string $name, string $path, int $pid): string {
+    $up = (string)(parse_url($url, PHP_URL_PATH) ?? '');
+    if ($pid <= 0 || !preg_match('#^/api/v4/projects/[^/]+/packages/generic/#', $up)) return $url;
+    $file = rawurldecode(basename($up));
+    $id = array_search($file, rs_gl_package_names($pid, -1), true);
+    if ($id === false && $file !== $name) $id = array_search($name, rs_gl_package_names($pid, -1), true);
+    return $id !== false ? 'https://gitlab.com/' . $path . '/-/package_files/' . (int)$id . '/download' : $url;
+}
+
 // The file names in a project's newest packages: [file id => name]. Kept 6 hours; asked again sooner
 // (at most every 10 minutes) when a release names a file that isn't in it yet.
 function rs_gl_package_names(int $pid, int $want = 0): array {
     static $mem = [];
-    if (isset($mem[$pid]) && ($want === 0 || isset($mem[$pid][$want]))) return $mem[$pid];
+    if (isset($mem[$pid]) && ($want <= 0 || isset($mem[$pid][$want]))) return $mem[$pid];
     $k = 'glpkg:' . $pid;
     $kv = function_exists('rs_kv_get') ? rs_kv_get($k) : null;
     $map = $kv ? (json_decode($kv['v'], true) ?: []) : [];
-    $fresh = $kv && ($kv['age'] < 6 * 3600) && ($want === 0 || isset($map[$want]) || $kv['age'] < 600);
+    $fresh = $kv && ($kv['age'] < 6 * 3600) && ($want <= 0 || isset($map[$want]) || $kv['age'] < 600);
     if (!$fresh) {
         $got = [];
         $r = rs_http(rs_gl_api() . '/projects/' . $pid . '/packages?per_page=20&order_by=created_at&sort=desc', ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
@@ -714,7 +726,7 @@ function rs_gl_package_names(int $pid, int $want = 0): array {
         if (is_array($list)) {
             foreach (array_slice($list, 0, 20) as $p) {
                 if (!is_array($p) || (int)($p['id'] ?? 0) <= 0) continue;
-                $f = rs_http(rs_gl_api() . '/projects/' . $pid . '/packages/' . (int)$p['id'] . '/package_files?per_page=50', ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
+                $f = rs_http(rs_gl_api() . '/projects/' . $pid . '/packages/' . (int)$p['id'] . '/package_files?per_page=50&order_by=created_at&sort=desc', ['gitlab' => true, 'max' => 1 << 20, 'timeout' => 15]);
                 foreach ($f['status'] === 200 ? (json_decode($f['body'], true) ?: []) : [] as $x)
                     if (is_array($x) && (int)($x['id'] ?? 0) > 0) $got[(int)$x['id']] = (string)($x['file_name'] ?? '');
             }
@@ -743,6 +755,7 @@ function rs_gl_release_list(array $list, string $path): array {
             $u = (string)(($l['direct_asset_url'] ?? '') ?: ($l['url'] ?? ''));
             if ($name === '' || $u === '' || !rs_gl_own_url($u, $path)) continue;
             $name = rs_gl_file_name($name, $u, $path, $pid);
+            $u = rs_gl_launcher_url($u, $name, $path, $pid);
             $assets[] =['name' => $name, 'size' => 0, 'browser_download_url' => $u, 'download_count' => 0];
         }
         if (!$assets) $assets = rs_gl_note_assets((string)($r['description'] ?? ''), $path, $pid); // (3.9)
