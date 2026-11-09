@@ -1,0 +1,1315 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Dusklight",
+  "repo": "TwilitRealm/dusklight",
+  "game": {
+    "kind": "iso",
+    "label": "Your Twilight Princess GameCube or Wii disc image (.iso or .rvz), any region except Wii Korea",
+    "check": {
+      "ids": [
+        "GZ2E",
+        "GZ2P",
+        "GZ2J",
+        "RZDE",
+        "RZDP",
+        "RZDJ"
+      ]
+    }
+  },
+  "start": {
+    "program": [
+      "dusklight.exe",
+      "Dusklight.app/Contents/MacOS/Dusklight"
+    ],
+    "args": [
+      "--dvd",
+      "{game}"
+    ]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "json",
+      "file": [
+        {
+          "path": "{install}/data/config.json",
+          "if": "{install}/data/config.json"
+        },
+        {
+          "path": "{appdata}/TwilitRealm/Dusklight/config.json",
+          "if": "{appdata}/TwilitRealm/Dusklight/config.json"
+        },
+        {
+          "path": "{appdata}/TwilitRealm/Dusk/config.json",
+          "if": "{appdata}/TwilitRealm/Dusk/config.json"
+        },
+        {
+          "path": "{appdata}/TwilitRealm/Dusklight/config.json"
+        }
+      ]
+    }
+  ],
+  "saves": [
+    "{install}/data/USA",
+    "{install}/data/EUR",
+    "{install}/data/JAP",
+    "{install}/data/MemoryCard*.raw",
+    "{install}/data/*.gci",
+    "{install}/data/states.json",
+    "{appdata}/TwilitRealm/Dusklight/USA",
+    "{appdata}/TwilitRealm/Dusklight/EUR",
+    "{appdata}/TwilitRealm/Dusklight/JAP",
+    "{appdata}/TwilitRealm/Dusklight/MemoryCard*.raw",
+    "{appdata}/TwilitRealm/Dusklight/*.gci",
+    "{appdata}/TwilitRealm/Dusklight/states.json",
+    "{appdata}/TwilitRealm/Dusk/USA",
+    "{appdata}/TwilitRealm/Dusk/EUR",
+    "{appdata}/TwilitRealm/Dusk/JAP",
+    "{appdata}/TwilitRealm/Dusk/MemoryCard*.raw",
+    "{appdata}/TwilitRealm/Dusk/*.gci",
+    "{appdata}/TwilitRealm/Dusk/states.json"
+  ],
+  "settings": [
+    {
+      "id": "fullscreen",
+      "label": "Full screen",
+      "help": "",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "video.enableFullscreen": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "video.enableFullscreen": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "video.enableFullscreen": "false"
+      },
+      "group": "Display"
+    },
+    {
+      "id": "vsync",
+      "label": "V-Sync",
+      "help": "Matches the picture to your monitor to stop tearing.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "video.enableVsync": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "video.enableVsync": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "video.enableVsync": "true"
+      },
+      "group": "Display"
+    },
+    {
+      "id": "aspect",
+      "label": "Screen shape",
+      "help": "Keep the original 4:3 picture, or fill the whole window.",
+      "choices": [
+        {
+          "label": "Fill the window",
+          "set": {
+            "video.lockAspectRatio": "false"
+          }
+        },
+        {
+          "label": "Original (4:3)",
+          "set": {
+            "video.lockAspectRatio": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "video.lockAspectRatio": "false"
+      },
+      "group": "Display"
+    },
+    {
+      "id": "fps_counter",
+      "label": "FPS counter",
+      "help": "Shows the frame rate in a corner while you play.",
+      "group": "Display",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.enableFpsOverlay": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.enableFpsOverlay": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableFpsOverlay": "false"
+      }
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "help": "How sharp the game draws. Higher needs a stronger graphics card. Match the window draws at your window or screen size.",
+      "choices": [
+        {
+          "label": "Match the window",
+          "set": {
+            "game.internalResolutionScale": "0"
+          }
+        },
+        {
+          "label": "1x (original)",
+          "set": {
+            "game.internalResolutionScale": "1"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "game.internalResolutionScale": "2"
+          }
+        },
+        {
+          "label": "3x",
+          "set": {
+            "game.internalResolutionScale": "3"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "game.internalResolutionScale": "4"
+          }
+        },
+        {
+          "label": "6x",
+          "set": {
+            "game.internalResolutionScale": "6"
+          }
+        },
+        {
+          "label": "8x",
+          "set": {
+            "game.internalResolutionScale": "8"
+          }
+        }
+      ],
+      "defaults": {
+        "game.internalResolutionScale": "0"
+      },
+      "group": "Graphics"
+    },
+    {
+      "id": "shadows",
+      "label": "Shadow resolution",
+      "help": "Sharper shadows. Higher uses more of your graphics card.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "1x (original)",
+          "set": {
+            "game.shadowResolutionMultiplier": "1"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "game.shadowResolutionMultiplier": "2"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "game.shadowResolutionMultiplier": "4"
+          }
+        },
+        {
+          "label": "8x",
+          "set": {
+            "game.shadowResolutionMultiplier": "8"
+          }
+        }
+      ],
+      "defaults": {
+        "game.shadowResolutionMultiplier": "1"
+      }
+    },
+    {
+      "id": "bloom",
+      "label": "Bloom",
+      "help": "The glow around bright light. Classic is the original; Dusklight is a higher-quality version.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.bloomMode": "0"
+          }
+        },
+        {
+          "label": "Classic",
+          "set": {
+            "game.bloomMode": "1"
+          }
+        },
+        {
+          "label": "Dusklight",
+          "set": {
+            "game.bloomMode": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "game.bloomMode": "2"
+      }
+    },
+    {
+      "id": "dof",
+      "label": "Depth of field",
+      "help": "The blur on faraway things. Classic is the original; Dusklight is a higher-quality version.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.depthOfFieldMode": "0"
+          }
+        },
+        {
+          "label": "Classic",
+          "set": {
+            "game.depthOfFieldMode": "1"
+          }
+        },
+        {
+          "label": "Dusklight",
+          "set": {
+            "game.depthOfFieldMode": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "game.depthOfFieldMode": "2"
+      }
+    },
+    {
+      "id": "letterbox",
+      "label": "Black bars",
+      "help": "The bars at the top and bottom when targeting, aiming, talking and in cutscenes.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "Keep them",
+          "set": {
+            "game.disableLetterboxing": "0"
+          }
+        },
+        {
+          "label": "Remove them",
+          "set": {
+            "game.disableLetterboxing": "1"
+          }
+        },
+        {
+          "label": "Remove in gameplay only",
+          "set": {
+            "game.disableLetterboxing": "2"
+          }
+        },
+        {
+          "label": "Remove in cutscenes only",
+          "set": {
+            "game.disableLetterboxing": "3"
+          }
+        }
+      ],
+      "defaults": {
+        "game.disableLetterboxing": "0"
+      }
+    },
+    {
+      "id": "pillarbox",
+      "label": "Remove side bars in cutscenes",
+      "help": "For ultrawide screens. Things past the original framing can look off.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.disableCutscenePillarboxing": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.disableCutscenePillarboxing": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.disableCutscenePillarboxing": "false"
+      }
+    },
+    {
+      "id": "textures",
+      "label": "Texture packs",
+      "help": "Uses the texture packs you have installed.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "game.enableTextureReplacements": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "game.enableTextureReplacements": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableTextureReplacements": "true"
+      }
+    },
+    {
+      "id": "bloom_brightness",
+      "label": "Bloom brightness",
+      "help": "How strongly bright areas glow (1.0 is full).",
+      "group": "Graphics",
+      "slider": {
+        "key": "game.bloomMultiplier",
+        "min": 0,
+        "max": 1,
+        "step": 0.1,
+        "format": "%.1f"
+      },
+      "defaults": {
+        "game.bloomMultiplier": "1.0"
+      },
+      "advanced": true
+    },
+    {
+      "id": "resampler",
+      "label": "Output resampling",
+      "help": "How the picture is scaled to your window. Area can look cleaner when the resolution is above your screen’s.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "Bilinear",
+          "set": {
+            "game.resampler": "0"
+          }
+        },
+        {
+          "label": "Area",
+          "set": {
+            "game.resampler": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "game.resampler": "0"
+      },
+      "advanced": true
+    },
+    {
+      "id": "minimap_shadow",
+      "label": "Mini-map shadows",
+      "help": "A thick shadow around the mini-map. Can cost some speed.",
+      "group": "Graphics",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "game.enableMapBackground": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "game.enableMapBackground": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableMapBackground": "true"
+      },
+      "advanced": true
+    },
+    {
+      "id": "fps",
+      "label": "Unlock frame rate",
+      "help": "Draws in-between frames for smoother motion above 30 fps. Can cause small visual glitches.",
+      "choices": [
+        {
+          "label": "Original",
+          "set": {
+            "game.enableFrameInterpolation": "0"
+          }
+        },
+        {
+          "label": "Unlocked, capped",
+          "set": {
+            "game.enableFrameInterpolation": "1"
+          }
+        },
+        {
+          "label": "Unlocked, no cap",
+          "set": {
+            "game.enableFrameInterpolation": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableFrameInterpolation": "0"
+      },
+      "group": "Frame Rate"
+    },
+    {
+      "id": "fps_cap",
+      "label": "Frame rate cap",
+      "when": {
+        "game.enableFrameInterpolation": "1"
+      },
+      "choices": [
+        {
+          "label": "30 fps",
+          "set": {
+            "video.maxFrameRate": "30"
+          }
+        },
+        {
+          "label": "60 fps",
+          "set": {
+            "video.maxFrameRate": "60"
+          }
+        },
+        {
+          "label": "90 fps",
+          "set": {
+            "video.maxFrameRate": "90"
+          }
+        },
+        {
+          "label": "120 fps",
+          "set": {
+            "video.maxFrameRate": "120"
+          }
+        },
+        {
+          "label": "144 fps",
+          "set": {
+            "video.maxFrameRate": "144"
+          }
+        },
+        {
+          "label": "165 fps",
+          "set": {
+            "video.maxFrameRate": "165"
+          }
+        },
+        {
+          "label": "180 fps",
+          "set": {
+            "video.maxFrameRate": "180"
+          }
+        },
+        {
+          "label": "240 fps",
+          "set": {
+            "video.maxFrameRate": "240"
+          }
+        },
+        {
+          "label": "360 fps",
+          "set": {
+            "video.maxFrameRate": "360"
+          }
+        },
+        {
+          "label": "540 fps",
+          "set": {
+            "video.maxFrameRate": "540"
+          }
+        },
+        {
+          "label": "Custom (in-game)",
+          "set": {}
+        }
+      ],
+      "defaults": {
+        "video.maxFrameRate": "240"
+      },
+      "group": "Frame Rate"
+    },
+    {
+      "id": "audio_out",
+      "label": "Speakers",
+      "help": "",
+      "group": "Audio",
+      "choices": [
+        {
+          "label": "Stereo speakers",
+          "set": {
+            "audio.outputMode": "0"
+          }
+        },
+        {
+          "label": "Headphones (spatial)",
+          "set": {
+            "audio.outputMode": "1"
+          }
+        },
+        {
+          "label": "5.1 surround",
+          "set": {
+            "audio.outputMode": "2"
+          }
+        },
+        {
+          "label": "7.1 surround",
+          "set": {
+            "audio.outputMode": "3"
+          }
+        }
+      ],
+      "defaults": {
+        "audio.outputMode": "0"
+      }
+    },
+    {
+      "id": "vol_master",
+      "label": "Master volume",
+      "help": "",
+      "group": "Audio",
+      "slider": {
+        "key": "audio.masterVolume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "audio.masterVolume": "60"
+      }
+    },
+    {
+      "id": "vol_music",
+      "label": "Music volume",
+      "help": "",
+      "group": "Audio",
+      "slider": {
+        "key": "audio.mainMusicVolume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "audio.mainMusicVolume": "100"
+      }
+    },
+    {
+      "id": "vol_sfx",
+      "label": "Sound effects volume",
+      "help": "",
+      "group": "Audio",
+      "slider": {
+        "key": "audio.soundEffectsVolume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "audio.soundEffectsVolume": "100"
+      }
+    },
+    {
+      "id": "reverb",
+      "label": "Reverb",
+      "help": "The echo in caves and big rooms.",
+      "group": "Audio",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "audio.enableReverb": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "audio.enableReverb": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "audio.enableReverb": "true"
+      }
+    },
+    {
+      "id": "low_hp",
+      "label": "Low health beeping",
+      "help": "",
+      "group": "Audio",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "game.noLowHpSound": "false"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "game.noLowHpSound": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.noLowHpSound": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "mirror",
+      "label": "Mirror mode",
+      "help": "Flips the world left to right, like the Wii version.",
+      "group": "Gameplay",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.enableMirrorMode": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.enableMirrorMode": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableMirrorMode": "false"
+      }
+    },
+    {
+      "id": "minimal_hud",
+      "label": "Minimal HUD",
+      "help": "Hides most of the on-screen HUD.",
+      "group": "Gameplay",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.minimalHUD": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.minimalHUD": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.minimalHUD": "false"
+      }
+    },
+    {
+      "id": "damage",
+      "label": "Damage taken",
+      "help": "Multiplies the damage you take. Off in speedrun mode.",
+      "group": "Gameplay",
+      "choices": [
+        {
+          "label": "Normal",
+          "set": {
+            "game.damageMultiplier": "1"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "game.damageMultiplier": "2"
+          }
+        },
+        {
+          "label": "3x",
+          "set": {
+            "game.damageMultiplier": "3"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "game.damageMultiplier": "4"
+          }
+        },
+        {
+          "label": "8x",
+          "set": {
+            "game.damageMultiplier": "8"
+          }
+        }
+      ],
+      "defaults": {
+        "game.damageMultiplier": "1"
+      }
+    },
+    {
+      "id": "reticle",
+      "label": "Aiming reticle",
+      "help": "Shows a reticle for the bow and slingshot.",
+      "group": "Gameplay",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.aimingReticle": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.aimingReticle": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.aimingReticle": "false"
+      }
+    },
+    {
+      "id": "tv_screen",
+      "label": "Skip the TV settings screen",
+      "help": "Skips the TV calibration screen when loading a save.",
+      "group": "Gameplay",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "game.hideTvSettingsScreen": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "game.hideTvSettingsScreen": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "game.hideTvSettingsScreen": "true"
+      }
+    },
+    {
+      "id": "wallets",
+      "label": "Bigger wallets",
+      "help": "Wallet sizes like the HD version (500, 1000, 2000).",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.biggerWallets": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.biggerWallets": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.biggerWallets": "false"
+      }
+    },
+    {
+      "id": "rupee_cs",
+      "label": "Skip rupee cutscenes",
+      "help": "Rupees only play their cutscene the first time.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.disableRupeeCutscenes": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.disableRupeeCutscenes": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.disableRupeeCutscenes": "false"
+      }
+    },
+    {
+      "id": "no_rupee_return",
+      "label": "Keep rupees when the wallet is full",
+      "help": "Always collect rupees, even with a full wallet.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.noReturnRupees": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.noReturnRupees": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.noReturnRupees": "false"
+      }
+    },
+    {
+      "id": "fast_transitions",
+      "label": "Faster scene transitions",
+      "help": "Shorter fades when changing maps.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.fastTransitions": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.fastTransitions": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.fastTransitions": "false"
+      }
+    },
+    {
+      "id": "fast_climb",
+      "label": "Faster climbing",
+      "help": "Quicker ladders and vines, like the HD version.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.fastClimbing": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.fastClimbing": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.fastClimbing": "false"
+      }
+    },
+    {
+      "id": "fast_tears",
+      "label": "Faster Tears of Light",
+      "help": "Tears of Light pop out faster, like the HD version.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.fastTears": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.fastTears": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.fastTears": "false"
+      }
+    },
+    {
+      "id": "autosave",
+      "label": "Autosave",
+      "help": "Saves when you reach a new area or open a dungeon door.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.autoSave": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.autoSave": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.autoSave": "false"
+      }
+    },
+    {
+      "id": "instant_saves",
+      "label": "Instant saves",
+      "help": "No wait when saving to the memory card.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.instantSaves": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.instantSaves": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.instantSaves": "false"
+      }
+    },
+    {
+      "id": "instant_text",
+      "label": "Hold B for instant text",
+      "help": "",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.instantText": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.instantText": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.instantText": "false"
+      }
+    },
+    {
+      "id": "quick_transform",
+      "label": "Quick transform (R+Y)",
+      "help": "Switch between Link and Wolf Link right away.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.enableQuickTransform": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.enableQuickTransform": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableQuickTransform": "false"
+      }
+    },
+    {
+      "id": "suns_song",
+      "label": "Sun's Song (R+X)",
+      "help": "Wolf Link can howl to change the time of day.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.sunsSong": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.sunsSong": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.sunsSong": "false"
+      }
+    },
+    {
+      "id": "hold_mash",
+      "label": "Hold to mash",
+      "help": "Hold the button instead of mashing it.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.holdToMash": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.holdToMash": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.holdToMash": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "no_recoil",
+      "label": "No sword recoil",
+      "help": "Link doesn't bounce back when his sword hits a wall.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.noSwordRecoil": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.noSwordRecoil": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.noSwordRecoil": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "button_fishing",
+      "label": "Button fishing",
+      "help": "Fish with the button the rod is on.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.buttonFishing": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.buttonFishing": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.buttonFishing": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "poe_count",
+      "label": "Poe count on the map",
+      "help": "Shows how many Poe Souls you have per region.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.enhancedMapMenus": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.enhancedMapMenus": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enhancedMapMenus": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "cat_fish",
+      "label": "One fish for the cat",
+      "help": "Skip catching a second fish for Sera's cat.",
+      "group": "Quality of Life",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "game.no2ndFishForCat": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "game.no2ndFishForCat": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "game.no2ndFishForCat": "false"
+      },
+      "advanced": true
+    },
+    {
+      "id": "backend",
+      "label": "Graphics API",
+      "help": "Try another one if the game crashes or shows a black screen. One your PC doesn’t have falls back to Auto.",
+      "group": "Dusklight",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "backend.graphicsBackend": "auto"
+          }
+        },
+        {
+          "label": "Direct3D 12",
+          "set": {
+            "backend.graphicsBackend": "d3d12"
+          }
+        },
+        {
+          "label": "Direct3D 11",
+          "set": {
+            "backend.graphicsBackend": "d3d11"
+          }
+        },
+        {
+          "label": "Vulkan",
+          "set": {
+            "backend.graphicsBackend": "vulkan"
+          }
+        },
+        {
+          "label": "Metal",
+          "set": {
+            "backend.graphicsBackend": "metal"
+          }
+        }
+      ],
+      "defaults": {
+        "backend.graphicsBackend": "auto"
+      },
+      "advanced": true
+    },
+    {
+      "id": "updates",
+      "label": "Dusklight's own update check",
+      "help": "RecompLauncher already keeps it up to date.",
+      "group": "Dusklight",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "backend.checkForUpdates": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "backend.checkForUpdates": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "backend.checkForUpdates": "true"
+      },
+      "advanced": true
+    },
+    {
+      "id": "discord",
+      "label": "Discord status",
+      "help": "Shows that you are playing on Discord.",
+      "group": "Dusklight",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "game.enableDiscordPresence": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "game.enableDiscordPresence": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "game.enableDiscordPresence": "true"
+      },
+      "advanced": true
+    },
+    {
+      "id": "shader_overlay",
+      "label": "Shader compiling notice",
+      "help": "Shows a small notice while shaders are being built.",
+      "group": "Dusklight",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "backend.showPipelineCompilation": "true"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "backend.showPipelineCompilation": "false"
+          }
+        }
+      ],
+      "defaults": {
+        "backend.showPipelineCompilation": "true"
+      },
+      "advanced": true
+    }
+  ]
+}
