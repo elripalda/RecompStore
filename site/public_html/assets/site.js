@@ -2916,7 +2916,11 @@
           <aside class="pc-side">
             <div class="glass panel">
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
-              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div><a class="btn" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>${systems.map((sx, i) => `<a class="btn${i === 0 ? ' primary' : ''}" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn primary" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>`}
+              ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div><a class="btn" href="${gh}" target="_blank" rel="noopener">${gl ? t('Follow it on GitLab') : t('Follow it on GitHub')}</a></div>` : `<div class="pc-dl" data-dl>
+                <a class="btn primary pc-open-rl" href="recomplauncher://game/${encodeURIComponent(a.id)}" data-rl-open><img src="/assets/mark.svg" alt="" width="18" height="18">${t('Open in RecompLauncher')}</a>
+                <p class="pc-open-help" data-rl-help role="status" hidden>${tf('RecompLauncher didn\'t open? {get}, or update it, then try again. You can also download it directly below.', { get: `<a href="/get">${t('Get RecompLauncher')}</a>` })}</p>
+                <div class="pc-dl-direct" style="--n:${Math.max(1, Math.min(systems.length, 3))}">${systems.map((sx) => `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${systems.length > 1 ? esc(SYS_NAMES[sx]) : tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>
+              </div>`}
               <div data-acct-save></div>
               <div data-rl-send></div>
               <div class="pc-links">
@@ -3022,6 +3026,16 @@
       const vs = view.querySelector('[data-versions]');
       if (vs) ps5CountsLoad().then(() => { const v2 = view.querySelector('[data-versions]'); if (v2) v2.outerHTML = versionsHTML('pc', a.id); });
     });
+    // (4.3) Open in RecompLauncher: its recomplauncher:// link. If the browser never leaves the page
+    // (the launcher isn't installed, or is too old for links), a line offers to get it.
+    view.querySelectorAll('[data-rl-open]').forEach((b) => b.addEventListener('click', () => {
+      const help = view.querySelector('[data-rl-help]');
+      let left = false;
+      const away = () => { left = true; };
+      window.addEventListener('blur', away, { once: true });
+      document.addEventListener('visibilitychange', away, { once: true });
+      setTimeout(() => { window.removeEventListener('blur', away); document.removeEventListener('visibilitychange', away); if (!left && help) help.hidden = false; }, 1800);
+    }));
     // The real files from its latest release, straight from GitHub or GitLab (through this site).
     const pat = (p) => new RegExp('^' + String(p).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
     fetch(relApi(a.repo, a.host)).then((r) => r.json()).then((rels) => {
