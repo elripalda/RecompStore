@@ -83,6 +83,8 @@ function rs_auto_find_notes(array $f): array {
     if ($k !== '' && isset($listed[$k])) $notes[] = ['ok', 'Another version of ' . $listed[$k][0] . ': goes on its Versions page'];
     if (!empty($f['flags']['gamefiles'])) $notes[] = ['bad', 'Has a file that looks like game data'];
     if (!empty($f['flags']['huge'])) $notes[] = ['warn', 'Has a file over 3 GB'];
+    if (!empty($f['flags']['setup_kit'])) $notes[] = ['warn', 'A setup kit that builds it from your copy: goes in as Setup required'];
+    if (!empty($f['flags']['installer_only'])) $notes[] = ['warn', 'Only an installer for Windows'];
     if (!empty($f['archived'])) $notes[] = ['warn', 'Archived'];
     if (!empty($f['fork'])) $notes[] = ['warn', 'A fork'];
     $age = !empty($f['released']) ? (time() - (int)strtotime((string)$f['released'])) / 86400 : 999;

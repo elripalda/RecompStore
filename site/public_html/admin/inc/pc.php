@@ -181,20 +181,43 @@ function rs_pc_game_guess(string $repoName, string $desc): string {
 // A release's downloads for each system: [win, linux, mac] => asset name (or ''). Game data never:
 // a ROM, disc image or anything huge is left out (and flagged).
 function rs_pc_assets(array $assets, array &$flags): array {
+    // (4.3) Each system's file is scored, not just the first that fits: the game's own build beats an
+    // add-on (a DLSS pack, a mod pack, a server, a patch), 64-bit beats 32-bit, a portable build beats
+    // an installer, and between equals the bigger file (the game, not its extras) wins.
     $out = ['win' => '', 'linux' => '', 'mac' => ''];
-    $score = ['win' => -1, 'linux' => -1, 'mac' => -1];
+    $best = ['win' => null, 'linux' => null, 'mac' => null];
     foreach ($assets as $a) {
         $n = (string)($a['name'] ?? '');
         $l = strtolower($n);
+        $size = (int)($a['size'] ?? 0);
         if (preg_match('/\.(z64|n64|v64|iso|xex|xiso|bin|cue|chd|gcm|rvz|wbfs|nsp|xci|pkg)$/', $l)) { $flags['gamefiles'] = true; continue; }
-        if ((int)($a['size'] ?? 0) > (3 << 30)) { $flags['huge'] = true; continue; }
+        if ($size > (3 << 30)) { $flags['huge'] = true; continue; }
         // (4.3) .rar too: the launcher installs it on Windows, Linux and Mac.
         if (!preg_match('/\.(zip|7z|rar|exe|msi|tar\.gz|tgz|appimage|dmg|flatpak)$/', $l)) continue;
         if (preg_match('/(ps5|ps4|prospero|switch|android|apk|ios|source|src|debug|symbols|pdb)/', $l)) continue;
-        $sys = preg_match('/(linux|appimage|ubuntu|steamdeck|flatpak|\.tar\.gz|\.tgz)/', $l) ? 'linux'
-            : (preg_match('/(mac|osx|darwin|\.dmg)/', $l) ? 'mac' : 'win');
-        $s = ($sys === 'win' && preg_match('/(win|windows|x64|x86_64|msvc|pc)/', $l)) ? 2 : 1;
-        if ($s > $score[$sys]) { $score[$sys] = $s; $out[$sys] = $n; }
+        // Not the game itself: an add-on, an upscaler pack, a mod or texture pack, a soundtrack, a
+        // dedicated server, an SDK, a patch (but a "patcher" can be the game's own way in).
+        if (preg_match('/(add-?on|dlss|reshade|mod-?pack|texture|soundtrack|(^|[-_. ])ost([-_. ]|$)|wallpaper|manual|(^|[-_. ])server|dedicated|(^|[-_. ])sdk([-_. ]|$)|(^|[-_. ])patch(?!er)|hotfix-only)/', $l)) { $flags['extras'] = true; continue; }
+        $sys = preg_match('/(windows|win64|win32|(^|[-_. ])win([-_. ]|$))/', $l) && !preg_match('/(linux|appimage|darwin|macos)/', $l) ? 'win'
+            : (preg_match('/(linux|appimage|ubuntu|steamdeck|flatpak|\.tar\.gz|\.tgz)/', $l) ? 'linux'
+            : (preg_match('/(mac|osx|darwin|\.dmg)/', $l) ? 'mac' : 'win'));
+        $inst = (bool)preg_match('/(setup|installer|(^|[-_. ])install(?!ed)|\.msi$)/', $l);
+        $sc = 10;
+        if ($sys === 'win' && preg_match('/(win|windows|x64|x86_64|msvc|pc)/', $l)) $sc += 3;
+        if (preg_match('/(x86(?!_64)|win32|i386|i686|32-?bit)/', $l)) $sc -= 2;
+        if ($sys === 'linux' && preg_match('/(arm64|aarch64)/', $l)) $sc -= 2;
+        if ($sys === 'mac' && preg_match('/(arm64|universal|apple)/', $l)) $sc += 2;
+        if ($sys === 'win' && preg_match('/\.(tar\.gz|tgz)$/', $l)) $sc -= 1; // Windows players open a .zip more easily
+        if ($inst) $sc -= 5;
+        $cur = $best[$sys];
+        if ($cur === null || $sc > $cur['sc'] || ($sc === $cur['sc'] && $size > $cur['size'])) $best[$sys] = ['sc' => $sc, 'size' => $size, 'name' => $n, 'inst' => $inst];
+    }
+    foreach ($best as $sys => $b) if ($b) $out[$sys] = $b['name'];
+    // Only an installer for Windows: the launcher's installer flow (Installer only), not a plain install.
+    if ($best['win'] && $best['win']['inst']) {
+        // A small "...Setup.zip" is usually a kit that builds the game from the player's copy (Setup required).
+        if (preg_match('/\.(zip|7z|rar)$/', strtolower($best['win']['name'])) && $best['win']['size'] > 0 && $best['win']['size'] < (25 << 20)) $flags['setup_kit'] = true;
+        else $flags['installer_only'] = true;
     }
     return $out;
 }
@@ -741,6 +764,14 @@ function rs_pc_add(string $repo): array {
     elseif ($a['icon'] === '' && $host === 'gitlab' && preg_match('#^https://gitlab\.com/uploads/#', (string)$f['avatar'])) $a = array_merge($a, rs_pc_media((string)$f['avatar'], 'icon', $id));
     unset($a['hero_web']);
     $a['license'] = (string)($f['license'] ?? '');
+    // (4.3) What the release itself says about setting it up.
+    $fl = (array)($f['flags'] ?? []);
+    if (!empty($fl['setup_kit'])) {
+        $a['setup_required'] = true;
+        $a['setup_steps'] = "Press Open Folder and run the setup that came with it (Windows may say it protected your PC: More info, then Run anyway).\nPick your copy of the game when it asks.\nWait for it to finish building, then come back and press Play.";
+    } elseif (!empty($fl['installer_only'])) {
+        $a['blocked_why'] = 'Only a setup .exe (an installer): tick Installer only once a launcher with the installer flow is out';
+    }
     $a = rs_pc_fill_features($a);
     if ($host === '') $a = rs_ai_on_add($a, $a['repo']); // (2.9) (3.9) the AI check reads GitHub only
     rs_pc_save($a);
