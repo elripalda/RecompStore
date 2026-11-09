@@ -1158,7 +1158,7 @@
               <li><b>1</b><span><strong>${t('Easy Setup')}</strong>${t('Players drop in their disc and press Play. About ten minutes to add, and it gets the Easy Setup badge.')}</span></li>
               <li><b>2</b><span><strong>${t('Settings in the launcher')}</strong>${t('Resolution, frame rate and controls on its page and in Big Picture mode.')}</span></li>
             </ol>
-            <a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>
+            <div class="sub-sdk-btns"><a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>${agentBtn()}</div>
           </aside>
           <fieldset class="kinds plats"><legend>${t('Where does it run?')}</legend>
             ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === (new URLSearchParams(location.search).get('platform') === 'pc') ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
@@ -2243,7 +2243,7 @@
           <span class="kicker">${t('For developers')}</span>
           <h1>${t('RecompLauncher SDK')}</h1>
           <p class="lead">${t('One small file in your release, recomplauncher.json, and your recomp installs, sets itself up and shows its settings in RecompLauncher like a native PC game. Your recomp doesn\'t change. Free for everyone.')}</p>
-          <div class="sdk-cta"><a class="btn primary" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/schema/recomplauncher.json" target="_blank" rel="noopener">${t('JSON schema')}</a></div>
+          <div class="sdk-cta">${agentBtn('primary')}<a class="btn" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/schema/recomplauncher.json" target="_blank" rel="noopener">${t('JSON schema')}</a></div>
         </header>
         <section class="sdk-levels">${levels.map(([k, n, d]) => `<div class="glass sdk-level"><b>${k}</b><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
         <div class="sdk-body"><nav class="sdk-toc" aria-label="${t('Contents')}"><strong>${t('Contents')}</strong></nav><div class="sdk-doc" dir="ltr"><p class="muted">${t('Loading…')}</p></div></div>
@@ -2295,6 +2295,36 @@
   // colour through a mask, so it follows the button's colour like the rest.
   const PC_CAT_ICONS = ['action', 'adventure', 'platformer', 'racing', 'fighting', 'shooter', 'sports', 'rpg', 'puzzle'];
   const pcCatIcon = (k) => (PC_CAT_ICONS.includes(k) ? `<span class="ico-m" style="--m:url('/assets/cat/pc/${k}.png?v=1')" aria-hidden="true"></span>` : '');
+  // (4.3) "Copy a prompt for your AI agent": developers who build with an AI coding agent paste it
+  // in, and the agent adds RecompLauncher support from the real guide and schema.
+  const AGENT_PROMPT = () => [
+    'Add RecompLauncher support to this recomp.',
+    '',
+    'RecompLauncher (https://recomplauncher.com) installs and updates PC recomps straight from their GitHub releases. Its SDK lets a recomp set itself up from the player\'s own copy of the game and show its settings in the launcher, all from one file: recomplauncher.json. The recomp itself doesn\'t change.',
+    '',
+    '1. Read the guide: https://recomplauncher.com/sdk-files/guide.md',
+    '   The JSON schema: https://recomplauncher.com/schema/recomplauncher.json',
+    '   Two worked examples: https://recomplauncher.com/sdk-files/examples/fifawc14.json and https://recomplauncher.com/sdk-files/examples/streetball.json',
+    '2. Look at how this project finds the game\'s files, what it needs from the player\'s copy (disc image, ROM or extracted files), how it starts, and where it keeps its settings.',
+    '3. Write recomplauncher.json for Level 1 (Easy Setup: the player picks their copy, the launcher checks it, sets it up and starts the game). If the project has a settings file, add Level 2 too (its settings shown in the launcher).',
+    '4. Ship it in every release: put recomplauncher.json at the top of each release zip, next to the executable, and inside the AppImage at /recomplauncher.json if there is one. Update the release workflow or packaging script so it\'s always included.',
+    '5. Check the file against the schema. Don\'t change how the game runs, and never add any game files.',
+    '6. Add "Works with RecompLauncher" to the README with a link to https://recomplauncher.com.',
+    '',
+    'When you\'re done, tell me what you set up and anything you weren\'t sure about.',
+  ].join('\n');
+  const SVG_AGENT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
+  const agentBtn = (cls = '') => `<button type="button" class="btn agent-btn${cls ? ' ' + cls : ''}" data-agent-prompt>${SVG_AGENT}<span>${t('Copy a prompt for your AI agent')}</span></button>`;
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-agent-prompt]');
+    if (!b) return;
+    const label = b.querySelector('span');
+    const was = label ? label.textContent : '';
+    const done = (ok) => { if (!label) return; label.textContent = ok ? t('Copied. Paste it into your AI agent') : t('Couldn\'t copy. Select the text instead'); b.classList.toggle('copied', ok); setTimeout(() => { label.textContent = was; b.classList.remove('copied'); }, 3000); };
+    const text = AGENT_PROMPT();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (err) { /* no */ } ta.remove(); done(ok); }
+  });
   // (4.3) For developers, between the category rows: what a recomp gets on RecompLauncher, and the
   // SDK that makes it install and set itself up. Six reasons in an even grid.
   const SVG_P = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -2312,7 +2342,7 @@
             <div><span class="kicker">${t('For developers')}</span>
               <h2 id="pc-devband-h">${t('Have a recomp? Put it on RecompLauncher')}</h2>
               <p>${t('Free, open source, and it stays yours. Send its GitHub and we set up its page: covers, versions, downloads and player reports.')}</p></div>
-            <div class="cta-row"><a class="btn primary" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/pc/sdk">${t('Read the SDK')}</a></div>
+            <div class="cta-row"><a class="btn primary" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/pc/sdk">${t('Read the SDK')}</a>${agentBtn()}</div>
           </div>
           <ul class="pc-perks">${DEV_PERKS().map(([ic, n, d]) => `<li><span class="pc-perk-ico">${ic}</span><strong>${esc(n)}</strong><span>${esc(d)}</span></li>`).join('')}</ul>
           <p class="pc-devband-foot">${tf('Already on here? {hub}, or {acct}.', { hub: `<a href="/developers?signin=1">${t('Open your developer hub')}</a>`, acct: `<a href="/developers?signup=1">${t('get a free developer account')}</a>` })}</p>

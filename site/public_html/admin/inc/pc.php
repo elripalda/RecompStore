@@ -444,6 +444,37 @@ function rs_dc_suggest_forum_setup(): string {
     return 'Made the forum (' . $fid . ').' . ($st2 === 200 ? ' The old channel is now old-recomp-suggestions, read-only.' : ' Couldn\'t change the old channel (' . $st2 . ').');
 }
 
+// ---- (4.3) SDK support: does the recomp ship its own recomplauncher.json? ----------------------
+// Looked for in its repo (top folder) and at the top of its Windows release zip. Kept a week.
+// -> ['has' => 'release'|'repo'|'none'|'unknown', 'at' => time]
+function rs_pc_sdk_check(array $a, bool $fresh = false): array {
+    $k = 'sdk:' . $a['id'];
+    if (!$fresh && ($c = rs_kv_get($k)) && $c['age'] < 7 * 86400 && is_array($x = json_decode($c['v'], true))) return $x;
+    $out = ['has' => 'unknown', 'at' => time()];
+    $repo = (string)$a['repo'];
+    if (rs_pc_host($a) === '' && $repo !== '') {
+        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 10, 'max' => 400000]);
+        if ($r['status'] === 200) $out['has'] = 'repo';
+        elseif ($r['status'] === 404) $out['has'] = 'none';
+    }
+    if ($out['has'] !== 'repo') {
+        try {
+            $rel = rs_pc_release_for($a);
+            $pat = trim((string)$a['asset_win']);
+            foreach ($rel ? (array)$rel['assets'] : [] as $f) {
+                if ($pat === '' || !rs_pattern_matches($pat, (string)$f['name']) || !preg_match('/\.zip$/i', (string)$f['name'])) continue;
+                $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
+                if (empty($z['ok'])) break;
+                $out['has'] = 'none';
+                foreach (array_keys((array)$z['entries']) as $n) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) { $out['has'] = 'release'; break; }
+                break;
+            }
+        } catch (Throwable $e) { /* unknown for now */ }
+    }
+    rs_kv_put($k, (string)json_encode($out));
+    return $out;
+}
+
 // Looks a repo up by hand (the admin's box): it lands in the found list either way.
 // (3.9) A gitlab.com link is read from GitLab; it's filed as gitlab.com/<project>.
 function rs_pc_find_one(string $repo): array {

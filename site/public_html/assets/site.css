@@ -2768,3 +2768,11 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .pc-open-help a{color:var(--cyan)}
 .pc-dl-direct{display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr));gap:10px}
 .pc-dl-direct .btn{min-width:0;padding-inline:10px;white-space:nowrap}
+/* (4.3) Copy a prompt for your AI agent. */
+.agent-btn{display:inline-flex;align-items:center;justify-content:center;gap:9px}
+.agent-btn svg{flex:none}
+.agent-btn.copied{border-color:rgba(61,220,151,.6);color:#9ff0c6}
+.agent-btn.primary.copied{color:#05080d;background:#7cf2b0;border-color:#7cf2b0}
+.sub-sdk-btns{display:flex;flex-direction:column;gap:10px}
+.sub-sdk-btns .btn{justify-content:center}
+@media (max-width:900px){.sub-sdk-btns{flex-direction:row;flex-wrap:wrap}}

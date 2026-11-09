@@ -22,7 +22,7 @@ const RS_PAGE_ACCESS = [
     'dashboard.php' => ['curator', ''], 'status.php' => ['curator', ''], 'account.php' => ['curator', ''],
     'art-api.php' => ['curator', ''], 'picture.php' => ['curator', ''], 'docs.php' => ['curator', ''],
     // PC
-    'pc.php' => ['curator', 'pc'], 'titles.php' => ['curator', 'pc'], 'pc-banner.php' => ['curator', 'pc'], 'ai.php' => ['curator', 'pc'],
+    'pc.php' => ['curator', 'pc'], 'sdk-support.php' => ['curator', 'pc'], 'titles.php' => ['curator', 'pc'], 'pc-banner.php' => ['curator', 'pc'], 'ai.php' => ['curator', 'pc'],
     // PS5
     'index.php' => ['curator', 'ps5'], 'edit.php' => ['curator', 'ps5'], 'discover.php' => ['curator', 'ps5'], 'collections.php' => ['curator', 'ps5'],
     'beta.php' => ['curator', 'ps5'], 'beta-upload.php' => ['curator', 'ps5'], 'feedback.php' => ['curator', 'ps5'], 'import.php' => ['curator', 'ps5'],
