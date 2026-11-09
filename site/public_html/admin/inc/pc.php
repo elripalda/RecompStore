@@ -188,7 +188,8 @@ function rs_pc_assets(array $assets, array &$flags): array {
         $l = strtolower($n);
         if (preg_match('/\.(z64|n64|v64|iso|xex|xiso|bin|cue|chd|gcm|rvz|wbfs|nsp|xci|pkg)$/', $l)) { $flags['gamefiles'] = true; continue; }
         if ((int)($a['size'] ?? 0) > (3 << 30)) { $flags['huge'] = true; continue; }
-        if (!preg_match('/\.(zip|7z|exe|msi|tar\.gz|tgz|appimage|dmg|flatpak)$/', $l)) continue;
+        // (4.3) .rar too: the launcher installs it on Windows, Linux and Mac.
+        if (!preg_match('/\.(zip|7z|rar|exe|msi|tar\.gz|tgz|appimage|dmg|flatpak)$/', $l)) continue;
         if (preg_match('/(ps5|ps4|prospero|switch|android|apk|ios|source|src|debug|symbols|pdb)/', $l)) continue;
         $sys = preg_match('/(linux|appimage|ubuntu|steamdeck|flatpak|\.tar\.gz|\.tgz)/', $l) ? 'linux'
             : (preg_match('/(mac|osx|darwin|\.dmg)/', $l) ? 'mac' : 'win');
