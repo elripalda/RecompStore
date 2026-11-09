@@ -234,21 +234,28 @@ document.addEventListener('click', function (e) {
   var text = [
     'Add RecompLauncher support to ' + repo + ' (a PC recomp of ' + game + '), as a pull request.',
     '',
-    'RecompLauncher (https://recomplauncher.com) installs and updates PC recomps straight from their GitHub releases. Its SDK lets a recomp set itself up from the player\'s own copy of the game and show its settings in the launcher, all from one file: recomplauncher.json. The recomp itself doesn\'t change.',
+    'RecompLauncher (https://recomplauncher.com) installs and updates PC recomps straight from their GitHub releases. Its SDK lets a recomp set itself up from the player\'s own copy of the game and show its settings in the launcher, all from one file: recomplauncher.json. The recomp only changes where a level needs it (see step 5).',
     '',
     '1. Read the guide: https://recomplauncher.com/sdk-files/guide.md',
     '   The JSON schema: https://recomplauncher.com/schema/recomplauncher.json',
     '   Two worked examples: https://recomplauncher.com/sdk-files/examples/fifawc14.json and https://recomplauncher.com/sdk-files/examples/streetball.json',
     '2. Look at how this project finds the game\'s files, what it needs from the player\'s copy (disc image, ROM or extracted files), how it starts, and where it keeps its settings.',
-    '3. Write recomplauncher.json with every level that fits this project:',
+    '3. Write recomplauncher.json with every level that fits this project. Aim for all three levels:',
     '   - Level 1, Easy Setup ("game" and "start"): the player picks their copy, the launcher checks it, sets it up and starts the game.',
     '   - Level 2, settings in the launcher ("config" and "settings"): if the project has a settings file or command-line options, show them in the launcher.',
     '   - Level 3, full setup ("prepare" and "game.dumps"): if the project does work before the first start (extracting assets, fonts or menu art from the disc, building a cache), add a "prepare" step that runs it without a window and prints progress lines; add "dumps" with the known good copies of the game (name, size and CRC32 from Redump) so players get the verified badge.',
     '4. Ship it in every release: put recomplauncher.json at the top of each release zip, next to the executable, and inside the AppImage at /recomplauncher.json if there is one. Update the release workflow or packaging script so it\'s always included.',
-    '5. Check the file against the schema. Don\'t change how the game runs, and never add any game files.',
-    '6. Open the pull request with a short, friendly description of what it adds for players and that nothing else changes.',
+    '5. Check the file against the schema. Never add any game files. Small source changes to the recomp are allowed, and encouraged, where Levels 1 and 3 need them. Examples: a `--game <path>` option that points the installer at the player\'s disc image or folder, and a `--prepare` mode that runs the install without a window, prints `progress 0.4 Text` lines, and exits 0 on success. Rules for these changes:',
+    '   - They are opt-in. Without the new arguments the game must start and behave exactly as before, with its own installer UI.',
+    '   - Reuse the existing installer and integrity-check code. Don\'t rewrite it.',
+    '   - Follow the project\'s code style, and keep the diff as small as you can.',
+    '   - Put the code changes in their own commit, separate from recomplauncher.json and the packaging changes.',
+    '   - Don\'t change gameplay, graphics, saves or config formats.',
+    '6. For the "dumps" list, only use size and CRC32 values you can verify from Redump or from the project\'s own docs. If you can\'t verify a value, leave it out and tell me. Never invent one.',
+    '7. Open the pull request with a short, friendly description. Say what it adds for players. List the code changes separately, and say they only apply when the launcher passes the new arguments. If the code changes are large enough to review on their own, open two PRs: one with recomplauncher.json and the packaging changes, one with the code changes.',
+    '8. End the description with a short invite to the maintainers: they can make a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds their repos) and claim ' + repo + '. Its page on RecompLauncher then shows it as theirs, with the Verified developer badge once approved, and from there they can edit its page and art and read player reports with their logs. Keep it to two or three friendly sentences, not a sales pitch.',
     '',
-    'When you\'re done, tell me what you set up and anything you weren\'t sure about.'
+    'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.'
   ].join('\n');
   var label = b.textContent;
   var done = function (ok) { b.textContent = ok ? 'Copied' : 'Couldn\'t copy'; setTimeout(function () { b.textContent = label; }, 2500); };
