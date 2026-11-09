@@ -40,7 +40,7 @@
       { k: 'start_macos', l: 'Mac program', t: 'text', ph: 'Game.app/Contents/MacOS/Game' },
       { k: 'args', l: 'Starts with', t: 'text', ph: '--fullscreen', h: 'Arguments on every start.' },
       { k: 'setup', l: 'Runs once first', t: 'text', ph: 'setup.exe', h: 'A program in the release that runs before the first play.' },
-      { k: 'installer.then_start', l: 'After the installer, start', t: 'text', ph: 'Game.exe', show: () => get('kind') === 'installer', h: 'Its path in the folder it installs to.' },
+      { k: 'installer.then_start', l: 'After the installer, start', t: 'text', ph: 'Game.exe', wide: true, show: () => get('kind') === 'installer', h: 'Its path in the folder it installs to.' },
       { k: 'console', l: 'Asks questions in a text window', t: 'check' },
     ],
     copy: [
@@ -49,15 +49,15 @@
       { k: 'files.what', l: 'What the player reads', t: 'text', wide: true, ph: 'Your Xbox 360 disc, as an ISO or extracted', show: () => how() !== 'none' },
       { k: 'files.folder', l: 'Into this folder', t: 'text', ph: '.', h: '"." for the top of the game\'s folder.', show: () => how() === 'folder' },
       { k: 'files.flag', l: 'After this argument', t: 'text', ph: '--game_data_root', h: 'Empty: the copy goes first on the command line.', show: () => how() === 'flag' },
-      { k: 'files.env', l: 'Variable', t: 'text', ph: 'GAME_DATA', show: () => how() === 'env' },
-      { k: 'files.contains', l: 'It has to contain', t: 'list', ph: 'default.xex, Media', h: 'Names the launcher checks for, comma between.', show: () => how() !== 'none' },
+      { k: 'files.env', l: 'Variable', t: 'text', wide: true, ph: 'GAME_DATA', show: () => how() === 'env' },
       { k: 'files.extract', l: 'Unpack a disc image as', t: 'select', o: [['', 'Worked out (or not at all)'], 'xdvdfs', 'iso9660'], show: () => how() === 'folder' || how() === 'flag' },
+      { k: 'files.contains', l: 'It has to contain', t: 'list', wide: true, ph: 'default.xex, Media', h: 'Names the launcher checks for, comma between.', show: () => how() !== 'none' },
     ],
     notes: [
       { k: 'player_note', l: 'Note for players', t: 'area', wide: true, ph: 'The first start builds the game from your copy (about 5 minutes).', h: 'Shown on the game\'s page before they play.' },
       { k: 'multiplayer', l: 'Multiplayer', t: 'select', o: [['', 'None'], ['local', 'Local'], ['online', 'Online'], ['both', 'Local and online']] },
-      { k: 'requires', l: 'Launcher features it needs', t: 'list', ph: 'files.folder, settings.toml', h: 'A launcher without one of them skips this profile\'s extras (Uses below lists what it uses).' },
       { k: 'min', l: 'Needs launcher version', t: 'text', ph: '0.90.0-beta.27' },
+      { k: 'requires', l: 'Launcher features it needs', t: 'list', wide: true, ph: 'files.folder, settings.toml', h: 'A launcher without one of them skips this profile\'s extras (Uses below lists what it uses).' },
     ],
   };
 
@@ -115,7 +115,7 @@
           <label>In<select data-s="in">${ins.map((x) => `<option value="${esc(x)}"${where === x ? ' selected' : ''}>${x === 'args' ? 'The command line' : 'File: ' + esc(x)}</option>`).join('')}${ins.includes(where) ? '' : `<option selected>${esc(where)}</option>`}</select></label>
           <label>Heading<input value="${esc(st.group || '')}" data-s="group" placeholder="Graphics"></label>
           <label class="wide">Help<input value="${esc(st.help || '')}" data-s="help" placeholder="One short line under it"></label>
-          <label class="check"><input type="checkbox" data-s="advanced"${st.advanced ? ' checked' : ''}> Only under Show Advanced Options</label>
+          <label class="check wide"><input type="checkbox" data-s="advanced"${st.advanced ? ' checked' : ''}> Only under Show Advanced Options</label>
         </div>
         ${special ? `<p class="muted">This one is a ${special}: edit it as JSON.</p>` : `<div class="boot-ch boot-ch-head"><span>Choice</span><span>${where === 'args' ? 'Arguments' : 'Sets'}</span><span></span></div><div class="boot-ch">${choices}</div><p><button type="button" class="boot-mini" data-x="ch-add" data-i="${i}">Add a choice</button></p>
         ${where === 'args' ? '' : `<label style="display:flex;flex-direction:column;gap:4px;font-size:13px">The game's own values, before the player picks<textarea rows="2" class="mono" data-s="defaults" spellcheck="false" placeholder="Section/key=value">${esc(kv(st.defaults))}</textarea><small>What the game uses when its file doesn't say yet, so the right choice shows.</small></label>`}`}`;
