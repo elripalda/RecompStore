@@ -376,6 +376,9 @@ function rs_pc_find_quiver(int $budget = 40, int $pages = 8): array {
             if ($last && $added <= $last) { $stop = true; break; }
             if ((string)($e['projectType'] ?? '') !== 'port') continue;
             if (!array_intersect((array)($e['supportedOS'] ?? []), ['windows', 'linux', 'macos', 'mac'])) continue;
+            // From a console: Quiver also lists PC-original fan games and tools as "ports", and phone-only builds.
+            $cons = array_values(array_diff(array_map('strval', (array)($e['consoles'] ?? [])), ['pc', 'mobile']));
+            if (!$cons) continue;
             $slug = (string)($e['slug'] ?? '');
             if (!preg_match('/^[a-z0-9-]{1,120}$/', $slug)) continue;
             $kk = 'qv:' . $slug;
@@ -397,6 +400,7 @@ function rs_pc_find_quiver(int $budget = 40, int $pages = 8): array {
             $have[$k] = ['none', time()];
             if (!$r['ok']) continue;
             $r['via'] = 'quiver';
+            $r['qv_consoles'] = $cons;
             $state = ($r['assets']['win'] === '' && $r['assets']['linux'] === '' && $r['assets']['mac'] === '') ? 'none' : 'new';
             $put->execute([rs_repo_key($host, (string)$r['repo']), json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $state]);
             $have[$k] = [$state, time()];
