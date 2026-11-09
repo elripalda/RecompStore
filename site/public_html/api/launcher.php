@@ -143,7 +143,7 @@ try {
         $c = fn(string $k, int $max) => rs_rl_clean((string)($in[$k] ?? ''), $max);
         rs_rl_report(['app' => $app, 'verdict' => $verdict, 'sys' => in_array($in['sys'] ?? '', ['windows', 'linux', 'macos', 'deck'], true) ? $in['sys'] : 'windows',
             'version' => preg_replace('/[^\w .+-]/u', '', $c('version', 40)) ?? '', 'note' => $c('note', 1000), 'specs' => is_string($in['specs'] ?? null) ? mb_substr($in['specs'], 0, 2000) : '', 'gpu' => $c('gpu', 160), 'cpu' => $c('cpu', 120),
-            'ram_gb' => max(0, min(4096, (int)($in['ram_gb'] ?? 0))), 'osver' => $c('osver', 80), 'mins' => max(0, min(100000, (int)($in['mins'] ?? 0)))], $acc, $install);
+            'ram_gb' => max(0, min(4096, (int)($in['ram_gb'] ?? 0))), 'osver' => $c('osver', 80), 'mins' => max(0, min(100000, (int)($in['mins'] ?? 0))), 'device' => $c('device', 40)], $acc, $install);
         rs_rl_out(200, []);
     }
 

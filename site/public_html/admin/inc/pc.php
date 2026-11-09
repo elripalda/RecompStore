@@ -1095,6 +1095,9 @@ function rs_pc_art_upgrade(array $a, array $have): array {
 function rs_pc_catalog(): array {
     $abs = 'rs_abs';
     $apps = [];
+    // (4.3) Games handheld players say run well (player reports, last 90 days).
+    if (!function_exists('rs_handheld_good')) require_once __DIR__ . '/rl_cloud.php';
+    $handheld = function_exists('rs_handheld_good') ? rs_handheld_good() : [];
     foreach (rs_pc_apps(false) as $i => $a) {
         // (4.3) A SourceForge project goes out only once one of its releases has been checked.
         if (rs_pc_host($a) === 'sourceforge' && ((string)($a['ok_tag'] ?? '') === '' || str_starts_with((string)$a['ok_tag'], 'moved:'))) continue;
@@ -1117,6 +1120,7 @@ function rs_pc_catalog(): array {
         if (rs_pc_host($a) !== '') $e['host'] = rs_pc_host($a); // (4.3) 'gitlab' or 'sourceforge'
         // (3.9) Where its developer wants bugs reported (their own page or issue form).
         if (($ru = rs_pc_report_url((string)($a['report_url'] ?? ''))) !== '') $e['report_url'] = $ru;
+        if (isset($handheld[$a['id']])) $e['handheld'] = $handheld[$a['id']];
         // (4.3) A Coming soon game with no repo yet: where to follow it (the developer's post or page).
         if ((string)$a['repo'] === '' && ($fu = rs_pc_report_url((string)($a['follow'] ?? ''))) !== '') $e['follow'] = $fu;
         // (3.8) The release that's out (the launcher installs this one) and its checked files.

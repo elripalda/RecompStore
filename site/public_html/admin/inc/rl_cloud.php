@@ -441,7 +441,8 @@ function rs_rl_more_tables(): void {
     // Launcher reports: what the PC was, next to the player's word.
     rs_pc_tables();
     foreach (['gpu' => "VARCHAR(160) NOT NULL DEFAULT ''", 'cpu' => "VARCHAR(120) NOT NULL DEFAULT ''", 'ram_gb' => 'SMALLINT NOT NULL DEFAULT 0',
-        'osver' => "VARCHAR(80) NOT NULL DEFAULT ''", 'src' => "VARCHAR(8) NOT NULL DEFAULT ''", 'mins' => 'INT NOT NULL DEFAULT 0'] as $col => $def) {
+        'osver' => "VARCHAR(80) NOT NULL DEFAULT ''", 'src' => "VARCHAR(8) NOT NULL DEFAULT ''", 'mins' => 'INT NOT NULL DEFAULT 0',
+        'device' => "VARCHAR(40) NOT NULL DEFAULT ''"] as $col => $def) { // (4.3) device: the handheld, when it's one
         if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE '$col'")->fetch()) $db->exec("ALTER TABLE pc_feedback ADD COLUMN $col $def");
     }
     // (3.7) Diagnostics are kept 90 days, and none of it is tied to an account (the privacy page says so).
@@ -594,6 +595,52 @@ function rs_rl_beta_members(int $betaId): array {
 
 // ---- (3.2) "How did it run?" from the launcher --------------------------------------------------
 
+// (4.3) Which handheld a report came from: '' for a normal PC. The launcher's own word first (from
+// Beta 27 or so it sends "device"), else the Steam Deck system, else what the specs give away.
+const RS_HANDHELDS = ['Steam Deck', 'ROG Ally', 'ROG Xbox Ally', 'Legion Go', 'MSI Claw', 'Ayaneo', 'GPD', 'OneXPlayer', 'Zotac Zone', 'Other handheld'];
+function rs_handheld_of(string $sys, string $device, string $specs): string {
+    foreach (RS_HANDHELDS as $h) if (strcasecmp(trim($device), $h) === 0) return $h;
+    if (stripos($device, 'deck') !== false) return 'Steam Deck';
+    if ($sys === 'deck') return 'Steam Deck';
+    $t = $specs;
+    if (preg_match('/steam ?deck|\bjupiter\b|\bgalileo\b|AMD Custom APU 0(405|932)|Sephiroth/i', $t)) return 'Steam Deck';
+    if (preg_match('/xbox ally|RC73/i', $t)) return 'ROG Xbox Ally';
+    if (preg_match('/ROG Ally|RC71L|RC72L/i', $t)) return 'ROG Ally';
+    if (preg_match('/Legion Go|\b83E1\b|\b83L3\b|\b83N[0-9]\b/i', $t)) return 'Legion Go';
+    if (preg_match('/MSI Claw|\bClaw (A1M|8|7)\b/i', $t)) return 'MSI Claw';
+    if (preg_match('/AYANEO/i', $t)) return 'Ayaneo';
+    if (preg_match('/\bGPD\b/', $t)) return 'GPD';
+    if (preg_match('/ONEXPLAYER|OneXFly/i', $t)) return 'OneXPlayer';
+    if (preg_match('/ZOTAC ZONE/i', $t)) return 'Zotac Zone';
+    if (preg_match('/Ryzen Z1|Z1 Extreme|Z2 Extreme|Ryzen Z2/i', $t)) return 'Other handheld';
+    return '';
+}
+
+// (4.3) Games handheld players say run well: at least 3 handheld reports in the last 90 days, and 7 in
+// 10 of them "runs" ("has issues" counts half). -> [app id => ['ok' => true, 'devices' => [...], 'n' => int]]
+function rs_handheld_good(): array {
+    try {
+        rs_rl_more_tables();
+        $rows = rs_db()->query("SELECT app, verdict, sys, device, specs, cpu FROM pc_feedback WHERE hidden = 0 AND created > (NOW() - INTERVAL 90 DAY) AND (device <> '' OR sys = 'deck' OR specs REGEXP 'deck|jupiter|galileo|0405|0932|ally|rc7[123]|legion go|claw|ayaneo|gpd|onexplayer|zotac zone|ryzen z[12]')")->fetchAll();
+    } catch (Throwable $e) { return []; }
+    $by = [];
+    foreach ($rows as $r) {
+        $d = (string)$r['device'] !== '' ? (string)$r['device'] : rs_handheld_of((string)$r['sys'], '', (string)$r['specs'] . "\n" . (string)$r['cpu']);
+        if ($d === '') continue;
+        $a = (string)$r['app'];
+        $by[$a]['n'] = ($by[$a]['n'] ?? 0) + 1;
+        $w = ['runs' => 1.0, 'issues' => 0.5][(string)$r['verdict']] ?? 0.0;
+        $by[$a]['score'] = ($by[$a]['score'] ?? 0) + $w;
+        if ((string)$r['verdict'] !== 'broken' && $d !== 'Other handheld') $by[$a]['devices'][$d] = true;
+    }
+    $out = [];
+    foreach ($by as $a => $x) {
+        if ($x['n'] < 3 || $x['score'] / $x['n'] < 0.7) continue;
+        $out[$a] = ['ok' => true, 'devices' => array_keys($x['devices'] ?? []), 'n' => $x['n']];
+    }
+    return $out;
+}
+
 // One report per player and recomp (a new one replaces theirs): keyed by their account, or by the
 // launcher's install when they aren't signed in.
 function rs_rl_report(array $r, ?array $acc, string $install): void {
@@ -606,11 +653,13 @@ function rs_rl_report(array $r, ?array $acc, string $install): void {
     if ($specs === '') $specs = rs_play_specs_clean(implode("\n", array_filter([$r['osver'] !== '' ? 'OS: ' . $r['osver'] : '', $r['cpu'] !== '' ? 'CPU: ' . $r['cpu'] : '',
         $r['gpu'] !== '' ? 'GPU: ' . $r['gpu'] : '', (int)$r['ram_gb'] ? 'RAM: ' . (int)$r['ram_gb'] . ' GB' : ''])));
     $db = rs_db();
-    $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, gpu, cpu, ram_gb, osver, src, mins, account_id, specs) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, \'launcher\', ?, ?, ?)
+    // (4.3) The handheld it was played on: what the launcher says, else what its specs give away.
+    $device = rs_handheld_of((string)$r['sys'], (string)($r['device'] ?? ''), $specs . "\n" . (string)$r['cpu']);
+    $db->prepare('INSERT INTO pc_feedback (app, verdict, sys, version, note, ip_hash, created, gpu, cpu, ram_gb, osver, src, mins, account_id, specs, device) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, \'launcher\', ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE verdict = VALUES(verdict), sys = VALUES(sys), version = VALUES(version), note = VALUES(note), created = NOW(), hidden = 0,
         gpu = VALUES(gpu), cpu = VALUES(cpu), ram_gb = VALUES(ram_gb), osver = VALUES(osver), src = VALUES(src), mins = VALUES(mins),
-        account_id = COALESCE(VALUES(account_id), account_id), specs = VALUES(specs)')
-        ->execute([$r['app'], $r['verdict'], $r['sys'], $r['version'], $r['note'], $who, $r['gpu'], $r['cpu'], $r['ram_gb'], $r['osver'], $r['mins'], $acc ? (int)$acc['id'] : null, $specs]);
+        account_id = COALESCE(VALUES(account_id), account_id), specs = VALUES(specs), device = VALUES(device)')
+        ->execute([$r['app'], $r['verdict'], $r['sys'], $r['version'], $r['note'], $who, $r['gpu'], $r['cpu'], $r['ram_gb'], $r['osver'], $r['mins'], $acc ? (int)$acc['id'] : null, $specs, $device]);
     // The game page's reports (play_reports, 3.2) copy pc_feedback in about once a minute; this one
     // goes in now, with the PC's parts, which that copy leaves alone.
     $st = $db->prepare('SELECT id FROM pc_feedback WHERE app = ? AND ip_hash = ? ORDER BY id DESC LIMIT 1');
