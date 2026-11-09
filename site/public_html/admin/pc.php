@@ -5,6 +5,7 @@
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
+require_once __DIR__ . '/inc/boot.php';
 rs_require_login();
 rs_pc_tables();
 @set_time_limit(180);
@@ -17,6 +18,16 @@ if (isset($_GET['report_log'])) {
 }
 
 $editId = (string)($_GET['edit'] ?? '');
+// (4.3) The boot profile editor's check as you type. It changes nothing, so it isn't in the change log.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'boot_check') {
+    rs_session();
+    header('Content-Type: application/json');
+    $t = $_POST['csrf'] ?? '';
+    if (!is_string($t) || empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $t)) { http_response_code(400); exit('{"problems":[["err","This page expired. Reload it."]]}'); }
+    $bj = json_decode((string)($_POST['boot'] ?? ''), true);
+    if (!is_array($bj)) exit(json_encode(['problems' => [['err', 'Not valid JSON.']]]));
+    exit(json_encode(['problems' => rs_boot_check($bj), 'uses' => rs_boot_uses($bj), 'summary' => rs_boot_summary($bj)], JSON_UNESCAPED_UNICODE));
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
@@ -79,6 +90,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bj = json_decode($boot, true);
                 if (!is_array($bj) || $boot[0] !== '{') throw new RuntimeException('The boot profile isn\'t valid JSON. It has to be one { ... } object.');
                 if (strlen($boot) > 20000) throw new RuntimeException('The boot profile is too long.');
+                // (4.3) Checked the way the launcher reads it: a mistake that would break it stops the save.
+                $bootProbs = rs_boot_check($bj);
+                $bootErr = array_values(array_filter($bootProbs, fn($p) => $p[0] === 'err'));
+                if ($bootErr) throw new RuntimeException('The boot profile: ' . $bootErr[0][1] . (count($bootErr) > 1 ? ' (and ' . (count($bootErr) - 1) . ' more)' : ''));
+                $bootWarn = count($bootProbs);
                 $boot = json_encode($bj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
             $a['boot'] = $boot;
@@ -142,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_pc_save($a);
                 rs_flash($ab ? 'About the game: ' . $ab['name'] . ($ab['released'] ?? '' ? ' (' . substr($ab['released'], 0, 4) . ')' : '') . ' from IGDB.' : 'IGDB has no close match. Put its IGDB game ID in and try again.', $ab ? 'ok' : 'err');
             }
-            if (empty($_POST['art']) && empty($_POST['readme']) && empty($_POST['about'])) rs_flash('Saved. Publish when you\'re ready.');
+            if (empty($_POST['art']) && empty($_POST['readme']) && empty($_POST['about'])) rs_flash('Saved. Publish when you\'re ready.' . (!empty($bootWarn) ? ' Its boot profile has ' . $bootWarn . ' thing' . ($bootWarn === 1 ? '' : 's') . ' the launcher will skip (shown under it).' : ''));
             $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
         } elseif ($act === 'art_upgrade') {
             // (3.5) Sharper art for the ones listed: [{id, hero: width now, logo: width now}, ...]
@@ -279,7 +295,7 @@ $pcReportLi = function (array $x, string $appId, string $from, array $replies) u
 };
 $thumb = fn(string $u, int $w): string => preg_match('#/media/([A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(jpe?g|png|webp))$#i', $u, $m) ? '/api/thumb.php?f=' . rawurlencode($m[1]) . '&w=' . $w : $u;
 
-rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']);
+rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css', 'assets/boot.css']);
 ?>
 <section class="head-row">
   <div>
@@ -334,7 +350,15 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
     <label class="span2">Not compatible yet<input name="blocked_why" value="<?= h((string)($a['blocked_why'] ?? '')) ?>" maxlength="200" placeholder="Like: there's no Windows build yet"><small>Only you see this. A hidden recomp with a reason here sits under Not compatible in the list instead of Hidden, until its developer puts out a build that works.</small></label>
     <label class="span2">Key features<textarea name="features" rows="5" maxlength="1200" placeholder="One per line"><?= h($a['features']) ?></textarea><small>One per line, shown at the top of its page. Picked up from the README's Features list when it was added.</small></label>
     <label class="span2">Around the web<textarea name="media" rows="4" maxlength="5000" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.reddit.com/r/…/comments/…&#10;https://x.com/…/status/…"><?= h($a['media']) ?></textarea><small>Videos, posts and articles about it, one link per line. YouTube shows as a video, Reddit and X as cards.</small></label>
-    <label class="span2">Boot profile<textarea name="boot" rows="8" maxlength="20000" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace;font-size:13px" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>How RecompLauncher starts it, sets it up from the player's copy (Easy Setup) and which of its settings to show. One JSON object, per the curator setup guide. Empty: the launcher works it out.</small></label>
+    <?php $bootBi = (string)($a['boot'] ?? '') === '' ? (rs_boot_builtin()[$a['id']] ?? null) : null; ?>
+    <div class="span2 boot-ed" id="boot" data-boot-ed data-csrf="<?= h(rs_csrf()) ?>"<?= $bootBi ? ' data-builtin="' . h(json_encode($bootBi, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) . '"' : '' ?>>
+      <div class="boot-top"><strong>Boot profile</strong> <span class="muted" data-boot-sum></span> <a class="muted" href="boot.php" style="margin-left:auto;font-size:13px">All boot profiles</a></div>
+      <small class="muted">How RecompLauncher starts it, sets it up from the player's copy (Easy Setup) and which of its settings it shows. It reaches players with the next Publish, no launcher update needed.</small>
+      <div data-boot-form></div>
+      <ul class="boot-probs" data-boot-probs></ul>
+      <div class="boot-uses muted" data-boot-uses></div>
+      <details><summary>Edit as JSON</summary><textarea name="boot" rows="14" maxlength="20000" spellcheck="false" class="mono" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>One JSON object, per the curator setup guide. The fields above edit this; anything they don't show stays as it is.</small></details>
+    </div>
     <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label><label class="check" title="Its release is only a setup .exe: RecompLauncher runs the installer, then finds where it installed (needs a launcher with the installer flow)"><input type="checkbox" name="installer" value="1"<?= !empty($a['installer']) ? ' checked' : '' ?>> Installer only</label></div>
     <label>Setup steps<textarea name="setup_steps" rows="5" maxlength="2000"><?= h((string)($a['setup_steps'] ?? '')) ?></textarea><small>Only for Setup required. One step per line, in order. Shown with the yellow Set Up button and on its page, with a link to the README.</small></label>
@@ -486,4 +510,4 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css']
   if (q.value) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 })();
 </script>
-<?php rs_foot(['assets/artpick.js']);
+<?php rs_foot(['assets/artpick.js', 'assets/boot.js']);

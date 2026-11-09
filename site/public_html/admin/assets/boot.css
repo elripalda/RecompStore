@@ -1,0 +1,33 @@
+/* (4.3) Boot profile editor on a recomp's edit page, and the Boot profiles page */
+.boot-ed{display:flex;flex-direction:column;gap:14px;border:1px solid var(--line);border-radius:16px;padding:16px 18px;background:rgba(var(--ink-rgb),.025)}
+.boot-ed>.boot-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.boot-ed>.boot-top strong{font-size:15px}
+.boot-ed .boot-sec{border-top:1px solid var(--line);padding-top:12px}
+.boot-ed .boot-sec>h4{margin:0 0 8px;font:700 13px Figtree,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.boot-ed .boot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px 14px}
+.boot-ed .boot-grid label{display:flex;flex-direction:column;gap:4px;font-size:13px;margin:0}
+.boot-ed .boot-grid label.wide{grid-column:1/-1}
+.boot-ed .boot-grid label.check{flex-direction:row;align-items:center;gap:8px}
+.boot-ed input,.boot-ed select,.boot-ed textarea{font-size:13px}
+.boot-ed small{color:var(--muted);font-size:12px}
+.boot-ed .mono,.boot-ed textarea.mono{font-family:ui-monospace,Consolas,monospace}
+.boot-ed details>summary{cursor:pointer;color:var(--muted);font-size:13px}
+.boot-ed details textarea{width:100%;margin-top:8px}
+.boot-probs{display:flex;flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;font-size:13px}
+.boot-probs li{padding:6px 10px;border-radius:10px;background:rgba(var(--ink-rgb),.05)}
+.boot-probs li.err{color:var(--bad);background:rgba(255,138,128,.1)}
+.boot-probs li.warn{color:var(--warn);background:rgba(255,200,87,.08)}
+.boot-probs li.ok{color:var(--ok);background:rgba(95,227,161,.08)}
+.boot-set{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 8px}
+.boot-set-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.boot-set-head b{flex:1;min-width:140px}
+.boot-set-head button,.boot-ed .boot-mini{padding:3px 9px;font-size:12px;border-radius:8px}
+.boot-set .boot-grid{margin-top:8px}
+.boot-ch{display:grid;grid-template-columns:minmax(110px,1fr) minmax(160px,2fr) auto;gap:6px;align-items:center;margin-top:6px}
+.boot-ch-head{font-size:12px;color:var(--muted)}
+.boot-uses{font-size:12px}
+.boot-uses code{font-size:12px;padding:1px 6px;border-radius:6px;background:rgba(var(--ink-rgb),.08);margin-right:4px}
+.boot-easy{background:rgba(95,227,161,.14);color:var(--ok)}
+.boot-table td{vertical-align:top}
+.boot-table .boot-n{white-space:nowrap}
+@media (max-width:640px){.boot-ch{grid-template-columns:1fr}.boot-ed{padding:12px}}

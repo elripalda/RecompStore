@@ -1,0 +1,29 @@
+{
+ "pgr4-native": {
+  "files": {
+   "update": {
+    "folder": "game/Content",
+    "accepts": "file",
+    "what": "Title Update #2 (version 0.0.2.1), the package file as it comes off your console, unchanged. The game only runs with it",
+    "name": "TU_16L61VP_0000004000000.00000000000G1",
+    "sha256": "9980cf82c3bbbb32b35c841532c832b5598e99ce50daba8c658645213ab3d9b8"
+   }
+  }
+ },
+ "metroidprimeport": {
+  "=files": {
+   "how": "env",
+   "env": "MP_DISC"
+  }
+ },
+ "tenkaichi3decomp": {
+  "makes": [
+   "gamedata/disc/SLUS_216.78"
+  ]
+ },
+ "dbz-bt4-tag-team-decomp": {
+  "makes": [
+   "gamedata/disc"
+  ]
+ }
+}
