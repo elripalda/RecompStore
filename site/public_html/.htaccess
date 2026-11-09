@@ -12,6 +12,8 @@ RewriteCond %{HTTP_HOST} ^www\.recomplauncher\.com$ [NC]
 RewriteRule ^ https://recomplauncher.com%{REQUEST_URI} [L,R=301]
 # (3.1) RecompLauncher sign-in codes
 RewriteRule ^activate/?$ activate.php [L,QSA]
+# (4.3) Status page, on both sites
+RewriteRule ^status/?$ status.php [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
 RewriteRule ^((pc/)?launcher|download)/?$ /get [L,R=301]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]

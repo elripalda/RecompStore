@@ -256,6 +256,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      : ($h['status'] === 404 ? 'Saved, but there\'s no bucket called ' . $bucket . ' on that account.' : 'Saved, but Cloudflare answered HTTP ' . $h['status'] . '.'))),
                      $h['status'] === 200 ? 'ok' : 'err');
         }
+    } elseif (($_POST['action'] ?? '') === 'status-note') {
+        // (4.3) A note at the top of /status: what's going on, in a sentence or two. Empty: none.
+        $note = trim(str_replace("\r\n", "\n", (string)($_POST['status_note'] ?? '')));
+        if (mb_strlen($note) > 400) $note = mb_substr($note, 0, 400);
+        $lvl = (string)($_POST['status_level'] ?? 'warn');
+        rs_set_setting('status_note', $note);
+        rs_set_setting('status_level', in_array($lvl, ['ok', 'warn', 'down'], true) ? $lvl : 'warn');
+        rs_log('status', $note === '' ? 'note cleared' : 'note', mb_substr($note, 0, 120));
+        rs_flash($note === '' ? 'The status page has no note now.' : 'The note is on the status page.');
     } elseif (($_POST['action'] ?? '') === 'saves-pause') {
         // (4.1) Pause cloud saves: the launcher hears 423 and a plain reason instead of an error.
         $on = !empty($_POST['paused']);
@@ -819,6 +828,16 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <input type="hidden" name="paused" value="<?= $savesPaused ? '' : '1' ?>">
     <p><strong><?= $savesPaused ? 'Cloud saves are paused.' : 'Cloud saves are on.' ?></strong> <span class="muted">While they're paused, the launcher shows players "Cloud saves are paused while we move them to new storage. Your saves on this PC are safe." Nothing is uploaded or downloaded.</span></p>
     <button class="btn <?= $savesPaused ? 'primary' : 'danger' ?>"><?= $savesPaused ? 'Turn cloud saves back on' : 'Pause cloud saves' ?></button>
+  </form>
+</section>
+<section class="card">
+  <h2>Status page</h2>
+  <p class="muted">recomplauncher.com/status checks the website, sign-in, the game list, cloud saves and downloads by itself, every minute. Add a note here when something's going on, so players and helpers see it.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="status-note">
+    <label><span>Note (empty for none)</span><textarea name="status_note" rows="3" maxlength="400" placeholder="Cloud saves are slow tonight while we move them. Saves on your PC are safe."><?= h((string)rs_setting('status_note', '')) ?></textarea></label>
+    <label><span>How serious</span><select name="status_level"><?php foreach (['warn' => 'Slow or paused (yellow)', 'down' => 'Down (red)', 'ok' => 'Just so you know (green)'] as $k => $v): ?><option value="<?= $k ?>"<?= rs_setting('status_level', 'warn') === $k ? ' selected' : '' ?>><?= $v ?></option><?php endforeach; ?></select></label>
+    <div class="actions"><button class="btn">Save</button> <a class="btn" href="https://recomplauncher.com/status" target="_blank" rel="noopener">Open the status page</a></div>
   </form>
 </section>
 <section class="card">
