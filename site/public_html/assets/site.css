@@ -2729,3 +2729,36 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 }
 .pc-row-head h2{margin-bottom:14px}
 @media (max-width:600px){.pc-pager{gap:8px 6px}.pc-pager-word{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.pc-pager-step{padding:0 10px!important;min-width:38px}}
+/* (4.3) For developers: the band between the PC home page's category rows. */
+.pc-devband{padding:clamp(22px,3vw,36px);margin:28px 0 36px;position:relative;overflow:hidden}
+.pc-devband::before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px;height:520px;border-radius:50%;background:radial-gradient(closest-side,rgba(52,242,232,.14),transparent);pointer-events:none}
+.pc-devband-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px 32px;flex-wrap:wrap;position:relative}
+.pc-devband-head h2{font-size:clamp(24px,2.6vw,34px);margin:0 0 8px}
+.pc-devband-head p{margin:0;color:#c9d3e0;max-width:680px}
+.pc-devband-head .cta-row{margin:0;flex:none}
+.pc-perks{list-style:none;margin:24px 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;position:relative}
+.pc-perks li{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto 1fr;gap:4px 14px;padding:16px 18px;border-radius:18px;background:rgba(11,18,32,.45);border:1px solid var(--line)}
+.pc-perk-ico{grid-row:span 2;display:inline-grid;place-items:center;width:42px;height:42px;border-radius:12px;background:rgba(52,242,232,.12);color:var(--cyan)}
+.pc-perk-ico svg{width:22px;height:22px}
+.pc-perks strong{font-size:16px}
+.pc-perks li>span:last-child{color:var(--muted);font-size:14.5px;line-height:1.45}
+.pc-devband-foot{margin:18px 0 0;color:var(--muted);font-size:14.5px;position:relative}
+@media (max-width:1100px){.pc-perks{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.pc-perks{grid-template-columns:minmax(0,1fr)}.pc-devband-head .cta-row{width:100%}}
+/* (4.3) The submit form on recomplauncher.com opens with the SDK. */
+.sub-sdk-top{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:18px 26px;align-items:center;padding:18px 20px;margin:0 0 22px;border-radius:18px;border:1px solid rgba(52,242,232,.4);background:linear-gradient(135deg,rgba(52,242,232,.10),rgba(55,123,182,.08))}
+.sub-sdk-top[hidden]{display:none}
+.sub-sdk-words strong{display:block;font-size:19px;margin-bottom:4px}
+.sub-sdk-words p{margin:0;color:#c9d3e0;font-size:15px}
+.sub-sdk-levels{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.sub-sdk-levels li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;font-size:14px;color:var(--muted)}
+.sub-sdk-levels b{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--cyan);color:#05080d;font-size:13px}
+.sub-sdk-levels strong{display:block;color:var(--frost);font-size:15px}
+@media (max-width:900px){.sub-sdk-top{grid-template-columns:minmax(0,1fr)}.sub-sdk-top .btn{justify-self:start}}
+/* (4.3) Feature complete: a finished recomp, in green. */
+.pc-pill.life-complete{--c:#3ddc97}
+.pc-life-b.life-complete{color:#7cf2b0;border:1px solid rgba(61,220,151,.45)}
+.pc-life.life-complete{background:rgba(61,220,151,.08);border:1px solid rgba(61,220,151,.4);color:#d2f5e3}
+.pc-life.life-complete strong{color:#7cf2b0}
+.launch-dev .cta-row{margin:0;flex:none;flex-wrap:nowrap}
+@media (max-width:760px){.launch-dev .cta-row{flex-wrap:wrap}}

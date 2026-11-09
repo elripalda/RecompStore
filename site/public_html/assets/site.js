@@ -1146,11 +1146,20 @@
     view.innerHTML = `
       <article class="form-page submit-page">
         <a class="back" href="/contact">${backArrow()} ${t('Contact')}</a>
-        <h1>${t('Submit to RecompStore')}</h1>
+        <h1>${new URLSearchParams(location.search).get('platform') === 'pc' ? t('Submit your recomp') : t('Submit to RecompStore')}</h1>
         <p class="lead">${t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.')}</p>
         <div data-sub-who></div>
         <form class="glass form" novalidate enctype="multipart/form-data">
           <div class="sub-repos" data-sub-repos hidden></div>
+          <aside class="sub-sdk-top" data-pc-only>
+            <div class="sub-sdk-words"><span class="kicker">${t('RecompLauncher SDK')}</span><strong>${t('Make it one click for players')}</strong>
+              <p>${t('Add one small file, recomplauncher.json, to your release and RecompLauncher installs your recomp, sets it up from the player\'s own disc and shows its settings. Your recomp doesn\'t change, and it\'s free.')}</p></div>
+            <ol class="sub-sdk-levels">
+              <li><b>1</b><span><strong>${t('Easy Setup')}</strong>${t('Players drop in their disc and press Play. About ten minutes to add, and it gets the Easy Setup badge.')}</span></li>
+              <li><b>2</b><span><strong>${t('Settings in the launcher')}</strong>${t('Resolution, frame rate and controls on its page and in Big Picture mode.')}</span></li>
+            </ol>
+            <a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>
+          </aside>
           <fieldset class="kinds plats"><legend>${t('Where does it run?')}</legend>
             ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === (new URLSearchParams(location.search).get('platform') === 'pc') ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
           </fieldset>
@@ -1366,6 +1375,8 @@
       form.querySelectorAll('[data-ps5-only]').forEach((el) => { el.hidden = pc; });
       form.querySelectorAll('[data-pc-only]').forEach((el) => { el.hidden = !pc; });
       if (pc) { const g = form.querySelector('input[name="kind"][value="games"]'); if (g) g.checked = true; }
+      const subH = view.querySelector('.submit-page > h1');
+      if (subH) subH.textContent = pc ? t('Submit your recomp') : t('Submit to RecompStore');
       const subLead = view.querySelector('.submit-page > .lead');
       if (subLead) subLead.textContent = pc ? t('Made a PC recomp? Send it in for RecompLauncher. Everything you fill in here goes on its page, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.')
         : t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.');
@@ -1599,9 +1610,11 @@
   const SVG_AI = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
   // (4.0) How alive a project is: ended (no more updates, or archived on GitHub), on hold, or quiet
   // (no release in 2 months or more). Shown as a label on its page; ended and on hold on its tile too.
+  // (4.3) Or complete: finished as it is, by its developer's word. Never shown as ended or quiet.
   const PC_QUIET_DAYS = 60;
   const pcLife = (a) => {
     if (!a || a.soon) return null;
+    if (a.status === 'complete') return { kind: 'complete', note: a.status_note || '' };
     if (a.status === 'ended' || a.archived) return { kind: 'ended', note: a.status_note || '' };
     if (a.status === 'paused') return { kind: 'paused', note: a.status_note || '' };
     const at = a.released ? Date.parse(a.released + 'T12:00:00Z') : NaN;
@@ -1611,18 +1624,21 @@
   const LIFE_SVG = {
     ended: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
     paused: '<path d="M9 5v14M15 5v14"/>',
+    complete: '<circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.6 2.6 5-5.4"/>',
     quiet: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>' };
   const lifeIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LIFE_SVG[k]}</svg>`;
   const lifeText = (l) => {
     if (l.kind === 'ended') return t('Project ended');
     if (l.kind === 'paused') return t('On hold');
+    if (l.kind === 'complete') return t('Feature complete');
     const m = Math.floor(l.days / 30.4);
     return m >= 24 ? tf('No updates in {n} years', { n: Math.floor(m / 12) }) : m >= 12 ? t('No updates in over a year') : tf('No updates in {n} months', { n: m });
   };
   const lifeWhy = (a, l) => l.kind === 'ended' ? (a.archived && !a.status ? t('The developer archived this project, so no more updates are coming.') : t('The developer isn\'t planning any more updates.'))
-    : l.kind === 'paused' ? t('The developer has put it on hold. Updates may pick up again later.') : t('No new release in a while. It may still get updates.');
+    : l.kind === 'paused' ? t('The developer has put it on hold. Updates may pick up again later.')
+    : l.kind === 'complete' ? t('The developer considers it finished: everything it set out to do is in. Fixes may still come now and then.') : t('No new release in a while. It may still get updates.');
   const lifePill = (a) => { const l = pcLife(a); return l ? `<span class="pc-pill life-${l.kind}" title="${esc(lifeWhy(a, l))}">${lifeIcon(l.kind)}${esc(lifeText(l))}</span>` : ''; };
-  const lifeBadge = (a) => { const l = pcLife(a); return l && l.kind !== 'quiet' ? `<span class="pc-life-b life-${l.kind}">${lifeIcon(l.kind)}${esc(l.kind === 'ended' ? t('Ended') : t('On hold'))}</span>` : ''; };
+  const lifeBadge = (a) => { const l = pcLife(a); return l && l.kind !== 'quiet' ? `<span class="pc-life-b life-${l.kind}">${lifeIcon(l.kind)}${esc(l.kind === 'ended' ? t('Ended') : l.kind === 'complete' ? t('Complete') : t('On hold'))}</span>` : ''; };
   const lifeNotice = (a) => { const l = pcLife(a); return l && l.kind !== 'quiet' ? `<div class="pc-life life-${l.kind}"><strong>${lifeIcon(l.kind)}${esc(lifeText(l))}</strong><p dir="auto">${esc(l.note || lifeWhy(a, l))}</p></div>` : ''; };
   function aiNoteHTML(a, pc) {
     if (!isAI(a)) return '';
@@ -1859,7 +1875,7 @@
   // GitHub release. No game files: players bring their own copy. Its own home, list and pages; the
   // header's PS5 / PC switch moves between the two stores.
   const PC_ORIGINS = { n64: 'Nintendo 64', x360: 'Xbox 360', xbox: 'Xbox', ps1: 'PlayStation', ps2: 'PlayStation 2', ps3: 'PlayStation 3', ps4: 'PlayStation 4',
-    gc: 'GameCube', wii: 'Wii', wiiu: 'Wii U', snes: 'Super Nintendo', gba: 'Game Boy Advance', gb: 'Game Boy', ds: 'Nintendo DS', dc: 'Dreamcast', saturn: 'Saturn', psp: 'PSP', switch: 'Nintendo Switch',
+    gc: 'GameCube', wii: 'Wii', wiiu: 'Wii U', snes: 'Super Nintendo', gba: 'Game Boy Advance', gb: 'Game Boy', ds: 'Nintendo DS', dc: 'Dreamcast', saturn: 'Saturn', psp: 'PSP', switch: 'Nintendo Switch', switch2: 'Nintendo Switch 2',
     nes: 'NES', gbc: 'Game Boy Color', '3ds': 'Nintendo 3DS', vb: 'Virtual Boy', ps5: 'PlayStation 5', genesis: 'Genesis', s32x: '32X', gg: 'Game Gear', arcade: 'Arcade', cdi: 'CD-i', amiga: 'Amiga', pc: 'PC', other: N_('Other') };
   const SYS_NAMES = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
   let pcCat = null, pcLoading = null;
@@ -1979,7 +1995,7 @@
   }
   // (2.8) Each console's own colour, for its pill.
   const PC_COLORS = { n64: '#e2453c', x360: '#5dc21e', xbox: '#2fa84f', ps1: '#9aa4b2', ps2: '#3d7dd8', ps3: '#7b8794', ps4: '#2f6fe0', gc: '#8a6cf0',
-    wii: '#4fc3f7', wiiu: '#00a2c7', snes: '#b38cf2', gba: '#6c63ff', gb: '#9bbc0f', ds: '#aab4c2', dc: '#ff8a3d', saturn: '#4f7cff', psp: '#5b6b8c', switch: '#e60012',
+    wii: '#4fc3f7', wiiu: '#00a2c7', snes: '#b38cf2', gba: '#6c63ff', gb: '#9bbc0f', ds: '#aab4c2', dc: '#ff8a3d', saturn: '#4f7cff', psp: '#5b6b8c', switch: '#e60012', switch2: '#ff3b47',
     nes: '#c8102e', gbc: '#f2c12e', '3ds': '#d6262d', vb: '#c4121b', ps5: '#e8edf3', genesis: '#1f6fd1', s32x: '#d4a017', gg: '#3b82c4', arcade: '#ff5fa2', cdi: '#2bb3a3', amiga: '#e5762b', other: '#a7b3c4' };
   const SVG_DISC = '<svg class="pc-disc" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="1.8"/></svg>';
   const originPill = (k) => `<span class="pc-pill" style="--c:${PC_COLORS[k] || PC_COLORS.other}">${esc(originName(k))}</span>`;
@@ -2279,6 +2295,28 @@
   // colour through a mask, so it follows the button's colour like the rest.
   const PC_CAT_ICONS = ['action', 'adventure', 'platformer', 'racing', 'fighting', 'shooter', 'sports', 'rpg', 'puzzle'];
   const pcCatIcon = (k) => (PC_CAT_ICONS.includes(k) ? `<span class="ico-m" style="--m:url('/assets/cat/pc/${k}.png?v=1')" aria-hidden="true"></span>` : '');
+  // (4.3) For developers, between the category rows: what a recomp gets on RecompLauncher, and the
+  // SDK that makes it install and set itself up. Six reasons in an even grid.
+  const SVG_P = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const DEV_PERKS = () => [
+    [SVG_P('<path d="M5 12l4 4 10-10"/>'), t('Easy Setup'), t('Players drop in their own disc and press Play. Level 1 of the SDK, about ten minutes to add.')],
+    [SVG_P('<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'), t('Your settings in the launcher'), t('Resolution, frame rate and controls on its page and in Big Picture mode, like a native PC game.')],
+    [SVG_P('<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>'), t('Updates on their own'), t('Every release on your GitHub reaches players by itself. Nothing to upload anywhere else.')],
+    [SVG_P('<path d="M12 2.5l2.8 2.6h3.9v3.9l2.8 2.8-2.8 2.8v3.9h-3.9L12 21.1l-2.8-2.6H5.3v-3.9L2.5 11.8l2.8-2.8V5.1h3.9z"/><path d="M8.6 11.9l2.3 2.3 4.5-4.6"/>'), t('A verified page'), t('A check mark on your page, a direct line to the team, and your updates out faster.')],
+    [SVG_P('<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>'), t('Scanned and trusted'), t('Every download is checked for viruses before it reaches anyone, so players install yours with confidence.')],
+    [SVG_P('<path d="M4 20V4M4 20h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/>'), t('Reports and numbers'), t('See how it runs on real PCs, read what players say and answer them from your developer hub.')],
+  ];
+  const pcDevBand = () => `
+        <section class="glass pc-devband" aria-labelledby="pc-devband-h">
+          <div class="pc-devband-head">
+            <div><span class="kicker">${t('For developers')}</span>
+              <h2 id="pc-devband-h">${t('Have a recomp? Put it on RecompLauncher')}</h2>
+              <p>${t('Free, open source, and it stays yours. Send its GitHub and we set up its page: covers, versions, downloads and player reports.')}</p></div>
+            <div class="cta-row"><a class="btn primary" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/pc/sdk">${t('Read the SDK')}</a></div>
+          </div>
+          <ul class="pc-perks">${DEV_PERKS().map(([ic, n, d]) => `<li><span class="pc-perk-ico">${ic}</span><strong>${esc(n)}</strong><span>${esc(d)}</span></li>`).join('')}</ul>
+          <p class="pc-devband-foot">${tf('Already on here? {hub}, or {acct}.', { hub: `<a href="/developers?signin=1">${t('Open your developer hub')}</a>`, acct: `<a href="/developers?signup=1">${t('get a free developer account')}</a>` })}</p>
+        </section>`;
   function pcHome() {
     pcTitle = t('RecompLauncher — recompiled games for Windows, Linux and Mac');
     const apps = pcCat.apps;
@@ -2340,20 +2378,8 @@
         <div data-play-charts></div>
         ${consoleStrip ? `<section class="con-sec"><h2>${t('Browse by console')}</h2>${consoleStrip}</section>` : ''}
         ${catBtns ? `<section class="con-sec cat-sec"><h2>${t('Categories')}</h2>${catBtns}</section>` : ''}
-        ${cats.map((k) => row(t(PC_GENRES[k]), inCat(k), '/pc/' + PC_CAT_SLUG[k])).join('')}
-        <section class="band submit-band dev-band">
-          <div class="band-words">
-            <span class="kicker">${t('Made a PC recomp?')}</span>
-            <h2>${t('Put it on RecompLauncher')}</h2>
-            <p>${t('Send its GitHub and we set up its page: covers, versions, downloads and player reports. Updates come from your releases on their own.')}</p>
-            <div class="cta-row"><a class="btn primary" href="/submit?platform=pc">${t('Submit a game')}</a><a class="btn ghost" href="/developers">${t('Developer accounts')}</a></div>
-          </div>
-          <a class="glass report-card" href="/developers?signin=1">
-            <span class="kicker">${t('Already a developer?')}</span>
-            <strong>${t('Developer hub')}</strong>
-            <span>${t('Edit your pages, answer comments and see how your games are doing.')}</span>
-          </a>
-        </section>
+        ${cats.map((k, i) => row(t(PC_GENRES[k]), inCat(k), '/pc/' + PC_CAT_SLUG[k]) + (i === Math.min(1, cats.length - 1) ? pcDevBand() : '')).join('')}
+        ${cats.length ? '' : pcDevBand()}
         <section class="pc-intro"><h2>${t('What is a PC recomp?')}</h2><p>${t('Every recomp here is a fan project that turns a console game into a real PC game: higher resolutions, widescreen, high frame rates and mods. Each one comes from its developer\'s own GitHub, and you bring your own copy of the game.')}</p></section>
         ${pcNoFiles()}
       </article>`;
@@ -2676,7 +2702,7 @@
   // (2.8) RecompLauncher: what's coming to Windows.
   function pcLauncher() {
     pcTitle = `${t('Get RecompLauncher')} · RecompLauncher`;
-    const covers = pcCat.apps.filter((a) => a.cover && pcCharted(a) && !['n64', 'gc', 'wii', 'wiiu', 'switch', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'].includes(a.origin) && !/doax/i.test(a.id)).sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).slice(0, 8);
+    const covers = pcCat.apps.filter((a) => a.cover && pcCharted(a) && !['n64', 'gc', 'wii', 'wiiu', 'switch', 'switch2', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'].includes(a.origin) && !/doax/i.test(a.id)).sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).slice(0, 8);
     const feats = [
       ['library', t('Your whole library'), t('Every recomp in one place, with covers, play time and updates, including the ones you already have.')],
       ['disc', t('Set up from your disc'), t('Point it at your own disc image or ROM once. It checks it, and puts what each game needs where it goes.')],
@@ -4408,9 +4434,9 @@
       ['tags', t('Tags'), 300, t('Up to 8, separated by commas, like Widescreen, 60 FPS, Mods')], ['setup_steps', t('Setup steps'), 2000, t('Only if players set something up before the first play. One step per line.')],
       ['report_url', t('How To Report Bugs'), 300, t('A link to your own page for bug reports, like your GitHub issues. Shown next to the report form. Starts with https://')],
       // (4.0) Where the project stands: a label on its page and tile, here and in RecompLauncher.
-      ['status', t('Project Status'), 8, t('On hold or Ended shows a label on its page, so players know what to expect.')],
+      ['status', t('Project Status'), 8, t('Feature complete, On hold or Ended shows a label on its page, so players know what to expect. Feature complete means it\'s finished, so it\'s never marked as abandoned.')],
       ['status_note', t('Status Note'), 200, t('Optional. One line under the label, like: Development moved to the sequel.')]];
-    const PC_STATUS = [['', N_('Active')], ['paused', N_('On hold')], ['ended', N_('Ended (no more updates)')]];
+    const PC_STATUS = [['', N_('Active')], ['complete', N_('Feature complete (finished)')], ['paused', N_('On hold')], ['ended', N_('Ended (no more updates)')]];
     // (3.8) Its pictures: new ones wait for a quick look before they go on its page.
     const PC_PICS = [['cover', 'cover_file', t('Cover'), t('Portrait, 600×900')], ['art', 'hero_file', t('Backdrop'), t('Wide, 1920×620 or bigger')],
       ['logo', 'logo_file', t('Logo'), t('PNG with a see-through background')], ['icon', 'icon_file', t('Icon'), t('Square, 512×512')]];
@@ -5050,7 +5076,7 @@
   // The right side of the sign-in page: what an account is for, over floating game art.
   // Art for the account and beta panels. Games are tall covers, apps are square icons.
   // Nintendo games stay out of the promo art.
-  const NINTENDO = ['n64', 'gc', 'wii', 'wiiu', 'switch', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'];
+  const NINTENDO = ['n64', 'gc', 'wii', 'wiiu', 'switch', 'switch2', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'];
   const PROMO_COVERS = ['unleashedrecomp', 'bloodborne-pc', 'tenkaichi3decomp', 'skate3recomp', 'lostodysseyrecomp', 'iss-pc', 'symphonyrecomp', 'octr-nitrofueled-pc'];
   const PROMO_APPS = ['PS5SX2', 'Playden', 'PS5X360'];
   function promoCovers(n) {
@@ -5795,7 +5821,8 @@
     sec.innerHTML = `
       ${cards.length ? `<section class="launch-grid">${cards.map(([k, h, body], i) => `<div class="glass card-pad launch-card launch-${k}${cards.length % 2 && i === cards.length - 1 ? ' wide' : ''}"><span class="kicker">${esc(h)}</span>${body}</div>`).join('')}</section>` : ''}
       ${(P.faq || []).length ? `<section class="glass card-pad faq launch-faq"><span class="kicker">${t('Questions')}</span>${P.faq.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</section>` : ''}
-      ${P.bugs ? `<section class="glass card-pad launch-bugs"><div><span class="kicker">${t('Found a bug?')}</span><p>${esc(P.bugs)}</p></div>${discord ? `<a class="btn" href="${esc(discord)}" target="_blank" rel="noopener">${t('Join the Discord')} ↗</a>` : ''}</section>` : ''}`;
+      ${P.bugs ? `<section class="glass card-pad launch-bugs"><div><span class="kicker">${t('Found a bug?')}</span><p>${esc(P.bugs)}</p></div>${discord ? `<a class="btn" href="${esc(discord)}" target="_blank" rel="noopener">${t('Join the Discord')} ↗</a>` : ''}</section>` : ''}
+      <section class="glass card-pad launch-bugs launch-dev"><div><span class="kicker">${t('Make recomps?')}</span><p>${t('Add the RecompLauncher SDK and players install yours, set it up from their own disc and change its settings, all from the launcher. Free, and your recomp doesn\'t change.')}</p></div><div class="cta-row"><a class="btn" href="/pc/sdk">${t('Read the SDK')}</a><a class="btn primary" href="/submit?platform=pc">${t('Submit your recomp')}</a></div></section>`;
     hero.after(sec);
     if (L.preview && !L.live) {
       const note = document.createElement('p');

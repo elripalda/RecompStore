@@ -356,7 +356,7 @@ const RS_DEV_PC_FIELDS = ['name' => 120, 'blurb' => 160, 'description' => 8000, 
 
 // (4.0) A value for one of RS_DEV_PC_FIELDS that isn't plain text: null when it's fine, else what's wrong.
 function rs_dev_pc_field_error(string $k, string $v): ?string {
-    if ($k === 'status' && $v !== '' && !in_array($v, RS_PC_STATUSES, true)) return 'Pick Active, On hold or Ended.';
+    if ($k === 'status' && $v !== '' && !in_array($v, RS_PC_STATUSES, true)) return 'Pick Active, Feature complete, On hold or Ended.';
     if ($k === 'status_note' && preg_match('/[\r\n]/', $v)) return 'The status note is one line.';
     return null;
 }

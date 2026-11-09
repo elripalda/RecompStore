@@ -15,7 +15,7 @@ const RS_PC_CATALOG = RS_PUBLIC . '/pc-catalog.json';
 // The consoles recomps come from, in the order the site lists them.
 const RS_PC_ORIGINS = ['n64' => 'Nintendo 64', 'x360' => 'Xbox 360', 'xbox' => 'Xbox', 'ps1' => 'PlayStation', 'ps2' => 'PlayStation 2',
     'ps3' => 'PlayStation 3', 'ps4' => 'PlayStation 4', 'gc' => 'GameCube', 'wii' => 'Wii', 'wiiu' => 'Wii U', 'snes' => 'Super Nintendo', 'gba' => 'Game Boy Advance',
-    'gb' => 'Game Boy', 'ds' => 'Nintendo DS', 'dc' => 'Dreamcast', 'saturn' => 'Saturn', 'psp' => 'PSP', 'switch' => 'Nintendo Switch',
+    'gb' => 'Game Boy', 'ds' => 'Nintendo DS', 'dc' => 'Dreamcast', 'saturn' => 'Saturn', 'psp' => 'PSP', 'switch' => 'Nintendo Switch', 'switch2' => 'Nintendo Switch 2',
     'nes' => 'NES', 'gbc' => 'Game Boy Color', '3ds' => 'Nintendo 3DS', 'vb' => 'Virtual Boy', 'ps5' => 'PlayStation 5', 'genesis' => 'Genesis', 's32x' => '32X',
     'gg' => 'Game Gear', 'arcade' => 'Arcade', 'cdi' => 'CD-i', 'amiga' => 'Amiga', 'pc' => 'PC', 'other' => 'Other'];
 // (2.8) What kind of game it is: each one a category of the PC store, with its own page (/pc/<slug>).
@@ -75,7 +75,8 @@ function rs_pc_tables(): void {
 }
 
 // (4.0) A project's standing, when it's not just active: on hold, or no more updates coming.
-const RS_PC_STATUSES = ['paused', 'ended'];
+// (4.3) complete: finished by its developer's word, so it's never shown as ended or quiet.
+const RS_PC_STATUSES = ['complete', 'paused', 'ended'];
 
 function rs_pc_defaults(): array {
     return ['id' => '', 'name' => '', 'game' => '', 'origin' => 'other', 'repo' => '', 'asset_win' => '', 'asset_linux' => '', 'asset_mac' => '',
@@ -162,7 +163,7 @@ function rs_pc_origin_guess(string $text): string {
         ['ps3', '/\b(ps3|playstation 3|rpcs3)\b/'], ['ps4', '/\b(ps4|playstation 4)\b/'], ['ps2', '/\b(ps2|playstation 2|ps2recomp)\b/'],
         ['ps1', '/\b(ps1|psx|playstation 1|psxrecomp|playstation one)\b/'], ['gc', '/\b(gamecube|ngc|dolphin decomp)\b/'], ['wiiu', '/\b(wii ?u|cemu)\b/'], ['wii', '/\bwii\b/'], ['psp', '/\b(psp|playstation portable)\b/'],
         ['snes', '/\b(snes|super nintendo|super famicom)\b/'], ['gba', '/\b(gba|game boy advance)\b/'], ['ds', '/\b(nds|nintendo ds)\b/'],
-        ['gb', '/\b(game ?boy|gbc)\b/'], ['dc', '/\bdreamcast\b/'], ['saturn', '/\bsega saturn\b/'], ['switch', '/\b(nintendo switch|las ?recomp)\b/']];
+        ['gb', '/\b(game ?boy|gbc)\b/'], ['dc', '/\bdreamcast\b/'], ['saturn', '/\bsega saturn\b/'], ['switch2', '/\b(nintendo )?switch ?2\b/'], ['switch', '/\b(nintendo switch|las ?recomp)\b/']];
     foreach ($rules as [$k, $re]) if (preg_match($re, $t)) return $k;
     return 'other';
 }
@@ -314,7 +315,10 @@ function rs_pc_find_discord(int $budget = 30): array {
         return [$new, $looked, $why];
     };
     if ($bot === '' || !preg_match('/^\d{5,25}$/', $chan)) return $done(0, 0, 'The site\'s Discord bot isn\'t set up.');
-    [$st, $msgs] = rs_dc_call('GET', '/channels/' . $chan . '/messages?limit=100', ['bot' => $bot]);
+    // (4.3) A forum: each post is a thread; its title and first message are read like a message was.
+    $forum = rs_setting('dc_suggest_forum', '') === $chan;
+    if ($forum) { [$st, $msgs] = rs_dc_forum_posts($chan, $bot); }
+    else [$st, $msgs] = rs_dc_call('GET', '/channels/' . $chan . '/messages?limit=100', ['bot' => $bot]);
     if ($st === 403 || $st === 404) return $done(0, 0, 'The bot can\'t read #recomp-suggestions. Add it to the server and let it see that channel and its history.');
     if ($st !== 200 || !is_array($msgs)) return $done(0, 0, 'Discord didn\'t answer (' . $st . '). It tries again later.');
     $db = rs_db();
@@ -336,7 +340,8 @@ function rs_pc_find_discord(int $budget = 30): array {
             $l = rs_repo_from_link($url);
             if (!$l) continue;
             $k = strtolower(rs_repo_key($l['host'], $l['repo']));
-            if (isset($listed[$k])) continue;
+            // (4.3) A forum post for a recomp that's already on RecompLauncher gets tagged and closed.
+            if (isset($listed[$k])) { if ($forum && !empty($m['thread'])) rs_dc_forum_close((string)$m['thread'], 'Already listed'); continue; }
             if (isset($have[$k]) && ($have[$k][0] !== 'none' || $have[$k][1] > time() - 3 * 86400)) continue;
             ++$looked;
             $r = rs_pc_read_repo($l['repo'], $l['host']);
@@ -344,7 +349,8 @@ function rs_pc_find_discord(int $budget = 30): array {
             if (!$r['ok']) continue;
             $r['via'] = 'discord';
             $r['by'] = (string)($m['author']['global_name'] ?? $m['author']['username'] ?? '');
-            $r['msg'] = 'https://discord.com/channels/' . RS_DC_SUGGEST_GUILD . '/' . $chan . '/' . (string)($m['id'] ?? '');
+            $r['msg'] = !empty($m['thread']) ? 'https://discord.com/channels/' . RS_DC_SUGGEST_GUILD . '/' . $m['thread'] : 'https://discord.com/channels/' . RS_DC_SUGGEST_GUILD . '/' . $chan . '/' . (string)($m['id'] ?? '');
+            if (!empty($m['thread'])) $r['thread'] = (string)$m['thread'];
             $state = ($r['assets']['win'] === '' && $r['assets']['linux'] === '' && $r['assets']['mac'] === '') ? 'none' : 'new';
             $put->execute([rs_repo_key($l['host'], (string)$r['repo']), json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $state]);
             $have[$k] = [$state, time()];
@@ -354,6 +360,88 @@ function rs_pc_find_discord(int $budget = 30): array {
     // Messages come back empty when the app's Message Content Intent is off.
     $why = $msgs && $blank === count($msgs) ? 'Discord hides the messages\' text from the bot. Turn on Message Content Intent for the app in the Discord Developer Portal (Bot page).' : '';
     return $done($new, $looked, $why);
+}
+
+// ---- (4.3) #recomp-suggestions as a forum ------------------------------------------------------
+// One post per suggestion. The site reads the posts (open and recently closed), and when a suggested
+// recomp is added, or is already listed, its post gets that tag and is closed, so the forum only
+// shows what's still waiting.
+const RS_DC_FORUM_TAGS = [['Added', '✅'], ['Already listed', '📚'], ['Looking into it', '👀'], ['Can\'t be added', '⛔']];
+
+// The forum's posts as messages: [status, [['id', 'content', 'embeds', 'author', 'thread']]].
+function rs_dc_forum_posts(string $forum, string $bot): array {
+    $threads = [];
+    [$st, $act] = rs_dc_call('GET', '/guilds/' . RS_DC_SUGGEST_GUILD . '/threads/active', ['bot' => $bot]);
+    if ($st !== 200) return [$st, null];
+    foreach ((array)($act['threads'] ?? []) as $t) if ((string)($t['parent_id'] ?? '') === $forum) $threads[] = $t;
+    [$st2, $arc] = rs_dc_call('GET', '/channels/' . $forum . '/threads/archived/public?limit=50', ['bot' => $bot]);
+    if ($st2 === 200) foreach ((array)($arc['threads'] ?? []) as $t) $threads[] = $t;
+    $out = [];
+    foreach (array_slice($threads, 0, 80) as $t) {
+        $id = (string)$t['id'];
+        // The post's first message has the thread's own ID.
+        [$s3, $m] = rs_dc_call('GET', '/channels/' . $id . '/messages/' . $id, ['bot' => $bot]);
+        $m = $s3 === 200 && is_array($m) ? $m : [];
+        $out[] = ['id' => $id, 'thread' => $id, 'content' => (string)($t['name'] ?? '') . ' ' . (string)($m['content'] ?? ''),
+            'embeds' => (array)($m['embeds'] ?? []), 'attachments' => (array)($m['attachments'] ?? []), 'author' => (array)($m['author'] ?? [])];
+    }
+    return [200, $out];
+}
+
+// Tags a forum post (Added, Already listed, ...) and closes it. Best effort: the bot needs Manage Threads.
+function rs_dc_forum_close(string $thread, string $tag): bool {
+    try {
+        $bot = function_exists('rs_dc_conf') ? (string)rs_dc_conf()['bot'] : '';
+        $forum = (string)rs_setting('dc_suggest_forum', '');
+        if ($bot === '' || $forum === '' || !preg_match('/^\d{5,25}$/', $thread)) return false;
+        $tags = json_decode((string)(rs_kv_get('dc_forum_tags')['v'] ?? ''), true);
+        if (!is_array($tags) || (rs_kv_get('dc_forum_tags')['age'] ?? 1e9) > 86400) {
+            [$st, $ch] = rs_dc_call('GET', '/channels/' . $forum, ['bot' => $bot]);
+            $tags = [];
+            foreach ((array)($ch['available_tags'] ?? []) as $x) $tags[(string)$x['name']] = (string)$x['id'];
+            rs_kv_put('dc_forum_tags', (string)json_encode($tags));
+        }
+        [$st, $t] = rs_dc_call('GET', '/channels/' . $thread, ['bot' => $bot]);
+        if ($st !== 200 || (string)($t['parent_id'] ?? '') !== $forum) return false;
+        $applied = array_values(array_unique(array_merge((array)($t['applied_tags'] ?? []), isset($tags[$tag]) ? [$tags[$tag]] : [])));
+        if (!empty($t['thread_metadata']['archived'])) rs_dc_call('PATCH', '/channels/' . $thread, ['bot' => $bot, 'json' => ['archived' => false]]);
+        [$st] = rs_dc_call('PATCH', '/channels/' . $thread, ['bot' => $bot, 'json' => ['applied_tags' => array_slice($applied, 0, 5), 'archived' => true]]);
+        return $st === 200;
+    } catch (Throwable $e) { return false; }
+}
+
+// One time: makes #recomp-suggestions a forum. The old channel stays, read-only, renamed, under it.
+// -> what happened, in words.
+function rs_dc_suggest_forum_setup(): string {
+    $bot = function_exists('rs_dc_conf') ? (string)rs_dc_conf()['bot'] : '';
+    if ($bot === '') return 'The site\'s Discord bot isn\'t set up.';
+    $g = RS_DC_SUGGEST_GUILD;
+    $old = trim((string)rs_setting('dc_suggest_channel', RS_DC_SUGGEST_CHANNEL));
+    [$st, $chans] = rs_dc_call('GET', '/guilds/' . $g . '/channels', ['bot' => $bot]);
+    if ($st !== 200 || !is_array($chans)) return 'Discord didn\'t list the channels (' . $st . ').';
+    $was = null;
+    foreach ($chans as $c) if ((string)$c['id'] === $old) $was = $c;
+    if (!$was) return 'The old #recomp-suggestions channel wasn\'t found.';
+    if ((int)$was['type'] === 15) return 'It\'s a forum already.';
+    $tags = array_map(fn($t) => ['name' => $t[0], 'emoji_name' => $t[1], 'moderated' => true], RS_DC_FORUM_TAGS);
+    $json = ['name' => 'recomp-suggestions', 'type' => 15, 'parent_id' => $was['parent_id'] ?? null, 'position' => (int)($was['position'] ?? 0),
+        'permission_overwrites' => (array)($was['permission_overwrites'] ?? []),
+        'topic' => "Suggest a recomp for RecompLauncher.\n\nOne post per recomp: the game in the title, its GitHub or GitLab link in the post. Search first so it isn't posted twice.\n\nWhen a recomp is added (or it's already on RecompLauncher), its post gets tagged and closed, so what's open here is still waiting.",
+        'available_tags' => $tags, 'default_reaction_emoji' => ['emoji_name' => '👍'], 'default_sort_order' => 0, 'default_forum_layout' => 1];
+    [$st, $new] = rs_dc_call('POST', '/guilds/' . $g . '/channels', ['bot' => $bot, 'json' => $json]);
+    if ($st !== 201 && $st !== 200) return 'Discord didn\'t make the forum (' . $st . '): ' . mb_substr(json_encode($new), 0, 300);
+    $fid = (string)$new['id'];
+    rs_set_setting('dc_suggest_forum', $fid);
+    rs_set_setting('dc_suggest_old', $old);
+    rs_set_setting('dc_suggest_channel', $fid);
+    // The old one: renamed, read-only for everyone, right under the forum.
+    $ow = (array)($was['permission_overwrites'] ?? []);
+    $found = false;
+    foreach ($ow as &$o) if ((string)$o['id'] === $g) { $o['deny'] = (string)((int)$o['deny'] | 2048 | 274877906944 | 34359738368); $found = true; }
+    unset($o);
+    if (!$found) $ow[] = ['id' => $g, 'type' => 0, 'allow' => '0', 'deny' => (string)(2048 | 274877906944 | 34359738368)];
+    [$st2] = rs_dc_call('PATCH', '/channels/' . $old, ['bot' => $bot, 'json' => ['name' => 'old-recomp-suggestions', 'topic' => 'Moved: post suggestions in the recomp-suggestions forum.', 'permission_overwrites' => $ow, 'position' => (int)($was['position'] ?? 0) + 1]]);
+    return 'Made the forum (' . $fid . ').' . ($st2 === 200 ? ' The old channel is now old-recomp-suggestions, read-only.' : ' Couldn\'t change the old channel (' . $st2 . ').');
 }
 
 // Looks a repo up by hand (the admin's box): it lands in the found list either way.
@@ -597,6 +685,8 @@ function rs_pc_add(string $repo): array {
     if ($host === '') $a = rs_ai_on_add($a, $a['repo']); // (2.9) (3.9) the AI check reads GitHub only
     rs_pc_save($a);
     rs_db()->prepare("UPDATE pc_found SET state = 'added' WHERE repo = ?")->execute([rs_pc_key($a)]);
+    // (4.3) Suggested in the Discord forum: its post gets the Added tag and closes.
+    if (!empty($f['thread'])) rs_dc_forum_close((string)$f['thread'], 'Added');
     return $a;
 }
 
@@ -754,7 +844,7 @@ function rs_pc_feedback_list(string $app, bool $withHidden = false, int $limit =
 // (3.5) About the game: the original game's facts from IGDB (release date, who made it, genres,
 // modes, a short summary), shown in its own card. Uses the IGDB keys from Settings.
 const RS_IGDB_PLATFORMS = ['pc' => [6, 13], 'n64' => 4, 'x360' => 12, 'xbox' => 11, 'ps1' => 7, 'ps2' => 8, 'ps3' => 9, 'ps4' => 48, 'gc' => 21, 'wii' => 5, 'wiiu' => 41,
-    'snes' => 19, 'gba' => 24, 'gb' => 33, 'ds' => 20, 'dc' => 23, 'saturn' => 32, 'psp' => 38, 'switch' => 130, 'nes' => 18, 'gbc' => 22, '3ds' => 37,
+    'snes' => 19, 'gba' => 24, 'gb' => 33, 'ds' => 20, 'dc' => 23, 'saturn' => 32, 'psp' => 38, 'switch' => 130, 'switch2' => 508, 'nes' => 18, 'gbc' => 22, '3ds' => 37,
     'vb' => 87, 'ps5' => 167, 'genesis' => 29, 's32x' => 30, 'gg' => 35, 'arcade' => 52, 'cdi' => 117, 'amiga' => 16];
 
 function rs_pc_about_norm(string $s): string {
@@ -866,7 +956,7 @@ function rs_pc_catalog(): array {
         // page, with the developer's own words if any. "archived": closed on GitHub, shown as ended too.
         $life = in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) ? (string)$a['status'] : '';
         if ($life !== '') $e['status'] = $life;
-        if (!empty($a['archived'])) $e['archived'] = true;
+        if (!empty($a['archived']) && $life !== 'complete') $e['archived'] = true;
         if (($life !== '' || !empty($a['archived'])) && trim((string)($a['status_note'] ?? '')) !== '') $e['status_note'] = trim((string)$a['status_note']);
         $e += rs_ai_entry($a); // (2.9)
         // (3.3) How RecompLauncher starts it and sets it up from the player's copy (CURATOR-SETUP-GUIDE.md).
