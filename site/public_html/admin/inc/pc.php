@@ -1260,7 +1260,8 @@ function rs_pc_switch_repo(array $a, string $to, string $host = ''): array {
 function rs_pc_mac_why(string $pat): string {
     $p = strtolower(trim($pat));
     if ($p === '') return '';
-    if (!str_ends_with($p, '.zip')) return 'The Mac download has to be a .zip. RecompLauncher on Mac can\'t install a .dmg, .rar, .tar.gz or a file with no type.';
+    // (4.3) The launcher on Mac installs .zip, .dmg, .rar and .7z (since #37).
+    if (!preg_match('/\.(zip|dmg|rar|7z)$/', $p)) return 'The Mac download has to be a .zip, .dmg, .rar or .7z. RecompLauncher on Mac can\'t install a .tar.gz, a .pkg or a file with no type.';
     if (preg_match('/(x86[_-]?64|amd64|intel)/', $p) && !preg_match('/(arm64|aarch64|universal|apple[-_ ]?silicon)/', $p))
         return 'This Mac download looks Intel-only by its name. RecompLauncher on Mac needs an Apple Silicon or universal build.';
     return '';
