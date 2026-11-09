@@ -141,9 +141,9 @@ if (mb_strlen($q) >= 2) {
         $c = rs_kv_get('sdk:' . $a['id']);
         $r = $c && $c['age'] < 7 * 86400 ? json_decode($c['v'], true) : null;
         if (!is_array($r) && $live < 5) { ++$live; try { $r = rs_pc_sdk_check($a); } catch (Throwable $e) { $r = null; } }
-        $has = is_array($r) ? (string)($r['has'] ?? 'unknown') : 'waiting';
+        $got = is_array($r) ? (string)($r['has'] ?? 'unknown') : 'waiting';
         $mk = $marks[$a['id']] ?? null;
-        $state = in_array($has, ['release', 'repo'], true) ? 'ships' : ($mk ? ($mk['kind'] === 'pr' ? 'pr' : 'no') : ($has === 'none' ? 'missing' : 'unknown'));
+        $state = in_array($got, ['release', 'repo'], true) ? 'ships' : ($mk ? ($mk['kind'] === 'pr' ? 'pr' : 'no') : ($got === 'none' ? 'missing' : 'unknown'));
         $found[] = ['a' => $a, 'state' => $state, 'm' => $mk];
     }
 }
