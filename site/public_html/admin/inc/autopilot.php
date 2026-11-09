@@ -35,6 +35,7 @@ function rs_auto_morning_run(): array {
     $out = ['found' => 0, 'ps5_fixed' => [], 'grouped' => 0];
     try { [$out['found']] = rs_pc_find(120); } catch (Throwable $e) { /* tomorrow */ }
     try { $out['found'] += rs_pc_find_discord(40)[0]; } catch (Throwable $e) { /* tomorrow */ } // (4.1)
+    try { $out['found'] += rs_pc_find_quiver(60, 10)[0]; } catch (Throwable $e) { /* tomorrow */ } // (4.3)
     rs_auto_prevet();
     try { $out['ps5_fixed'] = rs_ps5_heal(); } catch (Throwable $e) { /* tomorrow */ }
     try { $out['grouped'] = rs_titles_autogroup(); } catch (Throwable $e) { /* next time */ }
