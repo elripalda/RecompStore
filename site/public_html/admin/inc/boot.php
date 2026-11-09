@@ -24,8 +24,10 @@ const RS_BOOT_HOW = [
 ];
 const RS_BOOT_EASY = ['folder', 'flag', 'env', 'setup'];
 const RS_BOOT_TOP = ['kind', 'start', 'start_linux', 'start_macos', 'start_is', 'args', 'setup', 'console', 'installer', 'clone', 'makes',
-    'files', 'settings', 'player_note', 'multiplayer', 'server', 'updates', 'requires', 'min', 'format'];
+    'files', 'settings', 'player_note', 'multiplayer', 'server', 'updates', 'requires', 'needs', 'min', 'format'];
 const RS_BOOT_FILES = ['how', 'accepts', 'what', 'folder', 'flag', 'env', 'contains', 'extract', 'check_image', 'id', 'ids', 'region', 'n64_id', 'n64_rev', 'update'];
+// (4.3) What the PC needs for the setup step, checked on the game page (Beta 28): RecompLauncher's own names.
+const RS_BOOT_NEEDS = ['build_tools', 'clang', 'python'];
 const RS_BOOT_PLACES = ['{install}/', '{documents}/', '{local}/', '{config}/', '{home}/'];
 
 // The launcher's own profiles, by catalog id.
@@ -145,6 +147,8 @@ function rs_boot_check(array $b): array {
     if (isset($b['makes']) && (!is_array($b['makes']) || !array_is_list($b['makes']))) $e('makes is a list of paths.');
     foreach ((array)($b['makes'] ?? []) as $m) if (!is_string($m) || !rs_boot_rel_ok($m)) $e('Every path in makes has to be inside the game\'s folder.');
     if (isset($b['requires']) && (!is_array($b['requires']) || !array_is_list($b['requires']) || array_filter($b['requires'], fn($x) => !is_string($x)))) $e('requires is a list of feature names, like ["files.folder", "settings.toml"].');
+    if (isset($b['needs']) && (!is_array($b['needs']) || !array_is_list($b['needs']) || array_filter($b['needs'], fn($x) => !is_string($x)))) $e('needs is a list, like ["build_tools", "clang", "python"].');
+    foreach ((array)($b['needs'] ?? []) as $x) if (is_string($x) && !in_array($x, RS_BOOT_NEEDS, true)) $w("needs: \"$x\" isn't one the launcher checks yet (it knows " . implode(', ', RS_BOOT_NEEDS) . ').');
     if (isset($b['min']) && !preg_match('/^\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/', (string)$b['min'])) $e('min is a launcher version, like 0.90.0-beta.27.');
 
     // files: where the player's copy goes.

@@ -58,6 +58,7 @@
       { k: 'multiplayer', l: 'Multiplayer', t: 'select', o: [['', 'None'], ['local', 'Local'], ['online', 'Online'], ['both', 'Local and online']] },
       { k: 'min', l: 'Needs launcher version', t: 'text', ph: '0.90.0-beta.27' },
       { k: 'requires', l: 'Launcher features it needs', t: 'list', wide: true, ph: 'files.folder, settings.toml', h: 'A launcher without one of them skips this profile\'s extras (Uses below lists what it uses).' },
+      { k: 'needs', l: 'The PC needs for setup', t: 'list', wide: true, ph: 'build_tools, clang, python', h: 'The game page checks each one on Windows and says how to get what\'s missing (Beta 28).' },
     ],
   };
 

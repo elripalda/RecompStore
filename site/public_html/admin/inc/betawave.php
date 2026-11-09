@@ -278,6 +278,9 @@ function rs_lb_json_feed(): array {
     if ($lx) $feed['linux'] = ['version' => $lx['version'], 'url' => $lx['url'], 'sha256' => $lx['sha256'], 'size' => $lx['size'],
         'deb' => (string)($lx['deb']['url'] ?? '')];
     if (($mac = rs_lb_mac_entry()) !== null) $feed['macos'] = $mac;
+    // (4.3) Windows and Linux launchers older than "min" are told they have to update.
+    $min = trim((string)rs_setting('lb_min', ''));
+    if ($min !== '' && rs_lb_is_semver($min)) { $feed['min'] = $min; if (isset($feed['linux'])) $feed['linux']['min'] = $min; }
     return $feed;
 }
 

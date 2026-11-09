@@ -52,6 +52,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $now = (string)(json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version.json'), true)['version'] ?? '');
             rs_flash($now !== $was ? 'Found ' . rs_lb_semver_name($now) . ' on GitHub. Launchers that are open were told to update.' : 'Up to date: ' . rs_lb_semver_name($now) . ' is the newest on GitHub.');
             $back = 'launcher-beta.php#github';
+        } elseif ($act === 'min-save') {
+            // (4.3) The oldest Windows and Linux launcher that may keep running without updating.
+            $min = trim((string)($_POST['lb_min'] ?? ''));
+            if ($min !== '' && !rs_lb_is_semver($min)) throw new RuntimeException('Write the minimum version like 0.90.0-beta.20, or leave it empty.');
+            rs_set_setting('lb_min', $min);
+            rs_lb_publish_json();
+            rl_push('launcher');
+            rs_log('launcher-min', 'windows+linux', $min === '' ? 'none' : $min);
+            rs_flash($min === '' ? 'No minimum version now.' : 'Launchers older than ' . rs_lb_semver_name($min) . ' are told they have to update.');
+            $back = 'launcher-beta.php#min';
         } elseif ($act === 'mac-save') {
             // (4.2) The Mac build's own settings: whether the Get page offers it, and its optional
             // "min" and "notes" in version.json. Windows and Linux aren't touched.
@@ -209,6 +219,15 @@ $feedNow = json_decode((string)@file_get_contents(RS_PUBLIC . '/launcher/version
 </section>
 
 <?php $macNow = is_array($feedNow['macos'] ?? null) ? $feedNow['macos'] : null; ?>
+<section class="card" id="min">
+  <h2>Minimum version</h2>
+  <p class="muted small">Windows and Linux launchers older than this are told they have to update before they keep going. Leave it empty to let every version run. The Mac build has its own, below.</p>
+  <form method="post" class="grid2"><?= $csrf ?><input type="hidden" name="action" value="min-save">
+    <label>Oldest launcher that may run<input name="lb_min" class="mono" maxlength="40" placeholder="0.90.0-beta.20" value="<?= h((string)rs_setting('lb_min', '')) ?>"><small>Written like 0.90.0-beta.20.</small></label>
+    <div class="actions" style="align-self:end"><button class="primary">Save minimum</button></div>
+  </form>
+</section>
+
 <section class="card" id="mac">
   <h2>Mac (Apple Silicon)</h2>
   <p class="muted small">The newest release on GitHub with an <code>_aarch64.dmg</code>, on its own: publishing a Windows or Linux build never changes it. M1 and newer only, not notarized by Apple. Mac updates are manual, so the launcher opens this link.</p>
