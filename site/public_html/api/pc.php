@@ -27,8 +27,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? n
     if ($_GET['a'] === 'app') {
         // (4.4) Its own file, written at each publish (admin/inc/pc.php rs_pc_write_app_files).
         $fastA = dirname(__DIR__, 2) . '/recompstore-private/pc-app/' . $fastId . '.json';
-        $fastM = @filemtime($fastA);
-        if ($fastM !== false && $fastM >= (int)@filemtime(dirname(__DIR__) . '/pc-catalog.json')) {
+        // (4.6) Served whenever it's there, even while a publish is still rewriting them all: a few
+        // minutes old is fine for an entry (players cache it 2 minutes anyway). Waiting for "newer than
+        // the catalog" sent every request to the whole catalog for the minutes a rewrite takes, which on
+        // a busy server made the rewrite slower still.
+        if (is_file($fastA)) {
             header('X-Content-Type-Options: nosniff');
             header('Content-Type: application/json; charset=utf-8');
             header('Cache-Control: public, max-age=120');
@@ -73,6 +76,9 @@ function rs_pc_out(int $code, array $body, int $cache = 0): void {
 // Only recomps on the PC store's published list.
 function rs_pc_listed(string $id): ?array {
     if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) return null;
+    // (4.6) Its own small file first (written at each publish), then the whole catalog.
+    $own = dirname(__DIR__, 2) . '/recompstore-private/pc-app/' . $id . '.json';
+    if (is_file($own) && is_array($j = json_decode((string)@file_get_contents($own), true)) && is_array($j['app'] ?? null)) return $j['app'];
     // (4.1) The catalog as opcache's cached array, not decoded again on every request (admin/inc/catcache.php).
     $cat = rs_json_cached(RS_PC_CATALOG);
     foreach ((array)($cat['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
