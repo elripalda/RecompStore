@@ -602,11 +602,21 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
     try {
         if ($fresh && rs_pc_host($a) === '') { rs_cache_tables(); rs_db()->prepare('DELETE FROM gh_cache WHERE k = ?')->execute([strtolower($repo . '#readme')]); }
         $rd = rs_pc_readme($repo, rs_pc_host($a));
-        if ((int)$rd['status'] === 200) $out['badge'] = (bool)preg_match('#recomplauncher\.com/[^\s"\')]*badge[^\s"\')]*\.svg|Get it on RecompLauncher#i', (string)$rd['md']);
-        elseif ((int)$rd['status'] === 404) $out['badge'] = false;
+        $rs = (int)$rd['status'];
+        if ($rs === 200) $out['badge'] = (bool)preg_match('#recomplauncher\.com/[^\s"\')]*badge[^\s"\')]*\.svg|Get it on RecompLauncher#i', (string)$rd['md']);
+        elseif ($rs === 404) $out['badge'] = false;
+        elseif (!in_array($rs, [0, 429, 500, 502, 503, 504], true)) $out['badge'] = null; // can't be read: looked at, unknown
     } catch (Throwable $e) { /* next check */ }
     rs_kv_put($k, (string)json_encode($out));
     return $out;
+}
+
+// (4.6) Due a check: never checked, older than a week, or checked before the README badge was looked at.
+function rs_pc_sdk_due(array $a): bool {
+    $c = rs_kv_get('sdk:' . $a['id']);
+    if (!$c || $c['age'] >= 7 * 86400) return true;
+    $v = json_decode($c['v'], true);
+    return !is_array($v) || !array_key_exists('badge', $v);
 }
 
 // What a developer's own recomplauncher.json covers, for the launcher's "Launcher support" list:

@@ -27,6 +27,7 @@ try {
     usort($todo, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
     foreach ($todo as $a) {
         if (microtime(true) - $t > 240) break;
+        if (!rs_pc_sdk_due($a)) continue; // the admin page checked it meanwhile
         try { rs_pc_sdk_check($a, true); ++$s; } catch (Throwable $e) { /* next run */ }
     }
     echo gmdate('c') . ' sdk checked ' . $s . ' of ' . count($todo) . ' in ' . round(microtime(true) - $t) . "s\n";
