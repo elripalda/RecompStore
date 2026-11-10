@@ -1,12 +1,10 @@
 <?php
-// (4.3) SDK support: the most downloaded PC recomps whose own GitHub doesn't ship a
-// recomplauncher.json yet, so the team can send their developers a pull request (or a nudge).
+// (4.3) SDK support: every recomp on RecompLauncher and whether its own GitHub ships a
+// recomplauncher.json, so the team can send the developers that don't a pull request (or a nudge).
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 rs_require_login();
-
-const RS_SDK_TOP = 50;
 
 // Recomps taken off the list by hand: a pull request is already open for it ('pr'), or its developer
 // said they don't want to support RecompLauncher ('no'). [id => [kind, url, note, who, at]]
@@ -70,46 +68,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-// Listed recomps, most downloaded first. The page only reads what's been checked; the checking runs
-// after the page has gone (a minute at a time), so it never keeps anyone waiting.
-// Only today's console recomps: not PC games, and projects that started in 2025 or later (older
-// projects with big download counts would crowd out the ones worth a pull request).
-const RS_SDK_SINCE = '2025-01-01';
-$apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''
-    && !in_array((string)$a['origin'], ['pc', 'other'], true)
-    && ((string)$a['first'] !== '' ? (string)$a['first'] : (string)$a['released']) >= RS_SDK_SINCE));
+
+// Every listed recomp with a repo, most downloaded first, in one table the team filters in the page.
+// The page only reads what's been checked; the checking runs after the page has gone (a minute at a
+// time), so it never keeps anyone waiting.
+$apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''));
 usort($apps, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
-$missing = [];
-$has = 0;
-$waiting = 0;
-$toCheck = [];
 $marks = rs_sdk_marks();
-$prs = $nos = [];
-foreach ($apps as $rank => $a) {
-    // A pull request that got merged and shipped: it's done, whatever the mark says.
-    if (isset($marks[$a['id']]) && ($c0 = rs_kv_get('sdk:' . $a['id'])) && in_array(json_decode($c0['v'], true)['has'] ?? '', ['release', 'repo'], true)) { ++$has; continue; }
-    if (isset($marks[$a['id']])) { if ($marks[$a['id']]['kind'] === 'pr') $prs[] = ['a' => $a, 'm' => $marks[$a['id']]]; else $nos[] = ['a' => $a, 'm' => $marks[$a['id']]]; continue; }
-    if (count($missing) >= RS_SDK_TOP) continue;
-    $c = rs_kv_get('sdk:' . $a['id']);
-    $r = $c && $c['age'] < 7 * 86400 ? json_decode($c['v'], true) : null;
-    if (!is_array($r)) { ++$waiting; $toCheck[] = $a['id']; continue; }
-    if ($r['has'] === 'release' || $r['has'] === 'repo') { ++$has; continue; }
-    $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
-    $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
-    $missing[] = ['a' => $a, 'rank' => $rank + 1, 'now' => $now, 'unknown' => $r['has'] === 'unknown'];
-}
-// (4.6) The ones that ship their own recomplauncher.json, for the badge pull request (Xarishark's prompt).
-$ships = [];
+// All the checks in one query instead of one per recomp.
+$checked = [];
 try {
     rs_cache_tables();
-    $shipIds = [];
-    foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'sdk:%'") as $kr) {
-        $kv = json_decode((string)$kr['v'], true);
-        if (is_array($kv) && in_array((string)($kv['has'] ?? ''), ['release', 'repo'], true)) $shipIds[substr((string)$kr['k'], 4)] = true;
+    foreach (rs_db()->query("SELECT k, v, TIMESTAMPDIFF(SECOND, at, NOW()) AS age FROM kv_cache WHERE k LIKE 'sdk:%'") as $kr) {
+        $checked[substr((string)$kr['k'], 4)] = ['v' => json_decode((string)$kr['v'], true), 'age' => (int)$kr['age']];
     }
-    foreach ($apps as $a) if (isset($shipIds[$a['id']])) $ships[] = $a;
-} catch (Throwable $e) { rs_errlog('sdk ships', $e); }
-// One background run at a time: the next unchecked ones, for up to a minute.
+} catch (Throwable $e) { rs_errlog('sdk checks', $e); }
+$rows = [];
+$count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'unknown' => 0];
+$waiting = 0;
+$toCheck = [];
+foreach ($apps as $rank => $a) {
+    $c = $checked[$a['id']] ?? null;
+    $r = $c && is_array($c['v']) ? $c['v'] : null;
+    $fresh = $c && $c['age'] < 7 * 86400;
+    if (!$r || !$fresh) $toCheck[] = $a['id'];
+    $got = $r ? (string)($r['has'] ?? 'unknown') : 'waiting';
+    $mk = $marks[$a['id']] ?? null;
+    // A pull request that got merged and shipped: it's done, whatever the mark says.
+    if (in_array($got, ['release', 'repo'], true)) $state = 'ships';
+    elseif ($mk) $state = $mk['kind'] === 'pr' ? 'pr' : 'no';
+    elseif ($got === 'none') $state = 'missing';
+    else $state = 'unknown';
+    if ($got === 'waiting' && $state === 'unknown') ++$waiting;
+    $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
+    $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
+    $kind = in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console';
+    $prSt = $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '';
+    $rows[] = ['a' => $a, 'rank' => $rank + 1, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now, 'kind' => $kind, 'pr' => $prSt];
+    ++$count['all'];
+    ++$count[$state];
+}
+// One background run at a time: the next unchecked ones (most downloaded first), for up to a minute.
 if ($toCheck) {
     $run = rs_kv_get('sdk_scan_run');
     if (!$run || $run['age'] > 150) {
@@ -174,56 +173,107 @@ if (mb_strlen($q) >= 2) {
         }
     }
 }
+
 $stateLabel = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ''], 'no' => ['Won\'t support it', ' warn'], 'missing' => ['No file yet', ''], 'unknown' => ['Couldn\'t check yet', ' warn']];
+$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'unknown' => 'Not checked'];
 
 rs_head('SDK support', true, ['assets/account.css']);
 ?>
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code. To send one to a recomp that isn't in the top <?= RS_SDK_TOP ?>, or isn't listed at all, search for it below; a recomp's edit page has the same buttons.</p>
+    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Filter by status, type or name, and sort by any column. Each one without a file is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For the ones that already ship a file, Copy badge PR prompt adds just the badge. More on a row has the badge code, Check again and the marks.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
-<div class="role-cards">
-  <div class="role-card"><span class="muted small">Ship their own file</span><span class="n"><?= number_format($has) ?></span><p class="muted small">Of the most downloaded checked so far.</p></div>
-  <div class="role-card"><span class="muted small">On this list</span><span class="n"><?= count($missing) ?></span><p class="muted small">Most downloaded first. Pick one and send a pull request.</p></div>
-  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= $waiting ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background. Reload in a minute.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
+<div class="role-cards four">
+  <div class="role-card"><span class="muted small">Ship their own file</span><span class="n"><?= number_format($count['ships']) ?></span><p class="muted small">Easy Setup straight from the developer.</p></div>
+  <div class="role-card"><span class="muted small">No file yet</span><span class="n"><?= number_format($count['missing']) ?></span><p class="muted small">Pick one and send a pull request.</p></div>
+  <div class="role-card"><span class="muted small">Pull requests open</span><span class="n"><?= number_format($count['pr']) ?></span><p class="muted small">Waiting on the developer.</p></div>
+  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= number_format($waiting) ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background. Reload in a minute.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
 </div>
-<section class="card">
-  <form method="get" class="sdk-search">
-    <input type="search" name="q" value="<?= h($q) ?>" placeholder="Any recomp by name, or a GitHub link or owner/name, also ones not in the top <?= RS_SDK_TOP ?> or not listed" spellcheck="false" autocomplete="off">
-    <button class="btn primary">Search</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
+<section class="card sdk-card">
+  <div class="sdk-bar">
+    <div class="sdk-chips" role="group" aria-label="Status">
+      <?php foreach ($chips as $k => $label): ?><button type="button" class="sdk-chip<?= $k === 'all' ? ' on' : '' ?>" data-sdk-state="<?= $k ?>" aria-pressed="<?= $k === 'all' ? 'true' : 'false' ?>"><?= h($label) ?><span class="n"><?= number_format($count[$k]) ?></span></button><?php endforeach; ?>
+    </div>
+    <div class="sdk-tools">
+      <select id="sdk-kind" aria-label="Type"><option value="">Every type</option><option value="console">Console recomps</option><option value="pc">PC games</option></select>
+      <input type="search" id="sdk-find" placeholder="Filter by name, game or repo" spellcheck="false" autocomplete="off" aria-label="Filter">
+    </div>
+  </div>
+  <p class="muted small sdk-shown" id="sdk-shown">Showing <?= number_format($count['all']) ?> of <?= number_format($count['all']) ?></p>
+  <div class="sdk-scroll">
+    <table class="sdk-table" id="sdk-table">
+      <thead><tr>
+        <th class="c-rank"><button type="button" data-sdk-sort="rank" aria-sort="ascending">#</button></th>
+        <th><button type="button" data-sdk-sort="name">Recomp</button></th>
+        <th class="c-num"><button type="button" data-sdk-sort="dl">Downloads</button></th>
+        <th><button type="button" data-sdk-sort="state">Status</button></th>
+        <th class="c-now"><button type="button" data-sdk-sort="now">Easy Setup now</button></th>
+        <th class="c-act"><span class="sr-only">Actions</span></th>
+      </tr></thead>
+      <?php foreach ($rows as $row): $a = $row['a']; $st = $row['state']; $mk = $row['m']; [$sl, $sc] = $stateLabel[$st];
+        if ($st === 'pr' && $row['pr'] !== '') { $sl = 'Pull request ' . ($row['pr'] === 'merged' ? 'merged' : ($row['pr'] === 'closed' ? 'closed' : 'open')); $sc = $row['pr'] === 'merged' ? ' ok' : ($row['pr'] === 'closed' ? ' warn' : ''); }
+        if ($st === 'unknown' && $row['waiting']) { $sl = 'Not checked yet'; $sc = ''; }
+        [$nl, $nw] = $nowLabel[$row['now']];
+        $gh = rs_host_web(rs_pc_host($a), (string)$a['repo']);
+        $find = mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id']); ?>
+      <tbody class="sdk-item" id="r-<?= h($a['id']) ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-now="<?= h($row['now']) ?>" data-find="<?= h($find) ?>">
+        <tr>
+          <td class="c-rank"><?= (int)$row['rank'] ?></td>
+          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
+          <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
+          <td><span class="pill<?= $sc ?>"><?= h($sl) ?></span></td>
+          <td class="c-now"><span class="muted small" title="<?= h($nw) ?>"><?= h($nl) ?></span></td>
+          <td class="c-act"><div class="sdk-btns">
+            <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
+            <?php if ($st === 'ships'): ?><button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
+            <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
+            <?php else: ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
+            <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= h($a['id']) ?>">More</button>
+          </div></td>
+        </tr>
+        <tr class="sdk-extra" id="m-<?= h($a['id']) ?>" hidden><td colspan="6"><div class="sdk-extra-in">
+          <div class="sdk-btns sdk-btns-l">
+            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><button type="button" class="btn" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><?php endif; ?>
+            <?php if ($st === 'pr'): ?><button type="button" class="btn" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
+            <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
+            <?php if ($mk): ?><form method="post"><?= $csrf ?><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><span class="muted small">Marked by <?= h((string)$mk['who']) ?> on <?= h((string)$mk['at']) ?><?= $st === 'no' && (string)$mk['url'] !== '' ? ' · <a href="' . h((string)$mk['url']) . '" target="_blank" rel="noopener">where they said so ↗</a>' : '' ?></span><?php endif; ?>
+          </div>
+          <?php if (!$mk && $st !== 'ships'): ?>
+          <div class="sdk-mark-forms">
+            <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="action" value="mark_pr"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
+              <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
+            <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
+              <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Mark</button></form>
+          </div>
+          <?php endif; ?>
+        </div></td></tr>
+      </tbody>
+      <?php endforeach; ?>
+      <tbody id="sdk-none" hidden><tr><td colspan="6" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
+    </table>
+  </div>
+</section>
+<section class="card" id="lookup">
+  <h2>Not on RecompLauncher yet?</h2>
+  <p class="muted small">Paste a GitHub link or owner/name to get the prompt and badge for a recomp that isn't listed, so a pull request can go out before it's added.</p>
+  <form method="get" class="sdk-search" action="sdk-support.php#lookup">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="github.com/owner/name, or owner/name" spellcheck="false" autocomplete="off">
+    <button class="btn primary">Look up</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
   </form>
   <?php if ($q !== ''): ?>
   <div class="sdk-list" style="margin-top:12px">
   <?php foreach ($found as $f): $a = $f['a']; [$sl, $sc] = $stateLabel[$f['state']]; ?>
-    <article class="sdk-row sdk-row-s" id="s-<?= h($a['id']) ?>">
-      <div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads<?= $f['m'] ? ' · marked by ' . h((string)$f['m']['who']) . ' on ' . h((string)$f['m']['at']) : '' ?></span></div>
-      <span class="pill<?= $sc ?>"><?= h($f['state'] === 'pr' && ($st = rs_sdk_pr_state($a, (string)$f['m']['url'])) !== '' ? 'Pull request ' . ($st === 'merged' ? 'merged' : ($st === 'closed' ? 'closed' : 'open')) : $sl) ?></span>
-      <div class="sdk-btns">
-        <a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-        <?php if ($f['state'] === 'pr' && (string)$f['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$f['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a><?php endif; ?>
-        <button type="button" class="btn<?= $f['state'] === 'ships' ? ' primary' : '' ?>" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
-        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php endif; ?>
-        <form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
-        <?php if ($f['m']): ?><form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><?php endif; ?>
-      </div>
-      <?php if (!$f['m'] && $f['state'] !== 'ships'): ?>
-      <details class="sdk-mark">
-        <summary>Mark it</summary>
-        <div class="sdk-mark-forms">
-          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="mark_pr"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
-            <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
-          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
-            <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Remove</button></form>
-        </div>
-      </details>
-      <?php endif; ?>
+    <article class="sdk-row-s">
+      <div class="sdk-name"><strong><?= h($a['name']) ?></strong><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads</span></div>
+      <span class="pill<?= $sc ?>"><?= h($sl) ?></span>
+      <div class="sdk-btns"><a class="btn" href="#r-<?= h($a['id']) ?>" data-sdk-jump="<?= h($a['id']) ?>">Show it in the table</a></div>
     </article>
   <?php endforeach; ?>
   <?php if ($outside): ?>
-    <article class="sdk-row sdk-row-s">
+    <article class="sdk-row-s">
       <div class="sdk-name"><strong><?= h($outside['repo']) ?></strong><span class="muted small"><?= !empty($outside['missing']) ? 'GitHub has no repo by that name.' : 'Not on RecompLauncher yet' . ($outside['about'] !== '' ? ' · ' . h(mb_strimwidth($outside['about'], 0, 90, '…')) : '') ?></span></div>
       <span class="pill<?= !empty($outside['missing']) ? ' warn' : '' ?>"><?= !empty($outside['missing']) ? 'Not found' : 'Not listed' ?></span>
       <div class="sdk-btns">
@@ -235,116 +285,142 @@ rs_head('SDK support', true, ['assets/account.css']);
       </div>
     </article>
   <?php endif; ?>
-  <?php if (!$found && !$outside): ?><p class="muted">No listed recomp matches "<?= h($q) ?>". Paste its GitHub link or owner/name to get a prompt for one that isn't listed.</p><?php endif; ?>
+  <?php if (!$found && !$outside): ?><p class="muted">Nothing matches "<?= h($q) ?>". Paste its GitHub link or owner/name.</p><?php endif; ?>
   </div>
   <?php endif; ?>
 </section>
-<section class="card">
-  <div class="sdk-list">
-  <?php foreach ($missing as $m): $a = $m['a']; [$nl, $nw] = $nowLabel[$m['now']]; $gh = 'https://github.com/' . $a['repo']; ?>
-    <article class="sdk-row" id="r-<?= h($a['id']) ?>">
-      <span class="sdk-rank">#<?= (int)$m['rank'] ?></span>
-      <?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="44" height="44" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?>
-      <div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads</span></div>
-      <span class="pill" title="<?= h($nw) ?>"><?= h($m['unknown'] ? 'Couldn\'t check' : $nl) ?></span>
-      <div class="sdk-btns">
-        <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-        <button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button>
-        <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
-      </div>
-      <details class="sdk-mark">
-        <summary>Take it off the list</summary>
-        <div class="sdk-mark-forms">
-          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="action" value="mark_pr"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
-            <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
-          <form method="post" class="sdk-mark-form"><?= $csrf ?><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= h($a['id']) ?>">
-            <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Remove</button></form>
-        </div>
-      </details>
-    </article>
-  <?php endforeach; ?>
-  <?php if (!$missing): ?><p class="muted">Nothing on the list<?= $waiting ? ' yet. Reload in a minute to see more.' : '. Every popular recomp ships its own file.' ?></p><?php endif; ?>
-  </div>
-</section>
-<?php if ($ships): ?>
-<section class="card">
-  <details>
-    <summary><strong>Already supported</strong> <span class="count"><?= count($ships) ?></span></summary>
-    <p class="muted small">These ship their own recomplauncher.json. Copy badge PR prompt gives your AI agent the steps to open a pull request adding the "Get it on RecompLauncher" badge to the project's README, linked to its page here.</p>
-    <div class="sdk-list" style="margin-top:12px">
-    <?php foreach ($ships as $a): ?>
-      <article class="sdk-row sdk-row-s">
-        <div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads</span></div>
-        <span class="pill ok">Ships its own file</span>
-        <div class="sdk-btns">
-          <a class="btn" href="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-          <button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
-        </div>
-      </article>
-    <?php endforeach; ?>
-    </div>
-  </details>
-</section>
-<?php endif; ?>
-<?php if ($prs): ?>
-<section class="card">
-  <h2>Pull requests open <span class="count"><?= count($prs) ?></span></h2>
-  <p class="muted small">Off the list while their pull request is waiting. When one is merged, press Check again on it once the developer's next release is out.</p>
-  <div class="sdk-list">
-  <?php foreach ($prs as $p): $a = $p['a']; $st = rs_sdk_pr_state($a, (string)$p['m']['url']); ?>
-    <article class="sdk-row sdk-row-s" id="r-<?= h($a['id']) ?>">
-      <div class="sdk-name"><strong><?= h($a['name']) ?></strong><span class="muted small"><?= h($a['repo']) ?> · added by <?= h((string)$p['m']['who']) ?> on <?= h((string)$p['m']['at']) ?></span></div>
-      <span class="pill<?= $st === 'merged' ? ' ok' : ($st === 'closed' ? ' warn' : '') ?>"><?= h($st === 'merged' ? 'Merged' : ($st === 'closed' ? 'Closed, not merged' : ($st === 'open' ? 'Open' : 'Couldn\'t check'))) ?></span>
-      <div class="sdk-btns">
-        <a class="btn" href="<?= h((string)$p['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
-        <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Check again</button></form>
-        <form method="post"><?= $csrf ?><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Back on the list</button></form>
-      </div>
-    </article>
-  <?php endforeach; ?>
-  </div>
-</section>
-<?php endif; ?>
-<?php if ($nos): ?>
-<section class="card">
-  <details>
-    <summary><strong>Won't support RecompLauncher</strong> <span class="count"><?= count($nos) ?></span></summary>
-    <div class="sdk-list" style="margin-top:12px">
-    <?php foreach ($nos as $p): $a = $p['a']; ?>
-      <article class="sdk-row sdk-row-s">
-        <div class="sdk-name"><strong><?= h($a['name']) ?></strong><span class="muted small"><?= h($a['repo']) ?> · <?= h((string)$p['m']['who']) ?>, <?= h((string)$p['m']['at']) ?></span></div>
-        <span></span>
-        <div class="sdk-btns">
-          <?php if ((string)$p['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$p['m']['url']) ?>" target="_blank" rel="noopener">Where they said so ↗</a><?php endif; ?>
-          <form method="post"><?= $csrf ?><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Back on the list</button></form>
-        </div>
-      </article>
-    <?php endforeach; ?>
-    </div>
-  </details>
-</section>
-<?php endif; ?>
 <style>
-.sdk-list{display:flex;flex-direction:column;gap:8px}
-.sdk-row{display:grid;grid-template-columns:44px 44px minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:14px}
-.sdk-row img,.sdk-ico{width:44px;height:44px;border-radius:12px;object-fit:cover}
-.sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 14px Sora,sans-serif}
-.sdk-rank{color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
+.sdk-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin:0 0 10px}
+.sdk-chips{display:flex;flex-wrap:wrap;gap:8px}
+.sdk-chip{display:inline-flex;align-items:center;height:34px;padding:0 14px;border-radius:999px;border:1px solid rgba(var(--ink-rgb),.16);background:rgba(var(--ink-rgb),.06);color:var(--frost);font:600 14px Figtree,sans-serif;cursor:pointer}
+.sdk-chip .n{opacity:.7;margin-left:6px;font-weight:700}
+.sdk-chip.on{background:var(--cyan);border-color:var(--cyan);color:var(--on-accent)}
+.sdk-chip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.sdk-tools{display:flex;gap:8px;align-items:center}
+.sdk-tools select{height:38px;min-width:160px}
+.sdk-tools input{height:38px;min-width:260px}
+.sdk-shown{margin:0 0 8px}
+.sdk-scroll{max-height:min(1360px,calc(100vh - 150px));overflow:auto;border:1px solid var(--line);border-radius:14px;overscroll-behavior:contain}
+.sdk-table{width:100%;border-collapse:separate;border-spacing:0;font-size:14.5px}
+.sdk-table thead th{position:sticky;top:0;z-index:2;background:var(--surface);text-align:left;padding:0;border-bottom:1px solid var(--line);white-space:nowrap}
+.sdk-table thead th button,.sdk-table thead th>span{display:block;width:100%;padding:10px 12px;background:none;border:0;color:var(--muted);font:600 13.5px Figtree,sans-serif;text-align:inherit;cursor:pointer}
+.sdk-table thead th button:hover{color:var(--frost)}
+.sdk-table thead th button[aria-sort]::after{content:" ↓";color:var(--cyan-ink)}
+.sdk-table thead th button[aria-sort=ascending]::after{content:" ↑"}
+.sdk-table td{padding:6px 12px;border-bottom:1px solid rgba(var(--ink-rgb),.06);vertical-align:middle}
+.sdk-item:hover>tr:first-child td{background:rgba(var(--ink-rgb),.03)}
+.sdk-table .c-rank{width:52px;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
+.sdk-table .c-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sdk-table thead .c-num button{text-align:right}
+.sdk-table .c-now{white-space:nowrap}
+.sdk-table .c-act{width:1%;white-space:nowrap}
+.sdk-who{display:flex;gap:10px;align-items:center;min-width:0}
+.sdk-who img,.sdk-ico{width:32px;height:32px;border-radius:9px;object-fit:cover;flex:none}
+.sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 12px Sora,sans-serif}
 .sdk-name{display:flex;flex-direction:column;min-width:0}
 .sdk-name a{color:var(--frost);text-decoration:none}
-.sdk-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sdk-btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.sdk-search{display:flex;gap:8px;align-items:center}
-.sdk-search input{flex:1;min-width:0}
+.sdk-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px}
+.sdk-btns{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.sdk-btns-l{justify-content:flex-start}
 .sdk-btns form{margin:0}
-.sdk-btns .btn{min-height:38px;padding:7px 12px;font-size:14px}
-.sdk-row-s{grid-template-columns:minmax(0,1fr) auto auto}
-.sdk-mark{grid-column:1/-1;margin:0}
-.sdk-mark summary{margin:0;font-size:13.5px}
-.sdk-mark-forms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:10px}
+.sdk-btns .btn{min-height:32px;padding:5px 11px;font-size:13.5px}
+.sdk-more[aria-expanded=true]{background:rgba(var(--ink-rgb),.12)}
+.sdk-extra td{background:rgba(var(--ink-rgb),.035)}
+.sdk-extra-in{display:flex;flex-direction:column;gap:10px;padding:6px 0}
+.sdk-empty{text-align:center;padding:24px 12px!important}
+.sdk-mark-forms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .sdk-mark-form{display:flex;gap:8px;align-items:flex-end}
 .sdk-mark-form label{flex:1;margin:0;font-size:14px}
-@media (max-width:980px){.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}}
-@media (max-width:980px){.sdk-row{grid-template-columns:44px minmax(0,1fr)}.sdk-rank{display:none}.sdk-row .pill,.sdk-btns{grid-column:1/-1}}
+.sdk-search{display:flex;gap:8px;align-items:center}
+.sdk-search input{flex:1;min-width:0}
+.sdk-list{display:flex;flex-direction:column;gap:8px}
+.sdk-row-s{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:14px}
+.sdk-flash td{animation:sdkflash 1.6s ease-out}
+@keyframes sdkflash{from{background:rgba(52,242,232,.22)}to{background:transparent}}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:1100px){.sdk-table .c-now{display:none}}
+@media (max-width:860px){.sdk-tools{width:100%}.sdk-tools input{min-width:0;flex:1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}.sdk-name span{max-width:200px}}
 </style>
+<script>
+(function () {
+  var table = document.getElementById('sdk-table');
+  if (!table) return;
+  var items = Array.prototype.slice.call(table.querySelectorAll('tbody.sdk-item'));
+  var none = document.getElementById('sdk-none');
+  var shown = document.getElementById('sdk-shown');
+  var find = document.getElementById('sdk-find');
+  var kind = document.getElementById('sdk-kind');
+  var lookup = document.getElementById('sdk-lookup');
+  var order = {missing: 0, unknown: 1, pr: 2, no: 3, ships: 4};
+  var nowOrder = {none: 0, steps: 1, profile: 2, json: 3};
+  var st = {state: 'all', kind: '', q: '', sort: 'rank', dir: 1};
+  try { var saved = JSON.parse(sessionStorage.getItem('sdk-view') || 'null'); if (saved) { st.state = saved.state || 'all'; st.kind = saved.kind || ''; st.sort = saved.sort || 'rank'; st.dir = saved.dir || 1; } } catch (e) {}
+  function save() { try { sessionStorage.setItem('sdk-view', JSON.stringify({state: st.state, kind: st.kind, sort: st.sort, dir: st.dir})); } catch (e) {} }
+  function apply() {
+    var n = 0, q = st.q.toLowerCase().trim();
+    // A pasted GitHub link filters by its owner/name.
+    var m = q.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)/);
+    if (m) q = m[1].replace(/\.git$/, '');
+    items.forEach(function (it) {
+      var ok = (st.state === 'all' || it.dataset.state === st.state) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
+      it.hidden = !ok;
+      if (ok) n++;
+    });
+    none.hidden = n > 0;
+    if (lookup) { lookup.hidden = !st.q.trim(); lookup.href = 'sdk-support.php?q=' + encodeURIComponent(st.q.trim()) + '#lookup'; }
+    shown.textContent = 'Showing ' + n.toLocaleString() + ' of ' + items.length.toLocaleString();
+    document.querySelectorAll('[data-sdk-state]').forEach(function (b) { var on = b.dataset.sdkState === st.state; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+    kind.value = st.kind;
+  }
+  function key(it) {
+    if (st.sort === 'name') return it.dataset.name;
+    if (st.sort === 'dl') return -Number(it.dataset.dl);
+    if (st.sort === 'state') return order[it.dataset.state] * 1e6 + Number(it.dataset.rank);
+    if (st.sort === 'now') return nowOrder[it.dataset.now] * 1e6 + Number(it.dataset.rank);
+    return Number(it.dataset.rank);
+  }
+  function sort() {
+    var list = items.slice().sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; });
+    list.forEach(function (it) { table.insertBefore(it, none); });
+    table.querySelectorAll('[data-sdk-sort]').forEach(function (b) {
+      if (b.dataset.sdkSort === st.sort) b.setAttribute('aria-sort', st.dir === 1 ? 'ascending' : 'descending'); else b.removeAttribute('aria-sort');
+    });
+  }
+  document.querySelectorAll('[data-sdk-state]').forEach(function (b) { b.addEventListener('click', function () { st.state = b.dataset.sdkState; save(); apply(); }); });
+  kind.addEventListener('change', function () { st.kind = kind.value; save(); apply(); });
+  find.addEventListener('input', function () { st.q = find.value; apply(); });
+  find.addEventListener('keydown', function (e) { if (e.key === 'Escape' && find.value) { e.preventDefault(); find.value = ''; st.q = ''; apply(); } });
+  table.querySelectorAll('[data-sdk-sort]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var k = b.dataset.sdkSort;
+      if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = 1; }
+      save(); sort();
+    });
+  });
+  table.addEventListener('click', function (e) {
+    var b = e.target.closest('.sdk-more');
+    if (!b) return;
+    var row = document.getElementById(b.getAttribute('aria-controls'));
+    var open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    row.hidden = !open;
+  });
+  // Show one row: clear the filters that hide it, open its More, scroll it into view.
+  function jump(id) {
+    var it = document.getElementById('r-' + id);
+    if (!it) return;
+    if (it.hidden) { st.state = 'all'; st.kind = ''; st.q = ''; find.value = ''; apply(); }
+    var more = it.querySelector('.sdk-more'), row = it.querySelector('.sdk-extra');
+    if (more && row) { more.setAttribute('aria-expanded', 'true'); row.hidden = false; }
+    it.scrollIntoView({block: 'center'});
+    it.classList.add('sdk-flash');
+    setTimeout(function () { it.classList.remove('sdk-flash'); }, 1700);
+  }
+  document.addEventListener('click', function (e) { var a = e.target.closest('[data-sdk-jump]'); if (a) { e.preventDefault(); jump(a.dataset.sdkJump); } });
+  sort();
+  apply();
+  // Back from a Check again or a mark: keep that row in view.
+  if (location.hash.indexOf('#r-') === 0) jump(decodeURIComponent(location.hash.slice(3)));
+})();
+</script>
 <?php rs_foot(['assets/sdk-prompt.js']);
