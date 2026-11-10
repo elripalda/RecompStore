@@ -182,7 +182,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Filter by status, type or name, and sort by any column. Each one without a file is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For the ones that already ship a file, Copy badge PR prompt adds just the badge. More on a row has the badge code, Check again and the marks.</p>
+    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Filter by status, type or name, and sort by any column. Each one without a file is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For the ones that already ship a file, Copy badge PR prompt adds just the badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
@@ -210,7 +210,6 @@ rs_head('SDK support', true, ['assets/account.css']);
         <th><button type="button" data-sdk-sort="name">Recomp</button></th>
         <th class="c-num"><button type="button" data-sdk-sort="dl">Downloads</button></th>
         <th><button type="button" data-sdk-sort="state">Status</button></th>
-        <th class="c-now"><button type="button" data-sdk-sort="now">Easy Setup now</button></th>
         <th class="c-act"><span class="sr-only">Actions</span></th>
       </tr></thead>
       <?php foreach ($rows as $row): $a = $row['a']; $st = $row['state']; $mk = $row['m']; [$sl, $sc] = $stateLabel[$st];
@@ -224,17 +223,16 @@ rs_head('SDK support', true, ['assets/account.css']);
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
           <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
-          <td><span class="pill<?= $sc ?>"><?= h($sl) ?></span></td>
-          <td class="c-now"><span class="muted small" title="<?= h($nw) ?>"><?= h($nl) ?></span></td>
+          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?></span></div></td>
           <td class="c-act"><div class="sdk-btns">
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <?php if ($st === 'ships'): ?><button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
             <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
             <?php else: ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
-            <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= h($a['id']) ?>">More</button>
+            <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= h($a['id']) ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
           </div></td>
         </tr>
-        <tr class="sdk-extra" id="m-<?= h($a['id']) ?>" hidden><td colspan="6"><div class="sdk-extra-in">
+        <tr class="sdk-extra" id="m-<?= h($a['id']) ?>" hidden><td colspan="5"><div class="sdk-extra-in">
           <div class="sdk-btns sdk-btns-l">
             <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><button type="button" class="btn" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><?php endif; ?>
             <?php if ($st === 'pr'): ?><button type="button" class="btn" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
@@ -252,7 +250,7 @@ rs_head('SDK support', true, ['assets/account.css']);
         </div></td></tr>
       </tbody>
       <?php endforeach; ?>
-      <tbody id="sdk-none" hidden><tr><td colspan="6" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
+      <tbody id="sdk-none" hidden><tr><td colspan="5" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
     </table>
   </div>
 </section>
@@ -310,10 +308,13 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-table thead th button[aria-sort=ascending]::after{content:" ↑"}
 .sdk-table td{padding:6px 12px;border-bottom:1px solid rgba(var(--ink-rgb),.06);vertical-align:middle}
 .sdk-item:hover>tr:first-child td{background:rgba(var(--ink-rgb),.03)}
-.sdk-table .c-rank{width:52px;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
+.sdk-table .c-rank{width:40px;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
 .sdk-table .c-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sdk-table thead .c-num button{text-align:right}
-.sdk-table .c-now{white-space:nowrap}
+.sdk-st{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.sdk-st .pill{white-space:nowrap}
+.sdk-st .small{white-space:nowrap;font-size:12.5px}
+.sdk-more{min-width:38px;font-size:16px!important;letter-spacing:1px}
 .sdk-table .c-act{width:1%;white-space:nowrap}
 .sdk-table .c-act .sdk-btns{flex-wrap:nowrap}
 .sdk-who{display:flex;gap:10px;align-items:center;min-width:0}
@@ -321,7 +322,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 12px Sora,sans-serif}
 .sdk-name{display:flex;flex-direction:column;min-width:0}
 .sdk-name a{color:var(--frost);text-decoration:none}
-.sdk-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px}
+.sdk-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
 .sdk-btns{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .sdk-btns-l{justify-content:flex-start}
 .sdk-btns form{margin:0}
@@ -340,7 +341,6 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-flash td{animation:sdkflash 1.6s ease-out}
 @keyframes sdkflash{from{background:rgba(52,242,232,.22)}to{background:transparent}}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media (max-width:1100px){.sdk-table .c-now{display:none}}
 @media (max-width:860px){.sdk-tools{width:100%}.sdk-tools input{min-width:0;flex:1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}.sdk-name span{max-width:200px}}
 </style>
 <script>
