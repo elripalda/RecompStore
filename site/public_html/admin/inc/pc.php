@@ -1293,13 +1293,16 @@ function rs_pc_banner_save(array $ids): array {
 // (3.5) The published catalog, written in one line (the launcher reads it), and next to it the
 // website's lighter copy: the same list without what only a game's own page shows (the original
 // game's details, the launch settings, "What's in it"). The site asks for those one game at a time.
-function rs_pc_write_files(array $cat): bool {
+function rs_pc_write_files(array $cat, ?string $only = null): bool {
     $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
     $json = json_encode($cat, $flags);
     $tmp = RS_PC_CATALOG . '.tmp';
     if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG)) return false;
     rs_pc_write_web($cat);
-    rs_pc_write_app_files($cat);
+    // (4.6) One recomp brought up to date: only its own file. The others are still right, and the API
+    // serves each game's file whenever it's there (rewriting all 1,400+ every few minutes kept the
+    // server busy).
+    rs_pc_write_app_files($cat, $only);
     // (4.4) The PHP copy the API reads is built here, once, not by the first players' requests.
     require_once __DIR__ . '/catcache.php';
     rs_json_cached(RS_PC_CATALOG);
@@ -1308,7 +1311,7 @@ function rs_pc_write_files(array $cat): bool {
 // (4.4) Each recomp's entry as its own small file, the answer to api/pc.php?a=app as it is: the most
 // asked question no longer loads the whole catalog. All rewritten each time (the API only trusts ones
 // as new as the catalog); ones no longer listed go.
-function rs_pc_write_app_files(array $cat): void {
+function rs_pc_write_app_files(array $cat, ?string $only = null): void {
     $dir = dirname(RS_PUBLIC) . '/recompstore-private/pc-app';
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) return;
     $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
@@ -1316,6 +1319,7 @@ function rs_pc_write_app_files(array $cat): void {
     foreach ((array)($cat['apps'] ?? []) as $a) {
         $id = (string)($a['id'] ?? '');
         if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) continue;
+        if ($only !== null && $id !== $only) { $keep["$id.json"] = true; continue; }
         $keep["$id.json"] = true;
         $body = json_encode(['ok' => true, 'app' => $a], $flags);
         if ($body === false) continue;
@@ -1364,7 +1368,7 @@ function rs_pc_publish_one(string $id): bool {
         if (($e['id'] ?? '') === $id && $fresh) { $fresh['order'] = $e['order'] ?? $fresh['order']; $cat['apps_min'][$gi]['apps'][$i] = $fresh; $hit = true; }
     if (!$hit) return false;
     $cat['updated'] = gmdate('c');
-    return rs_pc_write_files($cat);
+    return rs_pc_write_files($cat, $id);
 }
 
 // (2.9) Takes one recomp off pc-catalog.json at once (a copyright notice), without a full Publish.
