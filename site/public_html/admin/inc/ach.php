@@ -364,11 +364,19 @@ function rs_ach_session_start(int $acct, string $game, string $version, string $
     rs_ach_tables();
     $db = rs_db();
     $now = time();
+    // (4.6) The game's native achievement list, as the recomp gave it (names, gamerscore). The launcher
+    // reads it from the player's default.xex a moment after the game starts, so it usually comes with a
+    // second session-start for a session the website already has: it counts either way.
+    $native = function () use ($t, $game, $acct): void {
+        if (empty($t['native']) || !is_array($t['native'])) return;
+        rs_ach_native_store($game, $t['native']);
+        rs_ach_auto_list($game, $t['native'], in_array((string)($t['console'] ?? ''), RS_ACH_CONSOLES, true) ? (string)$t['console'] : 'x360', $acct);
+    };
     $local = preg_match('/^[A-Za-z0-9_-]{1,64}$/', (string)($t['local'] ?? '')) ? (string)$t['local'] : '';
     if ($local !== '') {
         $st = $db->prepare('SELECT id FROM ach_sessions WHERE account_id = ? AND local_id = ?');
         $st->execute([$acct, $local]);
-        if ($id = $st->fetchColumn()) return (string)$id;
+        if ($id = $st->fetchColumn()) { $native(); return (string)$id; }
     }
     $clamp = fn($x) => max($now - 30 * 86400, min($now, (int)$x));
     $started = isset($t['started']) && (int)$t['started'] > 0 ? $clamp($t['started']) : $now;
@@ -392,11 +400,7 @@ function rs_ach_session_start(int $acct, string $game, string $version, string $
             $ended ? gmdate('Y-m-d H:i:s', $ended) : null, json_encode($times), json_encode($loads), $local]);
     $folder = rs_ach_folder_clean((string)($t['unlock_folder'] ?? ''));
     if ($folder !== '') $db->prepare('INSERT INTO ach_folders (game, folder, n, seen) VALUES (?, ?, 1, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE n = n + 1, seen = VALUES(seen)')->execute([$game, $folder]);
-    // The game's native achievement list, as the recomp gave it at hello (names, gamerscore).
-    if (!empty($t['native']) && is_array($t['native'])) {
-        rs_ach_native_store($game, $t['native']);
-        rs_ach_auto_list($game, $t['native'], in_array((string)($t['console'] ?? ''), RS_ACH_CONSOLES, true) ? (string)$t['console'] : 'x360', $acct);
-    }
+    $native();
     return $id;
 }
 
