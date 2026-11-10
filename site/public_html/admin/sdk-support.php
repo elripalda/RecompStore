@@ -132,7 +132,10 @@ $q = trim((string)($_GET['q'] ?? ''));
 $found = [];
 $outside = null;
 if (mb_strlen($q) >= 2) {
-    $ql = mb_strtolower($q);
+    // A GitHub link or owner/name: search by the repo it points at.
+    $gm = [];
+    $isRepo = (bool)preg_match('#^(?:https?://)?(?:www\.)?(?:github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $q, $gm);
+    $ql = $isRepo ? mb_strtolower($gm[1] . '/' . $gm[2]) : mb_strtolower($q);
     $all = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && (string)$a['repo'] !== ''
         && (str_contains(mb_strtolower((string)$a['name']), $ql) || str_contains(mb_strtolower((string)$a['game']), $ql)
             || str_contains(mb_strtolower((string)$a['repo']), $ql) || str_contains(mb_strtolower((string)$a['id']), $ql))));
@@ -149,7 +152,7 @@ if (mb_strlen($q) >= 2) {
     }
     // A GitHub repo that isn't on RecompLauncher at all (owner/name or a github.com link): its prompt
     // and badge still work, so a pull request can go out before it's listed.
-    if (preg_match('#^(?:https?://)?(?:www\.)?(?:github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $q, $gm)) {
+    if ($isRepo) {
         $want = $gm[1] . '/' . $gm[2];
         $listed = false;
         foreach (rs_pc_apps() as $a) if (strcasecmp((string)$a['repo'], $want) === 0 && rs_pc_host($a) === '') { $listed = true; break; }
