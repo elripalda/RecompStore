@@ -9,9 +9,9 @@ header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Access-Control-Allow-Origin: *');
 @set_time_limit(120);
-// (2.6) Never kept by the CDN or a browser: what was just published is in Newest Arrivals on
-// the next look (each Publish writes the file again).
-header('Cache-Control: no-cache, must-revalidate');
+// (2.6) Never kept by a browser. (4.6) Cloudflare keeps it a minute: what was just published is in
+// Newest Arrivals within a minute, and a busy server isn't asked by every visitor.
+header('Cache-Control: public, max-age=0, s-maxage=60, stale-while-revalidate=600, stale-if-error=86400');
 // Most visits: the file, no database. One visit at a time makes the charts again when it's 10
 // minutes old; the others meanwhile get the one there is.
 $cf = rs_charts_file();

@@ -456,6 +456,9 @@ function rs_vt_after(): void {
     $set = true;
     $stamp = sys_get_temp_dir() . '/rs-vt-stamp';
     if (is_file($stamp) && time() - (int)@filemtime($stamp) < 20) return;
+    // (4.6) Not while the server is overloaded: the checks wait until it's calm again.
+    $load = function_exists('sys_getloadavg') ? sys_getloadavg() : false;
+    if ($load && $load[0] > 6) return;
     @touch($stamp);
     register_shutdown_function(function () {
         try {
