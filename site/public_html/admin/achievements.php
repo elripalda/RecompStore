@@ -45,6 +45,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_flash($n . ' ' . ($n === 1 ? 'application' : 'applications') . ' ' . ($to === 'approved' ? 'approved' : ($to === 'declined' ? 'declined' : 'moved back to waiting')) . '.');
         header('Location: achievements.php#apps'); exit;
     }
+    if ($act === 'note') {
+        $err = rs_ach_note_save((string)($_POST['note_title'] ?? ''), (string)($_POST['note_text'] ?? ''), (string)($_POST['note_button'] ?? ''), (string)($_POST['note_url'] ?? ''));
+        rs_flash($err ?? (trim((string)($_POST['note_text'] ?? '')) === '' ? 'Note cleared.' : 'Note posted. Testers see it on their Achievements page.'), $err ? 'err' : 'ok');
+        header('Location: achievements.php#note'); exit;
+    }
     if ($act === 'apply_open') {
         rs_set_setting('ach_apply_open', !empty($_POST['open']) ? '1' : '0');
         rs_set_setting('ach_auto_lists', !empty($_POST['auto']) ? '1' : '0');
@@ -126,6 +131,21 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
   <?php endforeach; ?>
   </tbody></table>
   <?php endif; ?>
+</section>
+
+<?php $note = rs_ach_note(); ?>
+<section class="card" id="note">
+  <h2>Note for testers</h2>
+  <p class="muted small">Pinned at the top of every tester's Achievements page in RecompLauncher (beta 30 and later). Posting a new one opens it again for anyone who folded the last one. Leave the message empty and save to take it down.</p>
+  <form method="post"><?= $csrf ?><input type="hidden" name="action" value="note">
+    <label>Title<input name="note_title" maxlength="80" value="<?= h((string)($note['title'] ?? '')) ?>" placeholder="From the Team"></label>
+    <label>Message<textarea name="note_text" rows="4" maxlength="1000" placeholder="Welcome to the alpha! Play any game from the list and your achievements pop up as you earn them. Something look wrong? Tell us in #testers on Discord."><?= h((string)($note['text'] ?? '')) ?></textarea></label>
+    <div class="grid2">
+      <label>Button text <span class="muted">(optional)</span><input name="note_button" maxlength="40" value="<?= h((string)($note['button'] ?? '')) ?>" placeholder="Open Discord"></label>
+      <label>Button link <span class="muted">(optional)</span><input name="note_url" maxlength="300" value="<?= h((string)($note['url'] ?? '')) ?>" placeholder="https://discord.gg/..."></label>
+    </div>
+    <div class="actions"><button class="btn primary">Post the note</button><?php if ($note): ?> <span class="muted small">Posted <?= h(gmdate('M j, H:i', (int)$note['id'])) ?> UTC</span><?php endif; ?></div>
+  </form>
 </section>
 
 <section class="card" id="apps">

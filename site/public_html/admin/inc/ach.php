@@ -168,6 +168,26 @@ function rs_ach_apply(array $acct, array $in): ?string {
     return null;
 }
 
+// (4.5) The team's sticky note for testers, pinned on the launcher's Achievements page.
+// -> null, or {id, title, text, button?, url?}. id changes with every new note, so a tester who folded
+// the last one sees the new one open again.
+function rs_ach_note(): ?array {
+    $n = json_decode((string)rs_setting('ach_note', ''), true);
+    if (!is_array($n) || trim((string)($n['text'] ?? '')) === '') return null;
+    $out = ['id' => (string)($n['id'] ?? ''), 'title' => (string)($n['title'] ?? ''), 'text' => (string)$n['text']];
+    if (!empty($n['button']) && !empty($n['url'])) { $out['button'] = (string)$n['button']; $out['url'] = (string)$n['url']; }
+    return $out;
+}
+function rs_ach_note_save(string $title, string $text, string $button, string $url): ?string {
+    $text = trim(str_replace("\r", '', $text));
+    if ($text === '') { rs_set_setting('ach_note', ''); return null; }
+    $url = trim($url);
+    if ($url !== '' && !preg_match('#^https://[^\s]+$#', $url)) return 'The button link has to start with https://';
+    rs_set_setting('ach_note', json_encode(['id' => (string)time(), 'title' => mb_substr(trim($title), 0, 80), 'text' => mb_substr($text, 0, 1000),
+        'button' => $url !== '' ? (mb_substr(trim($button), 0, 40) ?: 'Open') : '', 'url' => mb_substr($url, 0, 300)], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    return null;
+}
+
 // What the launcher and the site show a signed-in player.
 function rs_ach_status(array $acct): array {
     $app = rs_ach_application((int)$acct['id'], true);
@@ -175,7 +195,7 @@ function rs_ach_status(array $acct): array {
     // accounts in the admin's test account list.
     $team = in_array(strtolower((string)($acct['username'] ?? '')), rs_ach_testers(), true);
     return ['tester' => rs_ach_is_tester($acct), 'dev' => $team, 'apply_open' => rs_ach_apply_open(), 'terms' => RS_ACH_TERMS_V,
-        'needs_name' => ($acct['username'] ?? null) === null,
+        'needs_name' => ($acct['username'] ?? null) === null, 'note' => rs_ach_is_tester($acct) ? rs_ach_note() : null,
         'application' => $app ? ['status' => $app['status'], 'applied' => (int)strtotime($app['applied'] . ' UTC'),
             'decided' => $app['decided'] ? (int)strtotime($app['decided'] . ' UTC') : null] : null];
 }
