@@ -6,7 +6,7 @@ require __DIR__ . '/inc/totp.php';
 
 if (!rs_config()) { header('Location: setup.php'); exit; }
 rs_session();
-if (!empty($_SESSION['uid'])) { header('Location: dashboard.php'); exit; }
+if (!empty($_SESSION['uid'])) { header('Location: ' . (function_exists('rs_home_page') ? rs_home_page() : 'dashboard.php')); exit; }
 rs_users_2fa();
 
 $error = '';
@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['tries'] = 0;
             rs_log('login', (string)$u['username'], $recovery ? 'with a recovery code' : 'with the authenticator');
             if ($recovery) rs_flash('You logged in with a recovery code. It won\'t work again. If your phone is lost, turn two-step login off and on again in Settings.', 'err');
-            header('Location: dashboard.php'); // (2.3) the Dashboard first
+            header('Location: ' . (function_exists('rs_home_page') ? rs_home_page() : 'dashboard.php')); // (2.3) the Dashboard first
             exit;
         }
         rs_rate_hit('login');
@@ -69,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['tries'] = 0;
             if (!empty($_POST['keep'])) rs_keep_issue((int)$u['id']);
             rs_log('login', $name, 'password only');
-            header('Location: dashboard.php'); // (2.3) the Dashboard first
+            header('Location: ' . (function_exists('rs_home_page') ? rs_home_page() : 'dashboard.php')); // (2.3) the Dashboard first
             exit;
         }
         rs_rate_hit('login');

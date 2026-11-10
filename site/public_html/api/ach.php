@@ -2,16 +2,21 @@
 // (4.4) Recomp Achievements: what RecompLauncher and the site call.
 // Signed in = the launcher's PC token (X-RL-Token or Authorization: Bearer), or the site's account cookie.
 //
-// Open to everyone:
-//   GET  a=games                                    -> {games[{id, name, cover, icon, console, achievements, points, players, mastered}]}
-//   GET  a=board&game=?                              -> {board[{rank, username, avatar, points, ranked, unlocks, mastered}]}  (Ranked points)
-//   GET  a=stats                                     -> {stats{players, unlocks, ranked, mastered, games, testers}}
+// Open to everyone (cached a minute):
+//   GET  a=games                 -> {games[{id, name, cover, icon, console, achievements, points, players, mastered, beaten, leaderboards, rich_presence}]}
+//   GET  a=board&game=?&by=?     -> {board[{rank, username, avatar, points, score, ranked, unlocks, mastered, beaten}]}  by: points (default) or score
+//   GET  a=stats                 -> {stats{players, unlocks, ranked, mastered, beaten, games, testers}}
+//   GET  a=events                -> {events[{id, title, description, kind, games, console, goal, starts, ends, finished}]}
+//   GET  a=game&game=            -> {game, achievements[{id, title, description, points, type, bonus, unlocks, rarity}], count, points, players,
+//                                    can_beat, mastered[], beaten[], recent[], board[], leaderboards[{id, title, format, lower_is_better, entries[]}]}
+//   GET  a=user&name=            -> {user, points, score, rank, score_rank, games[], mastered[], beaten[], recent[], events[], playing}
 // Any signed-in account:
-//   GET  a=status                                   -> {tester, dev, note, apply_open, terms, needs_name, application{status, applied, decided}|null}
+//   GET  a=status                -> {tester, dev, note, apply_open, terms, needs_name, application{status, applied, decided}|null}
 //   POST a=apply {agree: true, terms, os, plays, why?, discord?} -> {status}   (os: windows, linux, mac, steamdeck)
 // Testers only (403 otherwise):
-//   GET  a=access                                   -> {}  (older launchers' check)
-//   GET  a=profile                                  -> {profile{points, rank, players, unlocks, ranked, mastered_count, games[], mastered[], recent[]}}
+//   GET  a=access                -> {}  (older launchers' check)
+//   GET  a=profile               -> {profile{points, score, rank, score_rank, players, unlocks, ranked, mastered_count, beaten_count,
+//                                    games[], mastered[], beaten[], recent[], events[], playing}}
 //   POST a=session-start {game, version, casual?, started?, checkins?, ended?, save_loaded?, local?, unlock_folder?, native?, console?}
 //        -> {session}. casual: why this whole session can't be Ranked ("imported_save"...).
 //        A session sent late (offline, or the game closed first) carries its own times, all unix:
@@ -22,19 +27,24 @@
 //        made from it.
 //   POST a=checkin {session, casual?, save_loaded?} -> {}
 //   POST a=unlocks {session, unlocks: [{id, source, at, casual?, reason?, earlier?, title?, description?, gamerscore?}]}
-//        -> {results: [{id, ranked, reason, new}], mastered}
-//   GET  a=list&game=                                -> {list}  (404 when the game has none)
-//   GET  a=mine&game=                                -> {unlocks[{id, source, points, at, ranked, reason}], points, mastered}
-//   POST a=reset {game}                              -> {cleared}  (dev tools: this account's unlocks for one game)
+//        -> {results: [{id, ranked, reason, new}], mastered, beaten, events: [{id, title}] (events just finished)}
+//   POST a=lboard {session, board, value, at} -> {best, ranked, rank, new_best}   (404 for a board not on the list)
+//   POST a=presence {session, text} -> {}   (what the player is doing; at most every 15 seconds)
+//   POST a=report {game, id, kind, note?, version?} -> {ticket}   kind: didnt_unlock, too_early, wrong_text, other
+//   GET  a=list&game=            -> {list}  (404 when the game has none; carries leaderboards and rich_presence)
+//   GET  a=mine&game=            -> {unlocks[{id, source, points, at, ranked, reason}], points, mastered, beaten, rarity{id: {n, rate}},
+//                                    players, reported{id: status}, boards[{id, value, ranked, at}]}
+//   POST a=reset {game}          -> {cleared}  (dev tools: this account's unlocks for one game)
 declare(strict_types=1);
 
 $a = (string)($_GET['a'] ?? '');
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
 // The open calls are the same for everyone: a short cache in front of the database.
-if ($method === 'GET' && in_array($a, ['games', 'board', 'stats'], true)) {
+if ($method === 'GET' && in_array($a, ['games', 'board', 'stats', 'events', 'game', 'user'], true)) {
     require_once dirname(__DIR__) . '/admin/inc/jcache.php';
-    $g = preg_replace('/[^a-z0-9-]/', '', (string)($_GET['game'] ?? ''));
-    rs_json_cache('ach-' . $a . ($g !== '' ? '-' . substr($g, 0, 60) : ''), 60);
+    $g = preg_replace('/[^a-z0-9-]/', '', strtolower((string)($_GET['game'] ?? $_GET['name'] ?? '')));
+    $by = ($_GET['by'] ?? '') === 'score' ? '-score' : '';
+    rs_json_cache('ach-' . $a . ($g !== '' ? '-' . substr($g, 0, 60) : '') . $by, 60);
 }
 
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
@@ -62,9 +72,21 @@ try {
     if ($a === 'board') {
         $game = (string)($_GET['game'] ?? '');
         if ($game !== '' && !rs_ach_game_ok($game)) rs_ach_out(400, ['error' => 'game is a recomp id.']);
-        rs_ach_out(200, ['board' => rs_ach_board($game, 100)]);
+        rs_ach_out(200, ['board' => rs_ach_board($game, 100, ($_GET['by'] ?? '') === 'score' ? 'score' : 'points')]);
     }
     if ($a === 'stats') rs_ach_out(200, ['stats' => rs_ach_stats()]);
+    if ($a === 'events') rs_ach_out(200, ['events' => rs_ach_events()]);
+    if ($a === 'game') {
+        $game = (string)($_GET['game'] ?? '');
+        $g = rs_ach_game_ok($game) ? rs_ach_public_game($game) : null;
+        if (!$g) rs_ach_out(404, ['error' => 'No achievements for this recomp yet.']);
+        rs_ach_out(200, $g);
+    }
+    if ($a === 'user') {
+        $u = rs_ach_public_user((string)($_GET['name'] ?? ''));
+        if (!$u) rs_ach_out(404, ['error' => 'No player by that name has achievements yet.']);
+        rs_ach_out(200, $u);
+    }
 } catch (Throwable $e) {
     error_log('ach api: ' . $e->getMessage());
     rs_ach_out(500, ['error' => 'Something went wrong on our side.']);
@@ -124,8 +146,32 @@ try {
         }
         $list = $in['unlocks'] ?? null;
         if (!is_array($list) || !array_is_list($list)) rs_ach_out(400, ['error' => 'unlocks is a list.']);
-        [$results, $mastered] = rs_ach_record($acct, $s, $list);
-        rs_ach_out(200, ['results' => $results, 'mastered' => $mastered]);
+        [$results, $mastered, $beaten, $events] = rs_ach_record($acct, $s, $list);
+        rs_ach_out(200, ['results' => $results, 'mastered' => $mastered, 'beaten' => $beaten, 'events' => $events]);
+    }
+    if ($a === 'lboard' || $a === 'presence') {
+        if ($method !== 'POST') rs_ach_out(405, ['error' => 'POST']);
+        $s = rs_ach_session((int)$acct['id'], (string)($in['session'] ?? ''));
+        if (!$s) rs_ach_out(404, ['error' => 'No such session.']);
+        if ($a === 'presence') {
+            if (rs_acct_try_count('ach-rp', 'a' . (int)$acct['id'], 1) >= 4) rs_ach_out(429, ['error' => 'Every 15 seconds at most.']);
+            rs_acct_try_add('ach-rp', 'a' . (int)$acct['id']);
+            rs_ach_presence_set((int)$acct['id'], (string)$s['game'], (string)($in['text'] ?? ''));
+            rs_ach_out(200, []);
+        }
+        $r = rs_ach_lb_submit($acct, $s, (int)($in['board'] ?? 0), (int)($in['value'] ?? 0), (int)($in['at'] ?? time()));
+        if (!$r) rs_ach_out(404, ['error' => 'That leaderboard isn\'t on the list.']);
+        rs_ach_out(200, $r);
+    }
+    if ($a === 'report') {
+        if ($method !== 'POST') rs_ach_out(405, ['error' => 'POST']);
+        if (rs_acct_try_count('ach-rep', 'a' . (int)$acct['id'], 60) >= 10) rs_ach_out(429, ['error' => 'That\'s a lot of reports. Try again in a bit.']);
+        rs_acct_try_add('ach-rep', 'a' . (int)$acct['id']);
+        $game = (string)($in['game'] ?? '');
+        if (!rs_ach_game_ok($game)) rs_ach_out(400, ['error' => 'game is a recomp id.']);
+        [$ticket, $err] = rs_ach_report($acct, $game, (int)($in['id'] ?? 0), (string)($in['kind'] ?? ''), (string)($in['note'] ?? ''), (string)($in['version'] ?? ''));
+        if ($err !== null) rs_ach_out(400, ['error' => $err]);
+        rs_ach_out(200, ['ticket' => $ticket]);
     }
     if ($a === 'list' || $a === 'mine') {
         $game = (string)($_GET['game'] ?? '');

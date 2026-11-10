@@ -12,6 +12,8 @@ $draft = null; $errs = []; $warns = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
+    // Achievement makers edit lists and answer reports; testers, the note and events are the team's.
+    if (in_array($act, ['testers', 'apps', 'note', 'apply_open', 'event', 'event_delete'], true) && !rs_role_at_least('curator')) { rs_flash('That part is for the team.', 'err'); header('Location: achievements.php'); exit; }
     if ($act === 'testers') {
         $names = array_values(array_unique(array_filter(array_map(fn($s) => strtolower(trim($s)), preg_split('/[\s,]+/', (string)($_POST['testers'] ?? '')) ?: []))));
         rs_set_setting('ach_testers', implode(',', $names));
@@ -56,6 +58,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_flash('Saved.');
         header('Location: achievements.php#apps'); exit;
     }
+    if ($act === 'tickets') {
+        $n = rs_ach_ticket_close(array_map('intval', (array)($_POST['ids'] ?? [])), (string)($_POST['to'] ?? ''), (string)($_POST['answer'] ?? ''), rs_me_name());
+        rs_flash($n . ' ' . ($n === 1 ? 'report' : 'reports') . ' updated.');
+        header('Location: achievements.php' . (rs_ach_game_ok((string)($_POST['game'] ?? '')) ? '?game=' . rawurlencode((string)$_POST['game']) : '') . '#tickets'); exit;
+    }
+    if ($act === 'event') {
+        $err = rs_ach_event_save($_POST);
+        rs_flash($err ?? 'Event added.', $err ? 'err' : 'ok');
+        header('Location: achievements.php#events'); exit;
+    }
+    if ($act === 'event_delete') {
+        rs_ach_event_delete((int)($_POST['id'] ?? 0));
+        rs_flash('Event removed.');
+        header('Location: achievements.php#events'); exit;
+    }
     if ($act === 'review_done') {
         rs_ach_tables();
         rs_db()->prepare('UPDATE ach_review SET done = 1 WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
@@ -78,6 +95,10 @@ $counts = $editing ? rs_ach_unlock_counts($game) : [];
 $recent = rs_ach_recent(30);
 $review = rs_ach_review_open();
 $testers = rs_ach_testers();
+$team = rs_role_at_least('curator');
+$tickets = rs_ach_tickets('open', '', 300);
+$ticketCounts = rs_ach_ticket_counts();
+$events = rs_ach_events();
 $appCounts = rs_ach_application_counts();
 $appView = in_array((string)($_GET['apps'] ?? ''), ['approved', 'declined'], true) ? (string)$_GET['apps'] : 'pending';
 $apps = rs_ach_applications($appView, 300);
@@ -107,15 +128,18 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
   <form method="post"><?= $csrf ?><input type="hidden" name="action" value="save">
     <label>Recomp id<input name="game" value="<?= h($game) ?>" required pattern="[a-z0-9][a-z0-9-]*" placeholder="supermarioworldrecomp" spellcheck="false"></label>
     <label>List (JSON)<textarea name="list" rows="18" class="mono" spellcheck="false"><?= h((string)$text) ?></textarea></label>
-    <p class="muted small">source: <code>memory</code> (each achievement has a <code>trigger</code>, an rcheevos rule), <code>events</code> (each has an <code>event</code> name the port fires) or <code>native</code> (Xbox 360: names and points come from the player's disc; give <code>total</code>, the number of achievements, for Mastered). points: 5, 10, 25 or 50.</p>
+    <p class="muted small">source: <code>memory</code> (each achievement has a <code>trigger</code>, an rcheevos rule), <code>events</code> (each has an <code>event</code> name the port fires) or <code>native</code> (Xbox 360: names and points come from the player's disc; give <code>total</code>, the number of achievements, for Mastered). points: 5, 10, 25 or 50. type: <code>progression</code> and <code>win</code> make Beaten (every progression one plus a win), <code>missable</code> warns players. <code>"bonus": true</code> counts for points but not for Beaten or Mastered. Optional: <code>leaderboards</code> [{id, title, format: score, time, frames, millisecs, seconds, minutes or value, lower_is_better, mem or start/cancel/submit/value}] and <code>rich_presence</code> (an rcheevos script, memory lists).</p>
     <label class="check"><input type="checkbox" name="live" value="1"<?= !$editing || $editing['live'] ? ' checked' : '' ?>> Live for test accounts</label>
     <div class="actions"><button class="btn primary">Check and save</button><?php if ($game !== ''): ?> <a class="btn" href="achievements.php">New list</a><?php endif; ?></div>
   </form>
   <?php if ($editing): ?>
   <h3>Unlocks on players' PCs</h3>
-  <table class="ac-table"><thead><tr><th>#</th><th>Achievement</th><th>Points</th><th>Unlocked</th><th>Ranked</th></tr></thead><tbody>
-  <?php foreach ((array)($editing['list']['achievements'] ?? []) as $x): $c = $counts[(int)($x['id'] ?? 0)] ?? [0, 0]; ?>
-    <tr><td><?= (int)($x['id'] ?? 0) ?></td><td><?= h((string)($x['title'] ?? '')) ?></td><td><?= (int)($x['points'] ?? 0) ?></td><td><?= $c[0] ?></td><td><?= $c[1] ?></td></tr>
+  <?php [$rare, $players] = rs_ach_rarity($game); ?>
+  <p class="muted small"><?= $players ?> <?= $players === 1 ? 'player has' : 'players have' ?> played it in RecompLauncher. <a href="https://recomplauncher.com/achievements/<?= h(rawurlencode($game)) ?>" target="_blank" rel="noopener">Its public page</a></p>
+  <table class="ac-table"><thead><tr><th>#</th><th>Achievement</th><th>Type</th><th>Points</th><th>Unlocked</th><th>Ranked</th><th>Rarity</th><th>Reports</th></tr></thead><tbody>
+  <?php foreach ((array)($editing['list']['achievements'] ?? []) as $x): $xid = (int)($x['id'] ?? 0); $c = $counts[$xid] ?? [0, 0]; $tk = $ticketCounts[$game][$xid] ?? 0; ?>
+    <tr><td><?= $xid ?></td><td><?= h((string)($x['title'] ?? '')) ?></td><td class="small"><?= h(trim((string)($x['type'] ?? '') . (!empty($x['bonus']) ? ' bonus' : ''))) ?></td><td><?= (int)($x['points'] ?? 0) ?></td><td><?= $c[0] ?></td><td><?= $c[1] ?></td>
+      <td><?= isset($rare[$xid]) ? round($rare[$xid]['rate'] * 100, 1) . '%' : '–' ?></td><td><?= $tk ? '<a href="#tickets" class="b">' . $tk . ' open</a>' : '' ?></td></tr>
   <?php endforeach; ?>
   </tbody></table>
   <form method="post" onsubmit="return confirm('Remove this list? Players keep what they unlocked.')"><?= $csrf ?><input type="hidden" name="action" value="delete"><input type="hidden" name="game" value="<?= h($game) ?>"><button class="btn danger">Remove the list</button></form>
@@ -133,7 +157,7 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
   <?php endif; ?>
 </section>
 
-<?php $note = rs_ach_note(); ?>
+<?php if ($team): $note = rs_ach_note(); ?>
 <section class="card" id="note">
   <h2>Note for testers</h2>
   <p class="muted small">Pinned at the top of every tester's Achievements page in RecompLauncher (beta 30 and later). Posting a new one opens it again for anyone who folded the last one. Leave the message empty and save to take it down.</p>
@@ -187,6 +211,53 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
     <label>RecompLauncher usernames, separated by commas<textarea name="testers" rows="3" class="mono" spellcheck="false"><?= h(implode(', ', $testers)) ?></textarea></label>
     <div class="actions"><button class="btn">Save</button></div>
   </form>
+</section>
+
+<section class="card" id="events">
+  <h2>Events</h2>
+  <p class="muted small">Like RetroAchievements' monthly events: a goal over a few weeks, and a badge on the profile of everyone who makes it. Only Ranked unlocks count.</p>
+  <?php if ($events): ?>
+  <table class="ac-table"><thead><tr><th>Event</th><th>Goal</th><th>Dates (UTC)</th><th>Finished</th><th></th></tr></thead><tbody>
+  <?php foreach ($events as $e): ?>
+    <tr><td><strong><?= h($e['title']) ?></strong><br><span class="muted small"><?= h($e['description']) ?></span></td>
+      <td class="small"><?= h(RS_ACH_EVENT_KINDS[$e['kind']] ?? $e['kind']) ?>: <?= (int)$e['goal'] ?><?= $e['console'] !== '' ? ' · ' . h(strtoupper($e['console'])) : '' ?><?= $e['games'] ? '<br>' . h(implode(', ', $e['games'])) : ' · any game' ?></td>
+      <td class="small"><?= h(gmdate('M j', $e['starts'])) ?> to <?= h(gmdate('M j', $e['ends'])) ?><?= time() >= $e['starts'] && time() <= $e['ends'] ? ' <span class="pill ok">On now</span>' : '' ?></td><td><?= (int)$e['finished'] ?></td>
+      <td><form method="post" onsubmit="return confirm('Remove this event and its badges?')"><?= $csrf ?><input type="hidden" name="action" value="event_delete"><input type="hidden" name="id" value="<?= (int)$e['id'] ?>"><button class="btn danger">Remove</button></form></td></tr>
+  <?php endforeach; ?>
+  </tbody></table>
+  <?php endif; ?>
+  <form method="post"><?= $csrf ?><input type="hidden" name="action" value="event">
+    <div class="grid2">
+      <label>Title<input name="title" maxlength="80" required placeholder="N64 November"></label>
+      <label>What players do<select name="kind"><?php foreach (RS_ACH_EVENT_KINDS as $k => $v): ?><option value="<?= $k ?>"><?= h($v) ?></option><?php endforeach; ?></select></label>
+      <label>How many<input type="number" name="goal" value="1" min="1" max="10000"></label>
+      <label>Console <span class="muted">(optional)</span><select name="console"><option value="">Any</option><?php foreach (RS_ACH_CONSOLES as $c): ?><option value="<?= $c ?>"><?= h(strtoupper($c)) ?></option><?php endforeach; ?></select></label>
+      <label>Starts<input type="date" name="starts" required></label>
+      <label>Ends<input type="date" name="ends" required></label>
+    </div>
+    <label>Description<input name="description" maxlength="300" placeholder="Beat any N64 game this month for the November badge."></label>
+    <label>Only these recomps <span class="muted">(optional, ids separated by commas)</span><input name="games" placeholder="zelda64recomp, banjorecomp"></label>
+    <div class="actions"><button class="btn primary">Add the event</button></div>
+  </form>
+</section>
+<?php endif; ?>
+
+<section class="card" id="tickets">
+  <h2>Reports from players</h2>
+  <p class="muted small">"This achievement is broken" reports from the launcher, like RetroAchievements' tickets. Fix the list above, then mark them.</p>
+  <?php if (!$tickets): ?><p class="muted">No open reports.</p><?php else: ?>
+  <form method="post"><?= $csrf ?><input type="hidden" name="action" value="tickets">
+  <table class="ac-table"><thead><tr><th></th><th>Recomp</th><th>Achievement</th><th>Problem</th><th>Player</th><th>When (UTC)</th></tr></thead><tbody>
+  <?php foreach ($tickets as $t): [$tt] = rs_ach_title($t['game'], (int)$t['ach']); ?>
+    <tr><td><input type="checkbox" name="ids[]" value="<?= (int)$t['id'] ?>"></td><td><a href="achievements.php?game=<?= h(rawurlencode($t['game'])) ?>"><?= h($t['game']) ?></a></td>
+      <td>#<?= (int)$t['ach'] ?> <?= h($tt) ?></td><td class="small"><strong><?= h(RS_ACH_TICKET_KINDS[$t['kind']] ?? $t['kind']) ?></strong><?= $t['note'] !== '' ? '<br>' . h($t['note']) : '' ?><?= $t['version'] !== '' ? '<br><span class="muted">Version ' . h($t['version']) . '</span>' : '' ?></td>
+      <td><?= h((string)$t['username']) ?></td><td class="small"><?= h($t['at']) ?></td></tr>
+  <?php endforeach; ?>
+  </tbody></table>
+  <label>Answer <span class="muted">(optional, the player sees it)</span><input name="answer" maxlength="300" placeholder="Fixed in the list, thanks!"></label>
+  <div class="actions"><button class="btn primary" name="to" value="fixed">Fixed</button><button class="btn" name="to" value="notabug">Not a bug</button></div>
+  </form>
+  <?php endif; ?>
 </section>
 
 <section class="card" id="review">

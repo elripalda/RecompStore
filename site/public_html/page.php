@@ -231,6 +231,23 @@ try {
             $d = 'Achievements for recompiled games, built into RecompLauncher. Earn them as you play, master whole games, and climb the leaderboards. Now in alpha with testers.';
             $m = ['title' => 'Recomp Achievements · RecompLauncher', 'ogTitle' => 'Recomp Achievements', 'path' => $pp('/pc/achievements'), 'desc' => $d,
                 'body' => '<h1>Recomp Achievements</h1><p>' . $e($d) . '</p>' . $pcNav];
+        } elseif ($p === 'pc-ach-game' || $p === 'pc-ach-user') {
+            // (4.6) A game's achievements, or a player's, on recomplauncher.com/achievements/...
+            if ($p === 'pc-ach-game') {
+                $gid = preg_replace('/[^a-z0-9-]/', '', (string)($_GET['id'] ?? ''));
+                $ga = null;
+                foreach ($pcApps as $x) if ((string)($x['id'] ?? '') === $gid) { $ga = $x; break; }
+                $gn = $ga ? (string)($ga['name'] ?? $gid) : $gid;
+                $d = 'Every Recomp Achievement for ' . $gn . ' in RecompLauncher: how rare each one is, who Beat and Mastered it first, and its leaderboards.';
+                $m = ['title' => $gn . ': Recomp Achievements · RecompLauncher', 'ogTitle' => $gn . ': Recomp Achievements', 'path' => $pp('/pc/achievements/' . $gid), 'desc' => $d,
+                    'body' => '<h1>' . $e($gn) . ': Recomp Achievements</h1><p>' . $e($d) . '</p>' . $pcNav, 'noindex' => !$ga];
+                if ($ga && !empty($ga['hero'])) $m['image'] = (string)$ga['hero'];
+            } else {
+                $un = preg_replace('/[^A-Za-z0-9_.-]/', '', (string)($_GET['name'] ?? ''));
+                $m = ['title' => $un . ': Recomp Achievements · RecompLauncher', 'ogTitle' => $un . ' on Recomp Achievements', 'path' => $pp('/pc/achievements/u/' . $un),
+                    'desc' => $un . '\'s Recomp Achievements in RecompLauncher: points, Beaten and Mastered games, events and latest unlocks.',
+                    'body' => '<h1>' . $e($un) . '</h1>' . $pcNav, 'noindex' => true];
+            }
         } elseif ($p === 'pc-press') {
             $m = ['title' => $name(t('Press kit')), 'path' => $pp('/pc/press'), 'desc' => t('Badges, logos and words for telling people where to get your app.'),
                 'image' => $base . '/assets/press/launcher/badge-dark.png', 'imageW' => 834, 'imageH' => 168, 'imageAlt' => 'Get it on RecompLauncher',

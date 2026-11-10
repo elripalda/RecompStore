@@ -1958,7 +1958,7 @@
   const thumb = (u, w) => { const m = THUMB_RE.exec(String(u || '')); return m ? `${STORE_ORIGIN}/api/thumb.php?f=${encodeURIComponent(m[1])}&w=${w}` : u; };
   const PHONE = matchMedia('(max-width: 860px)');
   const LAUNCHER_ORIGIN = location.origin.replace(/recompstore/i, 'recomplauncher');
-  const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}))?$/;
+  const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
   const pcOut = (h) => (h === '/pc/launcher' ? '/get' : h.replace(/^\/pc/, '') || '/');
   const pcIn = (p) => (p === '/get' ? '/pc/launcher' : p === '/' ? '/pc' : '/pc' + p);
   // The other side gets this one's language along.
@@ -2335,9 +2335,9 @@
     const how = [
       [ACH_STAR, t('Unlocks while you play'), t('Achievements pop up in the corner the moment you earn them, right over your recomp.')],
       ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>', t('Ranked'), t('Earned in a live session, on your own save: it counts as Ranked. Copied saves and cheats only count as Casual.')],
-      ['<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/></svg>', t('Mastered'), t('Unlock every achievement in a game and it\'s Mastered, with its own badge on your profile.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/></svg>', t('Mastered'), t('Finish the story and it\'s Beaten. Unlock every achievement and it\'s Mastered. Both go on your profile.')],
       ['<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>', t('Your profile'), t('Every achievement adds to your points and rank, on every PC you sign in on.')],
-      ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20V11M12 20V4M18 20v-7"/></svg>', t('Leaderboards'), t('See how you stack up against everyone, and game by game.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20V11M12 20V4M18 20v-7"/></svg>', t('Leaderboards'), t('Points, a rarity-weighted score, and each game\'s own best scores and times.')],
       ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>', t('Built from scratch'), t('Our own achievement sets, and the games\' own achievements where they have them, read from your copy.')]];
     view.innerHTML = `
       <article class="page ach-page">
@@ -2351,7 +2351,9 @@
         <section class="ach-how">${how.map(([i, n, d]) => `<div class="glass ach-card"><i>${i}</i><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
         <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games with achievements')}</h2><p class="muted">${t('More are added as developers support it.')}</p></div><div class="ach-games"><p class="muted">${t('Loading…')}</p></div>
           <div class="glass ach-ask"><strong>${t('Don\'t see a game you want?')}</strong><span>${t('Ask its developer to add Recomp Achievements. It\'s free, and the developer guide makes it quick. Most developers are happy to hear a game is wanted.')}</span></div></section>
-        <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Leaderboard')}</h2><p class="muted">${t('Ranked points across every game.')}</p></div><div class="glass ach-board"><p class="muted">${t('Loading…')}</p></div></section>
+        <section class="ach-sec"><div class="ach-sec-head ach-sec-split"><div><h2>${t('Leaderboard')}</h2><p class="muted">${t('Ranked points across every game. Score weights each achievement by how rare it is.')}</p></div>
+          <div class="ach-seg"><button type="button" class="on" data-ach-by="points">${t('Points')}</button><button type="button" data-ach-by="score">${t('Score')}</button></div></div><div class="glass ach-board"><p class="muted">${t('Loading…')}</p></div></section>
+        <section class="ach-sec ach-evsec" hidden><div class="ach-sec-head"><h2>${t('Events')}</h2><p class="muted">${t('Hit the goal before it ends for a badge on your profile.')}</p></div><div class="ach-events"></div></section>
         <section class="glass ach-apply" id="ach-apply"><p class="muted">${t('Loading…')}</p></section>
         <section class="glass ach-dev"><div><span class="kicker">${t('For developers')}</span><strong>${t('Add Recomp Achievements to your recomp')}</strong>
           <span class="muted">${t('Free for any game. One small library: memory achievements, your game\'s own native ones, or events you fire from your code.')}</span></div>
@@ -2363,23 +2365,132 @@
       const box = view.querySelector('.ach-games');
       if (!box) return;
       const games = (j.ok && j.games) || [];
-      box.innerHTML = games.length ? games.map((g) => `<a class="ach-game" href="/pc/game/${encodeURIComponent(g.id)}">
+      box.innerHTML = games.length ? games.map((g) => `<a class="ach-game" href="/pc/achievements/${encodeURIComponent(g.id)}">
           <span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, 360))}" alt="" loading="lazy">` : ''}</span>
           <strong>${esc(g.name)}</strong><span class="muted">${tf('{n} achievements · {p} points', { n: fmt(g.achievements), p: fmt(g.points) })}</span></a>`).join('')
         : `<p class="muted">${t('The first games are being set up with our testers.')}</p>`;
     });
-    achApi('board').then((j) => {
+    const board = (by) => achApi('board' + (by === 'score' ? '&by=score' : '')).then((j) => {
       const box = view.querySelector('.ach-board');
-      if (!box) return;
-      const rows = ((j.ok && j.board) || []).slice(0, 25);
-      box.innerHTML = rows.length ? `<ol class="ach-rows">${rows.map((r) => `<li><b class="ach-rank">${r.rank}</b>${avatarHTML(r, 36)}<span class="ach-name">${esc(r.username)}</span>
-          <span class="ach-num"><strong>${fmt(r.points)}</strong><small>${t('points')}</small></span><span class="ach-num"><strong>${fmt(r.mastered)}</strong><small>${t('Mastered')}</small></span></li>`).join('')}</ol>`
-        : `<p class="muted">${t('No Ranked unlocks yet. Testers are getting started.')}</p>`;
+      if (box) box.innerHTML = achBoardRows((j.ok && j.board) || [], by);
+    });
+    board('points');
+    view.querySelectorAll('[data-ach-by]').forEach((b) => b.addEventListener('click', () => {
+      view.querySelectorAll('[data-ach-by]').forEach((x) => x.classList.toggle('on', x === b));
+      board(b.dataset.achBy);
+    }));
+    achApi('events').then((j) => {
+      const box = view.querySelector('.ach-evsec');
+      const now = Date.now() / 1000;
+      const list = ((j.ok && j.events) || []).filter((e) => e.ends > now - 60 * 86400).slice(0, 4);
+      if (!box || !list.length) return;
+      box.hidden = false;
+      box.querySelector('.ach-events').innerHTML = list.map((e) => `<div class="glass ach-event${e.starts <= now && e.ends >= now ? ' live' : ''}"><i>${ACH_STAR}</i><div><strong>${esc(e.title)}</strong><span class="muted">${esc(e.description)}</span>
+        <small class="muted">${e.starts <= now && e.ends >= now ? tf('Ends {d}', { d: new Date(e.ends * 1000).toLocaleDateString(lang || 'en', { month: 'short', day: 'numeric' }) }) : e.starts > now ? tf('Starts {d}', { d: new Date(e.starts * 1000).toLocaleDateString(lang || 'en', { month: 'short', day: 'numeric' }) }) : t('Ended')} · ${tf('{n} finished', { n: achFmt(e.finished) })}</small></div></div>`).join('');
     });
     const applyBox = view.querySelector('.ach-apply');
     acctReady.then(() => (acct.me ? achApi('status') : null)).then((st) => { if (view.contains(applyBox)) achApplyBox(applyBox, st); });
     view.querySelector('[data-ach-jump]').addEventListener('click', (e) => { e.preventDefault(); applyBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
     if (location.hash === '#ach-apply') setTimeout(() => { const el = view.querySelector('#ach-apply'); if (el) el.scrollIntoView({ block: 'start' }); }, 300);
+  }
+
+  // (4.6) Recomp Achievements: a game's page and a player's page, like RetroAchievements' game and user pages.
+  const achFmt = (n) => Number(n || 0).toLocaleString(lang || 'en');
+  const achPct = (r) => (r >= 0.1 ? Math.round(r * 100) : Math.round(r * 1000) / 10) + '%';
+  const achAgo = (ts) => { const s = Math.max(0, Date.now() / 1000 - ts); if (s < 3600) return tf('{n}m ago', { n: Math.max(1, Math.round(s / 60)) }); if (s < 86400) return tf('{n}h ago', { n: Math.round(s / 3600) }); return new Date(ts * 1000).toLocaleDateString(lang || 'en', { month: 'short', day: 'numeric', year: s > 300 * 86400 ? 'numeric' : undefined }); };
+  // A leaderboard value as its format says: score and value as numbers, the rest as a time.
+  function achLbValue(v, f) {
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    const clock = (ms) => { const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60; return (h ? h + ':' + pad(m) : m) + ':' + pad(s); };
+    if (f === 'frames' || f === 'time') { const ms = Math.round(v * 1000 / 60); return clock(ms) + '.' + pad(Math.floor(ms % 1000 / 10)); }
+    if (f === 'millisecs') return clock(v) + '.' + pad(v % 1000, 3);
+    if (f === 'seconds') return clock(v * 1000);
+    if (f === 'minutes') return Math.floor(v / 60) + ':' + pad(v % 60);
+    return achFmt(v);
+  }
+  const ACH_BADGE = { win: N_('Win'), progression: N_('Progression'), missable: N_('Missable') };
+  const achUser = (u) => `<a class="ach-user" href="/pc/achievements/u/${encodeURIComponent(u.username)}">${avatarHTML(u, 28)}<span>${esc(u.username)}</span></a>`;
+  const achCover = (g, w) => `<span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, w || 360))}" alt="" loading="lazy">` : ''}</span>`;
+  const achBack = () => `<a class="ach-back" href="/pc/achievements">← ${t('Recomp Achievements')}</a>`;
+  const achMissing = (msg) => { view.innerHTML = `<article class="page ach-page">${achBack()}<div class="glass ach-empty"><p class="muted">${msg}</p></div></article>`; };
+
+  function pcAchGame(id) {
+    pcTitle = t('Recomp Achievements');
+    view.innerHTML = `<article class="page ach-page">${achBack()}<p class="muted">${t('Loading…')}</p></article>`;
+    achApi('game&game=' + encodeURIComponent(id)).then((j) => {
+      if (!view.querySelector('.ach-page') || current() !== '/pc/achievements/' + id) return;
+      if (!j.ok) { achMissing(t('This recomp doesn\'t have achievements yet.')); return; }
+      const g = j.game;
+      pcTitle = tf('{game}: Recomp Achievements', { game: g.name });
+      document.title = pcTitle;
+      const awards = (list, label) => list.length ? `<div class="glass ach-firsts"><strong>${label}</strong><div class="ach-chips">${list.map((u) => achUser(u)).join('')}</div></div>` : '';
+      const lbs = j.leaderboards || [];
+      view.innerHTML = `
+        <article class="page ach-page">
+          ${achBack()}
+          <header class="ach-ghead">
+            ${achCover(g, 420)}
+            <div class="ach-gmeta">
+              <span class="kicker">${esc((g.console || '').toUpperCase())}${g.game ? ' · ' + esc(g.game) : ''}</span>
+              <h1>${esc(g.name)}</h1>
+              <p class="lead">${tf('{n} achievements worth {p} points.', { n: achFmt(j.count), p: achFmt(j.points) })} ${j.can_beat ? t('Finish the story to Beat it, unlock them all to Master it.') : t('Unlock them all to Master it.')}</p>
+              <div class="ach-cta"><a class="btn primary" href="/pc/game/${encodeURIComponent(g.id)}">${t('Get it in RecompLauncher')}</a></div>
+            </div>
+          </header>
+          <section class="ach-stats">${[[t('Players'), j.players], [t('Beaten'), j.beaten.length], [t('Mastered'), j.mastered.length], [t('Leaderboards'), lbs.length]].map(([n, v]) => `<div class="glass ach-stat"><strong>${achFmt(v)}</strong><span>${n}</span></div>`).join('')}</section>
+          <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Achievements')}</h2><p class="muted">${t('How many players who started the game have each one.')}</p></div>
+            <div class="glass ach-list">${j.achievements.map((a) => `<div class="ach-item${a.bonus ? ' bonus' : ''}">
+              <i class="ach-star">${ACH_STAR}</i>
+              <div class="ach-item-t"><strong>${esc(a.title)}</strong><span class="muted">${esc(a.description)}</span>
+                <span class="ach-tags">${a.type && ACH_BADGE[a.type] ? `<b class="ach-tag ${a.type}">${t(ACH_BADGE[a.type])}</b>` : ''}${a.bonus ? `<b class="ach-tag bonus">${t('Bonus')}</b>` : ''}</span></div>
+              <div class="ach-item-r"><strong>${achFmt(a.points)}<small> ${t('pts')}</small></strong><span class="ach-rare"><i style="width:${Math.max(2, Math.round(a.rarity * 100))}%"></i></span><small class="muted">${a.unlocks ? tf('{p} of players', { p: achPct(a.rarity) }) : t('Nobody yet')}</small></div>
+            </div>`).join('')}</div></section>
+          ${j.beaten.length || j.mastered.length ? `<section class="ach-firsts-row">${awards(j.mastered, t('First to Master it'))}${awards(j.beaten, t('First to Beat it'))}</section>` : ''}
+          <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Top Players')}</h2><p class="muted">${t('Ranked points in this game.')}</p></div><div class="glass ach-board">${achBoardRows(j.board)}</div></section>
+          ${lbs.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Leaderboards')}</h2><p class="muted">${t('Best scores and times, from Ranked play.')}</p></div>
+            <div class="ach-lbs${lbs.length % 2 ? ' odd' : ''}">${lbs.map((b) => `<div class="glass ach-lb"><strong>${esc(b.title)}</strong>${b.description ? `<span class="muted">${esc(b.description)}</span>` : ''}
+              ${b.entries.length ? `<ol>${b.entries.map((e) => `<li><b>${e.rank}</b>${achUser(e)}<span class="ach-lbv">${esc(achLbValue(e.value, b.format))}</span></li>`).join('')}</ol>` : `<p class="muted">${t('No entries yet.')}</p>`}</div>`).join('')}</div></section>` : ''}
+          ${j.recent.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Latest Unlocks')}</h2></div><div class="glass ach-list">${j.recent.map((r) => `<div class="ach-item slim">${achUser(r)}<div class="ach-item-t"><strong>${esc(r.title)}</strong></div><div class="ach-item-r"><small class="muted">${achAgo(r.at)}${r.ranked ? '' : ' · ' + t('Casual')}</small></div></div>`).join('')}</div></section>` : ''}
+        </article>`;
+    });
+  }
+
+  function achBoardRows(rows, by) {
+    if (!rows || !rows.length) return `<p class="muted">${t('No Ranked unlocks yet.')}</p>`;
+    return `<ol class="ach-rows">${rows.slice(0, 25).map((r) => `<li><b class="ach-rank">${r.rank}</b>${avatarHTML(r, 36)}<a class="ach-name" href="/pc/achievements/u/${encodeURIComponent(r.username)}">${esc(r.username)}</a>
+      <span class="ach-num"><strong>${achFmt(by === 'score' ? r.score : r.points)}</strong><small>${by === 'score' ? t('score') : t('points')}</small></span><span class="ach-num"><strong>${achFmt(r.mastered)}</strong><small>${t('Mastered')}</small></span></li>`).join('')}</ol>`;
+  }
+
+  function pcAchUser(name) {
+    pcTitle = t('Recomp Achievements');
+    view.innerHTML = `<article class="page ach-page">${achBack()}<p class="muted">${t('Loading…')}</p></article>`;
+    achApi('user&name=' + encodeURIComponent(name)).then((j) => {
+      if (!view.querySelector('.ach-page') || current() !== '/pc/achievements/u/' + name) return;
+      if (!j.ok) { achMissing(t('No player by that name has achievements yet.')); return; }
+      const u = j.user;
+      pcTitle = tf('{name}: Recomp Achievements', { name: u.username });
+      document.title = pcTitle;
+      const awardGrid = (list, label) => list.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${label}</h2></div><div class="ach-games ach-awards">${list.map((g) => `<a class="ach-game ${g.award}" href="/pc/achievements/${encodeURIComponent(g.id)}">${achCover(g)}<b class="ach-tag ${g.award}">${g.award === 'mastered' ? t('Mastered') : t('Beaten')}</b><strong>${esc(g.name)}</strong><span class="muted">${achAgo(g.at)}${g.ranked ? '' : ' · ' + t('Casual')}</span></a>`).join('')}</div></section>` : '';
+      const ev = j.events || [];
+      view.innerHTML = `
+        <article class="page ach-page">
+          ${achBack()}
+          <header class="ach-uhead">
+            ${avatarHTML(u, 96)}
+            <div><h1>${esc(u.username)} ${u.tester ? `<span class="ach-badge on">${t('Tester')}</span>` : ''}</h1>
+              <p class="muted">${tf('Playing since {d}', { d: new Date(u.since + 'T00:00:00Z').toLocaleDateString(lang || 'en', { month: 'long', year: 'numeric' }) })}</p>
+              ${j.playing ? `<p class="ach-now"><i></i>${tf('Playing {game}', { game: `<a href="/pc/achievements/${encodeURIComponent(j.playing.game)}">${esc(j.playing.name)}</a>` })}${j.playing.text ? ' · ' + esc(j.playing.text) : ''}</p>` : ''}</div>
+          </header>
+          <section class="ach-stats">${[[t('Points'), j.points, j.rank ? '#' + j.rank : ''], [t('Score'), j.score, j.score_rank ? '#' + j.score_rank : ''], [t('Beaten'), j.beaten_count, ''], [t('Mastered'), j.mastered_count, '']].map(([n, v, r]) => `<div class="glass ach-stat"><strong>${achFmt(v)}${r ? `<small> ${r}</small>` : ''}</strong><span>${n}</span></div>`).join('')}</section>
+          ${ev.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Events')}</h2></div><div class="ach-events">${ev.map((e) => `<div class="glass ach-event${e.won ? ' won' : ''}"><i>${ACH_STAR}</i><div><strong>${esc(e.title)}</strong><span class="muted">${e.won ? tf('Finished {d}', { d: achAgo(e.won) }) : tf('{have} of {goal}', { have: achFmt(e.have), goal: achFmt(e.goal) })}</span>${e.won ? '' : `<span class="ach-rare"><i style="width:${Math.round(e.have / Math.max(1, e.goal) * 100)}%"></i></span>`}</div></div>`).join('')}</div></section>` : ''}
+          ${awardGrid([...j.mastered.map((g) => Object.assign({ award: 'mastered' }, g)), ...j.beaten.filter((b) => !j.mastered.some((m) => m.id === b.id)).map((g) => Object.assign({ award: 'beaten' }, g))], t('Beaten and Mastered'))}
+          <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games')}</h2></div><div class="glass ach-list">${j.games.map((g) => `<a class="ach-item prog" href="/pc/achievements/${encodeURIComponent(g.id)}">${achCover(g, 120)}
+              <div class="ach-item-t"><strong>${esc(g.name)}</strong><span class="ach-rare wide"><i style="width:${g.achievements ? Math.round(Math.min(1, g.unlocked / g.achievements) * 100) : 0}%"></i></span><span class="muted">${tf('{n} of {t}', { n: achFmt(g.unlocked), t: achFmt(g.achievements) })} · ${tf('{p} points', { p: achFmt(g.points) })}</span></div>
+              <div class="ach-item-r">${g.mastered ? `<b class="ach-tag mastered">${t('Mastered')}</b>` : g.beaten ? `<b class="ach-tag beaten">${t('Beaten')}</b>` : ''}</div></a>`).join('') || `<p class="muted">${t('No games yet.')}</p>`}</div></section>
+          ${j.recent.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Latest Unlocks')}</h2></div><div class="glass ach-list">${j.recent.map((r) => `<div class="ach-item"><i class="ach-star">${ACH_STAR}</i><div class="ach-item-t"><strong>${esc(r.title)}</strong><span class="muted">${esc(r.name)}${r.description ? ' · ' + esc(r.description) : ''}</span></div>
+              <div class="ach-item-r"><strong>${achFmt(r.points)}<small> ${t('pts')}</small></strong><small class="muted">${achAgo(r.at)}${r.rarity != null ? ' · ' + tf('{p} of players', { p: achPct(r.rarity) }) : ''}${r.ranked ? '' : ' · ' + t('Casual')}</small></div></div>`).join('')}</div></section>` : ''}
+        </article>`;
+    });
   }
 
   let pcCountsTried = false;
@@ -2403,6 +2514,8 @@
       else if (h === '/pc/settings') settingsPage(true);
       else if (h === '/pc/sdk') pcSdk();
       else if (h === '/pc/achievements') pcAchievements();
+      else if (/^\/pc\/achievements\/u\/[A-Za-z0-9_.-]{2,40}$/.test(h)) pcAchUser(decodeURIComponent(h.slice(19)));
+      else if (/^\/pc\/achievements\/[a-z0-9-]{1,64}$/.test(h)) pcAchGame(h.slice(17));
       else pcHome();
       document.title = pcTitle;
       enhanceRows(view);
