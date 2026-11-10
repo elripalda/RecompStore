@@ -8,6 +8,182 @@
     "format"
   ],
   "properties": {
+    "inputs": {
+      "type": "array",
+      "maxItems": 32,
+      "description": "Named game/disc/DLC inputs, explicit shared-key requirements, and NVIDIA's DLSS file (nvidia.dlss). See SETUP-INPUTS.md. No multidisc hashing, BIOS, firmware or font support.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "game",
+              "disc",
+              "dlc",
+              "update",
+              "key",
+              "runtime"
+            ],
+            "default": "game",
+            "description": "runtime: a file the launcher fetches itself (nvidia.dlss); the player picks nothing."
+          },
+          "optional": {
+            "type": "boolean",
+            "default": false
+          },
+          "shared": {
+            "enum": [
+              "switch.prod-keys",
+              "switch.title-keys",
+              "wiiu.common-key",
+              "nvidia.dlss"
+            ],
+            "description": "Shared across games. nvidia.dlss: NVIDIA's nvngx_dlss.dll, downloaded from NVIDIA by the launcher on NVIDIA RTX PCs. Coming soon to RecompLauncher; older launchers show an error for it, so add it once the version that has it is out."
+          },
+          "destination": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:\\\\|:|[{}]))(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+[^/]$",
+            "description": "Optional installation-relative file path. No folders, absolute paths, parent components or placeholders."
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "file",
+                    "folder"
+                  ]
+                },
+                "extensions": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]+$"
+                  }
+                },
+                "requires": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  },
+                  "description": "IDs of required shared-key inputs in this manifest, activated only for this selected format."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "shared"
+              ],
+              "properties": {
+                "shared": {
+                  "const": "nvidia.dlss"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "role": {
+                  "const": "runtime"
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "not": {
+                "required": [
+                  "formats"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "shared"
+              ],
+              "properties": {
+                "shared": {
+                  "not": {
+                    "const": "nvidia.dlss"
+                  }
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "role"
+              ],
+              "properties": {
+                "role": {
+                  "const": "key"
+                },
+                "optional": {
+                  "const": false
+                }
+              },
+              "not": {
+                "required": [
+                  "formats"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "not": {
+                "required": [
+                  "shared"
+                ]
+              }
+            },
+            "then": {
+              "required": [
+                "formats"
+              ],
+              "properties": {
+                "formats": {
+                  "minItems": 1
+                },
+                "role": {
+                  "enum": [
+                    "game",
+                    "disc",
+                    "dlc",
+                    "update"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
     "$schema": {
       "type": "string"
     },
@@ -54,6 +230,19 @@
             "iso9660": {
               "type": "string",
               "description": "A file in the top folder of a PS2 (or any ISO 9660) disc image."
+            },
+            "nup_build_id": {
+              "type": "string",
+              "pattern": "^[0-9A-Fa-f]{8,64}$",
+              "description": "The build ID of a Nintendo Switch or Switch 2 .nup package (hex, 8 to 64 digits; a prefix such as the first 8 is fine), read from the exefs/main of its newest title. A folder with exefs/main is checked the same way. Judged by the file's content, never its name. Needs no keys."
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]{3,16}$"
+              },
+              "description": "The disc or cartridge IDs it reads, as on the copy: a GameCube or Wii disc's (GZ2E01, or GZ2 for every region), an N64 cartridge's game code, a PlayStation disc's serial. Another game's copy is refused, and the player's copies are recognised by it."
             }
           },
           "additionalProperties": false
@@ -83,6 +272,48 @@
             },
             "additionalProperties": false
           }
+        },
+        "update": {
+          "type": "object",
+          "description": "A second thing the game needs beside the player's copy, picked on its own (a title update, or a PS4 update folder kept apart from the game). The launcher puts it in the game's folder and keeps it across updates.",
+          "required": [
+            "into",
+            "label"
+          ],
+          "properties": {
+            "into": {
+              "type": "string",
+              "description": "The folder inside your release it goes in, like game/Content or update."
+            },
+            "label": {
+              "type": "string",
+              "description": "What to ask for, like 'Your title update (TU 1.03)'."
+            },
+            "accepts": {
+              "enum": [
+                "file",
+                "folder",
+                "file or folder"
+              ],
+              "default": "file",
+              "description": "Whether the player picks a file, a folder, or either."
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "The game plays without it; the player can skip it."
+            },
+            "name": {
+              "type": "string",
+              "description": "The name it must have there (it's put in under this name)."
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "description": "The one known file: checked when it's picked."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -190,7 +421,7 @@
     },
     "exit_codes": {
       "type": "object",
-      "description": "Exit code (as a string) to the message shown to the player.",
+      "description": "Exit code (as a string) to the message shown to the player. \"ok\" instead of a message: the game closes with that code when it's quit normally, so it isn't shown as a crash.",
       "additionalProperties": {
         "type": "string"
       }
@@ -201,8 +432,7 @@
         "type": "object",
         "required": [
           "id",
-          "label",
-          "choices"
+          "label"
         ],
         "properties": {
           "id": {
@@ -248,6 +478,142 @@
           "when": {
             "$ref": "#/definitions/values",
             "description": "Greyed out unless these keys have these values."
+          },
+          "group": {
+            "type": "string",
+            "description": "A heading it's shown under, like \"Controls\". Settings keep their order; a heading shows where the group changes."
+          },
+          "advanced": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hidden until the player presses Show Advanced Options. Its value stays, and it's still written."
+          },
+          "slider": {
+            "type": "object",
+            "description": "A number on a slider instead of choices. The value is read from \"key\" like \"set\" keys (Section/Key), and written with \"format\". A value off the step (set in the game's own menu) is shown as it is and left alone until the player moves the slider.",
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "The key it sets in the settings file (Section/Key for INI sections and TOML tables). Not needed with \"in\": \"args\"."
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "step": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "How far one move goes. A hundredth of the range when it isn't said."
+              },
+              "format": {
+                "type": "string",
+                "default": "%g",
+                "description": "How the number is written, printf style: \"%.2f\", \"%d\", \"%g\"."
+              },
+              "args": {
+                "$ref": "#/definitions/args",
+                "description": "With \"in\": \"args\": the arguments, with {value} for the number. The same as the setting's own \"args\"."
+              }
+            },
+            "additionalProperties": false
+          },
+          "args": {
+            "$ref": "#/definitions/args",
+            "description": "For a slider with \"in\": \"args\": its arguments, with {value} for the number, like [\"--sens\", \"{value}\"]. Passed only once the player has moved it."
+          },
+          "bindings": {
+            "type": "object",
+            "description": "Key bindings instead of choices: the game's actions, each with the keys it's on in the settings file. The game page shows each action with its keys as chips; the player presses a chip and then the new key, mouse button or wheel. Only actions the player changes are written.",
+            "required": [
+              "actions"
+            ],
+            "properties": {
+              "separator": {
+                "type": "string",
+                "description": "Joins several keys on one action, in the order the player set them. Default \"|\"."
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8,
+                "description": "Keys one action can have. Default 2."
+              },
+              "actions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label",
+                    "key"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Where it's written, with the same rules as \"set\": Section/Key for INI or TOML, nested/keys for JSON."
+                    },
+                    "pad": {
+                      "type": "boolean",
+                      "description": "It takes a controller button too."
+                    }
+                  }
+                }
+              },
+              "names": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "The launcher's name for a key or button, to the name your file uses for it, like {\"Return\": \"Enter\"}. Without one, a name the file already uses for that key is kept."
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "choices"
+            ]
+          },
+          {
+            "required": [
+              "slider"
+            ]
+          },
+          {
+            "required": [
+              "bindings"
+            ]
+          }
+        ]
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Groups used in settings' \"group\". A group marked advanced is hidden as a whole until the player shows advanced options.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The name the settings use in \"group\"."
+          },
+          "advanced": {
+            "type": "boolean",
+            "default": false
           }
         },
         "additionalProperties": false
@@ -369,6 +735,19 @@
         },
         "additionalProperties": false
       }
+    },
+    "requires": {
+      "description": "The launcher features this profile uses. Parts needing a feature the player's launcher doesn't have are left out (no Easy Setup, no settings tab for it); the game still installs and plays.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/launcherFeature"
+      },
+      "uniqueItems": true
+    },
+    "min": {
+      "description": "The oldest launcher version this profile's Easy Setup, settings and installer parts work with, like \"0.90.0-beta.27\". Older launchers leave those parts out.",
+      "type": "string",
+      "pattern": "^v?\\d+\\.\\d+\\.\\d+(-[A-Za-z]+\\.\\d+)?$"
     }
   },
   "additionalProperties": false,
@@ -413,6 +792,38 @@
         },
         "additionalProperties": false
       }
+    },
+    "launcherFeature": {
+      "description": "A launcher feature a profile can say it uses (\"requires\"). A launcher that doesn't have one leaves out the parts that need it, and the game installs and plays the normal way. RecompLauncher 0.90 Beta 27 supports these.",
+      "enum": [
+        "start",
+        "start.linux",
+        "start.macos",
+        "setup",
+        "console",
+        "clone",
+        "makes",
+        "player_note",
+        "installer",
+        "needs",
+        "exit_codes",
+        "files.folder",
+        "files.flag",
+        "files.env",
+        "files.setup",
+        "files.accepts",
+        "files.contains",
+        "files.sha256",
+        "files.update",
+        "settings.toml",
+        "settings.ini",
+        "settings.json",
+        "settings.args",
+        "settings.choices",
+        "settings.slider",
+        "settings.bindings",
+        "settings.groups"
+      ]
     }
   }
 }

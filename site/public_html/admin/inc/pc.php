@@ -624,7 +624,9 @@ function rs_pc_sdk_due(array $a): bool {
 function rs_pc_sdk_keys(string $json): array {
     $j = json_decode($json, true);
     if (!is_array($j)) return [];
-    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps'])];
+    $dlss = false; // (4.6) it asks the launcher for NVIDIA's DLSS file
+    foreach ((array)($j['inputs'] ?? []) as $in) if (is_array($in) && ($in['shared'] ?? '') === 'nvidia.dlss') $dlss = true;
+    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps']), 'dlss' => $dlss];
 }
 
 // (4.3) The catalog's "support" list per recomp: which launcher features it has, and who made each

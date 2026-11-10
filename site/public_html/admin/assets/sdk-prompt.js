@@ -14,7 +14,7 @@
       '',
       '1. Read all of https://recomplauncher.com/sdk-files/recomplauncher-agent.md before changing anything. It has the steps, the rules, the full SDK guide with the Recomp Standards, worked examples and the JSON schema. If you can\'t open links, stop and ask me to paste it in.',
       '2. Check the repo\'s open pull requests and issues first. If someone is already adding recomplauncher.json, stop and tell me.',
-      '3. Follow the file: recomplauncher.json with every level that fits, shipped in every release (zip and AppImage); the small, safe Recomp Standards fixes (the standard file formats for its console, like CHD, a --game option, --keys where the player\'s own keys are needed); and the badge.',
+      '3. Follow the file: recomplauncher.json with every level that fits, shipped in every release (zip and AppImage); the small, safe Recomp Standards fixes (the standard file formats for its console, like CHD, a --game option, --keys where the player\'s own keys are needed); and the badge. If it supports DLSS but its releases leave out nvngx_dlss.dll, don\'t add the nvidia.dlss input yet (it\'s coming soon to RecompLauncher); mention it in the "For the developer" note instead.',
       '4. The badge goes near the top of the README. ' + (id
         ? 'This recomp is on RecompLauncher, at https://recomplauncher.com/game/' + id + '. Use exactly:'
         : 'This recomp isn\'t on RecompLauncher yet, so the badge links to the site. Use exactly:'),

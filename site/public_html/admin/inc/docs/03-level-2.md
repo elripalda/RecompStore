@@ -62,6 +62,23 @@ If your recomp has DLSS, FSR, XeSS or frame generation, expose it as a setting l
 }
 ```
 
+### Can't ship NVIDIA's DLSS file?
+
+NVIDIA's `nvngx_dlss.dll` isn't open source, so some projects (GPL ones especially) leave it out of their releases. Ask the launcher for it instead and players don't have to find it:
+
+```json
+{
+  "inputs": [
+    { "id": "dlss", "label": "NVIDIA DLSS", "role": "runtime", "shared": "nvidia.dlss",
+      "optional": true, "destination": "nvngx_dlss.dll" }
+  ]
+}
+```
+
+On a PC with an NVIDIA RTX card, the launcher downloads the file straight from NVIDIA's own DLSS repo the first time a game asks, checks it's signed by NVIDIA, keeps one copy for every game that uses it, and puts it at `destination` in your install. If your recomp takes a path instead, leave out `destination` and pass `"--dlss={input:dlss}"` in `start.args`. On other PCs it's skipped, and arguments with `{input:dlss}` are left out. Players can turn it off in Easy Setup. It never replaces a DLSS file your release ships itself.
+
+Coming soon to RecompLauncher. Launchers from before it show an error in Easy Setup for a file with this input, so add it once the version that has it is out.
+
 ## `looks`
 
 Players can pick a look for any game on Windows: Sharp, Vivid, Film, CRT or Studio monitor. They run on ReShade, which the launcher puts next to your executable for that start only and takes away when the game closes. Your release isn't changed.

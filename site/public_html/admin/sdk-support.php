@@ -70,6 +70,7 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
         'kind' => in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console',
         'pr' => $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '',
         'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
+        'dlss' => !empty($r['dlss']),
         'due' => !$r || $c['age'] >= 7 * 86400 || !array_key_exists('badge', $r)];
 }
 // Every row, the counts per status, and the ones due a check (most downloaded first).
@@ -140,7 +141,7 @@ function rs_sdk_row_html(array $row, string $csrf): string {
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
           <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><?php if ($row['badge']): ?><span class="sdk-star" title="Its README has the Get it on RecompLauncher badge" aria-label="Badge in README">★</span><?php endif; ?></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
-          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?></span></div></td>
+          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span></div></td>
           <td class="c-act"><div class="sdk-btns">
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <?php if ($st === 'ships'): ?><?= $row['badge'] ? '' : $badgePrBtn(' primary') ?>

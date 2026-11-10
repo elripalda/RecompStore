@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "about": "Where RecompLauncher gets NVIDIA's DLSS file for recomps that ask for it (inputs: shared nvidia.dlss). The file comes straight from NVIDIA's own DLSS repo; recomplauncher.com doesn't host it. Check the file is signed by NVIDIA Corporation before using it.",
+  "version": "310.9.16",
+  "source": "https://github.com/NVIDIA/DLSS",
+  "license": "https://github.com/NVIDIA/DLSS/blob/v310.9.16/LICENSE.txt",
+  "files": [
+    {
+      "name": "nvngx_dlss.dll",
+      "os": "windows",
+      "url": "https://raw.githubusercontent.com/NVIDIA/DLSS/v310.9.16/lib/Windows_x86_64/rel/nvngx_dlss.dll",
+      "size": 58956912,
+      "signer": "NVIDIA Corporation"
+    }
+  ]
+}

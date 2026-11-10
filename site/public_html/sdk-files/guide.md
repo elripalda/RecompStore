@@ -239,6 +239,31 @@ can't add them from outside. It can give players one clear place to turn them on
 DLSS ships through NVIDIA's Streamline SDK, which is free to use. If you're adding it, the
 setting above is all the launcher needs.
 
+#### Can't ship NVIDIA's DLSS file?
+
+NVIDIA's `nvngx_dlss.dll` isn't open source, so some projects (GPL ones especially) leave it out
+of their releases. Ask the launcher for it instead and players don't have to find it:
+
+```json
+{
+  "inputs": [
+    { "id": "dlss", "label": "NVIDIA DLSS", "role": "runtime", "shared": "nvidia.dlss",
+      "optional": true, "destination": "nvngx_dlss.dll" }
+  ]
+}
+```
+
+On a PC with an NVIDIA RTX card, the launcher downloads the file straight from NVIDIA's own DLSS
+repo the first time a game asks, checks it's signed by NVIDIA, keeps one copy for every game
+that uses it, and puts it at `destination` in your install. If your recomp takes a path instead,
+leave out `destination` and pass `"--dlss={input:dlss}"` in `start.args`. On other PCs it's
+skipped, and arguments with `{input:dlss}` are left out. Players can turn it off in Easy Setup.
+It never replaces a DLSS file your release ships itself.
+
+Coming soon to RecompLauncher. Launchers from before it show an error in Easy Setup for a file
+with this input, so add it once the version that has it is out. Works with a legacy `game`
+field or with other inputs.
+
 ### Looks
 
 Players can pick a look for any game on Windows: Sharp, Vivid, Film, CRT or Studio monitor. They
