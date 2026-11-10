@@ -2366,7 +2366,7 @@
       if (!box) return;
       const games = (j.ok && j.games) || [];
       box.innerHTML = games.length ? games.map((g) => `<a class="ach-game" href="/pc/achievements/${encodeURIComponent(g.id)}">
-          <span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, 360))}" alt="" loading="lazy">` : ''}</span>
+          <span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, 400))}" alt="" loading="lazy">` : ''}</span>
           <strong>${esc(g.name)}</strong><span class="muted">${tf('{n} achievements · {p} points', { n: fmt(g.achievements), p: fmt(g.points) })}</span></a>`).join('')
         : `<p class="muted">${t('Xbox 360 games appear here as testers play them.')}</p>`;
     });
@@ -2410,7 +2410,7 @@
   }
   const ACH_BADGE = { win: N_('Win'), progression: N_('Progression'), missable: N_('Missable') };
   const achUser = (u) => `<a class="ach-user" href="/pc/achievements/u/${encodeURIComponent(u.username)}">${avatarHTML(u, 28)}<span>${esc(u.username)}</span></a>`;
-  const achCover = (g, w) => `<span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, w || 360))}" alt="" loading="lazy">` : ''}</span>`;
+  const achCover = (g, w) => `<span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, w || 400))}" alt="" loading="lazy">` : ''}</span>`;
   const achBack = () => `<a class="ach-back" href="/pc/achievements">← ${t('Recomp Achievements')}</a>`;
   const achMissing = (msg) => { view.innerHTML = `<article class="page ach-page">${achBack()}<div class="glass ach-empty"><p class="muted">${msg}</p></div></article>`; };
 
@@ -2429,7 +2429,7 @@
         <article class="page ach-page">
           ${achBack()}
           <header class="ach-ghead">
-            ${achCover(g, 420)}
+            ${achCover(g, 640)}
             <div class="ach-gmeta">
               <span class="kicker">${esc((g.console || '').toUpperCase())}${g.game ? ' · ' + esc(g.game) : ''}</span>
               <h1>${esc(g.name)}</h1>
@@ -2484,7 +2484,7 @@
           <section class="ach-stats">${[[t('Points'), j.points, j.rank ? '#' + j.rank : ''], [t('Score'), j.score, j.score_rank ? '#' + j.score_rank : ''], [t('Beaten'), j.beaten_count, ''], [t('Mastered'), j.mastered_count, '']].map(([n, v, r]) => `<div class="glass ach-stat"><strong>${achFmt(v)}${r ? `<small> ${r}</small>` : ''}</strong><span>${n}</span></div>`).join('')}</section>
           ${ev.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Events')}</h2></div><div class="ach-events">${ev.map((e) => `<div class="glass ach-event${e.won ? ' won' : ''}"><i>${ACH_STAR}</i><div><strong>${esc(e.title)}</strong><span class="muted">${e.won ? tf('Finished {d}', { d: achAgo(e.won) }) : tf('{have} of {goal}', { have: achFmt(e.have), goal: achFmt(e.goal) })}</span>${e.won ? '' : `<span class="ach-rare"><i style="width:${Math.round(e.have / Math.max(1, e.goal) * 100)}%"></i></span>`}</div></div>`).join('')}</div></section>` : ''}
           ${awardGrid([...j.mastered.map((g) => Object.assign({ award: 'mastered' }, g)), ...j.beaten.filter((b) => !j.mastered.some((m) => m.id === b.id)).map((g) => Object.assign({ award: 'beaten' }, g))], t('Beaten and Mastered'))}
-          <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games')}</h2></div><div class="glass ach-list">${j.games.map((g) => `<a class="ach-item prog" href="/pc/achievements/${encodeURIComponent(g.id)}">${achCover(g, 120)}
+          <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games')}</h2></div><div class="glass ach-list">${j.games.map((g) => `<a class="ach-item prog" href="/pc/achievements/${encodeURIComponent(g.id)}">${achCover(g, 160)}
               <div class="ach-item-t"><strong>${esc(g.name)}</strong><span class="ach-rare wide"><i style="width:${g.achievements ? Math.round(Math.min(1, g.unlocked / g.achievements) * 100) : 0}%"></i></span><span class="muted">${tf('{n} of {t}', { n: achFmt(g.unlocked), t: achFmt(g.achievements) })} · ${tf('{p} points', { p: achFmt(g.points) })}</span></div>
               <div class="ach-item-r">${g.mastered ? `<b class="ach-tag mastered">${t('Mastered')}</b>` : g.beaten ? `<b class="ach-tag beaten">${t('Beaten')}</b>` : ''}</div></a>`).join('') || `<p class="muted">${t('No games yet.')}</p>`}</div></section>
           ${j.recent.length ? `<section class="ach-sec"><div class="ach-sec-head"><h2>${t('Latest Unlocks')}</h2></div><div class="glass ach-list">${j.recent.map((r) => `<div class="ach-item"><i class="ach-star">${ACH_STAR}</i><div class="ach-item-t"><strong>${esc(r.title)}</strong><span class="muted">${esc(r.name)}${r.description ? ' · ' + esc(r.description) : ''}</span></div>
