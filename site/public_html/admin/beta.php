@@ -31,6 +31,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_log('settings', 'Discord sign-in', 'saved');
             rs_flash(rs_dc_ready() ? 'Saved. Open recompstore.com/beta and sign in with Discord to try it.' : 'Saved. It needs the Client ID, the Client Secret and the server ID to work.');
             $back = 'beta.php#discord';
+        } elseif ($action === 'dc_counter' || $action === 'dc_count_now') {
+            // (4.6) The member counter channel at the top of the Discord server.
+            if ($action === 'dc_counter') {
+                $on = ($_POST['on'] ?? '') === '1';
+                rs_set_setting('dc_count_on', $on ? '1' : '0');
+                rs_log('settings', 'Discord member counter', $on ? 'on' : 'off');
+            }
+            if (rs_dc_count_on()) {
+                $cs = rs_dc_count_run();
+                if ($cs['err'] !== '') rs_flash($cs['err'], 'err');
+                else rs_flash('The channel shows ' . ($cs['live'] ?? rs_dc_count_name((int)$cs['count'])) . '. It updates every 10 minutes.');
+            } else rs_flash('Member counter off. The channel stays as it is; delete it in Discord if you don\'t want it.');
+            $back = 'beta.php#dc-counter';
         } elseif ($action === 'make') {
             $gid = (string)($_POST['game'] ?? '');
             $n = max(1, min(200, (int)($_POST['count'] ?? 1)));
@@ -106,6 +119,22 @@ $dcRecent = rs_db()->query('SELECT * FROM beta_discord ORDER BY created DESC LIM
     <p class="muted">Invite link shown to people who aren't in the server: <?= $dc['invite'] !== '' ? h($dc['invite']) : 'none yet' ?> (Settings, Discord invite).</p>
     <p><button class="primary">Save</button> <?php if ($dc['bot'] !== ''): ?><label class="check" style="display:inline-flex;margin-left:12px"><input type="checkbox" name="dc_bot_clear" value="1"> Remove the bot token</label><?php endif; ?></p>
   </form>
+  <?php $cs = rs_dc_count_state(); $cOn = rs_dc_count_on(); $cChan = trim((string)rs_setting('dc_count_chan', '')); ?>
+  <div class="dc-counter" id="dc-counter">
+    <h3>Member counter <?= $cOn ? ($cs['err'] !== '' ? '<span class="status-pill off">Needs a look</span>' : '<span class="status-pill used">On</span>') : '<span class="status-pill">Off</span>' ?></h3>
+    <p class="muted">A voice channel at the top of your server named "Members: 12,345". Everyone sees it and nobody can join it. The bot above renames it every 10 minutes when the number changes (Discord allows only a couple of renames per 10 minutes).</p>
+    <dl class="dc-counter-facts">
+      <div><dt>Channel</dt><dd><?php if ($cChan !== '' && $dc['guild'] !== ''): ?><a href="https://discord.com/channels/<?= h(rawurlencode($dc['guild'])) ?>/<?= h(rawurlencode($cChan)) ?>" target="_blank" rel="noopener"><?= h((string)($cs['live'] ?? '') ?: 'Open in Discord') ?></a><?php else: ?><span class="muted">Made the first time it's on</span><?php endif; ?></dd></div>
+      <div><dt>Last count</dt><dd><?= $cs['count'] !== null ? number_format((int)$cs['count']) : '<span class="muted">None yet</span>' ?></dd></div>
+      <div><dt>Last renamed</dt><dd><?= $cs['renamed'] ? h(rs_date('M j, g:i a', (int)$cs['renamed'])) : '<span class="muted">Never</span>' ?></dd></div>
+      <div><dt>Last checked</dt><dd><?= $cs['checked'] ? h(rs_date('M j, g:i a', (int)$cs['checked'])) : '<span class="muted">Never</span>' ?></dd></div>
+    </dl>
+    <?php if ($cOn && $cs['err'] !== ''): ?><p class="err-note"><?= h($cs['err']) ?><?php if (str_contains($cs['err'], 'Manage Channels') && $dc['client'] !== ''): ?> Give it with <a href="https://discord.com/oauth2/authorize?client_id=<?= h(rawurlencode($dc['client'])) ?>&amp;scope=bot&amp;permissions=<?= RS_DC_COUNT_PERMS ?>&amp;guild_id=<?= h(rawurlencode($dc['guild'])) ?>" target="_blank" rel="noopener">this link</a> (adds Manage Channels to the bot's role), then press Update now.<?php endif; ?></p><?php endif; ?>
+    <div class="dc-counter-btns">
+      <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="dc_counter"><input type="hidden" name="on" value="<?= $cOn ? '0' : '1' ?>"><button class="<?= $cOn ? '' : 'primary' ?>"><?= $cOn ? 'Turn it off' : 'Turn it on' ?></button></form>
+      <?php if ($cOn): ?><form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="dc_count_now"><button>Update now</button></form><?php endif; ?>
+    </div>
+  </div>
   <?php if ($dcRecent): ?>
   <h3>Latest codes through Discord</h3>
   <div class="table-wrap"><table class="codes">
@@ -181,4 +210,16 @@ document.querySelector('[data-copy-codes]')?.addEventListener('click', (e) => {
   navigator.clipboard && navigator.clipboard.writeText(t).then(() => { e.target.textContent = 'Copied'; setTimeout(() => (e.target.textContent = 'Copy all'), 1500); });
 });
 </script>
+<style>
+.dc-counter{margin:22px 0 4px;padding-top:18px;border-top:1px solid var(--line)}
+.dc-counter h3{margin:0 0 6px}
+.dc-counter-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}
+.dc-counter-facts div{background:rgba(var(--ink-rgb),.05);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+.dc-counter-facts dt{color:var(--muted);font-size:13px}
+.dc-counter-facts dd{margin:2px 0 0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dc-counter-btns{display:flex;gap:8px;flex-wrap:wrap}
+.dc-counter-btns form{margin:0}
+.dc-counter .err-note{color:var(--bad)}
+@media (max-width:860px){.dc-counter-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
 <?php rs_foot();

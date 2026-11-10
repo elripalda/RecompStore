@@ -242,6 +242,7 @@ $pageNow = rs_sdk_db_now();
 $q = trim((string)($_GET['q'] ?? ''));
 $found = [];
 $outside = null;
+$parked = null;
 if (mb_strlen($q) >= 2) {
     $gm = [];
     $isRepo = (bool)preg_match('#^(?:https?://)?(?:www\.)?(?:github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $q, $gm);
@@ -254,7 +255,12 @@ if (mb_strlen($q) >= 2) {
     if ($isRepo) {
         $want = $gm[1] . '/' . $gm[2];
         $listed = false;
-        foreach (rs_pc_apps() as $a) if (strcasecmp((string)$a['repo'], $want) === 0 && rs_pc_host($a) === '') { $listed = true; break; }
+        foreach (rs_pc_apps() as $a) if (strcasecmp((string)$a['repo'], $want) === 0 && rs_pc_host($a) === '') {
+            $listed = true;
+            // In the catalog but not in the table: hidden, or still Coming soon.
+            if (!isset($rows[$a['id']])) $parked = $a;
+            break;
+        }
         if (!$listed) {
             $r = rs_http(rs_gh_api() . '/repos/' . $want, ['github' => true, 'timeout' => 8, 'max' => 2000000]);
             $j = $r['status'] === 200 ? json_decode((string)$r['body'], true) : null;
@@ -307,7 +313,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 </section>
 <section class="card" id="lookup">
   <h2>Not on RecompLauncher yet?</h2>
-  <p class="muted small">Paste a GitHub link or owner/name to get the prompt and badge for a recomp that isn't listed, so a pull request can go out before it's added.</p>
+  <p class="muted small">For a recomp that isn't in the table above: paste its GitHub link or owner/name to get the agent prompt and badge, so a pull request can go out before it's listed. To list it, use Add it to the store (or Recomps, Found on GitHub). Ones already on RecompLauncher but hidden or Coming soon show here with a link to open them.</p>
   <form method="get" class="sdk-search" action="sdk-support.php#lookup">
     <input type="search" name="q" value="<?= h($q) ?>" placeholder="github.com/owner/name, or owner/name" spellcheck="false" autocomplete="off">
     <button class="btn primary">Look up</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
@@ -334,7 +340,14 @@ rs_head('SDK support', true, ['assets/account.css']);
       </div>
     </article>
   <?php endif; ?>
-  <?php if (!$found && !$outside): ?><p class="muted">Nothing matches "<?= h($q) ?>". Paste its GitHub link or owner/name.</p><?php endif; ?>
+  <?php if ($parked): ?>
+    <article class="sdk-row-s">
+      <div class="sdk-name"><strong><?= h($parked['name']) ?></strong><span class="muted small"><?= h($parked['repo']) ?> · on RecompLauncher, but <?= !empty($parked['hidden']) ? 'hidden' : 'still Coming soon' ?>, so it isn't in the table</span></div>
+      <span class="pill"><?= !empty($parked['hidden']) ? 'Hidden' : 'Coming soon' ?></span>
+      <div class="sdk-btns"><a class="btn" href="pc.php?edit=<?= h(rawurlencode($parked['id'])) ?>">Open it</a></div>
+    </article>
+  <?php endif; ?>
+  <?php if (!$found && !$outside && !$parked): ?><p class="muted">Nothing matches "<?= h($q) ?>". Paste its GitHub link or owner/name.</p><?php endif; ?>
   </div>
   <?php endif; ?>
 </section>

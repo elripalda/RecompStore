@@ -505,3 +505,92 @@ function rs_notes(bool $activeOnly = true, string $for = ''): array {
     return array_map(fn($r) => ['id' => (int)$r['id'], 'body' => (string)$r['body'], 'link' => (string)$r['link'], 'linkText' => (string)$r['link_text'],
         'place' => (string)$r['place'], 'tone' => (string)$r['tone'], 'active' => (bool)$r['active'], 'created' => (string)$r['created']], $rows);
 }
+
+// ---- (4.6) Member counter: a voice channel at the top of the Discord server named "Members: 12,345",
+// renamed by the beta bot from the VPS every 10 minutes (dc-counter.php). Nobody can join it. Discord
+// allows 2 renames per channel per 10 minutes, so it renames at most once a run, and only when the
+// number changed. The channel's ID is kept in the settings (dc_count_chan); what happened last time
+// (count, when, any problem) in kv_cache, so the settings aren't rewritten every run.
+const RS_DC_COUNT_GAP = 300;        // never rename the channel more often than this (seconds)
+const RS_DC_CONNECT = 1048576;      // the Connect permission (1 << 20)
+const RS_DC_COUNT_PERMS = 268435473; // the bot's invite permissions with Manage Channels added
+
+function rs_dc_count_on(): bool { return rs_setting('dc_count_on', '0') === '1'; }
+function rs_dc_count_name(int $n): string { return 'Members: ' . number_format($n); }
+// -> [chan, count, renamed (unix), checked (unix), err, retry (unix)]
+function rs_dc_count_state(): array {
+    $c = rs_kv_get('dc_counter');
+    $s = $c ? (json_decode($c['v'], true) ?: []) : [];
+    return $s + ['count' => null, 'renamed' => 0, 'checked' => 0, 'err' => '', 'retry' => 0];
+}
+function rs_dc_count_save(array $s): void { rs_kv_put('dc_counter', (string)json_encode($s)); }
+// A problem in plain words, for the admin. The bot token never goes in here.
+function rs_dc_count_why(int $st, $j, string $doing): string {
+    $code = is_array($j) ? (int)($j['code'] ?? 0) : 0;
+    if ($st === 401) return 'Discord turned the bot token down. Paste a new one above.';
+    if ($st === 403 || $code === 50013 || $code === 50001) return 'The bot isn\'t allowed to ' . $doing . '. It needs Manage Channels.';
+    if ($st === 404 && $doing === 'read the server') return 'The bot isn\'t in that server (check the Server ID).';
+    if ($st === 0) return 'Couldn\'t reach Discord. It tries again on the next run.';
+    return 'Discord answered ' . $st . ' while trying to ' . $doing . '. It tries again on the next run.';
+}
+
+// One run: read the member count, make the channel if it isn't there, rename it if the number changed.
+// Update now on the Beta page runs the same thing (still never sooner than RS_DC_COUNT_GAP after a rename).
+// -> the state after the run
+function rs_dc_count_run(): array {
+    $s = rs_dc_count_state();
+    $c = rs_dc_conf();
+    $now = time();
+    $s['checked'] = $now;
+    if (!rs_dc_count_on()) { $s['err'] = ''; rs_dc_count_save($s); return $s; }
+    if ($c['bot'] === '' || $c['guild'] === '') { $s['err'] = 'It needs the bot token and the Server ID above.'; rs_dc_count_save($s); return $s; }
+    if ($s['retry'] > $now) { rs_dc_count_save($s); return $s; } // Discord asked us to wait
+    $wait = function (int $st, $j) use (&$s, $now): bool {
+        if ($st !== 429) return false;
+        $s['retry'] = $now + (int)ceil((float)(is_array($j) ? ($j['retry_after'] ?? 60) : 60)) + 1;
+        $s['err'] = 'Discord asked to wait a little. It tries again on the next run.';
+        return true;
+    };
+
+    [$st, $g] = rs_dc_call('GET', '/guilds/' . rawurlencode($c['guild']) . '?with_counts=true', ['bot' => $c['bot']]);
+    if ($wait($st, $g)) { rs_dc_count_save($s); return $s; }
+    if ($st !== 200 || !is_array($g) || !isset($g['approximate_member_count'])) { $s['err'] = rs_dc_count_why($st, $g, 'read the server'); rs_dc_count_save($s); return $s; }
+    $n = (int)$g['approximate_member_count'];
+    $name = rs_dc_count_name($n);
+    $chan = trim((string)rs_setting('dc_count_chan', ''));
+
+    // Its channel: still there? (deleted by hand: made again)
+    if ($chan !== '') {
+        [$st, $ch] = rs_dc_call('GET', '/channels/' . rawurlencode($chan), ['bot' => $c['bot']]);
+        if ($wait($st, $ch)) { rs_dc_count_save($s); return $s; }
+        if ($st === 404 || ($st === 200 && (string)($ch['guild_id'] ?? '') !== $c['guild'])) { $chan = ''; rs_set_setting('dc_count_chan', ''); }
+        elseif ($st !== 200) { $s['err'] = rs_dc_count_why($st, $ch, 'see the channel'); rs_dc_count_save($s); return $s; }
+        else $s['live'] = (string)($ch['name'] ?? '');
+    }
+    if ($chan === '') {
+        // A voice channel at the very top: everyone sees it, nobody can connect.
+        [$st, $ch] = rs_dc_call('POST', '/guilds/' . rawurlencode($c['guild']) . '/channels', ['bot' => $c['bot'], 'json' => [
+            'name' => $name, 'type' => 2, 'position' => 0,
+            'permission_overwrites' => [['id' => $c['guild'], 'type' => 0, 'allow' => '0', 'deny' => (string)RS_DC_CONNECT]],
+        ]]);
+        if ($wait($st, $ch)) { rs_dc_count_save($s); return $s; }
+        if (($st !== 200 && $st !== 201) || empty($ch['id'])) { $s['err'] = rs_dc_count_why($st, $ch, 'make the channel'); rs_dc_count_save($s); return $s; }
+        rs_set_setting('dc_count_chan', (string)$ch['id']);
+        // Pull it to the top (position 0 on create isn't always honored).
+        rs_dc_call('PATCH', '/guilds/' . rawurlencode($c['guild']) . '/channels', ['bot' => $c['bot'], 'json' => [['id' => (string)$ch['id'], 'position' => 0]]]);
+        rs_log('discord', 'member counter', 'made the channel: ' . $name);
+        $s = ['count' => $n, 'renamed' => $now, 'checked' => $now, 'err' => '', 'retry' => 0, 'live' => $name];
+        rs_dc_count_save($s);
+        return $s;
+    }
+
+    // Rename only when the number changed, and never more often than Discord allows.
+    if (($s['live'] ?? '') === $name) { $s['count'] = $n; $s['err'] = ''; rs_dc_count_save($s); return $s; }
+    if ($now - (int)$s['renamed'] < RS_DC_COUNT_GAP) { $s['err'] = ''; rs_dc_count_save($s); return $s; }
+    [$st, $ch] = rs_dc_call('PATCH', '/channels/' . rawurlencode($chan), ['bot' => $c['bot'], 'json' => ['name' => $name]]);
+    if ($wait($st, $ch)) { rs_dc_count_save($s); return $s; }
+    if ($st !== 200) { $s['err'] = rs_dc_count_why($st, $ch, 'rename the channel'); rs_dc_count_save($s); return $s; }
+    $s = ['count' => $n, 'renamed' => $now, 'checked' => $now, 'err' => '', 'retry' => 0, 'live' => $name];
+    rs_dc_count_save($s);
+    return $s;
+}
