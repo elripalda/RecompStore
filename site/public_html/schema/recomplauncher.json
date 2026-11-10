@@ -11,7 +11,7 @@
     "inputs": {
       "type": "array",
       "maxItems": 32,
-      "description": "Named game/disc/DLC inputs, explicit shared-key requirements, and NVIDIA's DLSS file (nvidia.dlss). See SETUP-INPUTS.md. No multidisc hashing, BIOS, firmware or font support.",
+      "description": "Named game/disc/DLC inputs and explicit shared-key requirements. See SETUP-INPUTS.md. No multidisc hashing, BIOS, firmware, font or system-library support.",
       "items": {
         "type": "object",
         "required": [
@@ -33,11 +33,9 @@
               "disc",
               "dlc",
               "update",
-              "key",
-              "runtime"
+              "key"
             ],
-            "default": "game",
-            "description": "runtime: a file the launcher fetches itself (nvidia.dlss); the player picks nothing."
+            "default": "game"
           },
           "optional": {
             "type": "boolean",
@@ -47,10 +45,8 @@
             "enum": [
               "switch.prod-keys",
               "switch.title-keys",
-              "wiiu.common-key",
-              "nvidia.dlss"
-            ],
-            "description": "Shared across games. nvidia.dlss: NVIDIA's nvngx_dlss.dll, downloaded from NVIDIA by the launcher on NVIDIA RTX PCs. Coming soon to RecompLauncher; older launchers show an error for it, so add it once the version that has it is out."
+              "wiiu.common-key"
+            ]
           },
           "destination": {
             "type": "string",
@@ -98,41 +94,7 @@
             "if": {
               "required": [
                 "shared"
-              ],
-              "properties": {
-                "shared": {
-                  "const": "nvidia.dlss"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "role": {
-                  "const": "runtime"
-                }
-              },
-              "required": [
-                "role"
-              ],
-              "not": {
-                "required": [
-                  "formats"
-                ]
-              }
-            }
-          },
-          {
-            "if": {
-              "required": [
-                "shared"
-              ],
-              "properties": {
-                "shared": {
-                  "not": {
-                    "const": "nvidia.dlss"
-                  }
-                }
-              }
+              ]
             },
             "then": {
               "required": [
@@ -151,17 +113,8 @@
                   "formats"
                 ]
               }
-            }
-          },
-          {
-            "if": {
-              "not": {
-                "required": [
-                  "shared"
-                ]
-              }
             },
-            "then": {
+            "else": {
               "required": [
                 "formats"
               ],
