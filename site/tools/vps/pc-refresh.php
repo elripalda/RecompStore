@@ -13,3 +13,19 @@ require_once 'admin/inc/pc.php';
 $t = microtime(true);
 $n = rs_pc_refresh_github(1500, in_array('--all', $argv, true) ? 0 : 1800); // --all: every recomp now
 echo gmdate('c') . ' checked ' . $n . ' in ' . round(microtime(true) - $t) . "s\n";
+// SDK support: look for a recomplauncher.json in the recomps not checked this week, most downloaded
+// first, for up to four minutes a run, so the admin table fills in without anyone keeping it open.
+$t = microtime(true);
+$s = 0;
+try {
+    rs_cache_tables();
+    $seen = [];
+    foreach (rs_db()->query("SELECT k FROM kv_cache WHERE k LIKE 'sdk:%' AND at > NOW() - INTERVAL 7 DAY") as $r) $seen[substr((string)$r['k'], 4)] = true;
+    $todo = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== '' && !isset($seen[$a['id']])));
+    usort($todo, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
+    foreach ($todo as $a) {
+        if (microtime(true) - $t > 240) break;
+        try { rs_pc_sdk_check($a); ++$s; } catch (Throwable $e) { /* next run */ }
+    }
+    echo gmdate('c') . ' sdk checked ' . $s . ' of ' . count($todo) . ' in ' . round(microtime(true) - $t) . "s\n";
+} catch (Throwable $e) { echo gmdate('c') . ' sdk: ' . $e->getMessage() . "\n"; }

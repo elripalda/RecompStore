@@ -190,7 +190,7 @@ rs_head('SDK support', true, ['assets/account.css']);
   <div class="role-card"><span class="muted small">Ship their own file</span><span class="n"><?= number_format($count['ships']) ?></span><p class="muted small">Easy Setup straight from the developer.</p></div>
   <div class="role-card"><span class="muted small">No file yet</span><span class="n"><?= number_format($count['missing']) ?></span><p class="muted small">Pick one and send a pull request.</p></div>
   <div class="role-card"><span class="muted small">Pull requests open</span><span class="n"><?= number_format($count['pr']) ?></span><p class="muted small">Waiting on the developer.</p></div>
-  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= number_format($waiting) ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background. Reload in a minute.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
+  <div class="role-card"><span class="muted small">Still to check</span><span class="n"><?= number_format($waiting) ?></span><p class="muted small"><?= $waiting ? 'Being checked in the background, a few hundred an hour.' : 'All checked. Each one is looked at again after a week.' ?></p></div>
 </div>
 <section class="card sdk-card">
   <div class="sdk-bar">
@@ -297,8 +297,9 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-chip.on{background:var(--cyan);border-color:var(--cyan);color:var(--on-accent)}
 .sdk-chip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .sdk-tools{display:flex;gap:8px;align-items:center}
-.sdk-tools select{height:38px;min-width:160px}
-.sdk-tools input{height:38px;min-width:260px}
+.sdk-tools select,.sdk-tools input{height:40px;padding:0 12px;margin:0;box-sizing:border-box;font-size:14px;line-height:normal}
+.sdk-tools select{min-width:160px}
+.sdk-tools input{min-width:260px}
 .sdk-shown{margin:0 0 8px}
 .sdk-scroll{max-height:min(1360px,calc(100vh - 150px));overflow:auto;border:1px solid var(--line);border-radius:14px;overscroll-behavior:contain}
 .sdk-table{width:100%;border-collapse:separate;border-spacing:0;font-size:14.5px}
@@ -314,6 +315,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-table thead .c-num button{text-align:right}
 .sdk-table .c-now{white-space:nowrap}
 .sdk-table .c-act{width:1%;white-space:nowrap}
+.sdk-table .c-act .sdk-btns{flex-wrap:nowrap}
 .sdk-who{display:flex;gap:10px;align-items:center;min-width:0}
 .sdk-who img,.sdk-ico{width:32px;height:32px;border-radius:9px;object-fit:cover;flex:none}
 .sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 12px Sora,sans-serif}
