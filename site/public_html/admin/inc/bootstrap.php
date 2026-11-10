@@ -143,7 +143,7 @@ set_exception_handler(function (Throwable $e) {
 });
 
 function rs_session(): void {
-    if (session_status() === PHP_SESSION_ACTIVE) return;
+    if (session_status() === PHP_SESSION_ACTIVE || !empty($GLOBALS['rs_session_done'])) return;
     session_name('rs_admin');
     session_set_cookie_params([
         'lifetime' => 0, 'path' => '/admin', 'secure' => !empty($_SERVER['HTTPS']),
@@ -238,6 +238,19 @@ function rs_require_login(): void {
     if (empty($_SESSION['uid'])) { header('Location: login.php'); exit; }
     // (4.3) The team: an active login, and a page that's part of its role and stores.
     rs_gate();
+    rs_session_release();
+}
+
+// (4.6) PHP holds a login's session locked for as long as one of its pages runs, so one slow page (the
+// SDK tab asking GitHub, a big save) made every other admin page wait in line behind it. Pages that
+// only read the session let it go as soon as the login is checked; the few that write to it keep it.
+const RS_SESSION_WRITERS = ['settings.php', 'account.php', 'login.php', 'logout.php', 'setup.php', 'team.php', 'beta.php', 'launcher-beta.php', 'dashboard.php'];
+function rs_session_release(): void {
+    if (session_status() !== PHP_SESSION_ACTIVE) return;
+    if (in_array(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')), RS_SESSION_WRITERS, true)) return;
+    rs_csrf(); // the forms' token, made now while the session can still be written
+    session_write_close();
+    $GLOBALS['rs_session_done'] = true; // $_SESSION stays readable; it isn't opened (and locked) again
 }
 
 function rs_csrf(): string {
