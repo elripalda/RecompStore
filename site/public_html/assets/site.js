@@ -2260,7 +2260,7 @@
       toc.querySelectorAll('a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const el = doc.querySelector(a.getAttribute('href')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     };
     if (sdkText) { show(sdkText); return; }
-    fetch('/sdk-files/guide.md?v=4', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    fetch('/sdk-files/guide.md?v=5', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((x) => { sdkText = x; if (view.contains(doc)) show(x); })
       .catch(() => { doc.innerHTML = `<p class="muted">${t('The guide didn\'t load. Try again in a moment.')}</p>`; });
   }
