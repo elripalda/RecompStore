@@ -31,12 +31,38 @@
       'When you\'re done, give me the whole report, the pull request description and the branch name.'
     ].join('\n');
   }
+  // (4.6) Xarishark's prompt: a pull request that adds the badge to the README of a recomp that already
+  // ships its own recomplauncher.json. Its page on RecompLauncher is known here, so it's filled in.
+  function badgePr(repo, id, game) {
+    var page = 'https://recomplauncher.com/game/' + id;
+    return [
+      'Open a pull request on the GitHub repo given at the bottom of this prompt that adds the "Get it on RecompLauncher" badge to its README.',
+      '',
+      'Steps:',
+      '1. The project\'s page on RecompLauncher is ' + page + (game ? ' (' + game + ')' : '') + '. Check that it really exists and matches this repo. If it doesn\'t, stop and ask me. Never fall back to the site root link. The badge, as the press page (https://recomplauncher.com/press) gives it for this app:',
+      '   [![Get it on RecompLauncher](' + BASE + 'badge-dark.svg)](' + page + ')',
+      '2. Read the repo\'s README (the file name may be lowercase or .md/.rst), plus CONTRIBUTING.md if there is one. Follow its conventions. If the repo says not to open PRs like this, stop and tell me.',
+      '3. Fork the repo, clone it into the scratchpad directory and make a branch called `readme-recomplauncher-badge`. Never touch my working repo.',
+      '4. Add the badge near the top of the README: under the title and nav links, or next to any existing badges. Match the existing style, for example a centered `<p align="center">` block if the README is centered, with HTML if the README is HTML-based. Keep the file\'s line endings. Make no other change.',
+      '5. Commit with the message "README: add Get it on RecompLauncher badge". Add no Claude attribution: no Co-Authored-By trailer and no "Generated with Claude Code" line.',
+      '6. Push to my fork and open the PR against the default branch. The title is the same as the commit message. The body is short and friendly, and says:',
+      '   - the project is on RecompLauncher, so this adds the official badge linking to its page (include the link);',
+      '   - a one-line note that nothing else changed;',
+      '   - an explicit note: "Feel free to move the badge anywhere in the README you prefer, or drop it entirely if you\'d rather not have it. No hard feelings."',
+      '   Do not add a Claude attribution line to the PR body either.',
+      '7. Give me the PR link and the badge link you used. Clean up the scratchpad clone when done.',
+      '',
+      'Repo: https://github.com/' + repo
+    ].join('\n');
+  }
   function copy(b, text) {
     var label = b.textContent;
     var done = function (ok) { b.textContent = ok ? 'Copied' : 'Couldn\'t copy'; setTimeout(function () { b.textContent = label; }, 2500); };
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); else done(false);
   }
   document.addEventListener('click', function (e) {
+    var bp = e.target.closest('[data-badgepr-repo]');
+    if (bp) { e.preventDefault(); copy(bp, badgePr(bp.getAttribute('data-badgepr-repo'), bp.getAttribute('data-badgepr-id'), bp.getAttribute('data-badgepr-game') || '')); return; }
     var b = e.target.closest('[data-badge-id]');
     if (b) { e.preventDefault(); copy(b, badge(b.getAttribute('data-badge-id'))); return; }
     b = e.target.closest('[data-prompt-repo]');

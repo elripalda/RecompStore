@@ -98,6 +98,17 @@ foreach ($apps as $rank => $a) {
     $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
     $missing[] = ['a' => $a, 'rank' => $rank + 1, 'now' => $now, 'unknown' => $r['has'] === 'unknown'];
 }
+// (4.6) The ones that ship their own recomplauncher.json, for the badge pull request (Xarishark's prompt).
+$ships = [];
+try {
+    rs_cache_tables();
+    $shipIds = [];
+    foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'sdk:%'") as $kr) {
+        $kv = json_decode((string)$kr['v'], true);
+        if (is_array($kv) && in_array((string)($kv['has'] ?? ''), ['release', 'repo'], true)) $shipIds[substr((string)$kr['k'], 4)] = true;
+    }
+    foreach ($apps as $a) if (isset($shipIds[$a['id']])) $ships[] = $a;
+} catch (Throwable $e) { rs_errlog('sdk ships', $e); }
 // One background run at a time: the next unchecked ones, for up to a minute.
 if ($toCheck) {
     $run = rs_kv_get('sdk_scan_run');
@@ -193,6 +204,7 @@ rs_head('SDK support', true, ['assets/account.css']);
       <div class="sdk-btns">
         <a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
         <?php if ($f['state'] === 'pr' && (string)$f['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$f['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a><?php endif; ?>
+        <?php if ($f['state'] === 'ships'): ?><button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><?php endif; ?>
         <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php endif; ?>
         <form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
         <?php if ($f['m']): ?><form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><?php endif; ?>
@@ -254,6 +266,26 @@ rs_head('SDK support', true, ['assets/account.css']);
   <?php if (!$missing): ?><p class="muted">Nothing on the list<?= $waiting ? ' yet. Reload in a minute to see more.' : '. Every popular recomp ships its own file.' ?></p><?php endif; ?>
   </div>
 </section>
+<?php if ($ships): ?>
+<section class="card">
+  <details>
+    <summary><strong>Already supported</strong> <span class="count"><?= count($ships) ?></span></summary>
+    <p class="muted small">These ship their own recomplauncher.json. Copy badge PR prompt gives your AI agent the steps to open a pull request adding the "Get it on RecompLauncher" badge to the project's README, linked to its page here.</p>
+    <div class="sdk-list" style="margin-top:12px">
+    <?php foreach ($ships as $a): ?>
+      <article class="sdk-row sdk-row-s">
+        <div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads</span></div>
+        <span class="pill ok">Ships its own file</span>
+        <div class="sdk-btns">
+          <a class="btn" href="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" target="_blank" rel="noopener">GitHub ↗</a>
+          <button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
+        </div>
+      </article>
+    <?php endforeach; ?>
+    </div>
+  </details>
+</section>
+<?php endif; ?>
 <?php if ($prs): ?>
 <section class="card">
   <h2>Pull requests open <span class="count"><?= count($prs) ?></span></h2>
