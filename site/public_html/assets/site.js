@@ -2247,7 +2247,7 @@
           <span class="kicker">${t('For developers')}</span>
           <h1>${t('RecompLauncher SDK')}</h1>
           <p class="lead">${t('One small file in your release, recomplauncher.json, and your recomp installs, sets itself up and shows its settings in RecompLauncher like a native PC game. Your recomp doesn\'t change. Free for everyone.')}</p>
-          <div class="sdk-cta">${agentBtn('primary')}<a class="btn" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/schema/recomplauncher.json" target="_blank" rel="noopener">${t('JSON schema')}</a></div>
+          <div class="sdk-cta">${agentBtn('primary')}<a class="btn" href="/sdk-files/recomplauncher-agent.md?download=1" download="recomplauncher-agent.md">${t('Download for your AI agent')}</a><a class="btn" href="/submit?platform=pc">${t('Submit your recomp')}</a><a class="btn" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/schema/recomplauncher.json" target="_blank" rel="noopener">${t('JSON schema')}</a></div>
         </header>
         <section class="sdk-levels">${levels.map(([k, n, d]) => `<div class="glass sdk-level"><b>${k}</b><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
         <div class="sdk-body"><nav class="sdk-toc" aria-label="${t('Contents')}"><strong>${t('Contents')}</strong></nav><div class="sdk-doc" dir="ltr"><p class="muted">${t('Loading…')}</p></div></div>
@@ -2260,7 +2260,7 @@
       toc.querySelectorAll('a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const el = doc.querySelector(a.getAttribute('href')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     };
     if (sdkText) { show(sdkText); return; }
-    fetch('/sdk-files/guide.md?v=3', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    fetch('/sdk-files/guide.md?v=4', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((x) => { sdkText = x; if (view.contains(doc)) show(x); })
       .catch(() => { doc.innerHTML = `<p class="muted">${t('The guide didn\'t load. Try again in a moment.')}</p>`; });
   }
@@ -2535,27 +2535,7 @@
   const AGENT_PROMPT = () => [
     'Add RecompLauncher support to this recomp.',
     '',
-    'RecompLauncher (https://recomplauncher.com) installs and updates PC recomps straight from their GitHub releases. Its SDK lets a recomp set itself up from the player\'s own copy of the game and show its settings in the launcher, all from one file: recomplauncher.json. The recomp itself doesn\'t change.',
-    '',
-    '1. Read the guide: https://recomplauncher.com/sdk-files/guide.md',
-    '   The JSON schema: https://recomplauncher.com/schema/recomplauncher.json',
-    '   Two worked examples: https://recomplauncher.com/sdk-files/examples/fifawc14.json and https://recomplauncher.com/sdk-files/examples/streetball.json',
-    '2. Look at how this project finds the game\'s files, what it needs from the player\'s copy (disc image, ROM or extracted files), how it starts, and where it keeps its settings.',
-    '3. Write recomplauncher.json with every level that fits this project:',
-    '   - Level 1, Easy Setup ("game" and "start"): the player picks their copy, the launcher checks it, sets it up and starts the game.',
-    '   - Level 2, settings in the launcher ("config" and "settings"): if the project has a settings file or command-line options, show them in the launcher.',
-    '   - Level 3, full setup ("prepare" and "game.dumps"): if the project does work before the first start (extracting assets, fonts or menu art from the disc, building a cache), add a "prepare" step that runs it without a window and prints progress lines; add "dumps" with the known good copies of the game (name, size and CRC32 from Redump) so players get the verified badge.',
-    '4. Ship it in every release: put recomplauncher.json at the top of each release zip, next to the executable, and inside the AppImage at /recomplauncher.json if there is one. Update the release workflow or packaging script so it\'s always included.',
-    '5. Check the file against the schema. Never add any game files. Small source changes to the recomp are allowed where Levels 1 and 3 need them, for example a `--game <path>` option that points the installer at the player\'s copy, or a `--prepare` mode that runs the install without a window, prints `progress 0.4 Text` lines and exits 0 on success. Rules for these changes:',
-    '   - They are opt-in. Without the new arguments the game starts and behaves exactly as before, with its own installer UI.',
-    '   - Reuse the existing installer and integrity-check code. Don\'t rewrite it.',
-    '   - Keep the project\'s code style and the diff small, and put the code changes in their own commit.',
-    '   - Don\'t change gameplay, graphics, saves or config formats.',
-    '   For the "dumps" list, only use size and CRC32 values you can verify from Redump or the project\'s own docs. Never invent one.',
-    '6. Check the project against the "Recomp Standards" section of the guide. If it only accepts an extracted folder or one raw format, add the standard packaged formats for its console where it\'s a small change: CHD (libchdr) for PS1, PS2, PSP, Dreamcast, Saturn and other disc-based consoles, RVZ for GameCube and Wii, NSP, XCI and NUP for Switch, any N64 byte order, zipped ROMs, and for PS3, PS4, PS5 and Vita the decrypted dumps players already have, so no decryption step or keys are needed. Suggest the bigger items to me instead of changing them.',
-    '7. Add the "Get it on RecompLauncher" badge near the top of the README, linking to the recomp\'s page on RecompLauncher (https://recomplauncher.com/game/<its id>, or https://recomplauncher.com if it isn\'t listed yet). The badge code is on https://recomplauncher.com/press.',
-    '',
-    'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.',
+    'Read https://recomplauncher.com/sdk-files/recomplauncher-agent.md and follow it. It has the steps, the rules, the full SDK guide with the Recomp Standards, worked examples and the JSON schema, and it ends with a report for me: what you added, what you checked, and what else would make the recomp better.',
   ].join('\n');
   const SVG_AGENT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
   const agentBtn = (cls = '') => `<button type="button" class="btn agent-btn${cls ? ' ' + cls : ''}" data-agent-prompt>${SVG_AGENT}<span>${t('Copy a prompt for your AI agent')}</span></button>`;
