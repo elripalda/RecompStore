@@ -382,11 +382,15 @@ function rs_lb_gh_latest(string $platform = 'windows', int $maxAge = 120): ?arra
         $deb = null;
         foreach ((array)($rel['assets'] ?? []) as $a) {
             $u = (string)($a['browser_download_url'] ?? '');
-            if (preg_match('/_amd64\.deb$/i', (string)($a['name'] ?? '')) && str_starts_with($u, 'https://github.com/')) $deb = ['url' => $u, 'size' => (int)($a['size'] ?? 0)];
+            if (preg_match('/_amd64\.deb$/i', (string)($a['name'] ?? '')) && stripos((string)$a['name'], '_' . $ver . '_') !== false && str_starts_with($u, 'https://github.com/')) $deb = ['url' => $u, 'size' => (int)($a['size'] ?? 0)];
         }
         foreach ((array)($rel['assets'] ?? []) as $a) {
             $u = (string)($a['browser_download_url'] ?? '');
             if (!preg_match(RS_LB_GH_ASSET[$platform], (string)($a['name'] ?? '')) || !str_starts_with($u, 'https://github.com/')) continue;
+            // (4.6) Only a file made for this very release: Beta 33 once went out with Beta 32's installer
+            // attached, and every launcher looped on a failed update. A file named for another version is
+            // left out, so launchers keep the release before until the right one is attached.
+            if (stripos((string)$a['name'], '_' . $ver . '_') === false) { error_log('launcher github: ' . $a['name'] . ' is not for ' . $ver); continue; }
             $sha = strtolower((string)($a['digest'] ?? ''));
             $best = ['version' => $ver, 'url' => $u, 'size' => (int)($a['size'] ?? 0),
                 'sha256' => str_starts_with($sha, 'sha256:') ? substr($sha, 7) : '',
