@@ -15,6 +15,23 @@ RewriteCond %{HTTP_USER_AGENT} !PlayStation
 RewriteCond %{REQUEST_FILENAME}.gz -s
 RewriteRule ^(pc-catalog|pc-catalog-web|catalog|developers)\.json$ $1.json.gz [L,E=no-gzip:1]
 
+# (4.6) Thumbnails already made (media/t/<width>/) go out straight from disk, without PHP. Only one
+# not made yet goes to api/thumb.php, which makes it. (Picture names change whenever a picture does,
+# so a made one is never out of date.) A JPEG's is .jpg; a PNG's or WebP's is .webp, else .png.
+RewriteCond %{QUERY_STRING} ^f=([A-Za-z0-9][A-Za-z0-9._-]{0,150})\.jpe?g&w=(160|256|320|400|640|960)$ [NC]
+RewriteRule ^api/thumb\.php$ - [E=RS_TJ:%2/%1]
+RewriteCond %{ENV:RS_TJ} .
+RewriteCond %{DOCUMENT_ROOT}/media/t/%{ENV:RS_TJ}.jpg -s
+RewriteRule ^api/thumb\.php$ media/t/%{ENV:RS_TJ}.jpg [L]
+RewriteCond %{QUERY_STRING} ^f=([A-Za-z0-9][A-Za-z0-9._-]{0,150})\.(png|webp)&w=(160|256|320|400|640|960)$ [NC]
+RewriteRule ^api/thumb\.php$ - [E=RS_TA:%3/%1]
+RewriteCond %{ENV:RS_TA} .
+RewriteCond %{DOCUMENT_ROOT}/media/t/%{ENV:RS_TA}.webp -s
+RewriteRule ^api/thumb\.php$ media/t/%{ENV:RS_TA}.webp [L]
+RewriteCond %{ENV:RS_TA} .
+RewriteCond %{DOCUMENT_ROOT}/media/t/%{ENV:RS_TA}.png -s
+RewriteRule ^api/thumb\.php$ media/t/%{ENV:RS_TA}.png [L]
+
 # (2.9) RecompLauncher: recomplauncher.com is the PC side of this same site (parked on it). Its pages
 # drop the /pc, and the app's page is /get. Anything of RecompStore's opens on recompstore.com.
 RewriteCond %{HTTP_HOST} ^www\.recomplauncher\.com$ [NC]
@@ -93,6 +110,11 @@ RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ page.php?p=code [L]
   # kept for a year.
   <FilesMatch "(-[0-9a-f]{8}|^[0-9a-f]{40})\.(png|jpe?g|webp|gif)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # (4.6) Pictures readable from any page (as thumbnails from api/thumb.php always were, now that the
+  # ones already made go out straight from disk). They keep the year above through their names.
+  <FilesMatch "\.(png|jpe?g|webp|gif)$">
+    Header set Access-Control-Allow-Origin "*"
   </FilesMatch>
   <FilesMatch "\.woff2$">
     Header set Cache-Control "public, max-age=31536000, immutable"
