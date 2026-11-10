@@ -2349,7 +2349,7 @@
         </header>
         <section class="ach-stats" aria-label="${t('Recomp Achievements so far')}">${[[t('Games'), 'games'], [t('Players'), 'players'], [t('Unlocks'), 'unlocks'], [t('Mastered'), 'mastered']].map(([n, k]) => `<div class="glass ach-stat"><strong data-k="${k}">–</strong><span>${n}</span></div>`).join('')}</section>
         <section class="ach-how">${how.map(([i, n, d]) => `<div class="glass ach-card"><i>${i}</i><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
-        <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games with achievements')}</h2><p class="muted">${t('More are added as developers support it.')}</p></div><div class="ach-games"><p class="muted">${t('Loading…')}</p></div>
+        <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games with achievements')}</h2><p class="muted">${t('Every Xbox 360 game is open: the first time a tester plays one, its achievements are added for everyone. More consoles come as developers add them.')}</p></div><div class="ach-games"><p class="muted">${t('Loading…')}</p></div>
           <div class="glass ach-ask"><strong>${t('Don\'t see a game you want?')}</strong><span>${t('Ask its developer to add Recomp Achievements. It\'s free, and the developer guide makes it quick. Most developers are happy to hear a game is wanted.')}</span></div></section>
         <section class="ach-sec"><div class="ach-sec-head ach-sec-split"><div><h2>${t('Leaderboard')}</h2><p class="muted">${t('Ranked points across every game. Score weights each achievement by how rare it is.')}</p></div>
           <div class="ach-seg"><button type="button" class="on" data-ach-by="points">${t('Points')}</button><button type="button" data-ach-by="score">${t('Score')}</button></div></div><div class="glass ach-board"><p class="muted">${t('Loading…')}</p></div></section>
@@ -2368,7 +2368,7 @@
       box.innerHTML = games.length ? games.map((g) => `<a class="ach-game" href="/pc/achievements/${encodeURIComponent(g.id)}">
           <span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, 360))}" alt="" loading="lazy">` : ''}</span>
           <strong>${esc(g.name)}</strong><span class="muted">${tf('{n} achievements · {p} points', { n: fmt(g.achievements), p: fmt(g.points) })}</span></a>`).join('')
-        : `<p class="muted">${t('The first games are being set up with our testers.')}</p>`;
+        : `<p class="muted">${t('Xbox 360 games appear here as testers play them.')}</p>`;
     });
     const board = (by) => achApi('board' + (by === 'score' ? '&by=score' : '')).then((j) => {
       const box = view.querySelector('.ach-board');
