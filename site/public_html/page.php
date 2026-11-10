@@ -18,6 +18,31 @@ header('Cache-Control: public, max-age=0, s-maxage=120, stale-while-revalidate=6
 // A code a PS5 shows (/l/<code>, /r/<code>): the site's own page as it is; its script reads the code.
 if ($p0 === 'code') { echo $page; exit; }
 
+// (4.6) Each finished page is kept on disk 5 minutes: a game's page was built from the whole PC catalog
+// (decoded each time) for every visit that got past Cloudflare, which kept the server's CPU full. One
+// visit builds it again when it's older; the others meanwhile get the one there is.
+$pgQs = (string)($_SERVER['QUERY_STRING'] ?? '');
+$pgCache = null;
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && preg_match('/^(p=[a-z0-9-]+)(&(id|slug|name)=[A-Za-z0-9_.-]{1,64})?(&lang=[A-Za-z-]{2,8})?$/', $pgQs)) {
+    $pgDir = dirname(__DIR__) . '/recompstore-private/page-cache';
+    $pgCache = $pgDir . '/' . md5(strtolower((string)($_SERVER['HTTP_HOST'] ?? '')) . '|' . $pgQs) . '.html';
+    $pgAge = is_file($pgCache) ? time() - (int)@filemtime($pgCache) : PHP_INT_MAX;
+    $pgLock = null;
+    if ($pgAge >= 300 && $pgAge < 86400) {
+        $pgLock = @fopen($pgCache . '.lock', 'c');
+        if (!$pgLock || !flock($pgLock, LOCK_EX | LOCK_NB)) { if ($pgLock) fclose($pgLock); $pgLock = null; $pgAge = 0; }
+    }
+    if ($pgAge < 300) { readfile($pgCache); exit; }
+    if (!is_dir($pgDir)) @mkdir($pgDir, 0755, true);
+    ob_start(function (string $buf) use ($pgCache): string {
+        if (http_response_code() === 200 && strlen($buf) > 500) {
+            $tmp = $pgCache . '.' . getmypid();
+            if (@file_put_contents($tmp, $buf) !== false) @rename($tmp, $pgCache);
+        }
+        return $buf;
+    });
+}
+
 try {
     require __DIR__ . '/admin/inc/seo.php';
     $e = 'rs_seo_e';
