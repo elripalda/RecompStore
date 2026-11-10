@@ -513,7 +513,6 @@ function rs_notes(bool $activeOnly = true, string $for = ''): array {
 // (count, when, any problem) in kv_cache, so the settings aren't rewritten every run.
 const RS_DC_COUNT_GAP = 300;        // never rename the channel more often than this (seconds)
 const RS_DC_CONNECT = 1048576;      // the Connect permission (1 << 20)
-const RS_DC_VIEW = 1024;            // View Channel
 const RS_DC_MANAGE = 16;            // Manage Channels
 const RS_DC_COUNT_PERMS = 268435473; // the bot's invite permissions with Manage Channels added
 
@@ -590,7 +589,7 @@ function rs_dc_count_run(): array {
             if (!$has) {
                 [$st, $r] = rs_dc_call('PUT', '/channels/' . rawurlencode($chan) . '/permissions/' . rawurlencode($me), ['bot' => $c['bot'], 'json' => ['type' => 1, 'allow' => $mine['allow'], 'deny' => '0']]);
                 if ($wait($st, $r)) { rs_dc_count_save($s); return $s; }
-                if ($st !== 204 && $st !== 200) { $s['err'] = rs_dc_count_why($st, $r, 'give itself access to the channel'); rs_dc_count_save($s); return $s; }
+                if ($st !== 204 && $st !== 200) { $s['err'] = 'The bot can\'t reach the channel ' . ($s['live'] ?: '') . ' (made before it kept access to it). Delete that channel in Discord and the bot makes a new one on the next run.'; rs_dc_count_save($s); return $s; }
             }
         }
     }
