@@ -4,7 +4,7 @@
 // browsers keep it for a year (the file names already change whenever a picture does).
 declare(strict_types=1);
 
-const RS_THUMB_W = [160, 256, 400, 640, 960];
+const RS_THUMB_W = [160, 256, 320, 400, 640, 960]; // (4.6) 320: the launcher's Recomp Achievements covers
 
 $f = (string)($_GET['f'] ?? '');
 $w = (int)($_GET['w'] ?? 0);
