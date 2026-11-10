@@ -359,6 +359,16 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
       <div class="boot-uses muted" data-boot-uses></div>
       <details><summary>Edit as JSON</summary><textarea name="boot" rows="14" maxlength="100000" spellcheck="false" class="mono" placeholder='{ "kind": "portable", "start": "Game.exe", "start_is": "game", "files": { "how": "folder", ... } }'><?= h((string)($a['boot'] ?? '')) ?></textarea><small>One JSON object, per the curator setup guide. The fields above edit this; anything they don't show stays as it is.</small></details>
     </div>
+    <?php if ((string)$a['repo'] !== '' && empty($a['soon'])):
+      // (4.6) The developer's own recomplauncher.json: what SDK support last saw, and the agent prompt for a pull request.
+      $sdkC = rs_kv_get('sdk:' . $a['id']); $sdkR = $sdkC ? json_decode((string)$sdkC['v'], true) : null; $sdkHas = is_array($sdkR) ? (string)($sdkR['has'] ?? '') : '';
+      $sdkMk = (json_decode((string)rs_setting('sdk_marks', '{}'), true) ?: [])[$a['id']] ?? null;
+      [$sdkL, $sdkC2] = in_array($sdkHas, ['release', 'repo'], true) ? ['Ships its own file', ' ok'] : ($sdkMk ? ($sdkMk['kind'] === 'pr' ? ['Pull request open', ''] : ['Won\'t support it', ' warn']) : ($sdkHas === 'none' ? ['No file yet', ''] : ['Not checked yet', ''])); ?>
+    <div class="span2 pc-sdk">
+      <div><strong>The developer's own recomplauncher.json</strong> <span class="pill<?= $sdkC2 ?>"><?= h($sdkL) ?></span><small class="muted">When the developer ships the file in their releases, their setup and settings reach players without a boot profile. Copy agent prompt gives your AI agent everything it needs for the pull request, including the badge and the Recomp Standards check.</small></div>
+      <div class="pc-sdk-btns"><button type="button" class="btn" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web($aHost, (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><a class="btn" href="sdk-support.php?q=<?= h(rawurlencode((string)$a['repo'])) ?>">SDK support</a></div>
+    </div>
+    <?php endif; ?>
     <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label><label class="check" title="Its release is only a setup .exe: RecompLauncher runs the installer, then finds where it installed (needs a launcher with the installer flow)"><input type="checkbox" name="installer" value="1"<?= !empty($a['installer']) ? ' checked' : '' ?>> Installer only</label></div>
     <label>Setup steps<textarea name="setup_steps" rows="5" maxlength="2000"><?= h((string)($a['setup_steps'] ?? '')) ?></textarea><small>Only for Setup required. One step per line, in order. Shown with the yellow Set Up button and on its page, with a link to the README.</small></label>
@@ -510,4 +520,4 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
   if (q.value) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 })();
 </script>
-<?php rs_foot(['assets/artpick.js', 'assets/boot.js']);
+<?php rs_foot(['assets/artpick.js', 'assets/boot.js', 'assets/sdk-prompt.js']);

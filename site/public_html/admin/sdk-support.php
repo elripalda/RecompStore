@@ -130,6 +130,7 @@ $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 // project can be found and marked too. Unchecked ones are checked right here (a few at a time).
 $q = trim((string)($_GET['q'] ?? ''));
 $found = [];
+$outside = null;
 if (mb_strlen($q) >= 2) {
     $ql = mb_strtolower($q);
     $all = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && (string)$a['repo'] !== ''
@@ -146,6 +147,18 @@ if (mb_strlen($q) >= 2) {
         $state = in_array($got, ['release', 'repo'], true) ? 'ships' : ($mk ? ($mk['kind'] === 'pr' ? 'pr' : 'no') : ($got === 'none' ? 'missing' : 'unknown'));
         $found[] = ['a' => $a, 'state' => $state, 'm' => $mk];
     }
+    // A GitHub repo that isn't on RecompLauncher at all (owner/name or a github.com link): its prompt
+    // and badge still work, so a pull request can go out before it's listed.
+    if (preg_match('#^(?:https?://)?(?:www\.)?(?:github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $q, $gm)) {
+        $want = $gm[1] . '/' . $gm[2];
+        $listed = false;
+        foreach (rs_pc_apps() as $a) if (strcasecmp((string)$a['repo'], $want) === 0 && rs_pc_host($a) === '') { $listed = true; break; }
+        if (!$listed) {
+            $r = rs_http(rs_gh_api() . '/repos/' . $want, ['github' => true, 'timeout' => 8, 'max' => 2000000]);
+            $j = $r['status'] === 200 ? json_decode((string)$r['body'], true) : null;
+            $outside = is_array($j) ? ['repo' => (string)$j['full_name'], 'about' => (string)($j['description'] ?? ''), 'stars' => (int)($j['stargazers_count'] ?? 0)] : ['repo' => $want, 'missing' => $r['status'] === 404];
+        }
+    }
 }
 $stateLabel = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ''], 'no' => ['Won\'t support it', ' warn'], 'missing' => ['No file yet', ''], 'unknown' => ['Couldn\'t check yet', ' warn']];
 
@@ -154,7 +167,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code.</p>
+    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code. To send one to a recomp that isn't in the top <?= RS_SDK_TOP ?>, or isn't listed at all, search for it below; a recomp's edit page has the same buttons.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
@@ -165,7 +178,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 </div>
 <section class="card">
   <form method="get" class="sdk-search">
-    <input type="search" name="q" value="<?= h($q) ?>" placeholder="Find any recomp by name or repo, also ones not in the top <?= RS_SDK_TOP ?>" spellcheck="false" autocomplete="off">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="Any recomp by name, or a GitHub link or owner/name, also ones not in the top <?= RS_SDK_TOP ?> or not listed" spellcheck="false" autocomplete="off">
     <button class="btn primary">Search</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
   </form>
   <?php if ($q !== ''): ?>
@@ -177,7 +190,7 @@ rs_head('SDK support', true, ['assets/account.css']);
       <div class="sdk-btns">
         <a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
         <?php if ($f['state'] === 'pr' && (string)$f['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$f['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a><?php endif; ?>
-        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php endif; ?>
+        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php endif; ?>
         <form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
         <?php if ($f['m']): ?><form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><?php endif; ?>
       </div>
@@ -194,7 +207,20 @@ rs_head('SDK support', true, ['assets/account.css']);
       <?php endif; ?>
     </article>
   <?php endforeach; ?>
-  <?php if (!$found): ?><p class="muted">No listed recomp matches "<?= h($q) ?>".</p><?php endif; ?>
+  <?php if ($outside): ?>
+    <article class="sdk-row sdk-row-s">
+      <div class="sdk-name"><strong><?= h($outside['repo']) ?></strong><span class="muted small"><?= !empty($outside['missing']) ? 'GitHub has no repo by that name.' : 'Not on RecompLauncher yet' . ($outside['about'] !== '' ? ' · ' . h(mb_strimwidth($outside['about'], 0, 90, '…')) : '') ?></span></div>
+      <span class="pill<?= !empty($outside['missing']) ? ' warn' : '' ?>"><?= !empty($outside['missing']) ? 'Not found' : 'Not listed' ?></span>
+      <div class="sdk-btns">
+        <?php if (empty($outside['missing'])): ?>
+        <a class="btn" href="https://github.com/<?= h($outside['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
+        <button type="button" class="btn primary" data-prompt-repo="<?= h($outside['repo']) ?>" data-prompt-id="">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="">Copy badge</button>
+        <?php if (rs_role_at_least('curator')): ?><a class="btn" href="pc.php#found">Add it to the store</a><?php endif; ?>
+        <?php endif; ?>
+      </div>
+    </article>
+  <?php endif; ?>
+  <?php if (!$found && !$outside): ?><p class="muted">No listed recomp matches "<?= h($q) ?>". Paste its GitHub link or owner/name to get a prompt for one that isn't listed.</p><?php endif; ?>
   </div>
   <?php endif; ?>
 </section>
@@ -208,7 +234,7 @@ rs_head('SDK support', true, ['assets/account.css']);
       <span class="pill" title="<?= h($nw) ?>"><?= h($m['unknown'] ? 'Couldn\'t check' : $nl) ?></span>
       <div class="sdk-btns">
         <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-        <button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button>
+        <button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web(rs_pc_host($a), (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button>
         <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
       </div>
       <details class="sdk-mark">
@@ -286,43 +312,4 @@ rs_head('SDK support', true, ['assets/account.css']);
 @media (max-width:980px){.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:980px){.sdk-row{grid-template-columns:44px minmax(0,1fr)}.sdk-rank{display:none}.sdk-row .pill,.sdk-btns{grid-column:1/-1}}
 </style>
-<script>
-// (4.6) The "Get it on RecompLauncher" badge for a recomp's README: light or dark with GitHub's theme,
-// linking to its page.
-function rlBadge(id) {
-  var base = 'https://recomplauncher.com/assets/press/launcher/';
-  return '<a href="https://recomplauncher.com/game/' + id + '"><picture><source media="(prefers-color-scheme: dark)" srcset="' + base + 'badge-light.svg"><img alt="Get it on RecompLauncher" src="' + base + 'badge-dark.svg" height="48"></picture></a>';
-}
-document.addEventListener('click', function (e) {
-  var b = e.target.closest('[data-badge-id]');
-  if (!b) return;
-  var label = b.textContent;
-  var done = function (ok) { b.textContent = ok ? 'Copied' : 'Couldn\'t copy'; setTimeout(function () { b.textContent = label; }, 2500); };
-  if (navigator.clipboard) navigator.clipboard.writeText(rlBadge(b.getAttribute('data-badge-id'))).then(function () { done(true); }, function () { done(false); }); else done(false);
-});
-// The prompt for an AI agent working in the recomp's repo: add the SDK file and ship it in releases.
-document.addEventListener('click', function (e) {
-  var b = e.target.closest('[data-prompt-repo]');
-  if (!b) return;
-  var repo = b.getAttribute('data-prompt-repo'), game = b.getAttribute('data-prompt-game'), id = b.getAttribute('data-prompt-id');
-  var text = [
-    'Add RecompLauncher support to ' + repo + ' (a PC recomp of ' + game + '), as a pull request.',
-    '',
-    'Read https://recomplauncher.com/sdk-files/recomplauncher-agent.md and follow it. It has the steps, the rules, the full SDK guide with the Recomp Standards, worked examples and the JSON schema.',
-    '',
-    'This recomp is already on RecompLauncher: its page is https://recomplauncher.com/game/' + id + ', so use that link in the README badge:',
-    '',
-    rlBadge(id),
-    '',
-    'In the pull request description, after what it adds for players and the code changes:',
-    '- a "Things that would make your recomp better" section, from the report, kept short and friendly;',
-    '- a section headed "For the developer" with the report\'s "Make it yours on RecompLauncher" part, two or three sentences, not a sales pitch.',
-    '',
-    'When you\'re done, give me the whole report.'
-  ].join('\n');
-  var label = b.textContent;
-  var done = function (ok) { b.textContent = ok ? 'Copied' : 'Couldn\'t copy'; setTimeout(function () { b.textContent = label; }, 2500); };
-  if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); else done(false);
-});
-</script>
-<?php rs_foot();
+<?php rs_foot(['assets/sdk-prompt.js']);

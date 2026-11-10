@@ -33,3 +33,10 @@
 .boot-table td{vertical-align:top}
 .boot-table .boot-n{white-space:nowrap}
 @media (max-width:640px){.boot-ed .boot-grid{grid-template-columns:1fr}.boot-ch{grid-template-columns:1fr}.boot-ed{padding:12px}}
+/* (4.6) The developer's own recomplauncher.json, under the boot profile on a recomp's edit page. */
+.pc-sdk{display:flex;gap:16px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:16px;padding:14px 18px;background:rgba(var(--ink-rgb),.025)}
+.pc-sdk>div:first-child{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;min-width:0}
+.pc-sdk small{flex-basis:100%}
+.pc-sdk-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}
+.pc-sdk-btns .btn{min-height:38px;padding:7px 12px;font-size:14px}
+@media (max-width:820px){.pc-sdk{flex-direction:column;align-items:stretch}.pc-sdk-btns{justify-content:flex-start}}
