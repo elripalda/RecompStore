@@ -34,7 +34,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? n
         if (is_file($fastA)) {
             header('X-Content-Type-Options: nosniff');
             header('Content-Type: application/json; charset=utf-8');
-            header('Cache-Control: public, max-age=120');
+            // (4.6) Cloudflare keeps it an hour (refreshing it in the background), browsers 2 minutes.
+            header('Cache-Control: public, max-age=120, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400');
             readfile($fastA);
             exit;
         }
@@ -43,7 +44,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? n
             if (($fx['id'] ?? '') !== $fastId) continue;
             header('X-Content-Type-Options: nosniff');
             header('Content-Type: application/json; charset=utf-8');
-            header('Cache-Control: public, max-age=120');
+            header('Cache-Control: public, max-age=120, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400');
             echo json_encode(['ok' => true, 'app' => $fx], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             exit;
         }
@@ -52,7 +53,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? n
         if (is_file($fastF) && time() - (int)@filemtime($fastF) < 60) {
             header('X-Content-Type-Options: nosniff');
             header('Content-Type: application/json; charset=utf-8');
-            header('Cache-Control: public, max-age=60');
+            // (4.6) Players' reports: Cloudflare keeps them 5 minutes (refreshing in the background).
+            header('Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400');
             readfile($fastF);
             exit;
         }
@@ -70,7 +72,7 @@ function rs_pc_out(int $code, array $body, int $cache = 0): void {
     http_response_code($code);
     // (4.6) Answers for everyone: Cloudflare may hand out an older copy while it fetches a new one, or
     // while the server is down, rather than every request waiting on the server.
-    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache . ', stale-while-revalidate=86400, stale-if-error=86400' : 'no-store'));
+    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache . ', s-maxage=' . max($cache, 300) . ', stale-while-revalidate=86400, stale-if-error=86400' : 'no-store'));
     echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -219,7 +221,7 @@ try {
         if (!is_dir($fbDir)) @mkdir($fbDir, 0755, true);
         $fbJson = json_encode($fbBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($fbJson !== false && @file_put_contents($fbDir . '/' . $app['id'] . '.json.' . getmypid(), $fbJson) !== false) @rename($fbDir . '/' . $app['id'] . '.json.' . getmypid(), $fbDir . '/' . $app['id'] . '.json');
-        rs_pc_out(200, $fbBody);
+        rs_pc_out(200, $fbBody, 60); // (4.6) the same for everyone, like the copy above
     }
     if ($a === 'feedback' && $post) {
         if ($s('website', 100) !== '') rs_pc_out(200, ['ok' => true]); // the hidden field: a bot
