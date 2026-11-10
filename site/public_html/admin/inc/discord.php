@@ -570,7 +570,9 @@ function rs_dc_count_run(): array {
         $me = (string)$u['id'];
         rs_kv_put('dc_bot_user', $me);
     }
-    $mine = ['id' => $me, 'type' => 1, 'allow' => (string)(RS_DC_VIEW | RS_DC_MANAGE), 'deny' => '0'];
+    // Connect too: Discord won't let a bot open or rename a voice channel it can't connect to, and the
+    // channel denies Connect to everyone.
+    $mine = ['id' => $me, 'type' => 1, 'allow' => (string)(RS_DC_VIEW | RS_DC_MANAGE | RS_DC_CONNECT), 'deny' => '0'];
 
     // Its channel: still there? Read from the server's channel list, which needs no access to the
     // channel itself. (Deleted by hand: made again.)
@@ -585,7 +587,7 @@ function rs_dc_count_run(): array {
             $s['live'] = (string)($ch['name'] ?? '');
             // Made before the bot gave itself access: give it now.
             $has = false;
-            foreach ((array)($ch['permission_overwrites'] ?? []) as $o) if ((string)($o['id'] ?? '') === $me && ((int)($o['allow'] ?? 0) & RS_DC_VIEW)) $has = true;
+            foreach ((array)($ch['permission_overwrites'] ?? []) as $o) if ((string)($o['id'] ?? '') === $me && ((int)($o['allow'] ?? 0) & (RS_DC_VIEW | RS_DC_CONNECT)) === (RS_DC_VIEW | RS_DC_CONNECT)) $has = true;
             if (!$has) {
                 [$st, $r] = rs_dc_call('PUT', '/channels/' . rawurlencode($chan) . '/permissions/' . rawurlencode($me), ['bot' => $c['bot'], 'json' => ['type' => 1, 'allow' => $mine['allow'], 'deny' => '0']]);
                 if ($wait($st, $r)) { rs_dc_count_save($s); return $s; }
