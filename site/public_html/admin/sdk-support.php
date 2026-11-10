@@ -154,7 +154,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result.</p>
+    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
@@ -177,7 +177,7 @@ rs_head('SDK support', true, ['assets/account.css']);
       <div class="sdk-btns">
         <a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
         <?php if ($f['state'] === 'pr' && (string)$f['m']['url'] !== ''): ?><a class="btn" href="<?= h((string)$f['m']['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a><?php endif; ?>
-        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
+        <?php if ($f['state'] !== 'ships'): ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php endif; ?>
         <form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
         <?php if ($f['m']): ?><form method="post"><?= $csrf ?><input type="hidden" name="q" value="<?= h($q) ?>"><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><?php endif; ?>
       </div>
@@ -208,7 +208,7 @@ rs_head('SDK support', true, ['assets/account.css']);
       <span class="pill" title="<?= h($nw) ?>"><?= h($m['unknown'] ? 'Couldn\'t check' : $nl) ?></span>
       <div class="sdk-btns">
         <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-        <button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button>
+        <button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button>
         <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
       </div>
       <details class="sdk-mark">
@@ -287,11 +287,24 @@ rs_head('SDK support', true, ['assets/account.css']);
 @media (max-width:980px){.sdk-row{grid-template-columns:44px minmax(0,1fr)}.sdk-rank{display:none}.sdk-row .pill,.sdk-btns{grid-column:1/-1}}
 </style>
 <script>
+// (4.6) The "Get it on RecompLauncher" badge for a recomp's README: light or dark with GitHub's theme,
+// linking to its page.
+function rlBadge(id) {
+  var base = 'https://recomplauncher.com/assets/press/launcher/';
+  return '<a href="https://recomplauncher.com/game/' + id + '"><picture><source media="(prefers-color-scheme: dark)" srcset="' + base + 'badge-light.svg"><img alt="Get it on RecompLauncher" src="' + base + 'badge-dark.svg" height="48"></picture></a>';
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-badge-id]');
+  if (!b) return;
+  var label = b.textContent;
+  var done = function (ok) { b.textContent = ok ? 'Copied' : 'Couldn\'t copy'; setTimeout(function () { b.textContent = label; }, 2500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(rlBadge(b.getAttribute('data-badge-id'))).then(function () { done(true); }, function () { done(false); }); else done(false);
+});
 // The prompt for an AI agent working in the recomp's repo: add the SDK file and ship it in releases.
 document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-prompt-repo]');
   if (!b) return;
-  var repo = b.getAttribute('data-prompt-repo'), game = b.getAttribute('data-prompt-game');
+  var repo = b.getAttribute('data-prompt-repo'), game = b.getAttribute('data-prompt-game'), id = b.getAttribute('data-prompt-id');
   var text = [
     'Add RecompLauncher support to ' + repo + ' (a PC recomp of ' + game + '), as a pull request.',
     '',
@@ -314,7 +327,11 @@ document.addEventListener('click', function (e) {
     '   - Don\'t change gameplay, graphics, saves or config formats.',
     '6. For the "dumps" list, only use size and CRC32 values you can verify from Redump or from the project\'s own docs. If you can\'t verify a value, leave it out and tell me. Never invent one.',
     '7. Open the pull request with a short, friendly description. Say what it adds for players. List the code changes separately, and say they only apply when the launcher passes the new arguments. If the code changes are large enough to review on their own, open two PRs: one with recomplauncher.json and the packaging changes, one with the code changes.',
-    '8. End the description with a short invite to the maintainers: they can make a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds their repos) and claim ' + repo + '. Its page on RecompLauncher then shows it as theirs, with the Verified developer badge once approved, and from there they can edit its page and art and read player reports with their logs. Keep it to two or three friendly sentences, not a sales pitch.',
+    '8. Add the "Get it on RecompLauncher" badge to the README, near the top (under the title or next to any other badges), linking to the game\'s page. Use exactly this, so it switches with GitHub\'s light and dark themes:',
+    '',
+    rlBadge(id),
+    '',
+    '9. End the pull request description with a section headed "For the developer", two or three friendly sentences, not a sales pitch: they can make a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds their repos) and claim ' + repo + '. Once claimed, its page on RecompLauncher (https://recomplauncher.com/game/' + id + ') shows it as theirs, with the Verified developer badge once approved, and from there they can edit its page and art, see its stats, read player reports with their logs, and their new releases reach players faster.',
     '',
     'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.'
   ].join('\n');
