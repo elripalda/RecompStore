@@ -563,7 +563,8 @@ function rs_dc_suggest_forum_setup(): string {
 // ---- (4.3) SDK support: does the recomp ship its own recomplauncher.json? ----------------------
 // Looked for in its repo (top folder) and at the top of its Windows release zip. Kept a week.
 // -> ['has' => 'release'|'repo'|'none'|'unknown', 'at' => time]
-function rs_pc_sdk_check(array $a, bool $fresh = false): array {
+// $readmeNow: read the README from GitHub now (Check again); otherwise its copy from the last day.
+function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false): array {
     $k = 'sdk:' . $a['id'];
     if (!$fresh && ($c = rs_kv_get($k)) && $c['age'] < 7 * 86400 && is_array($x = json_decode($c['v'], true))) return $x;
     $out = ['has' => 'unknown', 'at' => time()];
@@ -597,11 +598,11 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
         } catch (Throwable $e) { /* unknown for now */ }
     }
     // (4.6) Whether its README has the "Get it on RecompLauncher" badge, for the SDK support table. A
-    // Check again reads the README fresh; otherwise the day-old copy does. Left out when the README
-    // couldn't be read, so the next run tries again.
+    // Check again asks GitHub now (its last copy if GitHub doesn't answer); otherwise the day-old copy
+    // does. Never deleting the copy first: when GitHub was busy, that left nothing to read, the badge
+    // unknown, and the recomp due again on every run. Left out only when there's no copy at all.
     try {
-        if ($fresh && rs_pc_host($a) === '') { rs_cache_tables(); rs_db()->prepare('DELETE FROM gh_cache WHERE k = ?')->execute([strtolower($repo . '#readme')]); }
-        $rd = rs_pc_readme($repo, rs_pc_host($a));
+        $rd = rs_pc_readme($repo, rs_pc_host($a), $readmeNow ? 0 : 86400);
         $rs = (int)$rd['status'];
         if ($rs === 200) $out['badge'] = (bool)preg_match('#recomplauncher\.com/[^\s"\')]*badge[^\s"\')]*\.svg|Get it on RecompLauncher#i', (string)$rd['md']);
         elseif ($rs === 404) $out['badge'] = false;
@@ -939,11 +940,11 @@ function rs_pc_add(string $repo): array {
 // ---- README and key features (2.8) ------------------------------------------------------------
 
 // A repo's README as Markdown (cached a day), and where its relative pictures live.
-function rs_pc_readme(string $repo, string $host = ''): array {
+function rs_pc_readme(string $repo, string $host = '', int $maxAge = 86400): array {
     if (rs_host_norm($host) === 'gitlab') return rs_pc_readme_gitlab($repo);
     if (rs_host_norm($host) === 'sourceforge') return ['status' => 404, 'md' => '']; // (4.3) its page has the README
     if (!rs_repo_ok($repo)) return ['status' => 400, 'md' => ''];
-    $r = rs_gh_cached($repo . '#readme', rs_gh_api() . '/repos/' . $repo . '/readme', 86400, function (array $j): array {
+    $r = rs_gh_cached($repo . '#readme', rs_gh_api() . '/repos/' . $repo . '/readme', $maxAge, function (array $j): array {
         $md = (string)base64_decode((string)($j['content'] ?? ''), false);
         if (strlen($md) > 200000) $md = substr($md, 0, 200000);
         return ['md' => mb_convert_encoding($md, 'UTF-8', 'UTF-8'), 'path' => (string)($j['path'] ?? 'README.md'), 'url' => (string)($j['html_url'] ?? '')];

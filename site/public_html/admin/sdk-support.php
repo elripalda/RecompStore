@@ -195,7 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (string)($_POST['id'] ?? '');
     $msg = ''; $kind = 'ok';
     if (($_POST['action'] ?? '') === 'recheck' && ($a = rs_pc_app($id))) {
-        $r = rs_pc_sdk_check($a, true);
+        $r = rs_pc_sdk_check($a, true, true);
         $msg = $a['name'] . ($r['has'] === 'release' || $r['has'] === 'repo' ? ' ships its own recomplauncher.json.' : ($r['has'] === 'none' ? ' doesn\'t ship one yet.' : ': GitHub didn\'t answer. Try again in a minute.'))
             . (array_key_exists('badge', $r) && $r['badge'] !== null ? ($r['badge'] ? ' Its README has the badge.' : ' No badge in its README.') : '');
     } elseif (in_array($_POST['action'] ?? '', ['mark_pr', 'mark_no'], true) && ($a = rs_pc_app($id))) {

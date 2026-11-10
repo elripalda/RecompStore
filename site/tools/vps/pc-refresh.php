@@ -32,3 +32,20 @@ try {
     }
     echo gmdate('c') . ' sdk checked ' . $s . ' of ' . count($todo) . ' in ' . round(microtime(true) - $t) . "s\n";
 } catch (Throwable $e) { echo gmdate('c') . ' sdk: ' . $e->getMessage() . "\n"; }
+// (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
+// (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
+// launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.
+try {
+    $r = rs_http(rs_gh_api() . '/repos/elripalda/RecompLauncher/contents/docs/recomplauncher.schema.json?ref=main', ['github' => true, 'timeout' => 10, 'max' => 3000000]);
+    $j = $r['status'] === 200 ? json_decode((string)$r['body'], true) : null;
+    $txt = is_array($j) ? (string)base64_decode((string)($j['content'] ?? ''), true) : '';
+    $sch = $txt !== '' ? json_decode($txt, true) : null;
+    $f = RS_PUBLIC . '/schema/recomplauncher.json';
+    if (is_array($sch) && ($sch['$id'] ?? '') === 'https://recomplauncher.com/schema/recomplauncher.json' && isset($sch['properties']['format'], $sch['properties']['start'])
+        && (!is_file($f) || hash_file('sha256', $f) !== hash('sha256', $txt))) {
+        if (@file_put_contents($f . '.new', $txt) !== false && @rename($f . '.new', $f)) {
+            rs_log('sdk', 'schema', 'synced from the launcher (' . substr((string)($j['sha'] ?? ''), 0, 7) . ')');
+            echo gmdate('c') . " schema synced from the launcher\n";
+        } else echo gmdate('c') . " schema: couldn't write it\n";
+    }
+} catch (Throwable $e) { echo gmdate('c') . ' schema: ' . $e->getMessage() . "\n"; }
