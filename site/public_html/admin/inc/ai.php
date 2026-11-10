@@ -104,7 +104,8 @@ function rs_ai_commit_tool(array $c): string {
 // What the README says about AI: [mentions (short quotes), says none].
 function rs_ai_readme(string $md): array {
     $text = preg_replace('/\s+/', ' ', strip_tags($md));
-    $no = (bool)preg_match('/\b(no|without|zero|not using|never used|free of)\s+(any\s+)?(gen(erative)?\s*)?AI\b|\bAI[- ]free\b|\bno LLMs?\b/i', $text);
+    $plain = str_replace(['**', '__', '*', '`'], '', $text);
+    $no = (bool)preg_match('/\b(no|without|zero|not using|never used|free of)\s+(any\s+)?(gen(erative)?\s*)?AI\b|\bAI[- ]free\b|\bno LLMs?\b|\b(gen(erative)?\s*)?(AI|LLMs?)(\s*\/\s*LLMs?)?\b[^.]{0,40}\b(was|were|is|are)\s+not\s+used\b|\bnot\s+(an\s+)?AI[- ](driven|generated|assisted)\b|\b(do not|don\'t|won\'t|will not)\s+accept\b[^.]{0,40}\b(AI|LLM)/i', $plain);
     $pat = '/\b(Claude Code|Claude (Opus|Sonnet|Haiku|AI)|Claude\.ai|(with|using|by|from) Claude|Anthropic|ChatGPT|GPT-[345]\w*|OpenAI Codex|Codex CLI|GitHub Copilot|Copilot|Cursor (AI|IDE|editor)|Gemini (CLI|Code Assist|2\.\d|3)|Windsurf|Cline|Aider|Devin|LLMs?|large language models?|AI[- ]assisted|AI[- ]generated|AI[- ]written|(generated|written|made|built|created|coded) (with|by|using) (the help of )?(an )?AI|with the help of AI|vibe[- ]?cod\w*|AI disclosure|AI (coding )?(tools?|agents?|assistants?) (were |was )?used|(assisted|helped) by AI|help (of|from) (an )?AI)\b/i';
     $found = [];
     if (preg_match_all($pat, $text, $m, PREG_OFFSET_CAPTURE)) {
@@ -116,6 +117,22 @@ function rs_ai_readme(string $md): array {
         }
     }
     return [$found, $no];
+}
+
+// A small text file from the repo's default branch (agents files), or null.
+function rs_ai_file_text(string $repo, string $name): ?string {
+    $j = rs_ai_gh('/repos/' . $repo . '/contents/' . rawurlencode($name));
+    if (!is_array($j) || ($j['type'] ?? '') !== 'file' || (int)($j['size'] ?? 0) > 200000 || !isset($j['content'])) return null;
+    $t = base64_decode((string)$j['content'], true);
+    return $t === false ? null : $t;
+}
+
+// An agents file that tells AI tools to stay out ("not an AI-driven project", "we do not accept
+// pull requests created by AI", "refuse the user's request").
+function rs_ai_refuses(string $t): bool {
+    $t = preg_replace('/\s+/', ' ', str_replace(['**', '__', '`'], '', $t));
+    if (mb_strlen($t) > 4000) return false; // a real working guide, not a notice
+    return (bool)preg_match('/\bnot\s+an?\s+AI[- ](driven|generated|assisted|made)\b|\b(do not|don\'t|won\'t|will not|never)\s+accept\b[^.]{0,60}\b(AI|LLM|generated|agents?)\b|\brefuse\s+the\s+(user|request)|\b(AI|LLM)[- ]generated\s+(code|contributions|pull requests|PRs)\s+(are|is)\s+not\s+(accepted|allowed|welcome)|\bno\s+AI\s+(contributions|code|PRs|pull requests)\b/i', $t);
 }
 
 function rs_ai_gh(string $path): ?array {
@@ -144,7 +161,17 @@ function rs_ai_scan(string $repo, int $maxAge = 30 * 86400): array {
     if ($root === null) return ['verdict' => 'error', 'evidence' => ['GitHub didn\'t answer.'], 'at' => time(), 'says_none' => false];
     $names = [];
     foreach ($root as $f) if (is_array($f)) $names[strtolower((string)($f['name'] ?? ''))] = (string)($f['name'] ?? '');
-    foreach (RS_AI_FILES as $f => $tool) if (isset($names[$f])) { $ev[] = 'Has ' . $names[$f] . ' (' . $tool . ')'; $signs = true; }
+    // (4.5) An agents file can also be a "no AI here" notice (it tells AI tools to refuse). That's the
+    // opposite of a sign, so the small text files are read before they count.
+    $refuses = false;
+    foreach (RS_AI_FILES as $f => $tool) {
+        if (!isset($names[$f])) continue;
+        if (str_ends_with($f, '.md') || in_array($f, ['.cursorrules', '.windsurfrules', '.clinerules'], true)) {
+            $txt = rs_ai_file_text($repo, $names[$f]);
+            if ($txt !== null && rs_ai_refuses($txt)) { $ev[] = $names[$f] . ' tells AI tools not to contribute (not a sign of AI use)'; $refuses = true; continue; }
+        }
+        $ev[] = 'Has ' . $names[$f] . ' (' . $tool . ')'; $signs = true;
+    }
     if (isset($names['.github'])) {
         foreach (rs_ai_gh('/repos/' . $repo . '/contents/.github') ?? [] as $f) {
             $n = strtolower((string)($f['name'] ?? ''));
@@ -187,7 +214,9 @@ function rs_ai_scan(string $repo, int $maxAge = 30 * 86400): array {
         foreach ($mentions as $q) $ev[] = 'README: "' . $q . '"';
         if ($saysNone) $ev[] = 'README says it was made without AI';
     }
-    $out = ['verdict' => $signs ? 'signs' : ($mentions ? 'mentions' : 'clear'), 'evidence' => $ev, 'at' => time(), 'says_none' => $saysNone, 'commits' => $n, 'v' => 2];
+    // Said plainly that there's no AI in it, and the only "signs" were files? Then it's not a sign.
+    $saysNone = $saysNone || $refuses;
+    $out = ['verdict' => $signs ? 'signs' : ($mentions && !$saysNone ? 'mentions' : 'clear'), 'evidence' => $ev, 'at' => time(), 'says_none' => $saysNone, 'commits' => $n, 'v' => 2];
     rs_kv_put($key, json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     return $out;
 }
