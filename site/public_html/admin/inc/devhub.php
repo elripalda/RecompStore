@@ -55,20 +55,20 @@ function rs_dev_tables(): void {
     ) CHARACTER SET utf8mb4');
     // (2.7.3) Accounts made with an email and a password (no GitHub): gh_id empty; the password only
     // as a hash; the email confirmed before they can sign in; a reset link when they forget it.
-    if (!$db->query("SHOW COLUMNS FROM dev_accounts LIKE 'pass_hash'")->fetch()) {
+    if (rs_col_missing($db, 'dev_accounts', 'pass_hash')) {
         $db->exec("ALTER TABLE dev_accounts MODIFY gh_id BIGINT NULL, MODIFY gh_login VARCHAR(64) NOT NULL DEFAULT '',
             ADD COLUMN pass_hash VARCHAR(255) NULL, ADD COLUMN email_ok TINYINT NOT NULL DEFAULT 0, ADD COLUMN mail_token CHAR(64) NULL,
             ADD COLUMN mail_token_until DATETIME NULL, ADD INDEX (email)");
     }
     // (2.7.3) Invites can come with their developer page set up (slug), and, when you tick it,
     // approve them the moment they accept (approve = 1). Otherwise you approve them as before.
-    if (!$db->query("SHOW COLUMNS FROM dev_invites LIKE 'approve'")->fetch()) {
+    if (rs_col_missing($db, 'dev_invites', 'approve')) {
         $db->exec("ALTER TABLE dev_invites ADD COLUMN slug VARCHAR(40) NOT NULL DEFAULT '', ADD COLUMN approve TINYINT NOT NULL DEFAULT 0");
     }
     // Set up now, sent later: held invites aren't emailed until you press Send.
-    if (!$db->query("SHOW COLUMNS FROM dev_invites LIKE 'held'")->fetch()) $db->exec('ALTER TABLE dev_invites ADD COLUMN held TINYINT NOT NULL DEFAULT 0');
+    if (rs_col_missing($db, 'dev_invites', 'held')) $db->exec('ALTER TABLE dev_invites ADD COLUMN held TINYINT NOT NULL DEFAULT 0');
     // (2.7.3) The weekly email: on unless they turn it off in their hub.
-    if (!$db->query("SHOW COLUMNS FROM dev_accounts LIKE 'weekly'")->fetch()) $db->exec('ALTER TABLE dev_accounts ADD COLUMN weekly TINYINT NOT NULL DEFAULT 1');
+    if (rs_col_missing($db, 'dev_accounts', 'weekly')) $db->exec('ALTER TABLE dev_accounts ADD COLUMN weekly TINYINT NOT NULL DEFAULT 1');
     // Changes a developer suggests for one of their app pages, waiting for the admin.
     $db->exec('CREATE TABLE IF NOT EXISTS dev_changes (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,7 +82,7 @@ function rs_dev_tables(): void {
         INDEX (status), INDEX (account_id)
     ) CHARACTER SET utf8mb4');
     // (3.0) What they make: "pc", "ps5" or both ("pc,ps5"); empty until they say.
-    if (!$db->query("SHOW COLUMNS FROM dev_accounts LIKE 'platforms'")->fetch()) {
+    if (rs_col_missing($db, 'dev_accounts', 'platforms')) {
         $db->exec("ALTER TABLE dev_accounts ADD COLUMN platforms VARCHAR(12) NOT NULL DEFAULT '', ADD COLUMN lounge_seen INT NOT NULL DEFAULT 0");
     }
     // (3.0) Recomps and apps a developer says are theirs: theirs by GitHub goes through at once; the
@@ -112,10 +112,10 @@ function rs_dev_tables(): void {
         INDEX (channel, account_id), INDEX (created)
     ) CHARACTER SET utf8mb4');
     // (3.1) Lounge channels, and where each developer has read up to in each.
-    if (!$db->query("SHOW COLUMNS FROM dev_messages LIKE 'room'")->fetch()) {
+    if (rs_col_missing($db, 'dev_messages', 'room')) {
         $db->exec("ALTER TABLE dev_messages ADD COLUMN room VARCHAR(16) NOT NULL DEFAULT 'general'");
     }
-    if (!$db->query("SHOW COLUMNS FROM dev_accounts LIKE 'lounge_rooms'")->fetch()) {
+    if (rs_col_missing($db, 'dev_accounts', 'lounge_rooms')) {
         $db->exec("ALTER TABLE dev_accounts ADD COLUMN lounge_rooms VARCHAR(255) NOT NULL DEFAULT ''");
     }
     // (3.1) Developer docs: Markdown pages for approved developers, for PC, PS5 or everyone.

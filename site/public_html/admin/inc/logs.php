@@ -218,7 +218,7 @@ function rs_inbox_sig_column(): void {
     $db = rs_db();
     $f = dirname(RS_PUBLIC) . '/recompstore-private/inbox-sig-column.done';
     if (!is_file($f)) {
-        if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'sig'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN sig VARCHAR(255) NOT NULL DEFAULT '', ADD INDEX sig_app (kind, app_id, sig(64))");
+        if (rs_col_missing($db, 'inbox', 'sig')) $db->exec("ALTER TABLE inbox ADD COLUMN sig VARCHAR(255) NOT NULL DEFAULT '', ADD INDEX sig_app (kind, app_id, sig(64))");
         @touch($f);
     }
     // (3.4) Headlines worked out again: launcher trails now count only for the report's own game.

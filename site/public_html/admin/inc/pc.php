@@ -66,10 +66,10 @@ function rs_pc_tables(): void {
     ) CHARACTER SET utf8mb4');
     // (3.9) Longer notes (a bad report has to say what happened), the player's PC in a few words, and
     // their account when they were signed in (never shown; it's how they hear back from the developer).
-    if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE 'specs'")->fetch())
+    if (rs_col_missing($db, 'pc_feedback', 'specs'))
         $db->exec("ALTER TABLE pc_feedback MODIFY note VARCHAR(1200) NOT NULL DEFAULT '', ADD COLUMN account_id INT NULL, ADD COLUMN specs VARCHAR(600) NOT NULL DEFAULT ''");
     // (4.0) Played through Proton: a Windows build on Linux or Steam Deck, as RecompLauncher reports it.
-    if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE 'proton'")->fetch())
+    if (rs_col_missing($db, 'pc_feedback', 'proton'))
         $db->exec("ALTER TABLE pc_feedback ADD COLUMN proton TINYINT(1) NOT NULL DEFAULT 0");
     $done = true;
 }

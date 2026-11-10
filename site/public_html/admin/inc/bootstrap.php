@@ -59,6 +59,27 @@ final class RsPDO extends PDO {
         @file_put_contents(self::file(), $k . "\n", FILE_APPEND | LOCK_EX);
         return $r;
     }
+    // (4.6) The same memory for other one-time checks (a column that's there).
+    public static function known(string $k): bool {
+        if (self::$done === null) { self::$done = []; $t = @file_get_contents(self::file()); if (is_string($t)) foreach (explode("\n", $t) as $l) if ($l !== '') self::$done[$l] = true; }
+        return isset(self::$done[$k]);
+    }
+    public static function remember(string $k): void {
+        if (self::known($k)) return;
+        self::$done[$k] = true;
+        @file_put_contents(self::file(), $k . "\n", FILE_APPEND | LOCK_EX);
+    }
+}
+
+// (4.6) Whether a table still lacks a column. "SHOW COLUMNS" ran on nearly every request; now a column
+// seen once is remembered (schema-done.txt) and never asked about again.
+function rs_col_missing(PDO $db, string $table, string $col): bool {
+    $k = 'col:' . $table . '.' . $col;
+    if (RsPDO::known($k)) return false;
+    if (!preg_match('/^[a-z0-9_]+$/', $table . $col)) return !$db->query("SHOW COLUMNS FROM `$table` LIKE " . $db->quote($col))->fetch();
+    if (!$db->query("SHOW COLUMNS FROM $table LIKE '$col'")->fetch()) return true;
+    RsPDO::remember($k);
+    return false;
 }
 
 function rs_db(): PDO {
@@ -777,19 +798,40 @@ function rs_settings_cached(): ?array {
         $x = @include $f;
         if (is_array($x)) return $GLOBALS['rs_settings_all'] = $x;
     }
+    // (4.6) When the copy is a minute old, one request reads the table again; the others meanwhile
+    // keep using the copy there is (up to 10 minutes old) instead of all asking the database at once.
+    $lock = @fopen($f . '.lock', 'c');
+    $mine = $lock && flock($lock, LOCK_EX | LOCK_NB);
+    if (!$mine && $age < 600) {
+        if ($lock) fclose($lock);
+        $x = @include $f;
+        if (is_array($x)) return $GLOBALS['rs_settings_all'] = $x;
+    }
     try {
-        $x = [];
-        foreach (rs_db()->query('SELECT k, v FROM settings') as $r) $x[(string)$r['k']] = (string)$r['v'];
-        $d = dirname($f);
-        if (!is_dir($d)) @mkdir($d, 0755, true);
-        $tmp = $f . '.' . getmypid();
-        if (@file_put_contents($tmp, '<?php return ' . var_export($x, true) . ';') !== false) @rename($tmp, $f);
-        return $GLOBALS['rs_settings_all'] = $x;
+        return $GLOBALS['rs_settings_all'] = rs_settings_rebuild();
     } catch (Throwable $e) {
         return null;
+    } finally {
+        if ($lock) { if ($mine) flock($lock, LOCK_UN); fclose($lock); }
     }
 }
-function rs_settings_forget(): void { unset($GLOBALS['rs_settings_all']); @unlink(rs_settings_file()); }
+// (4.6) The copy on disk, read again from the table and written in one go (a new file swapped in).
+function rs_settings_rebuild(): array {
+    $f = rs_settings_file();
+    $x = [];
+    foreach (rs_db()->query('SELECT k, v FROM settings') as $r) $x[(string)$r['k']] = (string)$r['v'];
+    $d = dirname($f);
+    if (!is_dir($d)) @mkdir($d, 0755, true);
+    $tmp = $f . '.' . getmypid();
+    if (@file_put_contents($tmp, '<?php return ' . var_export($x, true) . ';') !== false) @rename($tmp, $f);
+    return $x;
+}
+// (4.6) A setting changed: the copy on disk is written again right away, rather than deleted (a
+// deleted copy sent every request arriving next to the database at the same moment).
+function rs_settings_forget(): void {
+    unset($GLOBALS['rs_settings_all']);
+    try { rs_settings_rebuild(); } catch (Throwable $e) { @unlink(rs_settings_file()); }
+}
 
 function rs_setting(string $k, ?string $default = null): ?string {
     $all = rs_settings_cached();
@@ -1183,10 +1225,10 @@ function rs_submission_columns(): void {
     rs_inbox_table();
     rs_report_tables();
     $db = rs_db();
-    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'data'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN data MEDIUMTEXT NULL');
+    if (rs_col_missing($db, 'inbox', 'data')) $db->exec('ALTER TABLE inbox ADD COLUMN data MEDIUMTEXT NULL');
     // (2.7.3) Sent in from a developer's hub: their account.
-    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'dev_account'")->fetch()) $db->exec('ALTER TABLE inbox ADD COLUMN dev_account INT NULL, ADD INDEX (dev_account)');
-    if (!$db->query("SHOW COLUMNS FROM inbox_pictures LIKE 'role'")->fetch()) $db->exec("ALTER TABLE inbox_pictures ADD COLUMN role VARCHAR(8) NOT NULL DEFAULT ''");
+    if (rs_col_missing($db, 'inbox', 'dev_account')) $db->exec('ALTER TABLE inbox ADD COLUMN dev_account INT NULL, ADD INDEX (dev_account)');
+    if (rs_col_missing($db, 'inbox_pictures', 'role')) $db->exec("ALTER TABLE inbox_pictures ADD COLUMN role VARCHAR(8) NOT NULL DEFAULT ''");
     rs_inbox_category_column();
     $done = true;
 }
@@ -1198,7 +1240,7 @@ function rs_inbox_category_column(): void {
     if ($done) return;
     rs_inbox_table();
     $db = rs_db();
-    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'category'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN category VARCHAR(16) NOT NULL DEFAULT ''");
+    if (rs_col_missing($db, 'inbox', 'category')) $db->exec("ALTER TABLE inbox ADD COLUMN category VARCHAR(16) NOT NULL DEFAULT ''");
     $done = true;
 }
 
@@ -1293,7 +1335,7 @@ function rs_beta_tables(): void {
         tester TINYINT NOT NULL DEFAULT 0
     ) CHARACTER SET utf8mb4');
     // (2.0) A console the admin marked as a tester (Settings, Testers): it gets the test catalog.
-    if (!$db->query("SHOW COLUMNS FROM beta_installs LIKE 'tester'")->fetch()) {
+    if (rs_col_missing($db, 'beta_installs', 'tester')) {
         $db->exec('ALTER TABLE beta_installs ADD COLUMN tester TINYINT NOT NULL DEFAULT 0');
     }
     $db->exec('CREATE TABLE IF NOT EXISTS beta_tries (

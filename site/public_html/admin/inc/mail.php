@@ -52,7 +52,7 @@ function rs_mail_tables(): void {
         INDEX (inbox_id), INDEX (blast_id, list_id), INDEX (created)
     ) CHARACTER SET utf8mb4');
     // (2.7.2) Emails made in the builder (blocks, JSON) and sent to people picked by hand (only_ids, JSON ids).
-    if (!$db->query("SHOW COLUMNS FROM mail_blasts LIKE 'blocks'")->fetch()) $db->exec('ALTER TABLE mail_blasts ADD COLUMN blocks MEDIUMTEXT NULL, ADD COLUMN only_ids TEXT NULL');
+    if (rs_col_missing($db, 'mail_blasts', 'blocks')) $db->exec('ALTER TABLE mail_blasts ADD COLUMN blocks MEDIUMTEXT NULL, ADD COLUMN only_ids TEXT NULL');
     $done = true;
 }
 

@@ -67,13 +67,13 @@ function rs_play_tables(): void {
     ) CHARACTER SET utf8mb4');
     // (3.9) What a developer needs to answer a PC report: the player's PC in a few words, their log
     // (kept outside the website, never public), and whether the developer has seen it yet.
-    if (!$db->query("SHOW COLUMNS FROM play_reports LIKE 'specs'")->fetch()) {
+    if (rs_col_missing($db, 'play_reports', 'specs')) {
         $db->exec("ALTER TABLE play_reports ADD COLUMN specs VARCHAR(600) NOT NULL DEFAULT '', ADD COLUMN log_name VARCHAR(120) NOT NULL DEFAULT '',
             ADD COLUMN has_log TINYINT NOT NULL DEFAULT 0, ADD COLUMN dev_seen TINYINT NOT NULL DEFAULT 0");
         $db->exec('UPDATE play_reports SET dev_seen = 1'); // the ones from before aren't news
     }
     // (4.0) Played through Proton (a Windows build on Linux or Steam Deck), as RecompLauncher reports it.
-    if (!$db->query("SHOW COLUMNS FROM play_reports LIKE 'proton'")->fetch())
+    if (rs_col_missing($db, 'play_reports', 'proton'))
         $db->exec("ALTER TABLE play_reports ADD COLUMN proton TINYINT NOT NULL DEFAULT 0");
     // (3.9) Developers answer reports, and the player can answer back. Shown under the report.
     $db->exec('CREATE TABLE IF NOT EXISTS play_report_replies (
@@ -94,12 +94,29 @@ function rs_play_sync_legacy(): void {
     static $done = false;
     if ($done) return;
     $done = true;
+    // (4.6) New reports go in the moment they're sent (rs_play_from_pcfb), so this is only a backstop:
+    // every 10 minutes the reports of the last two days, once a day all of them. One request at a
+    // time (a file lock, not a setting), and the rest go on without waiting.
+    $f = dirname(RS_PUBLIC) . '/recompstore-private/play-legacy-at.txt';
+    $age = is_file($f) ? time() - (int)@filemtime($f) : PHP_INT_MAX;
+    if ($age < 600) return;
+    $lock = @fopen($f . '.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) { if ($lock) fclose($lock); return; }
+    clearstatcache(true, $f);
+    if (is_file($f) && time() - (int)@filemtime($f) < 600) { flock($lock, LOCK_UN); fclose($lock); return; }
+    $full = (string)@file_get_contents($f) !== gmdate('Y-m-d');
+    @file_put_contents($f, gmdate('Y-m-d'));
+    try {
+        rs_play_sync_legacy_run($full);
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+function rs_play_sync_legacy_run(bool $full): void {
     rs_play_tables();
     $db = rs_db();
-    // At most once a minute is plenty.
-    $last = (int)rs_setting('play_legacy_at', '0');
-    if (time() - $last < 60) return;
-    rs_set_setting('play_legacy_at', (string)time());
+    $recent = $full ? '' : ' WHERE f.created >= NOW() - INTERVAL 2 DAY';
     $tables = array_column($db->query('SHOW TABLES')->fetchAll(PDO::FETCH_NUM), 0);
     // RecompLauncher's (pc_feedback): one per connection, stamped in the server's own clock.
     // (3.9) With the player's account (never shown by name) and their PC's specs.
@@ -109,7 +126,7 @@ function rs_play_sync_legacy(): void {
             SELECT 'pc', f.app, f.ip_hash, f.account_id, 0, f.verdict, f.sys, f.version, f.note, f.specs, f.hidden, 'pcfb', f.id,
                    DATE_SUB(f.created, INTERVAL TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) SECOND),
                    DATE_SUB(f.created, INTERVAL TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) SECOND)
-            FROM pc_feedback f
+            FROM pc_feedback f" . $recent . "
             ON DUPLICATE KEY UPDATE verdict = IF(play_reports.source = 'pcfb', VALUES(verdict), play_reports.verdict),
                 account_id = IF(play_reports.source = 'pcfb', COALESCE(VALUES(account_id), play_reports.account_id), play_reports.account_id),
                 specs = IF(play_reports.source = 'pcfb' AND VALUES(specs) <> '', VALUES(specs), play_reports.specs),
@@ -124,7 +141,7 @@ function rs_play_sync_legacy(): void {
     if (in_array('ps5_feedback', $tables, true)) {
         $db->exec("INSERT INTO play_reports (kind, app, who, account_id, verdict, sys, version, note, hidden, source, legacy_id, created, updated)
             SELECT 'ps5', f.app, f.who, f.account_id, f.verdict, f.fw, f.version, f.note, f.hidden, 'ps5fb', f.id, f.created, f.created
-            FROM ps5_feedback f
+            FROM ps5_feedback f" . $recent . "
             ON DUPLICATE KEY UPDATE verdict = IF(play_reports.source = 'ps5fb', VALUES(verdict), play_reports.verdict),
                 sys = IF(play_reports.source = 'ps5fb', VALUES(sys), play_reports.sys),
                 note = IF(play_reports.source = 'ps5fb', VALUES(note), play_reports.note),
@@ -475,17 +492,44 @@ function rs_play_weight(array $r, int $now): float {
     return $w;
 }
 
-function rs_play_scores_forget(): void { rs_set_setting('play_scores_at', '0'); }
+// (4.6) Kept in a file of their own (recompstore-private/play-scores.json), not in the settings: the
+// settings are read by every request, and these are big. A new report marks the file out of date.
+function rs_play_scores_file(): string { return dirname(RS_PUBLIC) . '/recompstore-private/play-scores.json'; }
+function rs_play_scores_forget(): void { unset($GLOBALS['rs_play_scores_mem']); if (is_file($f = rs_play_scores_file())) @touch($f, 1); }
 
 // Every version's score: [kind => [app => [score, n, w, verdicts, sys => [sys => [score, n]], problems => [k => share], recent => n30, trend]]]
 // Kept for five minutes; a new report clears it.
 function rs_play_scores(): array {
-    rs_play_sync_legacy();
-    $cacheAt = (int)rs_setting('play_scores_at', '0');
-    if (time() - $cacheAt < 300) {
-        $c = json_decode((string)rs_setting('play_scores', ''), true);
-        if (is_array($c)) return $c;
+    $mem = &$GLOBALS['rs_play_scores_mem'];
+    if (is_array($mem)) return $mem;
+    $f = rs_play_scores_file();
+    clearstatcache(true, $f);
+    $age = is_file($f) ? time() - (int)@filemtime($f) : PHP_INT_MAX;
+    $old = $age < PHP_INT_MAX ? json_decode((string)@file_get_contents($f), true) : null;
+    if ($age < 300 && is_array($old)) return $mem = $old;
+    // Out of date: one request works them out again; the others meanwhile use the ones there are.
+    $lock = @fopen($f . '.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
+        if ($lock) fclose($lock);
+        if (is_array($old)) return $mem = $old;
+        $lock = null;
     }
+    try {
+        rs_play_sync_legacy();
+        $out = rs_play_scores_make();
+        $tmp = $f . '.' . getmypid();
+        if (@file_put_contents($tmp, json_encode($out, JSON_UNESCAPED_SLASHES)) !== false) @rename($tmp, $f);
+        // The copy the settings used to keep (and the old clocks) go, once.
+        if (rs_setting('play_scores', '') !== '' || rs_setting('play_legacy_at', '') !== '') {
+            rs_db()->exec("DELETE FROM settings WHERE k IN ('play_scores', 'play_scores_at', 'play_legacy_at')");
+            rs_settings_forget();
+        }
+        return $mem = $out;
+    } finally {
+        if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
+    }
+}
+function rs_play_scores_make(): array {
     $now = time();
     $acc = [];
     $st = rs_db()->query('SELECT kind, app, account_id, verdict, sys, progress, fps, problems, gpu, fix, note, helpful, updated FROM play_reports WHERE hidden = 0');
@@ -515,8 +559,6 @@ function rs_play_scores(): array {
         $out[$k][$a] = ['score' => (int)round(($e['sw'] + $prior * $pw) / ($e['w'] + $pw)), 'n' => $e['n'], 'verdicts' => $e['v'],
             'sys' => $sys, 'problems' => $pr, 'recent' => $e['n30'], 'trend' => $trend];
     }
-    rs_set_setting('play_scores', json_encode($out, JSON_UNESCAPED_SLASHES));
-    rs_set_setting('play_scores_at', (string)time());
     return $out;
 }
 

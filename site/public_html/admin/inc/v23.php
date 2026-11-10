@@ -107,8 +107,8 @@ function rs_inbox_feedback_columns(): void {
     if ($done) return;
     rs_inbox_category_column();
     $db = rs_db();
-    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'feedback'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN feedback VARCHAR(16) NOT NULL DEFAULT ''");
-    if (!$db->query("SHOW COLUMNS FROM inbox LIKE 'build'")->fetch()) $db->exec("ALTER TABLE inbox ADD COLUMN build VARCHAR(64) NOT NULL DEFAULT ''");
+    if (rs_col_missing($db, 'inbox', 'feedback')) $db->exec("ALTER TABLE inbox ADD COLUMN feedback VARCHAR(16) NOT NULL DEFAULT ''");
+    if (rs_col_missing($db, 'inbox', 'build')) $db->exec("ALTER TABLE inbox ADD COLUMN build VARCHAR(64) NOT NULL DEFAULT ''");
     $done = true;
 }
 

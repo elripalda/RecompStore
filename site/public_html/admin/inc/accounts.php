@@ -71,7 +71,7 @@ function rs_acct_tables(): void {
         at DATETIME NOT NULL,
         KEY look (kind, k, at)
     ) CHARACTER SET utf8mb4');
-    if (!$db->query("SHOW COLUMNS FROM accounts LIKE 'avatar'")->fetch()) $db->exec("ALTER TABLE accounts ADD COLUMN avatar VARCHAR(120) NULL");
+    if (rs_col_missing($db, 'accounts', 'avatar')) $db->exec("ALTER TABLE accounts ADD COLUMN avatar VARCHAR(120) NULL");
     // Email sign-ups that never confirmed: gone after 7 days (their username is free again).
     if (random_int(1, 40) === 1) $db->exec("DELETE FROM accounts WHERE email_ok = 0 AND pass_hash IS NOT NULL AND google_sub IS NULL AND discord_id IS NULL AND github_id IS NULL AND created < (UTC_TIMESTAMP() - INTERVAL 7 DAY)");
     $done = true;
@@ -574,7 +574,7 @@ function rs_pmail_tables(): void {
         ok TINYINT NOT NULL DEFAULT 1,
         PRIMARY KEY (mail_id, account_id)
     ) CHARACTER SET utf8mb4');
-    if (!$db->query("SHOW COLUMNS FROM account_saved LIKE 'seen_version'")->fetch())
+    if (rs_col_missing($db, 'account_saved', 'seen_version'))
         $db->exec("ALTER TABLE account_saved ADD COLUMN seen_version VARCHAR(40) NOT NULL DEFAULT ''");
     $done = true;
 }

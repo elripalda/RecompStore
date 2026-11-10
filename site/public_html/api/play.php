@@ -18,7 +18,8 @@ header('Content-Type: application/json; charset=utf-8');
 
 function rs_pl_out(int $code, array $body, int $cache = 0): void {
     http_response_code($code);
-    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache : 'no-store'));
+    // (4.6) The answers that are the same for everyone (scores, versions) are kept by Cloudflare too.
+    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache . ', s-maxage=' . max($cache, 300) : 'no-store'));
     echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }

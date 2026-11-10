@@ -443,7 +443,7 @@ function rs_rl_more_tables(): void {
     foreach (['gpu' => "VARCHAR(160) NOT NULL DEFAULT ''", 'cpu' => "VARCHAR(120) NOT NULL DEFAULT ''", 'ram_gb' => 'SMALLINT NOT NULL DEFAULT 0',
         'osver' => "VARCHAR(80) NOT NULL DEFAULT ''", 'src' => "VARCHAR(8) NOT NULL DEFAULT ''", 'mins' => 'INT NOT NULL DEFAULT 0',
         'device' => "VARCHAR(40) NOT NULL DEFAULT ''"] as $col => $def) { // (4.3) device: the handheld, when it's one
-        if (!$db->query("SHOW COLUMNS FROM pc_feedback LIKE '$col'")->fetch()) $db->exec("ALTER TABLE pc_feedback ADD COLUMN $col $def");
+        if (rs_col_missing($db, 'pc_feedback', $col)) $db->exec("ALTER TABLE pc_feedback ADD COLUMN $col $def");
     }
     // (3.7) Diagnostics are kept 90 days, and none of it is tied to an account (the privacy page says so).
     if (random_int(1, 200) === 1) {
