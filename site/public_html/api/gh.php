@@ -5,6 +5,23 @@
 // When GitHub can't be reached, the last copy (any age) with X-RS-Stale: 1.
 //   GET ?repo=owner/name
 declare(strict_types=1);
+
+// (4.6) The copy on disk, when it's fresh, goes out before the rest of the site loads: most of these
+// requests are answered by it, and loading the site for each one was most of their cost.
+$fastRepo = trim((string)($_GET['repo'] ?? ''));
+if (preg_match('#^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$#', $fastRepo) && !str_contains($fastRepo, '..')) {
+    $fastF = dirname(__DIR__, 2) . '/recompstore-private/gh/' . md5(strtolower($fastRepo)) . '.json';
+    $fastM = @filemtime($fastF);
+    if ($fastM !== false && time() - $fastM < 1800) {
+        header('Content-Type: application/json; charset=utf-8');
+        header('X-Content-Type-Options: nosniff');
+        header('Access-Control-Allow-Origin: *');
+        header('Cache-Control: public, max-age=120');
+        header('X-RS-Cache-Age: ' . (time() - $fastM));
+        readfile($fastF);
+        exit;
+    }
+}
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 
 header('Content-Type: application/json; charset=utf-8');
