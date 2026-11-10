@@ -429,6 +429,10 @@ What makes a recomp easy to play, wherever players get it from. Nothing here is 
 | PS1 | CHD, BIN/CUE, ISO |
 | PS2 | CHD, ISO |
 | PSP | CHD, ISO, CSO |
+| PS3 | a decrypted ISO, or the game folder (PS3_GAME) |
+| PS4 | the dumped game folder (CUSA…), or a fake-signed PKG |
+| PS5 | the dumped game folder (PPSA…) |
+| PS Vita | a decrypted dump: VPK or the game folder (PCSA…, PCSE…) |
 | Dreamcast | CHD, GDI |
 | Saturn, Sega CD / Mega CD | CHD, BIN/CUE |
 | TurboGrafx-CD / PC Engine CD, Neo Geo CD | CHD, BIN/CUE |
@@ -441,6 +445,8 @@ What makes a recomp easy to play, wherever players get it from. Nothing here is 
 | Xbox 360 | ISO, or an extracted folder with default.xex |
 
 CHD is the format most disc-based backups come in, and the one players ask for most. Reading it is a small library ([libchdr](https://github.com/rtissera/libchdr), BSD licensed).
+
+**Prefer files players can read directly.** Where a decrypted dump exists (a decrypted PS3 ISO, a dumped PS4 or PS5 folder, a decrypted Vita game), accept it as is. Then your recomp doesn't have to ship decryption code or keys, and players don't have to run a separate tool before they can play. Only reach for decryption when there's no other way, and never ship keys.
 
 **Check the copy, then say what's wrong.** If you know the good dumps (from [Redump](http://redump.org) or [No-Intro](https://no-intro.org)), check against them. When a file is wrong, say why in one line ("This is the PAL version. The recomp needs the USA one.") instead of crashing later.
 
