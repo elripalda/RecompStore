@@ -857,7 +857,8 @@ dialog.quick.closing::backdrop{animation:fade-out .18s ease-in both}
 .app-combo input::-webkit-search-cancel-button{filter:grayscale(1) invert(1) opacity(.55)}
 .app-combo-list{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 6px);max-height:320px;overflow:auto;display:flex;flex-direction:column;padding:6px;background:#0d1524;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5)}
 .app-combo-list[hidden]{display:none}
-.app-combo-list [role=option]{padding:9px 12px;border-radius:9px;cursor:pointer;color:var(--frost);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-combo-list>*{flex:none}
+.app-combo-list [role=option]{line-height:1.35;padding:9px 12px;border-radius:9px;cursor:pointer;color:var(--frost);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .app-combo-list [role=option].none{color:var(--muted)}
 .app-combo-list [role=option].cur{color:var(--cyan)}
 .app-combo-list [role=option].on,.app-combo-list [role=option]:hover{background:rgba(244,248,252,.09)}
