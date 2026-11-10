@@ -6,6 +6,15 @@ RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
+# (4.6) The catalogs, compressed: their .gz copy (written with each one) to anything that asks for
+# gzip, about an eighth of the size. Not for a part of the file (Range), and not for the PS5 store,
+# which gets the file as it is.
+RewriteCond %{HTTP:Accept-Encoding} gzip
+RewriteCond %{HTTP:Range} ^$
+RewriteCond %{HTTP_USER_AGENT} !PlayStation
+RewriteCond %{REQUEST_FILENAME}.gz -s
+RewriteRule ^(pc-catalog|pc-catalog-web|catalog|developers)\.json$ $1.json.gz [L,E=no-gzip:1]
+
 # (2.9) RecompLauncher: recomplauncher.com is the PC side of this same site (parked on it). Its pages
 # drop the /pc, and the app's page is /get. Anything of RecompStore's opens on recompstore.com.
 RewriteCond %{HTTP_HOST} ^www\.recomplauncher\.com$ [NC]
@@ -96,7 +105,28 @@ RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ page.php?p=code [L]
     Header set Cache-Control "no-cache, must-revalidate"
     Header set Access-Control-Allow-Origin "*"
   </Files>
+  # (4.6) The compressed copies: JSON, gzip-encoded, with the same rules as the file they copy.
+  <FilesMatch "^(pc-catalog|pc-catalog-web|catalog|developers)\.json(\.gz)?$">
+    Header append Vary Accept-Encoding
+  </FilesMatch>
+  <FilesMatch "^(pc-catalog|pc-catalog-web)\.json\.gz$">
+    Header set Cache-Control "public, max-age=60, s-maxage=300"
+  </FilesMatch>
+  <FilesMatch "^(catalog|developers)\.json\.gz$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "^catalog\.json\.gz$">
+    Header set Access-Control-Allow-Origin "*"
+  </FilesMatch>
 </IfModule>
+<FilesMatch "\.json\.gz$">
+  ForceType application/json
+  RemoveEncoding .gz
+  RemoveType .gz
+  <IfModule mod_headers.c>
+    Header set Content-Encoding gzip
+  </IfModule>
+</FilesMatch>
 <Files "seed.json">
   Require all denied
 </Files>

@@ -1096,12 +1096,27 @@ function rs_catalog_set_site_v2(bool $on): void {
     rs_write_catalog($cat);
 }
 
+// (4.6) A compressed copy next to a public JSON file (catalog.json.gz, say), written right after the
+// file itself. The web server hands it to anything that asks for gzip (.htaccess), so a catalog goes
+// out about an eighth of its size and the server doesn't compress it again for every download. When
+// the copy can't be written, the old one goes, so a stale copy is never served.
+function rs_json_gz(string $file): void {
+    $body = @file_get_contents($file);
+    $gz = $body === false ? false : gzencode($body, 7);
+    $tmp = $file . '.gz.tmp';
+    if ($gz === false || @file_put_contents($tmp, $gz) === false || !@rename($tmp, $file . '.gz')) {
+        @unlink($tmp);
+        @unlink($file . '.gz');
+    }
+}
+
 function rs_write_catalog(array $cat): void {
     $json = json_encode($cat, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $tmp = RS_CATALOG . '.tmp';
     if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_CATALOG)) {
         throw new RuntimeException('Could not write catalog.json. Check that public_html is writable.');
     }
+    rs_json_gz(RS_CATALOG);
 }
 
 function rs_publish(): int {

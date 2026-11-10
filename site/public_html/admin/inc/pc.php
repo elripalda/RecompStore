@@ -1298,6 +1298,7 @@ function rs_pc_write_files(array $cat, ?string $only = null): bool {
     $json = json_encode($cat, $flags);
     $tmp = RS_PC_CATALOG . '.tmp';
     if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG)) return false;
+    rs_json_gz(RS_PC_CATALOG);
     rs_pc_write_web($cat);
     // (4.6) One recomp brought up to date: only its own file. The others are still right, and the API
     // serves each game's file whenever it's there (rewriting all 1,400+ every few minutes kept the
@@ -1344,7 +1345,7 @@ function rs_pc_web_copy(array $cat): array {
 function rs_pc_write_web(array $cat): void {
     $f = RS_PUBLIC . '/pc-catalog-web.json';
     $json = json_encode(rs_pc_web_copy($cat), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    if ($json !== false && file_put_contents($f . '.tmp', $json . "\n") !== false) @rename($f . '.tmp', $f);
+    if ($json !== false && file_put_contents($f . '.tmp', $json . "\n") !== false && @rename($f . '.tmp', $f)) rs_json_gz($f);
 }
 
 // Writes pc-catalog.json from what's saved, without asking GitHub again (seconds, not minutes).

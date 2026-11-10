@@ -147,7 +147,7 @@ function rs_dev_write_public(): void {
         }
         $json = json_encode(['developers' => $list, 'built' => gmdate('c')], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $tmp = RS_PUBLIC . '/developers.json.tmp';
-        if (@file_put_contents($tmp, $json) !== false) @rename($tmp, RS_PUBLIC . '/developers.json');
+        if (@file_put_contents($tmp, $json) !== false && @rename($tmp, RS_PUBLIC . '/developers.json')) rs_json_gz(RS_PUBLIC . '/developers.json');
     } catch (Throwable $e) { /* the catalog's copy still works */ }
 }
 
