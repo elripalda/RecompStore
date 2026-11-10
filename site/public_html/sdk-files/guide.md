@@ -408,6 +408,67 @@ invite. Players join from the launcher or their account page, play it, and go ba
 release with one button. You can also name one release by its tag instead of "the newest
 pre-release".
 
+## Achievements
+
+Recomp Achievements is RecompLauncher's achievement system: achievements pop up as players earn them, games can be Beaten and Mastered, and Ranked points go on the leaderboards. It's separate from `recomplauncher.json`: a small C library in your recomp reports unlocks to the launcher, using the game's own achievements (Xbox 360), rules on console memory, or events you fire from your code.
+
+Everything you need is in the [Recomp Achievements repository](https://github.com/elripalda/RecompAchievements). Xbox 360 recomps on a recent ReXGlue build may already work without any change.
+
+## Recomp Standards
+
+What makes a recomp easy to play, wherever players get it from. Nothing here is required to be listed on RecompLauncher. These are the things players trip over most, and most of them are small changes.
+
+### The basics
+
+**Never ship game files.** No ROMs, disc images, extracted assets or keys. Players bring their own copy.
+
+**Accept the formats people actually have.** Most backups are packaged files, not the extracted folders a recomp is often first written for. Support the standard packaged formats where they apply:
+
+| Console | Accept |
+| --- | --- |
+| PS1 | CHD, BIN/CUE, ISO |
+| PS2 | CHD, ISO |
+| PSP | CHD, ISO, CSO |
+| Dreamcast | CHD, GDI |
+| Saturn, Sega CD / Mega CD | CHD, BIN/CUE |
+| TurboGrafx-CD / PC Engine CD, Neo Geo CD | CHD, BIN/CUE |
+| 3DO, Amiga CD32, Philips CD-i | CHD, BIN/CUE |
+| GameCube, Wii | RVZ, ISO, GCZ (and WBFS for Wii) |
+| N64 | .z64, .n64 and .v64 (any byte order), zipped |
+| NES, SNES, GB, GBA, DS | the ROM, or zipped |
+| Switch, Switch 2 | NSP, XCI and NUP, not only extracted exefs/romfs |
+| Xbox | ISO (XISO), or an extracted folder |
+| Xbox 360 | ISO, or an extracted folder with default.xex |
+
+CHD is the format most disc-based backups come in, and the one players ask for most. Reading it is a small library ([libchdr](https://github.com/rtissera/libchdr), BSD licensed).
+
+**Check the copy, then say what's wrong.** If you know the good dumps (from [Redump](http://redump.org) or [No-Intro](https://no-intro.org)), check against them. When a file is wrong, say why in one line ("This is the PAL version. The recomp needs the USA one.") instead of crashing later.
+
+**Let the game's location be passed in.** A `--game <path>` option (a file or a folder) means launchers, scripts and Steam shortcuts can start your recomp without anyone moving files around. Keep your own picker for everyone else.
+
+### Releases
+
+- **Tag every release with a version** (`v1.2.0`) and attach the builds to the GitHub release, not just to the README or Actions.
+- **One file per platform, with a name that says what it is**, the same way every time: `yourgame-1.2.0-windows-x64.zip`, `-linux-x86_64.AppImage`, `-macos-arm64.zip`.
+- **Build for Linux and Mac too** when you can. A lot of players are on Steam Deck.
+- **Say what changed** in the release notes, even in one line.
+
+### On the player's PC
+
+- **Portable when it can be.** If the folder next to the exe is writable, keep saves, settings and logs there. Otherwise use the usual per-user folder, and say where in the README.
+- **Settings in a file a person can read**: TOML, INI or JSON, with every option written out and commented. Don't hide settings in the registry.
+- **Logs in a known place**, kept for the last few runs, so players can send them when something breaks.
+- **Controllers through SDL**, with buttons that can be remapped and a sensible default for Xbox, PlayStation and Switch pads.
+- **No admin rights, no installer required.** Unzip and play.
+- **Don't download anything at first start** without asking.
+
+### Extras that players notice
+
+- **recomplauncher.json (this guide)**: one-click setup and your settings on the game's page in RecompLauncher.
+- **[Recomp Achievements](https://github.com/elripalda/RecompAchievements)**: achievements, Beaten and Mastered, leaderboards.
+- **A "Get it on RecompLauncher" badge** in your README, from the [press kit](https://recomplauncher.com/press).
+- **A short "How to play" at the top of the README**: what copy of the game you need, and where to put it.
+
 ## Get listed
 
 Recomps on recomplauncher.com are in the launcher. If yours isn't there yet, [submit it](https://recomplauncher.com/submit?platform=pc)

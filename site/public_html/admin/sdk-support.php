@@ -154,7 +154,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code.</p>
+    <p class="muted">The <?= RS_SDK_TOP ?> most downloaded console recomps whose own GitHub doesn't ship a <code>recomplauncher.json</code> yet. Each one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. Copy badge gives you just the badge code.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
@@ -327,11 +327,12 @@ document.addEventListener('click', function (e) {
     '   - Don\'t change gameplay, graphics, saves or config formats.',
     '6. For the "dumps" list, only use size and CRC32 values you can verify from Redump or from the project\'s own docs. If you can\'t verify a value, leave it out and tell me. Never invent one.',
     '7. Open the pull request with a short, friendly description. Say what it adds for players. List the code changes separately, and say they only apply when the launcher passes the new arguments. If the code changes are large enough to review on their own, open two PRs: one with recomplauncher.json and the packaging changes, one with the code changes.',
-    '8. Add the "Get it on RecompLauncher" badge to the README, near the top (under the title or next to any other badges), linking to the game\'s page. Use exactly this, so it switches with GitHub\'s light and dark themes:',
+    '8. Check the project against the Recomp Standards (the "Recomp Standards" section of the guide, also at https://github.com/elripalda/RecompLauncher-SDK/blob/main/docs/standards.md). If it only accepts an extracted folder or one raw format, add the standard packaged formats for its console where the change is small and safe: CHD (with libchdr, BSD licensed) for PS1, PS2, PSP, Dreamcast, Saturn and other disc-based consoles; RVZ for GameCube and Wii; NSP, XCI and NUP for Switch; any N64 byte order; zipped ROMs. Keep these in the same commit as the other code changes, opt-in rules included. Anything bigger from the list (release naming, portable mode, logs, controllers): don\'t change it, list it as a friendly suggestion in the description instead.',
+    '9. Add the "Get it on RecompLauncher" badge to the README, near the top (under the title or next to any other badges), linking to the game\'s page. Use exactly this, so it switches with GitHub\'s light and dark themes:',
     '',
     rlBadge(id),
     '',
-    '9. End the pull request description with a section headed "For the developer", two or three friendly sentences, not a sales pitch: they can make a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds their repos) and claim ' + repo + '. Once claimed, its page on RecompLauncher (https://recomplauncher.com/game/' + id + ') shows it as theirs, with the Verified developer badge once approved, and from there they can edit its page and art, see its stats, read player reports with their logs, and their new releases reach players faster.',
+    '10. End the pull request description with a section headed "For the developer", two or three friendly sentences, not a sales pitch: they can make a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds their repos) and claim ' + repo + '. Once claimed, its page on RecompLauncher (https://recomplauncher.com/game/' + id + ') shows it as theirs, with the Verified developer badge once approved, and from there they can edit its page and art, see its stats, read player reports with their logs, and their new releases reach players faster.',
     '',
     'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.'
   ].join('\n');

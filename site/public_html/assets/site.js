@@ -2260,7 +2260,7 @@
       toc.querySelectorAll('a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const el = doc.querySelector(a.getAttribute('href')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     };
     if (sdkText) { show(sdkText); return; }
-    fetch('/sdk-files/guide.md?v=1', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    fetch('/sdk-files/guide.md?v=2', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((x) => { sdkText = x; if (view.contains(doc)) show(x); })
       .catch(() => { doc.innerHTML = `<p class="muted">${t('The guide didn\'t load. Try again in a moment.')}</p>`; });
   }
@@ -2552,7 +2552,8 @@
     '   - Keep the project\'s code style and the diff small, and put the code changes in their own commit.',
     '   - Don\'t change gameplay, graphics, saves or config formats.',
     '   For the "dumps" list, only use size and CRC32 values you can verify from Redump or the project\'s own docs. Never invent one.',
-    '6. Add "Works with RecompLauncher" to the README with a link to https://recomplauncher.com.',
+    '6. Check the project against the "Recomp Standards" section of the guide. If it only accepts an extracted folder or one raw format, add the standard packaged formats for its console where it\'s a small change: CHD (libchdr) for PS1, PS2, PSP, Dreamcast, Saturn and other disc-based consoles, RVZ for GameCube and Wii, NSP, XCI and NUP for Switch, any N64 byte order, zipped ROMs. Suggest the bigger items to me instead of changing them.',
+    '7. Add the "Get it on RecompLauncher" badge near the top of the README, linking to the recomp\'s page on RecompLauncher (https://recomplauncher.com/game/<its id>, or https://recomplauncher.com if it isn\'t listed yet). The badge code is on https://recomplauncher.com/press.',
     '',
     'When you\'re done, tell me what you set up, what you verified and how, and anything you weren\'t sure about.',
   ].join('\n');
