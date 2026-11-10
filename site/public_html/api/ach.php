@@ -7,7 +7,7 @@
 //   GET  a=board&game=?                              -> {board[{rank, username, avatar, points, ranked, unlocks, mastered}]}  (Ranked points)
 //   GET  a=stats                                     -> {stats{players, unlocks, ranked, mastered, games, testers}}
 // Any signed-in account:
-//   GET  a=status                                   -> {tester, apply_open, terms, needs_name, application{status, applied, decided}|null}
+//   GET  a=status                                   -> {tester, dev, apply_open, terms, needs_name, application{status, applied, decided}|null}
 //   POST a=apply {agree: true, terms, os, plays, why?, discord?} -> {status}   (os: windows, linux, mac, steamdeck)
 // Testers only (403 otherwise):
 //   GET  a=access                                   -> {}  (older launchers' check)

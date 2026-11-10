@@ -162,7 +162,7 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
 
 <section class="card">
   <h2>Test accounts</h2>
-  <p class="muted small">Always testers, without applying (you and the team).</p>
+  <p class="muted small">Always testers, without applying (you and the team). These accounts also get the launcher's dev tools.</p>
   <form method="post"><?= $csrf ?><input type="hidden" name="action" value="testers">
     <label>RecompLauncher usernames, separated by commas<textarea name="testers" rows="3" class="mono" spellcheck="false"><?= h(implode(', ', $testers)) ?></textarea></label>
     <div class="actions"><button class="btn">Save</button></div>

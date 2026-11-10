@@ -171,7 +171,10 @@ function rs_ach_apply(array $acct, array $in): ?string {
 // What the launcher and the site show a signed-in player.
 function rs_ach_status(array $acct): array {
     $app = rs_ach_application((int)$acct['id'], true);
-    return ['tester' => rs_ach_is_tester($acct), 'apply_open' => rs_ach_apply_open(), 'terms' => RS_ACH_TERMS_V,
+    // dev: the launcher's dev tools (channel log, memory viewer, rule tester, Reset), for the team
+    // accounts in the admin's test account list.
+    $team = in_array(strtolower((string)($acct['username'] ?? '')), rs_ach_testers(), true);
+    return ['tester' => rs_ach_is_tester($acct), 'dev' => $team, 'apply_open' => rs_ach_apply_open(), 'terms' => RS_ACH_TERMS_V,
         'needs_name' => ($acct['username'] ?? null) === null,
         'application' => $app ? ['status' => $app['status'], 'applied' => (int)strtotime($app['applied'] . ' UTC'),
             'decided' => $app['decided'] ? (int)strtotime($app['decided'] . ' UTC') : null] : null];
