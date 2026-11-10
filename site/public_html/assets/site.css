@@ -850,6 +850,18 @@ dialog.quick.closing::backdrop{animation:fade-out .18s ease-in both}
 .press-badge .press-pick{display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-end;justify-content:space-between;margin:6px 0 20px}
 .press-badge label{display:flex;flex-direction:column;gap:8px;font-weight:600;color:var(--frost);min-width:min(320px,100%)}
 .press-badge select{font:inherit;font-weight:500;color:var(--frost);background:rgba(11,18,32,.75);border:1px solid var(--line);border-radius:12px;padding:12px 14px;max-width:100%}
+/* (4.6) The searchable "Your app" */
+.app-combo{position:relative;display:block;font-weight:500}
+.app-combo input{box-sizing:border-box;width:100%;font:inherit;font-weight:500;color:var(--frost);background:rgba(11,18,32,.75) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23a7b3c4' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 3.5 3.5'/%3E%3C/svg%3E") no-repeat 14px 50%;border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px 40px}
+.app-combo input:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(52,242,232,.18)}
+.app-combo input::-webkit-search-cancel-button{filter:grayscale(1) invert(1) opacity(.55)}
+.app-combo-list{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 6px);max-height:320px;overflow:auto;display:flex;flex-direction:column;padding:6px;background:#0d1524;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.app-combo-list[hidden]{display:none}
+.app-combo-list [role=option]{padding:9px 12px;border-radius:9px;cursor:pointer;color:var(--frost);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-combo-list [role=option].none{color:var(--muted)}
+.app-combo-list [role=option].cur{color:var(--cyan)}
+.app-combo-list [role=option].on,.app-combo-list [role=option]:hover{background:rgba(244,248,252,.09)}
+.app-combo-list .more{padding:9px 12px;color:var(--muted);font-size:13px;font-weight:500}
 .press-badge .chips .tag{cursor:pointer;font-family:Figtree,sans-serif}
 .press-preview{display:flex;justify-content:center;align-items:center;padding:34px 20px;border-radius:18px;margin-bottom:18px;border:1px solid var(--line)}
 .press-preview.on-light{background:#ffffff}

@@ -1926,6 +1926,39 @@
   };
   const titleVersions = (tt) => (tt.pc || []).filter((id) => ((pcCat && pcCat.listed) || []).some((a) => a.id === id)).length + (tt.ps5 || []).length;
   const pcById = (id) => (pcCat ? pcCat.all.find((a) => a.id === id) : null);
+  // (4.6) The press kits' "Your app": a search box with a list under it, not one select of every app
+  // (well over a thousand). Type part of a name; arrows and Enter, or click. Empty means the store.
+  const appCombo = (app, none) => `<span class="app-combo" data-app-combo><input type="search" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list"
+    placeholder="${esc(t('Search your app'))}" value="${esc(app ? app.name : '')}" data-none="${esc(none)}"><span class="app-combo-list" role="listbox" hidden></span></span>`;
+  function bindAppCombo(box, apps, none, onPick) {
+    if (!box) return;
+    const inp = box.querySelector('input'), list = box.querySelector('.app-combo-list');
+    let shown = [], at = -1, picked = apps.find((a) => a.name === inp.value) || null;
+    const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    const close = () => { list.hidden = true; inp.setAttribute('aria-expanded', 'false'); at = -1; };
+    const mark = () => list.querySelectorAll('[role=option]').forEach((o, i) => { o.classList.toggle('on', i === at); o.setAttribute('aria-selected', i === at); if (i === at) o.scrollIntoView({ block: 'nearest' }); });
+    const open = () => {
+      const q = norm(inp.value === (picked ? picked.name : '') ? '' : inp.value);
+      const words = q ? q.split(' ') : [];
+      const hit = words.length ? apps.filter((a) => { const n = norm(a.name + ' ' + a.id); return words.every((w) => n.includes(w)); })
+        .sort((x, y) => (norm(y.name).startsWith(q) ? 1 : 0) - (norm(x.name).startsWith(q) ? 1 : 0)) : apps;
+      shown = [null].concat(hit.slice(0, 60));
+      list.innerHTML = shown.map((a, i) => `<span role="option" data-i="${i}" class="${a ? '' : 'none'}${a && picked && a.id === picked.id ? ' cur' : ''}">${esc(a ? a.name : none)}</span>`).join('')
+        + (hit.length > 60 ? `<span class="more">${esc(tf('{n} more: keep typing', { n: hit.length - 60 }))}</span>` : !hit.length ? `<span class="more">${esc(t('No app by that name'))}</span>` : '');
+      list.hidden = false; inp.setAttribute('aria-expanded', 'true'); at = words.length && hit.length ? 1 : -1; mark();
+    };
+    const choose = (a) => { picked = a; inp.value = a ? a.name : ''; close(); onPick(a); };
+    inp.addEventListener('focus', () => { inp.select(); open(); });
+    inp.addEventListener('input', open);
+    inp.addEventListener('click', () => { if (list.hidden) open(); });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.hidden) open(); at = Math.max(0, Math.min(shown.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1))); mark(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (!list.hidden && at >= 0) choose(shown[at]); }
+      else if (e.key === 'Escape') { e.preventDefault(); inp.value = picked ? picked.name : ''; close(); }
+    });
+    list.addEventListener('mousedown', (e) => { const o = e.target.closest('[role=option]'); if (o) { e.preventDefault(); choose(shown[Number(o.dataset.i)]); } });
+    inp.addEventListener('blur', () => { setTimeout(() => { if (!list.hidden) { inp.value = picked ? picked.name : ''; close(); } }, 120); });
+  }
   // (3.5) A game's whole entry (the original game's details, "What's in it"), asked for once and kept.
   // Pointing at or touching a game's link starts it early, so the page usually has it on arrival.
   const pcFullAsked = {};
@@ -2889,7 +2922,7 @@
         <section class="glass card-pad press-badge" id="badge">
           <h2>${t('Get it on RecompLauncher badge')}</h2>
           <div class="press-pick">
-            <label>${t('Your app')}<select data-app><option value="">RecompLauncher</option>${apps.map((a) => `<option value="${esc(a.id)}"${app && app.id === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+            <label>${t('Your app')}${appCombo(app, 'RecompLauncher')}</label>
             <div class="chips filter" role="group" aria-label="${t('Badge')}"><button type="button" class="tag on" data-theme="dark">${t('Dark')}</button><button type="button" class="tag" data-theme="light">${t('Light')}</button></div>
           </div>
           <div class="press-preview" data-preview></div>
@@ -2935,8 +2968,8 @@
         + (app ? block('word-app', t('About your app'), `${tf('{name} is on RecompLauncher, the free home for recompiled PC games. Get it straight from its developer:', { name: app.name })} ${url}`) : '');
     };
     draw();
-    view.querySelector('[data-app]').addEventListener('change', (e) => {
-      app = apps.find((a) => a.id === e.target.value) || null;
+    bindAppCombo(view.querySelector('[data-app-combo]'), apps, 'RecompLauncher', (pick) => {
+      app = pick;
       const q = new URLSearchParams(location.search);
       if (app) q.set('app', app.id); else q.delete('app');
       history.replaceState(history.state, '', (LAUNCHER ? '/press' : '/pc/press') + (q.toString() ? '?' + q : ''));
@@ -4224,7 +4257,7 @@
         <section class="glass card-pad press-badge" id="badge">
           <h2>${t('Get it on RecompStore badge')}</h2>
           <div class="press-pick">
-            <label>${t('Your app')}<select data-app><option value="">${t('The store itself')}</option>${apps.map((a) => `<option value="${esc(a.id)}"${app && app.id === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+            <label>${t('Your app')}${appCombo(app, t('The store itself'))}</label>
             <div class="chips filter" role="group" aria-label="${t('Badge')}"><button type="button" class="tag on" data-theme="dark">${t('Dark')}</button><button type="button" class="tag" data-theme="light">${t('Light')}</button></div>
           </div>
           <div class="press-preview" data-preview></div>
@@ -4274,8 +4307,8 @@
         + (app ? block('word-app', t('About your app'), `${tf('{name} is on RecompStore, the free homebrew app store for jailbroken PS5. Install it and keep it up to date right from your console:', { name: app.name })} ${url}`) : '');
     };
     draw();
-    view.querySelector('[data-app]').addEventListener('change', (e) => {
-      app = apps.find((a) => a.id === e.target.value) || null;
+    bindAppCombo(view.querySelector('[data-app-combo]'), apps, t('The store itself'), (pick) => {
+      app = pick;
       const q = new URLSearchParams(location.search);
       if (app) q.set('app', app.id); else q.delete('app');
       history.replaceState(history.state, '', '/press' + (q.toString() ? '?' + q : ''));

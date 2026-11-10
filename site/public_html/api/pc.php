@@ -162,6 +162,31 @@ try {
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);
     if ($a === 'app' && !$post) rs_pc_out(200, ['ok' => true, 'app' => $app], 120);
+    // (4.6) How a release's files were checked (RecompLauncher's Downloads): for each file, clean or
+    // not and who checked it (ClamAV on this server, or VirusTotal). Only the store's own recomps.
+    if ($a === 'scan' && !$post) {
+        $tag = $s('tag', 120);
+        if ($tag === '') rs_pc_out(400, ['ok' => false, 'error' => 'Which version?']);
+        $full = rs_pc_app((string)$app['id']);
+        $files = [];
+        $waiting = false;
+        if ($full && $full['repo'] !== '') {
+            rs_vt_tables();
+            $st = rs_db()->prepare('SELECT name, status, malicious, suspicious, engines, scanner FROM vt_files WHERE repo = ? AND tag = ? ORDER BY name');
+            $st->execute([rs_pc_key($full), $tag]);
+            $sys = ['windows' => (string)$full['asset_win'], 'linux' => (string)$full['asset_linux'], 'macos' => (string)$full['asset_mac']];
+            foreach ($st->fetchAll() as $r) {
+                $v = rs_vt_verdict($r);
+                if ($v === 'grey') $waiting = true;
+                $for = [];
+                foreach ($sys as $k => $p) if ($p !== '' && rs_pattern_matches($p, (string)$r['name'])) $for[] = $k;
+                $files[] = ['name' => (string)$r['name'], 'for' => $for, 'verdict' => $v, 'scanner' => $r['scanner'] === 'clamav' ? 'clamav' : 'virustotal',
+                    'engines' => (int)$r['engines'], 'found' => (int)$r['malicious'] + (int)$r['suspicious']];
+            }
+        }
+        // A check still running is asked about again soon; a finished one stays as it is.
+        rs_pc_out(200, ['ok' => true, 'tag' => $tag, 'files' => $files], $files && !$waiting ? 3600 : 120);
+    }
     if ($a === 'readme' && !$post) {
         $rh = rs_host_norm((string)($app['host'] ?? '')); // (3.9) GitHub or GitLab
         $r = rs_pc_readme((string)$app['repo'], $rh);
