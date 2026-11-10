@@ -12,7 +12,9 @@ rs_maint_gate(str_starts_with($p0, 'pc') ? 'pc' : 'ps5');
 
 $page = (string)file_get_contents(__DIR__ . '/index.html');
 header('Content-Type: text/html; charset=utf-8');
-header('Cache-Control: no-cache');
+// (4.6) Every visitor gets the same page (the language is in the address; signing in happens in the
+// browser), so Cloudflare keeps it 2 minutes, and shows the last good copy while the server is busy or down.
+header('Cache-Control: public, max-age=0, s-maxage=120, stale-while-revalidate=600, stale-if-error=86400');
 // A code a PS5 shows (/l/<code>, /r/<code>): the site's own page as it is; its script reads the code.
 if ($p0 === 'code') { echo $page; exit; }
 

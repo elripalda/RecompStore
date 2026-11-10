@@ -68,7 +68,9 @@ header('Content-Type: application/json; charset=utf-8');
 
 function rs_pc_out(int $code, array $body, int $cache = 0): void {
     http_response_code($code);
-    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache : 'no-store'));
+    // (4.6) Answers for everyone: Cloudflare may hand out an older copy while it fetches a new one, or
+    // while the server is down, rather than every request waiting on the server.
+    header('Cache-Control: ' . ($cache > 0 ? 'public, max-age=' . $cache . ', stale-while-revalidate=86400, stale-if-error=86400' : 'no-store'));
     echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }

@@ -10,7 +10,8 @@ require __DIR__ . '/admin/inc/og.php';
 $id = preg_replace('/[^A-Za-z0-9_-]/', '', is_string($_GET['id'] ?? null) ? $_GET['id'] : '');
 $html = (string)file_get_contents(__DIR__ . '/index.html');
 header('Content-Type: text/html; charset=utf-8');
-header('Cache-Control: no-cache');
+// (4.6) The same for everyone: kept by Cloudflare like the site's pages (page.php).
+header('Cache-Control: public, max-age=0, s-maxage=120, stale-while-revalidate=600, stale-if-error=86400');
 $found = $id !== '' ? rs_og_find($id) : null;
 if (!$found) {
     http_response_code(404);
