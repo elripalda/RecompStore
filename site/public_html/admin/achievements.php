@@ -272,6 +272,28 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
   <?php endif; ?>
 </section>
 
+<?php
+// (4.6) What testers have played lately, and whether each game's achievement table (read by the
+// launcher from the player's default.xex) has reached the website: a game with sessions but no table
+// means the launcher isn't finding or reading the player's copy.
+$played = rs_db()->query("SELECT s.game, COUNT(*) n, COUNT(DISTINCT s.account_id) p, MAX(s.started) last,
+    (SELECT COUNT(*) FROM ach_native x WHERE x.game = s.game) nat, (SELECT MAX(seen) FROM ach_native x WHERE x.game = s.game) nat_seen,
+    (SELECT COUNT(*) FROM ach_lists l WHERE l.game = s.game) has_list
+    FROM ach_sessions s WHERE s.started > UTC_TIMESTAMP() - INTERVAL 3 DAY GROUP BY s.game ORDER BY last DESC LIMIT 40")->fetchAll();
+?>
+<section class="card" id="played">
+  <h2>Played lately</h2>
+  <p class="muted small">The last 3 days. "Table" is the game's own achievement list as players' launchers read it from their copy: a list is made from it the first time it comes in.</p>
+  <?php if (!$played): ?><p class="muted">Nobody has played yet.</p><?php else: ?>
+  <table class="ac-table"><thead><tr><th>Recomp</th><th>Sessions</th><th>Players</th><th>Last (UTC)</th><th>Table</th><th>List</th></tr></thead><tbody>
+  <?php foreach ($played as $r): ?>
+    <tr><td><?= h($r['game']) ?></td><td><?= (int)$r['n'] ?></td><td><?= (int)$r['p'] ?></td><td class="small"><?= h($r['last']) ?></td>
+      <td><?= (int)$r['nat'] ? (int)$r['nat'] . ' achievements · ' . h((string)$r['nat_seen']) : '<span class="muted">Not sent</span>' ?></td><td><?= (int)$r['has_list'] ? 'Yes' : '<span class="muted">No</span>' ?></td></tr>
+  <?php endforeach; ?>
+  </tbody></table>
+  <?php endif; ?>
+</section>
+
 <section class="card">
   <h2>Latest unlocks</h2>
   <?php if (!$recent): ?><p class="muted">None yet.</p><?php else: ?>

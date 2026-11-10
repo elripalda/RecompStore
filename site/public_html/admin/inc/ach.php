@@ -434,7 +434,14 @@ function rs_ach_auto_list(string $game, array $native, string $console, int $acc
     }
     // A real table: a handful at least, named, and not more gamerscore than a disc can hold.
     $gsTotal = array_sum(array_column($keep, 'gamerscore'));
-    if (count($keep) < 3 || count($keep) < count($seen) / 2 || $gsTotal > 2000) return false;
+    if (count($keep) < 3 || count($keep) < count($seen) / 2 || $gsTotal > 2000) {
+        // Not made: say why once a day, so the admin sees tables that came in but didn't fit.
+        $why = 'Table came in but no list was made: ' . count($seen) . ' achievements, ' . count($online) . ' online-only, ' . $gsTotal . ' gamerscore offline.';
+        $st = rs_db()->prepare('SELECT COUNT(*) FROM ach_review WHERE game = ? AND why LIKE \'Table came in%\' AND at > UTC_TIMESTAMP() - INTERVAL 1 DAY');
+        $st->execute([$game]);
+        if (!(int)$st->fetchColumn()) rs_db()->prepare('INSERT INTO ach_review (account_id, game, session, why, at) VALUES (?, ?, \'\', ?, UTC_TIMESTAMP())')->execute([$acct, $game, mb_substr($why, 0, 200)]);
+        return false;
+    }
     usort($keep, fn($x, $y) => $x['id'] <=> $y['id']);
     $list = ['format' => 1, 'game' => $game, 'source' => 'native', 'console' => $console, 'versions' => '>=0.0.0',
         'total' => count($keep), 'auto' => true, 'online' => $online, 'achievements' => $keep];
