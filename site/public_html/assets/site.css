@@ -2776,3 +2776,69 @@ a.pr-act{display:inline-flex;align-items:center;text-decoration:none}
 .sub-sdk-btns{display:flex;flex-direction:column;gap:10px}
 .sub-sdk-btns .btn{justify-content:center}
 @media (max-width:900px){.sub-sdk-btns{flex-direction:row;flex-wrap:wrap}}
+
+/* (4.5) Recomp Achievements page */
+.ach-page{max-width:1080px;margin:0 auto;display:grid;gap:40px}
+.ach-hero{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-top:12px}
+.ach-hero h1{font-size:clamp(40px,6vw,68px);margin:6px 0 4px}
+.ach-hero .lead{max-width:720px;color:#d5dde8;font-size:19px;margin:0 0 10px}
+.ach-cta{display:flex;flex-wrap:wrap;gap:10px}
+.ach-badge{display:inline-flex;align-items:center;gap:6px;font:700 13px Figtree,sans-serif;letter-spacing:.4px;padding:5px 12px;border-radius:999px;background:#F5C451;color:#1b1405}
+.ach-badge.on{background:var(--cyan);color:var(--midnight)}
+.ach-badge svg{width:15px;height:15px;fill:currentColor}
+.ach-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.ach-stat{padding:20px 22px;border-radius:20px;display:flex;flex-direction:column;gap:2px}
+.ach-stat strong{font:800 34px Archivo,sans-serif;font-stretch:108%;letter-spacing:-.5px}
+.ach-stat span{color:var(--muted);font-size:15px}
+.ach-how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.ach-card{padding:22px;border-radius:20px;display:flex;flex-direction:column;gap:8px}
+.ach-card i{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(52,242,232,.12);margin-bottom:4px}
+.ach-card i svg{width:22px;height:22px;fill:none;stroke:var(--cyan);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ach-card i svg path[d^="M12 2.8"]{fill:var(--cyan);stroke:none}
+.ach-card strong{font-size:19px}
+.ach-card span{color:var(--muted);font-size:15px;line-height:1.5}
+.ach-sec{display:grid;gap:16px}
+.ach-sec-head h2{font-size:30px;margin:0}
+.ach-sec-head p{margin:4px 0 0}
+.ach-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+.ach-game{display:flex;flex-direction:column;gap:4px;color:var(--frost);text-decoration:none}
+.ach-game:hover{color:var(--frost)}
+.ach-cover{display:block;aspect-ratio:2/3;border-radius:16px;overflow:hidden;background:rgba(244,248,252,.06);border:1px solid var(--line);margin-bottom:6px;transition:transform .25s,border-color .25s}
+.ach-game:hover .ach-cover{transform:translateY(-3px);border-color:var(--cyan)}
+.ach-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.ach-game strong{font-size:15.5px;line-height:1.3}
+.ach-game .muted{font-size:13.5px}
+.ach-ask{padding:18px 22px;border-radius:18px;display:flex;flex-direction:column;gap:4px}
+.ach-ask span{color:var(--muted);font-size:15px}
+.ach-board{padding:10px;border-radius:20px}
+.ach-board>p{padding:12px 14px;margin:0}
+.ach-rows{list-style:none;margin:0;padding:0;display:grid}
+.ach-rows li{display:grid;grid-template-columns:44px 36px 1fr 110px 110px;align-items:center;gap:14px;padding:10px 14px;border-radius:14px}
+.ach-rows li:nth-child(odd){background:rgba(244,248,252,.04)}
+.ach-rank{font:800 18px Archivo,sans-serif;color:var(--muted);text-align:center}
+.ach-rows li:nth-child(-n+3) .ach-rank{color:var(--cyan)}
+.ach-rows .acct-av{width:36px;height:36px;border-radius:50%;object-fit:cover}
+.ach-name{font-weight:600}
+.ach-num{display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}
+.ach-num strong{font-size:18px}
+.ach-num small{color:var(--muted);font-size:12.5px}
+.ach-apply{padding:30px;border-radius:24px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;scroll-margin-top:90px}
+.ach-apply h2{font-size:30px;margin:4px 0 0}
+.ach-apply>p{max-width:680px;margin:0}
+.ach-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px;width:100%;margin-top:10px}
+.ach-form label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:15px}
+.ach-form label:nth-of-type(n+3),.ach-form .ach-terms,.ach-form .ach-check,.ach-form .ach-err,.ach-form .ach-cta{grid-column:1/-1}
+.ach-form input,.ach-form select,.ach-form textarea{font:500 16px Figtree,sans-serif;color:var(--frost);background:rgba(11,18,32,.55);border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+.ach-form input:focus,.ach-form select:focus,.ach-form textarea:focus{border-color:var(--cyan);outline:none}
+.ach-form .ach-check{flex-direction:row;align-items:center;gap:10px;font-weight:500}
+.ach-form .ach-check input{width:18px;height:18px;accent-color:var(--cyan)}
+.ach-err{color:#ff9b9b;margin:0}
+.ach-terms{width:100%;border:1px solid var(--line);border-radius:14px;padding:12px 16px;background:rgba(11,18,32,.35)}
+.ach-terms summary{cursor:pointer;font-weight:600}
+.ach-terms-body{color:#cdd6e2;font-size:15px}
+.ach-terms-body ul{padding-inline-start:20px;margin:6px 0}
+.ach-dev{padding:24px 28px;border-radius:22px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.ach-dev>div:first-child{display:flex;flex-direction:column;gap:4px;max-width:620px}
+.ach-dev strong{font-size:20px}
+@media (max-width:900px){.ach-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ach-how{grid-template-columns:1fr}.ach-form{grid-template-columns:1fr}.ach-dev{flex-direction:column;align-items:flex-start}
+  .ach-rows li{grid-template-columns:32px 32px 1fr 76px;gap:10px}.ach-rows li .ach-num:last-child{display:none}}

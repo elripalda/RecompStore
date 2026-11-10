@@ -37,6 +37,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_flash('List removed. Players\' unlocks are kept.');
         header('Location: achievements.php'); exit;
     }
+    if ($act === 'apps') {
+        $ids = array_map('intval', (array)($_POST['ids'] ?? []));
+        $to = (string)($_POST['to'] ?? '');
+        if (!empty($_POST['oldest'])) $ids = array_map(fn($r) => (int)$r['account_id'], rs_ach_applications('pending', max(1, min(500, (int)$_POST['oldest']))));
+        $n = rs_ach_decide($ids, $to, rs_me_name());
+        rs_flash($n . ' ' . ($n === 1 ? 'application' : 'applications') . ' ' . ($to === 'approved' ? 'approved' : ($to === 'declined' ? 'declined' : 'moved back to waiting')) . '.');
+        header('Location: achievements.php#apps'); exit;
+    }
+    if ($act === 'apply_open') {
+        rs_set_setting('ach_apply_open', !empty($_POST['open']) ? '1' : '0');
+        rs_set_setting('ach_auto_lists', !empty($_POST['auto']) ? '1' : '0');
+        rs_flash('Saved.');
+        header('Location: achievements.php#apps'); exit;
+    }
     if ($act === 'review_done') {
         rs_ach_tables();
         rs_db()->prepare('UPDATE ach_review SET done = 1 WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
@@ -59,6 +73,10 @@ $counts = $editing ? rs_ach_unlock_counts($game) : [];
 $recent = rs_ach_recent(30);
 $review = rs_ach_review_open();
 $testers = rs_ach_testers();
+$appCounts = rs_ach_application_counts();
+$appView = in_array((string)($_GET['apps'] ?? ''), ['approved', 'declined'], true) ? (string)$_GET['apps'] : 'pending';
+$apps = rs_ach_applications($appView, 300);
+$osLabel = ['windows' => 'Windows', 'linux' => 'Linux', 'mac' => 'Mac', 'steamdeck' => 'Steam Deck'];
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $reasonLabel = ['earlier' => 'had it before', 'no_session' => 'no live session', 'save_replay' => 'replayed by a save', 'imported_save' => 'someone else\'s save',
     'cheats' => 'cheats on', 'save_state' => 'save state', 'casual' => 'Casual', 'unknown' => 'not on the list'];
@@ -68,12 +86,12 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>Recomp Achievements</h1>
-    <p class="muted">Private for now: only the test accounts below can use it, from a dev build of RecompLauncher. Lists follow SDK format 1. Every achievement shows the star icon, and finishing a whole list earns that game's Mastered badge.</p>
+    <p class="muted">Alpha: only approved testers (and the test accounts below) can use it in RecompLauncher. Anyone signed in can apply from the launcher's Achievements page or recomplauncher.com/achievements. Lists follow SDK format 1. Every achievement shows the star icon, and finishing a whole list earns that game's Mastered badge.</p>
   </div>
 </section>
 <div class="role-cards">
   <div class="role-card"><span class="muted small">Lists</span><span class="n"><?= count($lists) ?></span><p class="muted small"><?= count(array_filter($lists, fn($l) => $l['live'])) ?> live for testers.</p></div>
-  <div class="role-card"><span class="muted small">Test accounts</span><span class="n"><?= count($testers) ?></span><p class="muted small">RecompLauncher usernames that can use it.</p></div>
+  <div class="role-card"><span class="muted small">Testers</span><span class="n"><?= $appCounts['approved'] + count($testers) ?></span><p class="muted small"><?= $appCounts['pending'] ?> waiting to be approved.</p></div>
   <div class="role-card"><span class="muted small">To review</span><span class="n"><?= count($review) ?></span><p class="muted small">Unlock bursts too fast to be real play.</p></div>
 </div>
 
@@ -110,8 +128,41 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
   <?php endif; ?>
 </section>
 
+<section class="card" id="apps">
+  <h2>Tester applications</h2>
+  <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="apply_open">
+    <label class="check"><input type="checkbox" name="open" value="1"<?= rs_ach_apply_open() ? ' checked' : '' ?>> Applications open</label>
+    <label class="check"><input type="checkbox" name="auto" value="1"<?= rs_setting('ach_auto_lists', '1') === '1' ? ' checked' : '' ?>> Make Xbox 360 lists automatically from testers' copies</label>
+    <button class="btn">Save</button></form>
+  <p class="muted small">
+    <a href="achievements.php?apps=pending#apps"<?= $appView === 'pending' ? ' class="b"' : '' ?>>Waiting (<?= $appCounts['pending'] ?>)</a> ·
+    <a href="achievements.php?apps=approved#apps"<?= $appView === 'approved' ? ' class="b"' : '' ?>>Approved (<?= $appCounts['approved'] ?>)</a> ·
+    <a href="achievements.php?apps=declined#apps"<?= $appView === 'declined' ? ' class="b"' : '' ?>>Declined (<?= $appCounts['declined'] ?>)</a></p>
+  <?php if ($appView === 'pending' && $apps): ?>
+  <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="apps"><input type="hidden" name="to" value="approved">
+    <label>Approve the oldest<input type="number" name="oldest" value="25" min="1" max="500" style="width:6em"></label><button class="btn primary">Approve</button></form>
+  <?php endif; ?>
+  <?php if (!$apps): ?><p class="muted">None here.</p><?php else: ?>
+  <form method="post"><?= $csrf ?><input type="hidden" name="action" value="apps">
+  <table class="ac-table"><thead><tr><th></th><th>Account</th><th>Plays on</th><th>Recomps they play</th><th>Why</th><th>Applied (UTC)</th></tr></thead><tbody>
+  <?php foreach ($apps as $r): ?>
+    <tr><td><input type="checkbox" name="ids[]" value="<?= (int)$r['account_id'] ?>"></td>
+      <td><?= h((string)$r['username']) ?><?= $r['discord'] !== '' ? '<br><span class="muted small">Discord: ' . h($r['discord']) . '</span>' : '' ?><br><span class="muted small">Account since <?= h(substr((string)$r['created'], 0, 10)) ?></span></td>
+      <td><?= h($osLabel[$r['os']] ?? $r['os']) ?></td><td class="small"><?= h($r['plays']) ?></td><td class="small"><?= h($r['why']) ?></td>
+      <td class="small"><?= h($r['applied']) ?><?= $r['who'] !== '' ? '<br><span class="muted">' . h($r['who']) . '</span>' : '' ?></td></tr>
+  <?php endforeach; ?>
+  </tbody></table>
+  <div class="actions">
+    <?php if ($appView !== 'approved'): ?><button class="btn primary" name="to" value="approved">Approve the ticked ones</button><?php endif; ?>
+    <?php if ($appView !== 'declined'): ?><button class="btn danger" name="to" value="declined">Decline the ticked ones</button><?php endif; ?>
+    <?php if ($appView !== 'pending'): ?><button class="btn" name="to" value="pending">Back to waiting</button><?php endif; ?>
+  </div></form>
+  <?php endif; ?>
+</section>
+
 <section class="card">
   <h2>Test accounts</h2>
+  <p class="muted small">Always testers, without applying (you and the team).</p>
   <form method="post"><?= $csrf ?><input type="hidden" name="action" value="testers">
     <label>RecompLauncher usernames, separated by commas<textarea name="testers" rows="3" class="mono" spellcheck="false"><?= h(implode(', ', $testers)) ?></textarea></label>
     <div class="actions"><button class="btn">Save</button></div>

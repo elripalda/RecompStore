@@ -1958,7 +1958,7 @@
   const thumb = (u, w) => { const m = THUMB_RE.exec(String(u || '')); return m ? `${STORE_ORIGIN}/api/thumb.php?f=${encodeURIComponent(m[1])}&w=${w}` : u; };
   const PHONE = matchMedia('(max-width: 860px)');
   const LAUNCHER_ORIGIN = location.origin.replace(/recompstore/i, 'recomplauncher');
-  const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}))?$/;
+  const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}))?$/;
   const pcOut = (h) => (h === '/pc/launcher' ? '/get' : h.replace(/^\/pc/, '') || '/');
   const pcIn = (p) => (p === '/get' ? '/pc/launcher' : p === '/' ? '/pc' : '/pc' + p);
   // The other side gets this one's language along.
@@ -2265,6 +2265,123 @@
       .catch(() => { doc.innerHTML = `<p class="muted">${t('The guide didn\'t load. Try again in a moment.')}</p>`; });
   }
 
+  // (4.5) Recomp Achievements: what it is, the games that have it, the leaderboard, and the tester
+  // sign-up while it's in alpha. Everything comes from /api/ach.php.
+  const ACH_STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2 6.3 20.3l1.2-6.4-4.7-4.4 6.4-.8z"/></svg>';
+  const ACH_OS = [['windows', 'Windows'], ['linux', 'Linux'], ['mac', 'Mac'], ['steamdeck', 'Steam Deck']];
+  const achApi = (a, body) => fetch('/api/ach.php?a=' + a, body ? { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store', credentials: 'same-origin' })
+    .then((r) => r.json().catch(() => ({ ok: false }))).catch(() => ({ ok: false, error: t('That didn\'t go through. Check your connection and try again.') }));
+  function achTerms() {
+    return `<details class="ach-terms"><summary>${t('Tester terms')}</summary><div class="ach-terms-body">
+      <p>${t('Recomp Achievements is in alpha. Things will change, and unlocks or points may be reset while we test.')}</p>
+      <p><strong>${t('What we collect while you test')}</strong></p>
+      <ul><li>${t('Your username, and the achievements you unlock: the game, which achievement, and when.')}</li>
+        <li>${t('Your play sessions: when a game starts and stops, its version, and whether a save was loaded. This is how Ranked tells real play from copied saves.')}</li>
+        <li>${t('The achievement list read from your own copy of a game: names, descriptions and points only. Never your game files.')}</li>
+        <li>${t('Your system (Windows, Linux, Mac or Steam Deck), your RecompLauncher version, and the reports you choose to send us.')}</li></ul>
+      <p>${t('We use it only to run and improve Recomp Achievements and its anti-cheat. We don\'t sell it or share it.')}</p>
+      <p>${t('Your username, points, unlocks and Mastered games show on the leaderboards and the achievement pages.')}</p>
+      <p>${t('Play fair. Unlocks that look copied or cheated count as Casual, and testers who abuse the system can be removed.')}</p>
+      <p>${t('You can stop testing at any time. Ask us on Discord and we\'ll clear your achievement data.')}</p>
+      <p>${tf('Your account\'s {terms} still apply.', { terms: `<a href="${(LAUNCHER ? STORE_ORIGIN : '')}/terms">${t('Terms and Privacy')}</a>` })}</p>
+    </div></details>`;
+  }
+  function achApplyBox(box, st) {
+    const signIn = `<a class="btn primary" href="${acctSignHref()}">${t('Sign in to apply')}</a>`;
+    if (!acct.on) { box.innerHTML = `<p class="muted">${t('Tester sign-ups open soon.')}</p>`; return; }
+    if (!acct.me) { box.innerHTML = `<h2>${t('Become a tester')}</h2><p class="muted">${t('Sign in with your RecompLauncher account to apply. Your achievements are tied to it.')}</p><div class="ach-cta">${signIn}</div>${achTerms()}`; return; }
+    if (!st || !st.ok) { box.innerHTML = `<p class="muted">${t('This didn\'t load. Try again in a moment.')}</p>`; return; }
+    const app = st.application;
+    if (st.tester) {
+      box.innerHTML = `<span class="ach-badge on">${ACH_STAR}${t('Tester')}</span><h2>${t('You\'re in')}</h2>
+        <p class="muted">${t('Open RecompLauncher, play a game from the list, and your achievements pop up as you earn them. Your profile and rank are on the Achievements page in the launcher.')}</p>
+        <div class="ach-cta"><a class="btn primary" href="/get">${t('Get RecompLauncher')}</a></div>`;
+      return;
+    }
+    if (app && app.status === 'pending') {
+      box.innerHTML = `<span class="ach-badge">${t('Applied')}</span><h2>${t('You\'re on the list')}</h2>
+        <p class="muted">${t('We approve testers in waves. Once you\'re in, the Achievements page in RecompLauncher unlocks on its own. No need to apply again.')}</p>`;
+      return;
+    }
+    if (st.needs_name) { box.innerHTML = `<h2>${t('Become a tester')}</h2><p class="muted">${t('Pick a username for your account first. It\'s what the leaderboards show.')}</p><div class="ach-cta"><a class="btn primary" href="${storeLink('/account')}">${t('Pick a username')}</a></div>`; return; }
+    if (!st.apply_open) { box.innerHTML = `<h2>${t('Become a tester')}</h2><p class="muted">${t('Tester sign-ups are closed right now. Check back soon.')}</p>`; return; }
+    const again = app && app.status === 'declined' ? `<p class="muted small">${t('You weren\'t picked last round. You can apply again.')}</p>` : '';
+    box.innerHTML = `<h2>${t('Become a tester')}</h2>
+      <p class="muted">${t('Help us test Recomp Achievements before it opens to everyone. Testers get it first and shape how it works.')}</p>${again}
+      <form class="ach-form">
+        <label>${t('You play on')}<select name="os" required><option value="">${t('Pick one')}</option>${ACH_OS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></label>
+        <label>${t('Discord username (optional)')}<input name="discord" maxlength="60" placeholder="${esc(t('So we can reach you about bugs'))}"></label>
+        <label>${t('Recomps you play')}<input name="plays" maxlength="300" required placeholder="${esc(t('The Bigs 2, Super Mario 64, Sonic Unleashed…'))}"></label>
+        <label>${t('Why you want to test (optional)')}<textarea name="why" maxlength="600" rows="3"></textarea></label>
+        ${achTerms()}
+        <label class="ach-check"><input type="checkbox" name="agree" required> <span>${t('I\'ve read the tester terms and agree to them.')}</span></label>
+        <p class="ach-err" role="alert" hidden></p>
+        <div class="ach-cta"><button class="btn primary" type="submit">${t('Apply')}</button></div>
+      </form>`;
+    const f = box.querySelector('form');
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(f), err = f.querySelector('.ach-err'), btn = f.querySelector('button');
+      btn.disabled = true;
+      achApi('apply', { agree: !!fd.get('agree'), terms: st.terms, os: fd.get('os'), plays: fd.get('plays'), why: fd.get('why'), discord: fd.get('discord') }).then((j) => {
+        btn.disabled = false;
+        if (!j.ok) { err.textContent = j.error || t('Something went wrong on our side. Try again in a moment.'); err.hidden = false; return; }
+        achApplyBox(box, j);
+      });
+    });
+  }
+  function pcAchievements() {
+    pcTitle = t('Recomp Achievements — achievements for recompiled games, in RecompLauncher');
+    const how = [
+      [ACH_STAR, t('Unlocks while you play'), t('Achievements pop up in the corner the moment you earn them, right over your recomp.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>', t('Ranked'), t('Earned in a live session, on your own save: it counts as Ranked. Copied saves and cheats only count as Casual.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/></svg>', t('Mastered'), t('Unlock every achievement in a game and it\'s Mastered, with its own badge on your profile.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>', t('Your profile'), t('Every achievement adds to your points and rank, on every PC you sign in on.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20V11M12 20V4M18 20v-7"/></svg>', t('Leaderboards'), t('See how you stack up against everyone, and game by game.')],
+      ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>', t('Built from scratch'), t('Our own achievement sets, and the games\' own achievements where they have them, read from your copy.')]];
+    view.innerHTML = `
+      <article class="page ach-page">
+        <header class="ach-hero">
+          <span class="ach-badge">${t('Alpha')}</span>
+          <h1>${t('Recomp Achievements')}</h1>
+          <p class="lead">${t('Achievements for recompiled games, built into RecompLauncher. Earn them as you play, master whole games, and climb the leaderboards. We\'ve started rolling it out to testers.')}</p>
+          <div class="ach-cta"><a class="btn primary" href="#ach-apply" data-ach-jump>${t('Become a tester')}</a><a class="btn" href="/get">${t('Get RecompLauncher')}</a></div>
+        </header>
+        <section class="ach-stats" aria-label="${t('Recomp Achievements so far')}">${[[t('Games'), 'games'], [t('Players'), 'players'], [t('Unlocks'), 'unlocks'], [t('Mastered'), 'mastered']].map(([n, k]) => `<div class="glass ach-stat"><strong data-k="${k}">–</strong><span>${n}</span></div>`).join('')}</section>
+        <section class="ach-how">${how.map(([i, n, d]) => `<div class="glass ach-card"><i>${i}</i><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
+        <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Games with achievements')}</h2><p class="muted">${t('More are added as developers support it.')}</p></div><div class="ach-games"><p class="muted">${t('Loading…')}</p></div>
+          <div class="glass ach-ask"><strong>${t('Don\'t see a game you want?')}</strong><span>${t('Ask its developer to add Recomp Achievements. It\'s free, and the developer guide makes it quick. Most developers are happy to hear a game is wanted.')}</span></div></section>
+        <section class="ach-sec"><div class="ach-sec-head"><h2>${t('Leaderboard')}</h2><p class="muted">${t('Ranked points across every game.')}</p></div><div class="glass ach-board"><p class="muted">${t('Loading…')}</p></div></section>
+        <section class="glass ach-apply" id="ach-apply"><p class="muted">${t('Loading…')}</p></section>
+        <section class="glass ach-dev"><div><span class="kicker">${t('For developers')}</span><strong>${t('Add Recomp Achievements to your recomp')}</strong>
+          <span class="muted">${t('Free for any game. One small library: memory achievements, your game\'s own native ones, or events you fire from your code.')}</span></div>
+          <div class="ach-cta"><a class="btn" href="https://github.com/elripalda/RecompAchievements" target="_blank" rel="noopener">${t('Developer guide')}</a><a class="btn" href="/pc/sdk">${t('RecompLauncher SDK')}</a></div></section>
+      </article>`;
+    const fmt = (n) => Number(n || 0).toLocaleString(lang || 'en');
+    achApi('stats').then((j) => { if (j.ok) view.querySelectorAll('.ach-stat strong').forEach((s) => { s.textContent = fmt(j.stats[s.dataset.k]); }); });
+    achApi('games').then((j) => {
+      const box = view.querySelector('.ach-games');
+      if (!box) return;
+      const games = (j.ok && j.games) || [];
+      box.innerHTML = games.length ? games.map((g) => `<a class="ach-game" href="/pc/game/${encodeURIComponent(g.id)}">
+          <span class="ach-cover">${g.cover ? `<img src="${esc(thumb(g.cover, 360))}" alt="" loading="lazy">` : ''}</span>
+          <strong>${esc(g.name)}</strong><span class="muted">${tf('{n} achievements · {p} points', { n: fmt(g.achievements), p: fmt(g.points) })}</span></a>`).join('')
+        : `<p class="muted">${t('The first games are being set up with our testers.')}</p>`;
+    });
+    achApi('board').then((j) => {
+      const box = view.querySelector('.ach-board');
+      if (!box) return;
+      const rows = ((j.ok && j.board) || []).slice(0, 25);
+      box.innerHTML = rows.length ? `<ol class="ach-rows">${rows.map((r) => `<li><b class="ach-rank">${r.rank}</b>${avatarHTML(r, 36)}<span class="ach-name">${esc(r.username)}</span>
+          <span class="ach-num"><strong>${fmt(r.points)}</strong><small>${t('points')}</small></span><span class="ach-num"><strong>${fmt(r.mastered)}</strong><small>${t('Mastered')}</small></span></li>`).join('')}</ol>`
+        : `<p class="muted">${t('No Ranked unlocks yet. Testers are getting started.')}</p>`;
+    });
+    const applyBox = view.querySelector('.ach-apply');
+    acctReady.then(() => (acct.me ? achApi('status') : null)).then((st) => { if (view.contains(applyBox)) achApplyBox(applyBox, st); });
+    view.querySelector('[data-ach-jump]').addEventListener('click', (e) => { e.preventDefault(); applyBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    if (location.hash === '#ach-apply') setTimeout(() => { const el = view.querySelector('#ach-apply'); if (el) el.scrollIntoView({ block: 'start' }); }, 300);
+  }
+
   let pcCountsTried = false;
   function pcRoute(h) {
     setBackdrop(null);
@@ -2285,6 +2402,7 @@
       else if (h === '/pc/soon') pcSoon();
       else if (h === '/pc/settings') settingsPage(true);
       else if (h === '/pc/sdk') pcSdk();
+      else if (h === '/pc/achievements') pcAchievements();
       else pcHome();
       document.title = pcTitle;
       enhanceRows(view);

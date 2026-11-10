@@ -226,6 +226,11 @@ try {
             $m = ['title' => $name('RecompLauncher SDK'), 'ogTitle' => 'RecompLauncher SDK', 'path' => $pp('/pc/sdk'),
                 'desc' => t('One small file in your release, recomplauncher.json, and your recomp installs, sets itself up and shows its settings in RecompLauncher like a native PC game.'),
                 'body' => '<h1>RecompLauncher SDK</h1><p>' . $e(t('One small file in your release, recomplauncher.json, and your recomp installs, sets itself up and shows its settings in RecompLauncher like a native PC game.')) . '</p><p><a href="/sdk-files/guide.md">' . $e(t('Read the guide')) . '</a></p>' . $pcNav];
+        } elseif ($p === 'pc-achievements') {
+            // (4.5) Recomp Achievements: what it is, its games and leaderboard, tester sign-up.
+            $d = 'Achievements for recompiled games, built into RecompLauncher. Earn them as you play, master whole games, and climb the leaderboards. Now in alpha with testers.';
+            $m = ['title' => 'Recomp Achievements · RecompLauncher', 'ogTitle' => 'Recomp Achievements', 'path' => $pp('/pc/achievements'), 'desc' => $d,
+                'body' => '<h1>Recomp Achievements</h1><p>' . $e($d) . '</p>' . $pcNav];
         } elseif ($p === 'pc-press') {
             $m = ['title' => $name(t('Press kit')), 'path' => $pp('/pc/press'), 'desc' => t('Badges, logos and words for telling people where to get your app.'),
                 'image' => $base . '/assets/press/launcher/badge-dark.png', 'imageW' => 834, 'imageH' => 168, 'imageAlt' => 'Get it on RecompLauncher',

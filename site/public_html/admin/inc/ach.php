@@ -95,6 +95,20 @@ function rs_ach_tables(): void {
         ) CHARACTER SET utf8mb4');
         rs_set_setting('ach_schema', '2');
     }
+    // Tester applications (from the launcher's Achievements page or recomplauncher.com/achievements).
+    $db->exec('CREATE TABLE IF NOT EXISTS ach_apply (
+        account_id INT PRIMARY KEY,
+        status VARCHAR(10) NOT NULL DEFAULT \'pending\',
+        applied DATETIME NOT NULL,
+        decided DATETIME NULL,
+        who VARCHAR(80) NOT NULL DEFAULT \'\',
+        os VARCHAR(20) NOT NULL DEFAULT \'\',
+        plays VARCHAR(300) NOT NULL DEFAULT \'\',
+        why VARCHAR(600) NOT NULL DEFAULT \'\',
+        discord VARCHAR(60) NOT NULL DEFAULT \'\',
+        terms VARCHAR(10) NOT NULL DEFAULT \'\',
+        KEY by_status (status, applied)
+    ) CHARACTER SET utf8mb4');
     $done = true;
 }
 
@@ -109,8 +123,80 @@ function rs_ach_testers(): array {
     $raw = (string)rs_setting('ach_testers', '');
     return array_values(array_filter(array_map(fn($s) => strtolower(trim($s)), preg_split('/[\s,]+/', $raw) ?: [])));
 }
+// A tester: named in the admin's list, or an approved application.
 function rs_ach_is_tester(array $acct): bool {
-    return in_array(strtolower((string)($acct['username'] ?? '')), rs_ach_testers(), true);
+    if (in_array(strtolower((string)($acct['username'] ?? '')), rs_ach_testers(), true)) return true;
+    $app = isset($acct['id']) ? rs_ach_application((int)$acct['id']) : null;
+    return $app && $app['status'] === 'approved';
+}
+
+// ---- tester applications ------------------------------------------------------------------------
+
+// The tester terms' version. Changing the terms means a new version: applying asks for this one.
+const RS_ACH_TERMS_V = '1';
+const RS_ACH_OS = ['windows', 'linux', 'mac', 'steamdeck'];
+const RS_ACH_REAPPLY_DAYS = 14;
+
+function rs_ach_apply_open(): bool { return rs_setting('ach_apply_open', '1') === '1'; }
+
+function rs_ach_application(int $acct, bool $fresh = false): ?array {
+    static $cache = [];
+    if (!$fresh && array_key_exists($acct, $cache)) return $cache[$acct];
+    rs_ach_tables();
+    $st = rs_db()->prepare('SELECT * FROM ach_apply WHERE account_id = ?');
+    $st->execute([$acct]);
+    return $cache[$acct] = ($st->fetch() ?: null);
+}
+
+// -> null when it went in, or the reason it didn't (for the player).
+function rs_ach_apply(array $acct, array $in): ?string {
+    if (!rs_ach_apply_open()) return 'Tester applications are closed right now. Check back soon.';
+    if (($acct['username'] ?? null) === null) return 'Pick a username for your account first.';
+    if (($in['agree'] ?? null) !== true || (string)($in['terms'] ?? '') !== RS_ACH_TERMS_V) return 'Read and accept the tester terms to apply.';
+    $os = strtolower(trim((string)($in['os'] ?? '')));
+    if (!in_array($os, RS_ACH_OS, true)) return 'Pick the system you play on.';
+    $clip = fn(string $k, int $n) => mb_substr(trim(preg_replace('/\s+/u', ' ', (string)($in[$k] ?? ''))), 0, $n);
+    $plays = $clip('plays', 300); $why = $clip('why', 600); $discord = $clip('discord', 60);
+    if (mb_strlen($plays) < 2) return 'Tell us a few recomps you play.';
+    $have = rs_ach_application((int)$acct['id'], true);
+    if ($have && $have['status'] === 'approved') return null;
+    if ($have && $have['status'] === 'declined' && strtotime((string)$have['decided'] . ' UTC') > time() - RS_ACH_REAPPLY_DAYS * 86400)
+        return 'You applied recently. You can apply again after ' . gmdate('M j', strtotime((string)$have['decided'] . ' UTC') + RS_ACH_REAPPLY_DAYS * 86400) . '.';
+    rs_db()->prepare('INSERT INTO ach_apply (account_id, status, applied, os, plays, why, discord, terms) VALUES (?, \'pending\', UTC_TIMESTAMP(), ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE status = \'pending\', applied = VALUES(applied), decided = NULL, who = \'\', os = VALUES(os), plays = VALUES(plays), why = VALUES(why), discord = VALUES(discord), terms = VALUES(terms)')
+        ->execute([(int)$acct['id'], $os, $plays, $why, $discord, RS_ACH_TERMS_V]);
+    return null;
+}
+
+// What the launcher and the site show a signed-in player.
+function rs_ach_status(array $acct): array {
+    $app = rs_ach_application((int)$acct['id'], true);
+    return ['tester' => rs_ach_is_tester($acct), 'apply_open' => rs_ach_apply_open(), 'terms' => RS_ACH_TERMS_V,
+        'needs_name' => ($acct['username'] ?? null) === null,
+        'application' => $app ? ['status' => $app['status'], 'applied' => (int)strtotime($app['applied'] . ' UTC'),
+            'decided' => $app['decided'] ? (int)strtotime($app['decided'] . ' UTC') : null] : null];
+}
+
+function rs_ach_applications(string $status, int $n = 200): array {
+    rs_ach_tables();
+    $st = rs_db()->prepare('SELECT p.*, a.username, a.email, a.created FROM ach_apply p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.status = ? ORDER BY p.applied ' . ($status === 'pending' ? 'ASC' : 'DESC') . ' LIMIT ' . max(1, min(1000, $n)));
+    $st->execute([$status]);
+    return $st->fetchAll();
+}
+function rs_ach_application_counts(): array {
+    rs_ach_tables();
+    $out = ['pending' => 0, 'approved' => 0, 'declined' => 0];
+    foreach (rs_db()->query('SELECT status, COUNT(*) n FROM ach_apply GROUP BY status')->fetchAll() as $r) $out[$r['status']] = (int)$r['n'];
+    return $out;
+}
+// Approve or decline applications. -> how many changed.
+function rs_ach_decide(array $ids, string $status, string $who): int {
+    if (!in_array($status, ['approved', 'declined', 'pending'], true) || !$ids) return 0;
+    rs_ach_tables();
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    $st = rs_db()->prepare('UPDATE ach_apply SET status = ?, decided = ' . ($status === 'pending' ? 'NULL' : 'UTC_TIMESTAMP()') . ', who = ? WHERE account_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+    $st->execute(array_merge([$status, mb_substr($who, 0, 80)], $ids));
+    return $st->rowCount();
 }
 
 // ---- lists -----------------------------------------------------------------------------------
@@ -235,8 +321,53 @@ function rs_ach_session_start(int $acct, string $game, string $version, string $
     $folder = rs_ach_folder_clean((string)($t['unlock_folder'] ?? ''));
     if ($folder !== '') $db->prepare('INSERT INTO ach_folders (game, folder, n, seen) VALUES (?, ?, 1, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE n = n + 1, seen = VALUES(seen)')->execute([$game, $folder]);
     // The game's native achievement list, as the recomp gave it at hello (names, gamerscore).
-    if (!empty($t['native']) && is_array($t['native'])) rs_ach_native_store($game, $t['native']);
+    if (!empty($t['native']) && is_array($t['native'])) {
+        rs_ach_native_store($game, $t['native']);
+        rs_ach_auto_list($game, $t['native'], in_array((string)($t['console'] ?? ''), RS_ACH_CONSOLES, true) ? (string)$t['console'] : 'x360', $acct);
+    }
     return $id;
+}
+
+// ---- automatic lists ----------------------------------------------------------------------------
+
+// Online-only achievements (Xbox LIVE matches and the like) stay out of a list, so Mastered can be
+// reached offline. Read from the achievement's own words.
+function rs_ach_native_online(array $a): bool {
+    $t = (string)($a['title'] ?? '') . ' ' . (string)($a['description'] ?? '');
+    return (bool)preg_match('/xbox\s*live|\bonline\b|\branked\s+(match|game|exhibition)|\bmultiplayer\s+online|system\s*link|\bLIVE\b/i', $t)
+        && !preg_match('/\bco-?op\b(?!.*(online|live))/i', $t);
+}
+
+// The first time a game's native list comes in (from the player's own copy, at session start) and the
+// game has no list yet, one is made from it: points from gamerscore, online-only ones left out, live
+// for testers, and a note in the review queue so the admin can look it over. -> true when made.
+function rs_ach_auto_list(string $game, array $native, string $console, int $acct): bool {
+    if (rs_ach_list($game) || rs_setting('ach_auto_lists', '1') !== '1') return false;
+    $seen = []; $keep = []; $online = [];
+    foreach (array_slice($native, 0, 400) as $a) {
+        if (!is_array($a)) continue;
+        $id = (int)($a['id'] ?? 0);
+        $title = trim(mb_substr((string)($a['title'] ?? ''), 0, 120));
+        if ($id < 1 || isset($seen[$id])) continue;
+        $seen[$id] = true;
+        if ($title === '') continue;
+        if (rs_ach_native_online($a)) { $online[] = $id; continue; }
+        $gs = max(0, min(1000, (int)($a['gamerscore'] ?? 0)));
+        $keep[] = ['id' => $id, 'title' => $title, 'description' => trim(mb_substr((string)($a['description'] ?? ''), 0, 300)),
+            'points' => rs_ach_points_from_gs($gs), 'gamerscore' => $gs];
+    }
+    // A real table: a handful at least, named, and not more gamerscore than a disc can hold.
+    $gsTotal = array_sum(array_column($keep, 'gamerscore'));
+    if (count($keep) < 3 || count($keep) < count($seen) / 2 || $gsTotal > 2000) return false;
+    usort($keep, fn($x, $y) => $x['id'] <=> $y['id']);
+    $list = ['format' => 1, 'game' => $game, 'source' => 'native', 'console' => $console, 'versions' => '>=0.0.0',
+        'total' => count($keep), 'auto' => true, 'online' => $online, 'achievements' => $keep];
+    $who = '';
+    try { $st = rs_db()->prepare('SELECT username FROM accounts WHERE id = ?'); $st->execute([$acct]); $who = (string)$st->fetchColumn(); } catch (Throwable $e) {}
+    rs_ach_list_save($game, $list, true, 'auto' . ($who !== '' ? ' · ' . $who : ''));
+    rs_db()->prepare('INSERT INTO ach_review (account_id, game, session, why, at) VALUES (?, ?, \'\', ?, UTC_TIMESTAMP())')
+        ->execute([$acct, $game, 'New list made from this player\'s copy: ' . count($keep) . ' achievements' . ($online ? ', ' . count($online) . ' online-only left out' : '') . '. Look it over.']);
+    return true;
 }
 
 // The unlock folder as the launcher writes it, without the player's name: it has to start with one of
@@ -450,4 +581,130 @@ function rs_ach_unlock_counts(string $game): array {
     $out = [];
     foreach ($st->fetchAll() as $r) $out[(int)$r['ach']] = [(int)$r['n'], (int)$r['r']];
     return $out;
+}
+
+// ---- games, profiles and leaderboards ----------------------------------------------------------
+
+// A catalog entry's name and art, from the small per-app file a publish writes (not the whole catalog).
+function rs_ach_app_card(string $game): array {
+    static $cache = [];
+    if (isset($cache[$game])) return $cache[$game];
+    $a = null;
+    $f = dirname(RS_PUBLIC) . '/recompstore-private/pc-app/' . $game . '.json';
+    if (rs_ach_game_ok($game) && is_file($f)) $a = (json_decode((string)file_get_contents($f), true) ?: [])['app'] ?? null;
+    if (!is_array($a) && function_exists('rs_pc_app')) $a = rs_pc_app($game);
+    $a = is_array($a) ? $a : [];
+    return $cache[$game] = ['id' => $game, 'name' => (string)($a['name'] ?? $game), 'game' => (string)($a['game'] ?? ''),
+        'cover' => (string)($a['cover'] ?? ''), 'icon' => (string)($a['icon'] ?? ''), 'hero' => (string)($a['hero'] ?? '')];
+}
+
+// How many achievements count for Mastered, and their points.
+function rs_ach_list_totals(array $list, string $game): array {
+    $items = (array)($list['achievements'] ?? []);
+    if (($list['source'] ?? '') === 'native' && !$items) {
+        $st = rs_db()->prepare('SELECT gamerscore FROM ach_native WHERE game = ?');
+        $st->execute([$game]);
+        $gs = $st->fetchAll(PDO::FETCH_COLUMN);
+        $n = (int)($list['total'] ?? 0) ?: count($gs);
+        return [$n, array_sum(array_map(fn($g) => rs_ach_points_from_gs((int)$g), $gs))];
+    }
+    $n = ($list['source'] ?? '') === 'native' ? ((int)($list['total'] ?? 0) ?: count($items)) : count($items);
+    return [$n, array_sum(array_map(fn($a) => (int)($a['points'] ?? 0), $items))];
+}
+
+// Every game with a live list: what the Achievements pages list as compatible.
+function rs_ach_games(): array {
+    rs_ach_tables();
+    $db = rs_db();
+    $players = []; $mastered = [];
+    foreach ($db->query('SELECT game, COUNT(DISTINCT account_id) n FROM ach_unlocks GROUP BY game')->fetchAll() as $r) $players[$r['game']] = (int)$r['n'];
+    foreach ($db->query('SELECT game, COUNT(*) n FROM ach_mastered GROUP BY game')->fetchAll() as $r) $mastered[$r['game']] = (int)$r['n'];
+    $out = [];
+    foreach (rs_ach_lists() as $g => $l) {
+        if (!$l['live']) continue;
+        [$n, $pts] = rs_ach_list_totals($l['list'], $g);
+        $out[] = rs_ach_app_card($g) + ['console' => (string)($l['list']['console'] ?? ''), 'source' => (string)($l['list']['source'] ?? ''),
+            'achievements' => $n, 'points' => $pts, 'players' => $players[$g] ?? 0, 'mastered' => $mastered[$g] ?? 0,
+            'added' => (int)strtotime($l['updated'] . ' UTC')];
+    }
+    usort($out, fn($a, $b) => [$b['players'], $a['name']] <=> [$a['players'], $b['name']]);
+    return $out;
+}
+
+// Leaderboard: Ranked points (one game, or every game), then Mastered games, then who got there first.
+function rs_ach_board(string $game = '', int $n = 50): array {
+    rs_ach_tables();
+    $where = $game !== '' ? 'WHERE u.game = ?' : '';
+    $st = rs_db()->prepare('SELECT u.account_id, a.username, a.avatar, SUM(u.points * u.ranked) pts, SUM(u.ranked) ranked, COUNT(*) total, MAX(u.at) last,
+            (SELECT COUNT(*) FROM ach_mastered m WHERE m.account_id = u.account_id AND m.ranked = 1' . ($game !== '' ? ' AND m.game = u.game' : '') . ') mastered
+        FROM ach_unlocks u JOIN accounts a ON a.id = u.account_id AND a.banned = 0 AND a.username IS NOT NULL ' . $where . '
+        GROUP BY u.account_id, a.username, a.avatar' . ($game !== '' ? ', u.game' : '') . '
+        ORDER BY pts DESC, mastered DESC, last ASC LIMIT ' . max(1, min(200, $n)));
+    $st->execute($game !== '' ? [$game] : []);
+    $out = []; $rank = 0;
+    foreach ($st->fetchAll() as $r) $out[] = ['rank' => ++$rank, 'username' => $r['username'], 'avatar' => rs_acct_avatar_url($r),
+        'points' => (int)$r['pts'], 'ranked' => (int)$r['ranked'], 'unlocks' => (int)$r['total'], 'mastered' => (int)$r['mastered']];
+    return $out;
+}
+
+function rs_ach_stats(): array {
+    rs_ach_tables();
+    $db = rs_db();
+    $u = $db->query('SELECT COUNT(DISTINCT account_id) p, COUNT(*) n, COALESCE(SUM(ranked), 0) r FROM ach_unlocks')->fetch();
+    return ['players' => (int)$u['p'], 'unlocks' => (int)$u['n'], 'ranked' => (int)$u['r'],
+        'mastered' => (int)$db->query('SELECT COUNT(*) FROM ach_mastered')->fetchColumn(),
+        'games' => count(array_filter(rs_ach_lists(), fn($l) => $l['live'])),
+        'testers' => rs_ach_application_counts()['approved'] + count(rs_ach_testers())];
+}
+
+// An achievement's name, from its list or from what players' copies reported.
+function rs_ach_title(string $game, int $id): array {
+    static $lists = [];
+    $l = $lists[$game] ??= (rs_ach_list($game) ?: []);
+    foreach ((array)($l['achievements'] ?? []) as $a) if ((int)($a['id'] ?? 0) === $id) return [(string)($a['title'] ?? ''), (string)($a['description'] ?? '')];
+    $st = rs_db()->prepare('SELECT title, description FROM ach_native WHERE game = ? AND ach = ?');
+    $st->execute([$game, $id]);
+    $r = $st->fetch();
+    return $r ? [(string)$r['title'], (string)$r['description']] : ['', ''];
+}
+
+// A player's whole picture: points, rank, every game they've played, Mastered games, latest unlocks.
+function rs_ach_profile(int $acct): array {
+    rs_ach_tables();
+    $db = rs_db();
+    $st = $db->prepare('SELECT game, COUNT(*) n, SUM(ranked) r, SUM(points * ranked) pts, MAX(at) last FROM ach_unlocks WHERE account_id = ? GROUP BY game ORDER BY last DESC');
+    $st->execute([$acct]);
+    $rows = $st->fetchAll();
+    $ms = $db->prepare('SELECT game, at, ranked FROM ach_mastered WHERE account_id = ? ORDER BY at DESC');
+    $ms->execute([$acct]);
+    $mast = [];
+    foreach ($ms->fetchAll() as $m) $mast[$m['game']] = $m;
+    $lists = rs_ach_lists();
+    $games = []; $points = 0; $unlocks = 0; $ranked = 0;
+    foreach ($rows as $r) {
+        $g = $r['game'];
+        [$n, $pts] = isset($lists[$g]) ? rs_ach_list_totals($lists[$g]['list'], $g) : [0, 0];
+        $points += (int)$r['pts']; $unlocks += (int)$r['n']; $ranked += (int)$r['r'];
+        $games[] = rs_ach_app_card($g) + ['unlocked' => (int)$r['n'], 'ranked' => (int)$r['r'], 'achievements' => $n, 'points' => (int)$r['pts'], 'points_total' => $pts,
+            'mastered' => isset($mast[$g]) ? ((int)$mast[$g]['ranked'] ? 'ranked' : 'casual') : null, 'last' => (int)strtotime($r['last'] . ' UTC')];
+    }
+    $mastered = [];
+    foreach ($mast as $g => $m) $mastered[] = rs_ach_app_card($g) + ['at' => (int)strtotime($m['at'] . ' UTC'), 'ranked' => (bool)$m['ranked']];
+    $rs = $db->prepare('SELECT game, ach, points, at, ranked FROM ach_unlocks WHERE account_id = ? ORDER BY at DESC LIMIT 12');
+    $rs->execute([$acct]);
+    $recent = [];
+    foreach ($rs->fetchAll() as $r) {
+        [$title, $desc] = rs_ach_title($r['game'], (int)$r['ach']);
+        $recent[] = ['game' => $r['game'], 'name' => rs_ach_app_card($r['game'])['name'], 'id' => (int)$r['ach'], 'title' => $title, 'description' => $desc,
+            'points' => (int)$r['points'], 'at' => (int)strtotime($r['at'] . ' UTC'), 'ranked' => (bool)$r['ranked']];
+    }
+    // Rank: players with more Ranked points, plus one. Zero points = no rank yet.
+    $rank = null;
+    if ($points > 0) {
+        $st = $db->query('SELECT COUNT(*) FROM (SELECT account_id FROM ach_unlocks GROUP BY account_id HAVING SUM(points * ranked) > ' . $points . ') x');
+        $rank = (int)$st->fetchColumn() + 1;
+    }
+    $players = (int)$db->query('SELECT COUNT(DISTINCT account_id) FROM ach_unlocks')->fetchColumn();
+    return ['points' => $points, 'rank' => $rank, 'players' => $players, 'unlocks' => $unlocks, 'ranked' => $ranked,
+        'mastered_count' => count($mastered), 'games' => $games, 'mastered' => $mastered, 'recent' => $recent];
 }
