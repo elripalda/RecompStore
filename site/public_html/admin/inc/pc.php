@@ -611,6 +611,20 @@ function rs_pc_sdk_keys(string $json): array {
 // (4.3) The catalog's "support" list per recomp: which launcher features it has, and who made each
 // one work: "dev" (the recomp's own recomplauncher.json) or "launcher" (our profile in the catalog).
 // Only cached SDK checks are read here; nothing goes to GitHub while the catalog is built.
+// (4.4) Achievement folders and (when ach_public is on) the live lists, read once per publish.
+function rs_pc_ach_maps(): array {
+    static $m = null;
+    if ($m !== null) return $m;
+    $m = [[], []];
+    try {
+        require_once __DIR__ . '/ach.php';
+        $m[0] = rs_ach_folders();
+        if (rs_setting('ach_public', '0') === '1')
+            foreach (rs_ach_lists() as $g => $l) if ($l['live']) $m[1][$g] = $l['list'];
+    } catch (Throwable $e) { /* the catalog goes out without them */ }
+    return $m;
+}
+
 function rs_pc_support(array $a): array {
     if (!function_exists('rs_boot_effective')) require_once __DIR__ . '/boot.php';
     $c = rs_kv_get('sdk:' . $a['id']);
@@ -1191,6 +1205,11 @@ function rs_pc_catalog(): array {
         if (is_array($boot) && $boot) { if ((int)($boot['format'] ?? 0) === 1 && isset($boot['start'])) $e['launcher'] = $boot; else $e['boot'] = $boot; }
         if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
         $e['support'] = rs_pc_support($a);
+        // (4.4) Recomp Achievements: where this game's ReXGlue unlock file turned up on players' PCs,
+        // and, once it's public, the game's list.
+        [$achFolders, $achLists] = rs_pc_ach_maps();
+        if (isset($achFolders[$a['id']])) $e['achievements_folder'] = $achFolders[$a['id']];
+        if (isset($achLists[$a['id']])) $e['achievements'] = $achLists[$a['id']];
         $apps[] = $e;
     }
     // (4.3) Entries only newer launchers can read go in "apps_min": [{min, apps}], which older ones

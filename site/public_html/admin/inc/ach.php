@@ -78,6 +78,23 @@ function rs_ach_tables(): void {
         done TINYINT NOT NULL DEFAULT 0,
         KEY open_items (done, at)
     ) CHARACTER SET utf8mb4');
+    // Schema 2: late sessions (start, check-ins, end and save loads as the launcher kept them),
+    // and where each game's ReXGlue unlock file turned up.
+    if (rs_setting('ach_schema', '1') !== '2') {
+        $have = array_column($db->query('SHOW COLUMNS FROM ach_sessions')->fetchAll(), 'Field');
+        foreach (['ended' => 'DATETIME NULL', 'times' => 'TEXT NULL', 'loads' => 'TEXT NULL', 'local_id' => "VARCHAR(64) NOT NULL DEFAULT ''"] as $c => $def)
+            if (!in_array($c, $have, true)) $db->exec("ALTER TABLE ach_sessions ADD COLUMN $c $def");
+        $idx = array_column($db->query('SHOW INDEX FROM ach_sessions')->fetchAll(), 'Key_name');
+        if (!in_array('acct_local', $idx, true)) $db->exec('ALTER TABLE ach_sessions ADD KEY acct_local (account_id, local_id)');
+        $db->exec('CREATE TABLE IF NOT EXISTS ach_folders (
+            game VARCHAR(80) NOT NULL,
+            folder VARCHAR(200) NOT NULL,
+            n INT NOT NULL DEFAULT 1,
+            seen DATETIME NOT NULL,
+            PRIMARY KEY (game, folder)
+        ) CHARACTER SET utf8mb4');
+        rs_set_setting('ach_schema', '2');
+    }
     $done = true;
 }
 
@@ -183,12 +200,72 @@ function rs_ach_list_for_launcher(string $game): ?array {
 
 // ---- sessions --------------------------------------------------------------------------------
 
-function rs_ach_session_start(int $acct, string $game, string $version, string $casual): string {
+// A session, live or sent late. $t: started, checkins[], ended, save_loaded[] (unix times the launcher
+// kept), local (its own session id: the same one sent twice gets the same session back), unlock_folder.
+function rs_ach_session_start(int $acct, string $game, string $version, string $casual, array $t = []): string {
     rs_ach_tables();
+    $db = rs_db();
+    $now = time();
+    $local = preg_match('/^[A-Za-z0-9_-]{1,64}$/', (string)($t['local'] ?? '')) ? (string)$t['local'] : '';
+    if ($local !== '') {
+        $st = $db->prepare('SELECT id FROM ach_sessions WHERE account_id = ? AND local_id = ?');
+        $st->execute([$acct, $local]);
+        if ($id = $st->fetchColumn()) return (string)$id;
+    }
+    $clamp = fn($x) => max($now - 30 * 86400, min($now, (int)$x));
+    $started = isset($t['started']) && (int)$t['started'] > 0 ? $clamp($t['started']) : $now;
+    $times = [];
+    foreach ((array)($t['checkins'] ?? []) as $c) if ((int)$c > 0) $times[] = $clamp($c);
+    $times[] = $started;
+    $ended = isset($t['ended']) && (int)$t['ended'] > 0 ? max($started, $clamp($t['ended'])) : 0;
+    if ($ended) $times[] = $ended;
+    $times = array_values(array_unique(array_filter($times, fn($x) => $x >= $started)));
+    sort($times);
+    $times = array_slice($times, -2000);
+    $loads = [];
+    foreach ((array)($t['save_loaded'] ?? []) as $c) if ((int)$c > 0) $loads[] = max($started, $clamp($c));
+    sort($loads);
+    $loads = array_slice(array_values(array_unique($loads)), -200);
     $id = bin2hex(random_bytes(16));
-    rs_db()->prepare('INSERT INTO ach_sessions (id, account_id, game, version, started, last_seen, casual) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)')
-        ->execute([$id, $acct, $game, mb_substr($version, 0, 40), mb_substr($casual, 0, 40)]);
+    $db->prepare('INSERT INTO ach_sessions (id, account_id, game, version, started, last_seen, checkins, save_loaded, casual, ended, times, loads, local_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$id, $acct, $game, mb_substr($version, 0, 40), gmdate('Y-m-d H:i:s', $started), gmdate('Y-m-d H:i:s', max($times)),
+            max(0, count($times) - 1), $loads ? gmdate('Y-m-d H:i:s', end($loads)) : null, mb_substr($casual, 0, 40),
+            $ended ? gmdate('Y-m-d H:i:s', $ended) : null, json_encode($times), json_encode($loads), $local]);
+    $folder = rs_ach_folder_clean((string)($t['unlock_folder'] ?? ''));
+    if ($folder !== '') $db->prepare('INSERT INTO ach_folders (game, folder, n, seen) VALUES (?, ?, 1, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE n = n + 1, seen = VALUES(seen)')->execute([$game, $folder]);
+    // The game's native achievement list, as the recomp gave it at hello (names, gamerscore).
+    if (!empty($t['native']) && is_array($t['native'])) rs_ach_native_store($game, $t['native']);
     return $id;
+}
+
+// The unlock folder as the launcher writes it, without the player's name: it has to start with one of
+// these and can't climb out of it.
+function rs_ach_folder_clean(string $f): string {
+    $parts = array_values(array_filter(explode('\\', str_replace('/', '\\', trim($f))), fn($p) => $p !== ''));
+    if (!$parts || strlen($f) > 200) return '';
+    if (!in_array($parts[0], ['{game}', '%APPDATA%', '%LOCALAPPDATA%', '%USERPROFILE%', '%DOCUMENTS%'], true)) return '';
+    foreach (array_slice($parts, 1) as $p) if ($p === '.' || $p === '..' || preg_match('/[:*?"<>|\x00-\x1f%{}]/', $p)) return '';
+    return implode('\\', $parts);
+}
+
+// Most reported folder per game -> [game => folder]
+function rs_ach_folders(): array {
+    rs_ach_tables();
+    $out = [];
+    foreach (rs_db()->query('SELECT game, folder, n FROM ach_folders ORDER BY game, n DESC, seen DESC')->fetchAll() as $r)
+        if (!isset($out[$r['game']])) $out[$r['game']] = $r['folder'];
+    return $out;
+}
+
+function rs_ach_native_store(string $game, array $list): void {
+    $st = rs_db()->prepare('INSERT INTO ach_native (game, ach, title, description, gamerscore, seen) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE title = IF(VALUES(title) <> \'\', VALUES(title), title), description = IF(VALUES(description) <> \'\', VALUES(description), description),
+        gamerscore = IF(VALUES(gamerscore) > 0, VALUES(gamerscore), gamerscore), seen = VALUES(seen)');
+    foreach (array_slice($list, 0, 1000) as $a) {
+        if (!is_array($a) || (int)($a['id'] ?? 0) < 1) continue;
+        $st->execute([$game, (int)$a['id'], mb_substr((string)($a['title'] ?? ''), 0, 120), mb_substr((string)($a['description'] ?? ''), 0, 300), max(0, min(1000, (int)($a['gamerscore'] ?? 0)))]);
+    }
 }
 
 function rs_ach_session(int $acct, string $id): ?array {
@@ -202,13 +279,22 @@ function rs_ach_session(int $acct, string $id): ?array {
     $r['s'] = (int)strtotime($r['started'] . ' UTC');
     $r['l'] = (int)strtotime($r['last_seen'] . ' UTC');
     $r['sl'] = $r['save_loaded'] ? (int)strtotime($r['save_loaded'] . ' UTC') : 0;
+    $r['e'] = !empty($r['ended']) ? (int)strtotime($r['ended'] . ' UTC') : 0;
+    $r['tl'] = array_map('intval', json_decode((string)($r['times'] ?? ''), true) ?: []);
+    $r['ll'] = array_map('intval', json_decode((string)($r['loads'] ?? ''), true) ?: []);
+    if ($r['sl'] && !in_array($r['sl'], $r['ll'], true)) $r['ll'][] = $r['sl'];
     return $r;
 }
 
 // A check-in: the session is still running. casual / save_loaded come from the recomp's messages.
 function rs_ach_checkin(array $s, string $casual, bool $saveLoaded): void {
-    $sql = 'UPDATE ach_sessions SET last_seen = UTC_TIMESTAMP(), checkins = checkins + 1';
-    $args = [];
+    $now = time();
+    $times = $s['tl'] ?: [(int)$s['s']];
+    $times[] = $now;
+    $loads = $s['ll'];
+    if ($saveLoaded) $loads[] = $now;
+    $sql = 'UPDATE ach_sessions SET last_seen = UTC_TIMESTAMP(), checkins = checkins + 1, times = ?, loads = ?';
+    $args = [json_encode(array_slice($times, -2000)), json_encode(array_slice($loads, -200))];
     if ($casual !== '' && (string)$s['casual'] === '') { $sql .= ', casual = ?'; $args[] = mb_substr($casual, 0, 40); }
     if ($saveLoaded) $sql .= ', save_loaded = UTC_TIMESTAMP()';
     $args[] = $s['id'];
@@ -231,7 +317,6 @@ function rs_ach_record(array $acct, array $s, array $unlocks): array {
     $started = (int)$s['s'];
     $lastSeen = max((int)$s['l'], $started);
     $sessionCasual = (string)$s['casual'];
-    $loadAt = (int)($s['sl'] ?? 0);
 
     // Native unlocks clustered right after the session start or a save load = a save replaying them.
     $nativeTimes = [];
@@ -240,7 +325,15 @@ function rs_ach_record(array $acct, array $s, array $unlocks): array {
         return count(array_filter($nativeTimes, fn($x) => $x >= $t && $x <= $t + RS_ACH_BURST_SECS)) >= RS_ACH_BURST_MIN;
     };
     $burstStart = $burstFrom($started);
-    $burstLoad = $loadAt > 0 && $burstFrom($loadAt);
+    $burstLoads = array_values(array_filter($s['ll'], fn($t) => $burstFrom($t)));
+    $times = $s['tl'] ?: [$started, $lastSeen];
+    $ended = (int)$s['e'];
+    // Live: within the session, and close to a time the launcher saw it running (start, a check-in, the end).
+    $live = function (int $at) use ($times, $started, $ended): bool {
+        if ($at < $started - 60 || ($ended && $at > $ended + 60)) return false;
+        foreach ($times as $t) if ($at >= $t - 60 && $at <= $t + RS_ACH_LIVE_GAP) return true;
+        return false;
+    };
 
     $get = $db->prepare('SELECT ranked FROM ach_unlocks WHERE account_id = ? AND game = ? AND ach = ?');
     $ins = $db->prepare('INSERT INTO ach_unlocks (account_id, game, ach, source, points, at, session, ranked, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -266,10 +359,10 @@ function rs_ach_record(array $acct, array $s, array $unlocks): array {
         $why = '';
         if (!empty($u['earlier'])) $why = 'earlier';
         elseif ($sessionCasual !== '') $why = $sessionCasual;
-        elseif (!empty($u['casual'])) $why = mb_substr((string)($u['reason'] ?? 'casual'), 0, 40) ?: 'casual';
-        elseif ($at < $started - 60 || $at > $lastSeen + RS_ACH_LIVE_GAP) $why = 'no_session';
+        elseif (!empty($u['casual']) || trim((string)($u['reason'] ?? '')) !== '') $why = mb_substr(trim((string)($u['reason'] ?? '')), 0, 40) ?: 'casual';
+        elseif (!$live($at)) $why = 'no_session';
         elseif ($src === 'native' && $burstStart && $at <= $started + RS_ACH_BURST_SECS) $why = 'save_replay';
-        elseif ($src === 'native' && $burstLoad && $at >= $loadAt && $at <= $loadAt + RS_ACH_BURST_SECS) $why = 'save_replay';
+        elseif ($src === 'native' && array_filter($burstLoads, fn($t) => $at >= $t && $at <= $t + RS_ACH_BURST_SECS)) $why = 'save_replay';
         $ranked = $why === '';
         if ($ranked && $at > $now - 60) ++$recent;
 
@@ -289,7 +382,8 @@ function rs_ach_record(array $acct, array $s, array $unlocks): array {
     if ($recent > RS_ACH_FLOOD)
         $db->prepare('INSERT INTO ach_review (account_id, game, session, why, at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())')
             ->execute([(int)$acct['id'], $game, $s['id'], $recent . ' Ranked unlocks inside a minute']);
-    return [$results, rs_ach_check_mastered((int)$acct['id'], $game, $list)];
+    $forMastered = $list ?: (array_filter($unlocks, fn($u) => is_array($u) && ($u['source'] ?? '') === 'native') ? ['source' => 'native'] : null);
+    return [$results, rs_ach_check_mastered((int)$acct['id'], $game, $forMastered)];
 }
 
 function rs_ach_native_gs(string $game, int $id): int {
@@ -302,7 +396,10 @@ function rs_ach_native_gs(string $game, int $id): int {
 // Native lists give their count as "total" (the launcher reads it from the player's copy).
 function rs_ach_check_mastered(int $acct, string $game, ?array $list): bool {
     if (!$list) return false;
-    $total = ($list['source'] ?? '') === 'native' ? (int)($list['total'] ?? 0) : count((array)($list['achievements'] ?? []));
+    if (($list['source'] ?? '') === 'native') {
+        $total = (int)($list['total'] ?? 0);
+        if ($total < 1) { $st = rs_db()->prepare('SELECT COUNT(*) FROM ach_native WHERE game = ?'); $st->execute([$game]); $total = (int)$st->fetchColumn(); }
+    } else $total = count((array)($list['achievements'] ?? []));
     if ($total < 1) return false;
     $st = rs_db()->prepare('SELECT COUNT(*) n, SUM(ranked) r FROM ach_unlocks WHERE account_id = ? AND game = ?');
     $st->execute([$acct, $game]);
@@ -326,6 +423,15 @@ function rs_ach_mine(int $acct, string $game): array {
     $mk = $m->fetchColumn();
     return ['unlocks' => $rows, 'points' => array_sum(array_map(fn($r) => $r['ranked'] ? $r['points'] : 0, $rows)),
         'mastered' => $mk === false ? null : ((int)$mk ? 'ranked' : 'casual')];
+}
+
+// Dev tools' Reset: a test account clears its own unlocks for one game.
+function rs_ach_reset(int $acct, string $game): int {
+    rs_ach_tables();
+    $st = rs_db()->prepare('DELETE FROM ach_unlocks WHERE account_id = ? AND game = ?');
+    $st->execute([$acct, $game]);
+    rs_db()->prepare('DELETE FROM ach_mastered WHERE account_id = ? AND game = ?')->execute([$acct, $game]);
+    return $st->rowCount();
 }
 
 // Admin: recent unlocks and the open review items.
