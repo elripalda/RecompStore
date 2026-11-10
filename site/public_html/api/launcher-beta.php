@@ -9,6 +9,8 @@
 //                                 live, or before that with the preview key (null otherwise)
 //   GET  a=download            -> counted, then the installer (only once it's live)
 declare(strict_types=1);
+// (4.6) The launch info without a preview key: its 30-second copy, before the rest of the site loads.
+if (($_GET['a'] ?? '') === 'info' && (string)($_GET['k'] ?? '') === '' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') { require_once dirname(__DIR__) . '/admin/inc/jcache.php'; rs_json_cache('lb-info', 30); }
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/rl_launch.php';
 

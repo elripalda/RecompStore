@@ -7,6 +7,15 @@
 // (2.3.0) send kinds cancel, favorite, autoupdate, delete, move, text (docs/store-2.3.md, 5); the
 // state is forgotten when a console has no linked device left.
 declare(strict_types=1);
+// (4.6) A browser with no device cookie isn't linked to anything: every page asks, so it's answered
+// before the rest of the site loads.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($_GET['a'] ?? '') === 'mine' && !preg_match('/^[0-9a-f]{16}\.[0-9a-f]{32}$/', (string)($_COOKIE['rs_device'] ?? ''))) {
+    header('Cache-Control: no-store');
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Type: application/json; charset=utf-8');
+    echo '{"ok":true,"linked":false}';
+    exit;
+}
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 
 header('Cache-Control: no-store');

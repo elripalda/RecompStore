@@ -27,6 +27,18 @@
 //   GET  a=unsub&u=&l=&s=               -> off one email list (the link in every email)
 // POSTs are JSON from this site's own pages only (Origin and an X-RS header are checked).
 declare(strict_types=1);
+// (4.6) Signed out, "who's signed in?" is answered from its 30-second copy before the rest of the site
+// loads. Only when one of the jobs that ride on it is due (queued emails every 20 s, virus checks every
+// 20 s, report emails every 5 min) does the request go the long way, so those still run as often.
+if (($_GET['a'] ?? '') === 'me' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && !preg_match('/^[0-9a-f]{64}$/', (string)($_COOKIE['rs_acct'] ?? ''))) {
+    $acTmp = sys_get_temp_dir();
+    $acH = substr(md5(dirname(__DIR__) . '/admin/inc'), 0, 8);
+    $acDue = false;
+    foreach (["$acTmp/rs-mailq-$acH" => 20, "$acTmp/rs-vt-stamp" => 20, "$acTmp/rs-pcrep-$acH" => 300] as $acSt => $acEvery) {
+        if (!is_file($acSt) || time() - (int)@filemtime($acSt) >= $acEvery) { $acDue = true; break; }
+    }
+    if (!$acDue) { require_once dirname(__DIR__) . '/admin/inc/jcache.php'; rs_json_cache('acct-me-' . (str_contains((string)($_SERVER['HTTP_HOST'] ?? ''), 'recomplauncher') ? 'rl' : 'rs'), 30); }
+}
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/totp.php';
 // (3.1) Every page view asks who's signed in: a good moment to send a few waiting emails, after the answer.
