@@ -16,23 +16,35 @@ function rs_json_cached(string $file): ?array {
     $php = "$dir/$name";
     if (!is_file($php)) {
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        // (4.4) One request builds the new copy; the others don't wait in line for it (that held every
+        // PHP worker for seconds after each publish): they use the copy before it while it's written.
         $lock = @fopen("$dir/.lock", 'c');
-        if ($lock && flock($lock, LOCK_EX)) {
-            if (!is_file($php)) {
-                $data = json_decode((string)@file_get_contents($file), true);
-                if (is_array($data)) {
-                    $tmp = "$php." . getmypid() . '.tmp';
-                    if (@file_put_contents($tmp, '<?php return ' . var_export($data, true) . ";\n") !== false) @rename($tmp, $php);
-                    // Older copies of the same file go.
-                    $stem = preg_replace('/[^a-z0-9-]+/i', '-', basename($file)) . '-';
-                    foreach (glob("$dir/$stem*.php") ?: [] as $old) if ($old !== $php) @unlink($old);
-                }
-            }
+        if ($lock && flock($lock, LOCK_EX | LOCK_NB)) {
+            if (!is_file($php)) rs_json_cache_build($file, $dir, $php);
             flock($lock, LOCK_UN);
+        } elseif (!is_file($php)) {
+            $stem = preg_replace('/[^a-z0-9-]+/i', '-', basename($file)) . '-';
+            $older = glob("$dir/$stem*.php") ?: [];
+            usort($older, fn($x, $y) => (int)@filemtime($y) <=> (int)@filemtime($x));
+            foreach ($older as $o) {
+                $prev = @include $o;
+                if (is_array($prev)) { if ($lock) fclose($lock); return $prev; } // not kept in $mem: the next call looks for the new one
+            }
         }
         if ($lock) fclose($lock);
     }
     $out = is_file($php) ? @include $php : null;
     if (!is_array($out)) $out = json_decode((string)@file_get_contents($file), true);
     return $mem[$key] = is_array($out) ? $out : null;
+}
+
+// Writes $file's JSON out as PHP at $php (under the caller's lock), and drops older copies of it.
+function rs_json_cache_build(string $file, string $dir, string $php): void {
+    $data = json_decode((string)@file_get_contents($file), true);
+    if (!is_array($data)) return;
+    $tmp = "$php." . getmypid() . '.tmp';
+    if (@file_put_contents($tmp, '<?php return ' . var_export($data, true) . ";\n") === false || !@rename($tmp, $php)) { @unlink($tmp); return; }
+    if (function_exists('opcache_compile_file')) @opcache_compile_file($php);
+    $stem = preg_replace('/[^a-z0-9-]+/i', '-', basename($file)) . '-';
+    foreach (glob("$dir/$stem*.php") ?: [] as $old) if ($old !== $php) @unlink($old);
 }

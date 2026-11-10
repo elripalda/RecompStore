@@ -25,6 +25,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && is_string($_GET['a'] ?? n
     && preg_match('/^[a-z0-9-]{1,64}$/', $_GET['id'])) {
     $fastId = $_GET['id'];
     if ($_GET['a'] === 'app') {
+        // (4.4) Its own file, written at each publish (admin/inc/pc.php rs_pc_write_app_files).
+        $fastA = dirname(__DIR__, 2) . '/recompstore-private/pc-app/' . $fastId . '.json';
+        $fastM = @filemtime($fastA);
+        if ($fastM !== false && $fastM >= (int)@filemtime(dirname(__DIR__) . '/pc-catalog.json')) {
+            header('X-Content-Type-Options: nosniff');
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: public, max-age=120');
+            readfile($fastA);
+            exit;
+        }
         require_once dirname(__DIR__) . '/admin/inc/catcache.php';
         foreach ((array)(rs_json_cached(dirname(__DIR__) . '/pc-catalog.json')['apps'] ?? []) as $fx) {
             if (($fx['id'] ?? '') !== $fastId) continue;

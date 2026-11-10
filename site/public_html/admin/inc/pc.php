@@ -1280,7 +1280,31 @@ function rs_pc_write_files(array $cat): bool {
     $tmp = RS_PC_CATALOG . '.tmp';
     if ($json === false || file_put_contents($tmp, $json . "\n") === false || !rename($tmp, RS_PC_CATALOG)) return false;
     rs_pc_write_web($cat);
+    rs_pc_write_app_files($cat);
+    // (4.4) The PHP copy the API reads is built here, once, not by the first players' requests.
+    require_once __DIR__ . '/catcache.php';
+    rs_json_cached(RS_PC_CATALOG);
     return true;
+}
+// (4.4) Each recomp's entry as its own small file, the answer to api/pc.php?a=app as it is: the most
+// asked question no longer loads the whole catalog. All rewritten each time (the API only trusts ones
+// as new as the catalog); ones no longer listed go.
+function rs_pc_write_app_files(array $cat): void {
+    $dir = dirname(RS_PUBLIC) . '/recompstore-private/pc-app';
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) return;
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    $keep = [];
+    foreach ((array)($cat['apps'] ?? []) as $a) {
+        $id = (string)($a['id'] ?? '');
+        if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) continue;
+        $keep["$id.json"] = true;
+        $body = json_encode(['ok' => true, 'app' => $a], $flags);
+        if ($body === false) continue;
+        $f = "$dir/$id.json";
+        $tmp = "$f." . getmypid() . '.tmp';
+        if (@file_put_contents($tmp, $body) === false || !@rename($tmp, $f)) @unlink($tmp);
+    }
+    foreach (glob("$dir/*.json") ?: [] as $f) if (!isset($keep[basename($f)])) @unlink($f);
 }
 function rs_pc_web_copy(array $cat): array {
     $cat['apps'] = rs_pc_cat_apps($cat); // the website shows every host
