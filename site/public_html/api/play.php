@@ -28,7 +28,9 @@ function rs_pl_out(int $code, array $body, int $cache = 0): void {
 function rs_pl_version(string $kind, string $id): ?array {
     if ($kind === 'pc') {
         if (!preg_match('/^[a-z0-9-]{1,64}$/', $id)) return null;
-        // (4.1) From the published catalog (opcache's copy), not every recomp decoded from the database.
+        // (4.6) Its own small file first (written at each publish), then the published catalog.
+        $own = dirname(__DIR__, 2) . '/recompstore-private/pc-app/' . $id . '.json';
+        if (is_file($own) && is_array($j = json_decode((string)@file_get_contents($own), true)) && is_array($j['app'] ?? null)) return $j['app'];
         foreach ((array)(rs_json_cached(RS_PC_CATALOG)['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
         return null;
     }

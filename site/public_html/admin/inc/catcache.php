@@ -11,6 +11,13 @@ function rs_json_cached(string $file): ?array {
     static $mem = [];
     $key = $file . '|' . $mt . '|' . $sz;
     if (isset($mem[$key])) return $mem[$key];
+    // (4.6) A big file is just decoded. As PHP, the PC catalog came to 6.7 MB of code: compiling it into
+    // opcache took long enough on a busy server that the worker doing it held opcache's lock while every
+    // other PHP worker queued behind it (requests timed out, the admin waited 15 seconds and more).
+    if ($sz > 1000000) {
+        $out = json_decode((string)@file_get_contents($file), true);
+        return $mem[$key] = is_array($out) ? $out : null;
+    }
     $dir = dirname(__DIR__, 3) . '/recompstore-private/json-cache';
     $name = preg_replace('/[^a-z0-9-]+/i', '-', basename($file)) . '-' . $mt . '-' . $sz . '.php';
     $php = "$dir/$name";
