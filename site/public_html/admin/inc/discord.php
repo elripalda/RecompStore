@@ -513,6 +513,8 @@ function rs_notes(bool $activeOnly = true, string $for = ''): array {
 // (count, when, any problem) in kv_cache, so the settings aren't rewritten every run.
 const RS_DC_COUNT_GAP = 300;        // never rename the channel more often than this (seconds)
 const RS_DC_CONNECT = 1048576;      // the Connect permission (1 << 20)
+const RS_DC_VIEW = 1024;            // View Channel
+const RS_DC_MANAGE = 16;            // Manage Channels
 const RS_DC_COUNT_PERMS = 268435473; // the bot's invite permissions with Manage Channels added
 
 function rs_dc_count_on(): bool { return rs_setting('dc_count_on', '0') === '1'; }
@@ -559,19 +561,44 @@ function rs_dc_count_run(): array {
     $name = rs_dc_count_name($n);
     $chan = trim((string)rs_setting('dc_count_chan', ''));
 
-    // Its channel: still there? (deleted by hand: made again)
+    // The bot's own user, so it can keep seeing and renaming its channel on servers where the
+    // default role can't view channels.
+    $me = ($k = rs_kv_get('dc_bot_user')) ? $k['v'] : '';
+    if ($me === '') {
+        [$st, $u] = rs_dc_call('GET', '/users/@me', ['bot' => $c['bot']]);
+        if ($wait($st, $u)) { rs_dc_count_save($s); return $s; }
+        if ($st !== 200 || empty($u['id'])) { $s['err'] = rs_dc_count_why($st, $u, 'read its own account'); rs_dc_count_save($s); return $s; }
+        $me = (string)$u['id'];
+        rs_kv_put('dc_bot_user', $me);
+    }
+    $mine = ['id' => $me, 'type' => 1, 'allow' => (string)(RS_DC_VIEW | RS_DC_MANAGE), 'deny' => '0'];
+
+    // Its channel: still there? Read from the server's channel list, which needs no access to the
+    // channel itself. (Deleted by hand: made again.)
     if ($chan !== '') {
-        [$st, $ch] = rs_dc_call('GET', '/channels/' . rawurlencode($chan), ['bot' => $c['bot']]);
-        if ($wait($st, $ch)) { rs_dc_count_save($s); return $s; }
-        if ($st === 404 || ($st === 200 && (string)($ch['guild_id'] ?? '') !== $c['guild'])) { $chan = ''; rs_set_setting('dc_count_chan', ''); }
-        elseif ($st !== 200) { $s['err'] = rs_dc_count_why($st, $ch, 'see the channel'); rs_dc_count_save($s); return $s; }
-        else $s['live'] = (string)($ch['name'] ?? '');
+        [$st, $list] = rs_dc_call('GET', '/guilds/' . rawurlencode($c['guild']) . '/channels', ['bot' => $c['bot']]);
+        if ($wait($st, $list)) { rs_dc_count_save($s); return $s; }
+        if ($st !== 200 || !is_array($list)) { $s['err'] = rs_dc_count_why($st, $list, 'list the channels'); rs_dc_count_save($s); return $s; }
+        $ch = null;
+        foreach ($list as $x) if ((string)($x['id'] ?? '') === $chan) { $ch = $x; break; }
+        if (!$ch) { $chan = ''; rs_set_setting('dc_count_chan', ''); }
+        else {
+            $s['live'] = (string)($ch['name'] ?? '');
+            // Made before the bot gave itself access: give it now.
+            $has = false;
+            foreach ((array)($ch['permission_overwrites'] ?? []) as $o) if ((string)($o['id'] ?? '') === $me && ((int)($o['allow'] ?? 0) & RS_DC_VIEW)) $has = true;
+            if (!$has) {
+                [$st, $r] = rs_dc_call('PUT', '/channels/' . rawurlencode($chan) . '/permissions/' . rawurlencode($me), ['bot' => $c['bot'], 'json' => ['type' => 1, 'allow' => $mine['allow'], 'deny' => '0']]);
+                if ($wait($st, $r)) { rs_dc_count_save($s); return $s; }
+                if ($st !== 204 && $st !== 200) { $s['err'] = rs_dc_count_why($st, $r, 'give itself access to the channel'); rs_dc_count_save($s); return $s; }
+            }
+        }
     }
     if ($chan === '') {
-        // A voice channel at the very top: everyone sees it, nobody can connect.
+        // A voice channel at the very top: everyone sees it, nobody can connect; the bot keeps access.
         [$st, $ch] = rs_dc_call('POST', '/guilds/' . rawurlencode($c['guild']) . '/channels', ['bot' => $c['bot'], 'json' => [
             'name' => $name, 'type' => 2, 'position' => 0,
-            'permission_overwrites' => [['id' => $c['guild'], 'type' => 0, 'allow' => '0', 'deny' => (string)RS_DC_CONNECT]],
+            'permission_overwrites' => [['id' => $c['guild'], 'type' => 0, 'allow' => '0', 'deny' => (string)RS_DC_CONNECT], $mine],
         ]]);
         if ($wait($st, $ch)) { rs_dc_count_save($s); return $s; }
         if (($st !== 200 && $st !== 201) || empty($ch['id'])) { $s['err'] = rs_dc_count_why($st, $ch, 'make the channel'); rs_dc_count_save($s); return $s; }
