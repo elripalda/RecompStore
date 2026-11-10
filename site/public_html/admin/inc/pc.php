@@ -596,6 +596,15 @@ function rs_pc_sdk_check(array $a, bool $fresh = false): array {
             }
         } catch (Throwable $e) { /* unknown for now */ }
     }
+    // (4.6) Whether its README has the "Get it on RecompLauncher" badge, for the SDK support table. A
+    // Check again reads the README fresh; otherwise the day-old copy does. Left out when the README
+    // couldn't be read, so the next run tries again.
+    try {
+        if ($fresh && rs_pc_host($a) === '') { rs_cache_tables(); rs_db()->prepare('DELETE FROM gh_cache WHERE k = ?')->execute([strtolower($repo . '#readme')]); }
+        $rd = rs_pc_readme($repo, rs_pc_host($a));
+        if ((int)$rd['status'] === 200) $out['badge'] = (bool)preg_match('#recomplauncher\.com/[^\s"\')]*badge[^\s"\')]*\.svg|Get it on RecompLauncher#i', (string)$rd['md']);
+        elseif ((int)$rd['status'] === 404) $out['badge'] = false;
+    } catch (Throwable $e) { /* next check */ }
     rs_kv_put($k, (string)json_encode($out));
     return $out;
 }

@@ -84,7 +84,7 @@ try {
     }
 } catch (Throwable $e) { rs_errlog('sdk checks', $e); }
 $rows = [];
-$count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'unknown' => 0];
+$count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'unknown' => 0, 'badge' => 0];
 $waiting = 0;
 $toCheck = [];
 foreach ($apps as $rank => $a) {
@@ -104,9 +104,11 @@ foreach ($apps as $rank => $a) {
     $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
     $kind = in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console';
     $prSt = $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '';
-    $rows[] = ['a' => $a, 'rank' => $rank + 1, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now, 'kind' => $kind, 'pr' => $prSt];
+    $badge = $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null; // null: not looked at yet
+    $rows[] = ['a' => $a, 'rank' => $rank + 1, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now, 'kind' => $kind, 'pr' => $prSt, 'badge' => $badge];
     ++$count['all'];
     ++$count[$state];
+    if ($badge) ++$count['badge'];
 }
 // One background run at a time: the next unchecked ones (most downloaded first), for up to a minute.
 if ($toCheck) {
@@ -175,14 +177,14 @@ if (mb_strlen($q) >= 2) {
 }
 
 $stateLabel = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ''], 'no' => ['Won\'t support it', ' warn'], 'missing' => ['No file yet', ''], 'unknown' => ['Couldn\'t check yet', ' warn']];
-$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'unknown' => 'Not checked'];
+$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'unknown' => 'Not checked', 'badge' => 'Badge in README'];
 
 rs_head('SDK support', true, ['assets/account.css']);
 ?>
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Filter by status, type or name, and sort by any column. Each one without a file is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For the ones that already ship a file, Copy badge PR prompt adds just the badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
+    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Filter by status, type or name, and sort by any column. Each one without a file is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the "Get it on RecompLauncher" badge to their README and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For the ones that already ship a file, Copy badge PR prompt adds just the badge; Badge in README shows the ones that have it. The ⋯ button on a row has the badge code, Check again and the marks.</p>
   </div>
   <form method="post" class="actions"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
 </section>
@@ -218,15 +220,16 @@ rs_head('SDK support', true, ['assets/account.css']);
         [$nl, $nw] = $nowLabel[$row['now']];
         $gh = rs_host_web(rs_pc_host($a), (string)$a['repo']);
         $find = mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id']); ?>
-      <tbody class="sdk-item" id="r-<?= h($a['id']) ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-now="<?= h($row['now']) ?>" data-find="<?= h($find) ?>">
+      <tbody class="sdk-item" id="r-<?= h($a['id']) ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-now="<?= h($row['now']) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-find="<?= h($find) ?>">
         <tr>
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
           <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
-          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?></span></div></td>
+          <td><div class="sdk-st"><div class="sdk-pills"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><?php if ($row['badge']): ?><span class="pill ok" title="Its README has the Get it on RecompLauncher badge">Badge in README</span><?php endif; ?></div><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?></span></div></td>
           <td class="c-act"><div class="sdk-btns">
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-            <?php if ($st === 'ships'): ?><button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
+            <?php if ($st === 'ships' && $row['badge']): ?>
+            <?php elseif ($st === 'ships'): ?><button type="button" class="btn primary" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button>
             <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
             <?php else: ?><button type="button" class="btn primary" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
             <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= h($a['id']) ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
@@ -234,7 +237,7 @@ rs_head('SDK support', true, ['assets/account.css']);
         </tr>
         <tr class="sdk-extra" id="m-<?= h($a['id']) ?>" hidden><td colspan="5"><div class="sdk-extra-in">
           <div class="sdk-btns sdk-btns-l">
-            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><button type="button" class="btn" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><?php endif; ?>
+            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><?php if (!$row['badge']): ?><button type="button" class="btn" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><?php endif; ?><?php endif; ?>
             <?php if ($st === 'pr'): ?><button type="button" class="btn" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h($gh) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><?php endif; ?>
             <form method="post"><?= $csrf ?><input type="hidden" name="action" value="recheck"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn" title="Check its GitHub again">Check again</button></form>
             <?php if ($mk): ?><form method="post"><?= $csrf ?><input type="hidden" name="action" value="unmark"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button class="btn">Clear the mark</button></form><span class="muted small">Marked by <?= h((string)$mk['who']) ?> on <?= h((string)$mk['at']) ?><?= $st === 'no' && (string)$mk['url'] !== '' ? ' · <a href="' . h((string)$mk['url']) . '" target="_blank" rel="noopener">where they said so ↗</a>' : '' ?></span><?php endif; ?>
@@ -312,6 +315,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-table .c-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sdk-table thead .c-num button{text-align:right}
 .sdk-st{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.sdk-pills{display:flex;gap:4px;flex-wrap:wrap}
 .sdk-st .pill{white-space:nowrap}
 .sdk-st .small{white-space:nowrap;font-size:12.5px}
 .sdk-more{min-width:38px;font-size:16px!important;letter-spacing:1px}
@@ -364,7 +368,7 @@ rs_head('SDK support', true, ['assets/account.css']);
     var m = q.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)/);
     if (m) q = m[1].replace(/\.git$/, '');
     items.forEach(function (it) {
-      var ok = (st.state === 'all' || it.dataset.state === st.state) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
+      var ok = (st.state === 'all' || it.dataset.state === st.state || (st.state === 'badge' && it.dataset.badge === '1')) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
       it.hidden = !ok;
       if (ok) n++;
     });
