@@ -139,15 +139,15 @@ function rs_sdk_row_html(array $row, string $csrf): string {
       <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-find="<?= h($find) ?>">
         <tr>
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
-          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a><?php if ($row['badge']): ?><span class="sdk-star" title="Its README has the Get it on RecompLauncher badge" aria-label="Badge in README">★</span><?php endif; ?></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
+          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): ?><span class="sdk-star" title="Its README has the Get it on RecompLauncher badge" aria-label="Badge in README">★</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
           <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span></div></td>
           <td class="c-act"><div class="sdk-btns">
+            <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <?php if ($st === 'ships'): ?><?= $row['badge'] ? '' : $badgePrBtn(' primary') ?>
             <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
             <?php elseif ($st === 'locked'): ?>
             <?php else: ?><?= $promptBtn(' primary') ?><?php endif; ?>
-            <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= $id ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
           </div></td>
         </tr>
@@ -405,7 +405,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 12px Sora,sans-serif}
 .sdk-name{display:flex;flex-direction:column;min-width:0}
 .sdk-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
-.sdk-title .sdk-star{margin-left:6px;vertical-align:1px}
+.sdk-title .sdk-star{margin-right:6px;vertical-align:1px}
 .sdk-name a{color:var(--frost);text-decoration:none}
 .sdk-name>.small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
 .sdk-st{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
