@@ -1428,7 +1428,8 @@ function rs_pc_banner_rank(array $apps, string $rule, string $os): array {
     $c = [];
     foreach ($apps as $e) {
         if (!rs_pc_banner_fits($e, $os)) continue;
-        $born = min(rs_pc_banner_days((string)($e['first'] ?? '')), rs_pc_banner_days((string)($e['added'] ?? '')));
+        // How new: its first release (joining RecompLauncher later doesn't make an old recomp new).
+        $born = rs_pc_banner_days((string)($e['first'] ?? '') !== '' ? (string)$e['first'] : (string)($e['added'] ?? ''));
         $upd = rs_pc_banner_days((string)($e['released'] ?? ''));
         $pull = rs_pc_banner_pull($e);
         $score = match ($rule) {
