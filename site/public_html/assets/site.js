@@ -1949,18 +1949,18 @@
     if (!isPack(a)) return '';
     const card = (g) => {
       const home = packGameHome(g.name);
-      const pic = g.cover || a.cover ? `<img src="${esc(thumb(g.cover || a.cover, 300))}" alt="" width="150" height="225" loading="lazy" decoding="async">` : '<span class="pk-pic"></span>';
+      const pic = g.cover || a.cover ? `<img src="${esc(thumb(g.cover || a.cover, 320))}" alt="" width="150" height="225" loading="lazy" decoding="async">` : '<span class="pk-pic"></span>';
       const inner = `${pic}<b dir="auto">${esc(g.name)}</b>${home ? `<small>${t('Other versions')}</small>` : ''}`;
       return home ? `<a class="pk-game" href="/pc/game/${encodeURIComponent(home.id)}">${inner}</a>` : `<div class="pk-game">${inner}</div>`;
     };
     return `<section class="pk" aria-label="${esc(t('Games in this recomp'))}"><div class="pk-head"><h2>${tf('Includes {n} games', { n: fmtNum(a.games.length) })}</h2>
-      <small>${t('One download for all of them. Each gets its own tile in RecompLauncher.')}</small></div>
+      <small>${t('One download for all of them.')}</small></div>
       <div class="pk-grid" style="--pk-cols:${packCols(a.games.length)}">${a.games.map(card).join('')}</div></section>`;
   }
   function alsoInHTML(a) {
     const packs = packsWith(a);
     if (!packs.length) return '';
-    return `<section class="pk-also">${packs.map((p) => `<a class="pk-also-it" href="/pc/game/${encodeURIComponent(p.id)}">${p.icon || p.cover ? `<img src="${esc(thumb(p.icon || p.cover, 96))}" alt="" width="40" height="40" loading="lazy">` : ''}
+    return `<section class="pk-also">${packs.map((p) => `<a class="pk-also-it" href="/pc/game/${encodeURIComponent(p.id)}">${p.icon || p.cover ? `<img src="${esc(thumb(p.icon || p.cover, 160))}" alt="" width="40" height="40" loading="lazy">` : ''}
       <span><b dir="auto">${tf('Also in {name}', { name: esc(p.name) })}</b><small dir="auto">${esc(tf('{n} games in one download: {games}', { n: fmtNum(p.games.length), games: p.games.map((g) => g.name).join(', ') }))}</small></span>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>`).join('')}</section>`;
   }
