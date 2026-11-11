@@ -1954,7 +1954,7 @@
       return home ? `<a class="pk-game" href="/pc/game/${encodeURIComponent(home.id)}">${inner}</a>` : `<div class="pk-game">${inner}</div>`;
     };
     return `<section class="pk" aria-label="${esc(t('Games in this recomp'))}"><div class="pk-head"><h2>${tf('Includes {n} games', { n: fmtNum(a.games.length) })}</h2>
-      <small>${t('One download for all of them.')}</small></div>
+      <small>${t('One download for all of them. Each gets its own tile in RecompLauncher.')}</small></div>
       <div class="pk-grid" style="--pk-cols:${packCols(a.games.length)}">${a.games.map(card).join('')}</div></section>`;
   }
   function alsoInHTML(a) {

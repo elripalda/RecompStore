@@ -188,7 +188,8 @@ recomp has no such option yet, leave them out: each tile opens your own menu. `t
 360) names that game's achievement unlock file. `inputs` lists the setup inputs only that game
 needs (its own disc). Inputs no game lists are shared by all of them.
 
-Coming soon to RecompLauncher. Until then, launchers show one tile for the whole release.
+Needs RecompLauncher 0.90 Beta 36 or newer. Older launchers ignore the list and show one tile
+for the whole release.
 
 ## Level 2: settings in the launcher
 

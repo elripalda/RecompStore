@@ -95,4 +95,4 @@ If your release carries more than one game (a trilogy, a bundle), list them. Pla
 
 `id` is short (lowercase letters and digits, up to 16) and never changes, since saves and achievements hang on it. `args` are added after `start.args` to start that game directly. If your recomp has no such option yet, leave them out: each tile opens your own menu. `title_id` (Xbox 360) names that game's achievement unlock file. `inputs` lists the setup inputs only that game needs (its own disc). Inputs no game lists are shared by all of them.
 
-Coming soon to RecompLauncher. Until then, launchers show one tile for the whole release.
+Needs RecompLauncher 0.90 Beta 36 or newer. Older launchers ignore the list and show one tile for the whole release.
