@@ -234,24 +234,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $r = $st->fetch();
             $d = $r ? json_decode((string)($r['data'] ?? ''), true) : null;
             if (!$r || !is_array($d)) throw new RuntimeException('That submission is gone.');
+            // (4.6) No email address (a Discord name, say) or no mailbox: it's still declined and the
+            // reason kept; the message is copied from the page and sent by hand.
             $to = rs_inbox_email($r, null);
-            if ($to === '') throw new RuntimeException('They didn\'t leave an email address, so there\'s no one to tell. Mark it done instead.');
-            if (!rs_mail_ready()) throw new RuntimeException('Set up the mailbox on the Mail page first.');
+            $send = $to !== '' && rs_mail_ready();
             $subject = mb_substr(trim((string)($_POST['subject'] ?? '')), 0, 200);
             $body = trim(str_replace("\r\n", "\n", (string)($_POST['body'] ?? '')));
-            if ($subject === '' || mb_strlen($body) < 10) throw new RuntimeException('Write the message first.');
+            if ($send && ($subject === '' || mb_strlen($body) < 10)) throw new RuntimeException('Write the message first.');
             $fix = !empty($_POST['fix']);
-            $text = $body;
-            if ($fix) $text .= "\n\n" . 'Fix it here (everything you sent is filled in, and sending it updates the same submission):' . "\n" . 'https://recompstore.com/submit?fix=' . $id . '&t=' . rs_sub_fix_key($id);
-            $text .= "\n\n" . rs_mail_get('mail_sign');
-            rs_mail_send($to, $subject, $text, ['save' => true]);
-            rs_mail_log('reply', $to, $subject, $body . ($fix ? "\n\n[Fix link included]" : ''), '', $id);
+            if ($send) {
+                $text = $body;
+                if ($fix) $text .= "\n\n" . 'Fix it here (everything you sent is filled in, and sending it updates the same submission):' . "\n" . 'https://recompstore.com/submit?fix=' . $id . '&t=' . rs_sub_fix_key($id);
+                $text .= "\n\n" . rs_mail_get('mail_sign');
+                rs_mail_send($to, $subject, $text, ['save' => true]);
+                rs_mail_log('reply', $to, $subject, $body . ($fix ? "\n\n[Fix link included]" : ''), '', $id);
+            }
             $why = mb_substr(trim((string)($_POST['reason'] ?? '')), 0, 600);
             $d['declined'] = ['reason' => $why, 'at' => gmdate('c'), 'fix' => $fix];
             if (!$fix) { $d['turned_down'] = $d['declined']; unset($d['declined']); }
             $db->prepare("UPDATE inbox SET status = 'done', data = ? WHERE id = ?")->execute([json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $id]);
             rs_log('submission-declined', (string)$id, $why);
-            rs_flash('Declined and sent to ' . $to . ($fix ? ', with a link to fix it and send it again.' : '.'));
+            rs_flash($send ? 'Declined and sent to ' . $to . ($fix ? ', with a link to fix it and send it again.' : '.')
+                : 'Declined. No email went out' . ($to === '' ? ' (they left no email address)' : ' (the mailbox isn\'t set up)') . ', so send them the message yourself.');
         } catch (Throwable $e) {
             rs_flash('Not sent: ' . $e->getMessage(), 'err');
         }
@@ -657,7 +661,10 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
       <?php endif; ?>
     </details>
     <?php endif; ?>
-    <?php if ($r['kind'] === 'submit' && is_array($d ?? null) && !empty($r['data']) && $r['status'] !== 'done' && $to !== '' && $mailReady):
+    <?php if ($r['kind'] === 'submit' && is_array($d ?? null) && !empty($r['data']) && $r['status'] !== 'done'):
+      $canMail = $to !== '' && $mailReady; // (4.6) otherwise: declined here, the message sent by hand
+      $who = trim((string)($d['contact'] ?? '')) !== '' ? trim((string)$d['contact']) : trim((string)($r['contact'] ?? ''));
+      $fixUrl = 'https://recompstore.com/submit?fix=' . (int)$r['id'] . '&t=' . rs_sub_fix_key((int)$r['id']);
       $isPc = ($d['platform'] ?? '') === 'pc'; $where = $isPc ? 'RecompLauncher' : 'RecompStore';
       $presets = [
         ['No release yet', 'There\'s no GitHub release with a build players can download yet. Publish one with your files attached.'],
@@ -696,8 +703,9 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
         <label>Anything else <span class="muted">(your own words, optional)</span><textarea data-own rows="2" maxlength="1000" placeholder="For example: the Linux build crashes on start."></textarea></label>
         <label class="check"><input type="checkbox" name="fix" value="1" checked> Let them fix it and send it again (adds a link that opens their submission, filled in)</label>
         <label>Subject<input name="subject" maxlength="200" value="<?= h('About your ' . $where . ' submission: ' . (string)$d['name']) ?>" required></label>
-        <label>Message<textarea name="body" rows="10" required data-hello="<?= h('Hi' . (trim((string)($d['author'] ?? '')) !== '' ? ' ' . trim((string)$d['author']) : '') . ',') ?>" data-name="<?= h((string)$d['name']) ?>" data-where="<?= h($where) ?>"></textarea><small>Built from what you tick above, and yours to change. The fix link and your signature go under it. Sent from <?= h(rs_mail_get('mail_from')) ?>.</small></label>
-        <button class="danger">Decline and send</button>
+        <label>Message<textarea name="body" rows="10" required data-hello="<?= h('Hi' . (trim((string)($d['author'] ?? '')) !== '' ? ' ' . trim((string)$d['author']) : '') . ',') ?>" data-name="<?= h((string)$d['name']) ?>" data-where="<?= h($where) ?>"<?= $canMail ? '' : ' data-fixurl="' . h($fixUrl) . '"' ?>></textarea><?php if ($canMail): ?><small>Built from what you tick above, and yours to change. The fix link and your signature go under it. Sent from <?= h(rs_mail_get('mail_from')) ?>.</small><?php else: ?><small class="warn"><?= $to === '' ? 'They left no email address' . ($who !== '' ? ' (contact: ' . h($who) . ')' : '') : 'The mailbox isn\'t set up' ?>, so nothing is emailed. Copy the message (the fix link is in it) and send it to them yourself.</small><?php endif; ?></label>
+        <?php if ($canMail): ?><button class="danger">Decline and send</button>
+        <?php else: ?><button type="button" data-copy-decline>Copy message</button> <button class="danger">Decline</button><?php endif; ?>
       </form>
     </details>
     <?php endif; ?>
@@ -707,7 +715,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
         <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done'): ?><button name="action" value="<?= ($d['platform'] ?? '') === 'pc' ? 'to_ps5' : 'to_pc' ?>"><?= ($d['platform'] ?? '') === 'pc' ? 'Move to PS5' : 'Move to PC' ?></button><?php endif; ?>
         <?php if ($r['status'] === 'done'): ?><button name="action" value="new">Reopen</button>
         <?php else: ?><button name="action" value="done"<?= $r['kind'] === 'submit' && !empty($r['data']) ? '' : ' class="primary"' ?>>Mark done</button><?php endif; ?>
-        <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done' && ($to ?? '') !== '' && $mailReady): ?><button type="button" class="danger" data-open-decline="<?= (int)$r['id'] ?>">Decline</button><?php endif; ?>
+        <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done'): ?><button type="button" class="danger" data-open-decline="<?= (int)$r['id'] ?>">Decline</button><?php endif; ?>
       </form>
       <form method="post" onsubmit="return confirm('Delete this message for good?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button name="action" value="delete" class="danger">Delete</button></form>
       <?php if ($r['kind'] === 'logs'): /* (2.6) everything they sent, in one zip */ ?><a class="btn zip-dl" href="log-zip.php?id=<?= (int)$r['id'] ?>" download title="Every log, their message as message.txt, and any pictures">Download as zip</a><?php endif; ?>
@@ -753,13 +761,19 @@ document.querySelectorAll('[data-decline]').forEach((box) => {
     if (lines.length) parts.push(lines.join('\n'));
     body.value = body.dataset.hello + '\n\n' + 'Thanks for sending in ' + body.dataset.name + '. Before it can go on ' + body.dataset.where + ', '
       + (parts.length ? 'it needs a few changes:\n\n' + parts.join('\n\n') : 'it needs a few changes.')
-      + (fix.checked ? '\n\nUse the link below to open your submission with everything filled in, fix what\'s needed and send it again.' : '')
+      + (fix.checked ? (body.dataset.fixurl ? '\n\nOpen your submission with everything filled in, fix what\'s needed and send it again here:\n' + body.dataset.fixurl : '\n\nUse the link below to open your submission with everything filled in, fix what\'s needed and send it again.') : '')
       + '\n\nThanks again, and feel free to reply with any questions.';
   };
   f.addEventListener('change', build);
   own.addEventListener('input', build);
   build();
 });
+// (4.6) No email: copy the message to send it by hand (Discord and so on).
+document.querySelectorAll('[data-copy-decline]').forEach((b) => b.addEventListener('click', async () => {
+  const t = b.closest('form').querySelector('textarea[name=body]').value;
+  try { await navigator.clipboard.writeText(t); b.textContent = 'Copied'; } catch (e) { b.closest('form').querySelector('textarea[name=body]').select(); }
+  setTimeout(() => { b.textContent = 'Copy message'; }, 1600);
+}));
 // (4.6) The Decline button next to Mark done opens the decline box and brings it into view.
 document.querySelectorAll('[data-open-decline]').forEach((b) => b.addEventListener('click', () => {
   const box = document.getElementById('dec-' + b.dataset.openDecline);
