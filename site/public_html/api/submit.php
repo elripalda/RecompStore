@@ -123,8 +123,17 @@ if (preg_match('#^(https?://)?(www\.)?gitlab\.com/#i', $d['repo'])) {
 if ($d['category'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Pick what it is: a game port, an emulator, an app or a tool.']);
 if (mb_strlen($d['name']) < 2) rs_sub_out(422, ['ok' => false, 'error' => 'Give it a name.']);
 if (mb_strlen($d['author']) < 2) rs_sub_out(422, ['ok' => false, 'error' => 'Say who made it (your name or handle).']);
-if (mb_strlen($d['contact']) < 3) rs_sub_out(422, ['ok' => false, 'error' => 'Leave an email or a Discord name so we can reach you.']);
+// (4.6) An email address is required: it's how we tell them it's live, or what to change.
+if ($subAcc && !filter_var($d['contact'], FILTER_VALIDATE_EMAIL) && filter_var((string)($subAcc['email'] ?? ''), FILTER_VALIDATE_EMAIL)) $d['contact'] = (string)$subAcc['email'];
+if (!filter_var($d['contact'], FILTER_VALIDATE_EMAIL)) rs_sub_out(422, ['ok' => false, 'error' => 'Leave a real email address, so we can reach you.']);
 if ($repoHost === '' && !preg_match('#^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$#', $d['repo'])) rs_sub_out(422, ['ok' => false, 'error' => 'The GitHub repo goes like github.com/you/your-app.']);
+// (4.6) A GitHub project comes from the GitHub account it belongs to (theirs, or one of their public
+// organizations), signed in to a developer account. GitLab projects are checked by hand in the admin.
+if ($repoHost === '') {
+    $ghOwner = strtolower((string)strtok($d['repo'], '/'));
+    if (!$subAcc || (string)($subAcc['gh_login'] ?? '') === '') rs_sub_out(403, ['ok' => false, 'error' => 'Sign in with GitHub first (a free developer account at recompstore.com/developers), so we can confirm the project is yours.']);
+    if (!in_array($ghOwner, rs_dev_owners($subAcc), true)) rs_sub_out(403, ['ok' => false, 'error' => 'That repo belongs to ' . $ghOwner . ', not your GitHub (@' . $subAcc['gh_login'] . ') or one of its organizations. Send it from the GitHub account it belongs to. (If it\'s under an organization, make your membership public on GitHub.)']);
+}
 if ($d['title_id'] !== '' && !preg_match('/^[A-Z]{4}\d{5}$/', $d['title_id'])) rs_sub_out(422, ['ok' => false, 'error' => 'A title ID is four letters and five numbers, like PPSA12345. Leave it empty if you don\'t have one yet.']);
 if ($d['asset'] !== '' && !preg_match('/\.(zip|7z)$/i', $d['asset'])) rs_sub_out(422, ['ok' => false, 'error' => 'The release file is the .zip or .7z on your GitHub release, like MyApp-*.zip.']);
 if ($d['ai'] === '' && ($d['platform'] ?? '') === 'pc') rs_sub_out(422, ['ok' => false, 'error' => 'Say whether AI tools helped make it (yes or no).']);

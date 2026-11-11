@@ -1174,7 +1174,7 @@
           <div class="two">
             <label>${t('Name')}<input name="name" maxlength="120" required placeholder="${t('What players will see')}"></label>
             <label>${t('Made by')}<input name="author" maxlength="80" required autocomplete="nickname" placeholder="${t('Your name or handle')}"></label>
-            <label>${t('How can we reach you?')}<input name="contact" maxlength="200" required placeholder="${t('Email or Discord name')}"></label>
+            <label>${t('Email')}<input name="contact" type="email" maxlength="200" required autocomplete="email" placeholder="you@example.com"><small>${t('Required: it\'s how we tell you it\'s live, or what to change.')}</small></label>
             <label><span data-ps5-only>${t('GitHub repository')}</span><span data-pc-only hidden>${t('GitHub or GitLab project')}</span><input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
             <label data-ps5-only>${t('Release file')} <span class="opt">${t('optional')}</span><input name="asset" maxlength="160" placeholder="MyApp-*.zip" spellcheck="false"><small>${t('The .zip or .7z on your GitHub release the store should install. Put * for the part that changes with each version.')}</small></label>
             <label>${t('Version')} <span class="opt" data-ps5-only>${t('optional')}</span><input name="version" maxlength="40" placeholder="1.0.0"></label>
@@ -1337,7 +1337,7 @@
     devGet('me').then((j) => {
       if (!view.contains(form)) return;
       if (!j || !j.account) {
-        who.innerHTML = `<aside class="glass sub-dev"><div><strong>${t('Get a free developer account')}</strong>
+        who.innerHTML = `<aside class="glass sub-dev"><div><strong>${t('Get a free developer account')}</strong><span class="sub-need">${t('Required for GitHub projects: sign in with the GitHub account the project belongs to.')}</span>
           <ul class="sub-perks"><li>${t('Faster review: submissions from developer accounts go to the front of the line')}</li><li>${t('This form fills itself in from your GitHub')}</li><li>${t('Your own verified page with a check mark')}</li><li>${t('Faster updates: once you\'re verified, your new versions go out as soon as they pass the safety check')}</li><li>${t('Download numbers and players\' crash logs')}</li></ul>
           <span>${tf('Building for PC? The {sdk} is free and open to everyone.', { sdk: `<a href="/pc/sdk" target="_blank" rel="noopener">${t('RecompLauncher SDK')}</a>` })}</span></div>
           <div class="sub-dev-btns"><a class="btn primary" href="/developers?signup=1">${t('Get a free developer account')}</a><a class="btn" href="/developers?signin=1">${t('Sign in')}</a></div></aside>`;
@@ -1486,12 +1486,15 @@
       const pv = form.querySelector(`[data-pv="${pic}"]`);
       if (pv) pv.style.backgroundImage = files[0] ? `url("${url(files[0])}")` : '';
     });
-    const need = [['name', t('Give it a name.')], ['author', t('Say who made it.')], ['contact', t('Leave an email or a Discord name.')],
+    const need = [['name', t('Give it a name.')], ['author', t('Say who made it.')], ['contact', t('Leave your email address.')],
       ['repo', t('Add the GitHub repository.')], ['description', t('Add a description.')]];
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(form);
       for (const [k, msg] of need) if (!String(fd.get(k) || '').trim()) { status.textContent = msg; status.className = 'status bad'; form.querySelector(`[name="${k}"]`).focus(); return; }
+      // (4.6) An email is required, and a GitHub project is sent from the GitHub account it belongs to.
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(fd.get('contact') || '').trim())) { status.textContent = t('Leave a real email address, so we can reach you.'); status.className = 'status bad'; form.contact.focus(); return; }
+      if (!dev && !/gitlab\.com\//i.test(String(fd.get('repo') || ''))) { status.textContent = t('Sign in with GitHub first (free developer account, above), so we can confirm the project is yours.'); status.className = 'status bad'; who.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       if (fd.get('platform') === 'pc') {
         const bad = (msg, el) => { status.textContent = msg; status.className = 'status bad'; if (el) el.focus(); return true; };
         const sys = ['win', 'mac', 'linux'].filter((k) => form['sys_' + k].checked);

@@ -210,6 +210,17 @@ function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
     if ($k !== '' && isset($listed[$k])) $items[] = ['ok', 'Another version of ' . $listed[$k][0] . ': it goes on its Versions page'];
     if (!$pc && preg_match('/^[A-Z]{4}\d{5}$/', (string)($d['title_id'] ?? '')) && rs_game((string)$d['title_id'])) $items[] = ['bad', 'Title ID already used by ' . rs_game((string)$d['title_id'])['name']];
     if ($pc && ($d['ai'] ?? '') === 'yes') $items[] = ['warn', 'AI-assisted (shown on its page)'];
+    // (4.6) How to reach them, and whether the project is theirs.
+    $contact = trim((string)($d['contact'] ?? ''));
+    if (!filter_var($contact, FILTER_VALIDATE_EMAIL)) $items[] = ['bad', $contact === '' ? 'No email / contact info' : 'No email (contact: ' . $contact . ')'];
+    if ($host === 'gitlab') $items[] = ['warn', 'GitLab project: check it\'s theirs'];
+    elseif ($host === '') {
+        $ghOwner = strtolower((string)strtok((string)($d['repo'] ?? ''), '/'));
+        $by = strtolower(ltrim((string)($d['account_name'] ?? ''), '@'));
+        if (empty($d['account']) || !str_starts_with((string)($d['account_name'] ?? ''), '@')) $items[] = ['bad', 'Not sent from a GitHub-linked account'];
+        elseif ($by === $ghOwner) $items[] = ['ok', 'Sent from the owner\'s GitHub (@' . $by . ')'];
+        else $items[] = ['warn', 'Sent by @' . $by . ', repo is under ' . $ghOwner . ' (one of their orgs?)'];
+    }
     $kind = array_filter($items, fn($x) => $x[0] === 'bad') ? 'stop' : (array_filter($items, fn($x) => $x[0] === 'warn') ? 'check' : 'ready');
     return [$kind, $items];
 }
