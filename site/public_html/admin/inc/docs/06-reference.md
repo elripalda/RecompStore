@@ -16,6 +16,7 @@ Only `format` is required. Everything else is optional, and the launcher ignores
 | `game` | 1 | The player's copy: `kind`, `label`, `check`, `dumps` |
 | `start` | 1 | What to run: `program`, `args`, `env` |
 | `saves` | 1 | Where your saves are, for backups and cloud saves |
+| `games` | 1 | Several games in one recomp: `id`, `name`, `args`, `title_id`, `inputs` (coming soon) |
 | `config` | 2 | Settings files: `id`, `format`, `file`, `game_path`, `ensure`, `always`, `new` |
 | `settings` | 2 | Options for the player: `id`, `label`, `help`, `in`, `choices`, `defaults`, `when` |
 | `looks` | 2 | `graphics`, `graphics_key`, `in`, `lines`, `allowed`, `reason` |

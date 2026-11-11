@@ -40,3 +40,10 @@
 .pc-sdk-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}
 .pc-sdk-btns .btn{min-height:38px;padding:7px 12px;font-size:14px}
 @media (max-width:820px){.pc-sdk{flex-direction:column;align-items:stretch}.pc-sdk-btns{justify-content:flex-start}}
+/* (4.7) Games in one recomp */
+.pc-games-adm{display:flex;flex-direction:column;gap:10px}
+.pc-games-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.pc-games-it{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:rgba(var(--ink-rgb),.025);min-width:0}
+.pc-games-it img,.pc-games-it i{width:40px;height:60px;border-radius:6px;object-fit:cover;flex:none;background:rgba(var(--ink-rgb),.08)}
+.pc-games-it span{display:flex;flex-direction:column;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pc-games-adm>button{align-self:flex-start}

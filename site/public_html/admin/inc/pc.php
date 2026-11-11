@@ -100,6 +100,80 @@ function rs_pc_copy_ids(string $s): array {
     }
     return array_slice($out, 0, 24);
 }
+// (4.7) A recomp that carries several games (COGBox: Gears of War 1 to Judgment; Athelas: the Lord of
+// the Rings trilogy): one install, and in RecompLauncher a tile per game. Each game: id (a-z0-9, 1 to 16,
+// its full id is "<recomp id>--<game id>"), name, args (added after start.args to play it), title_id
+// (Xbox 360, names its achievement unlock file), inputs (the setup inputs only it needs), and its own art.
+const RS_PC_GAMES_MAX = 12;
+function rs_pc_games(array $a): array {
+    $out = [];
+    foreach ((array)($a['games'] ?? []) as $g) {
+        if (!is_array($g) || !preg_match('/^[a-z0-9]{1,16}$/', (string)($g['id'] ?? '')) || trim((string)($g['name'] ?? '')) === '') continue;
+        $out[] = $g;
+    }
+    return count($out) >= 2 ? $out : [];
+}
+// The admin's lines: "id | name | launch args | title id | inputs", one game per line. Art and other
+// fields a game already had (same id) stay. -> [games, error or '']
+function rs_pc_games_parse(string $text, array $old): array {
+    $had = [];
+    foreach ((array)$old as $g) if (is_array($g) && isset($g['id'])) $had[(string)$g['id']] = $g;
+    $out = []; $seen = [];
+    foreach (preg_split('/\R/', trim($text)) ?: [] as $n => $line) {
+        if (trim($line) === '') continue;
+        $c = array_map('trim', explode('|', $line));
+        $id = strtolower($c[0] ?? '');
+        $name = mb_substr($c[1] ?? '', 0, 120);
+        if (!preg_match('/^[a-z0-9]{1,16}$/', $id)) return [[], 'Line ' . ($n + 1) . ': the id is 1 to 16 lowercase letters and digits (gow2).'];
+        if ($name === '') return [[], 'Line ' . ($n + 1) . ': it needs a name.'];
+        if (isset($seen[$id])) return [[], 'Line ' . ($n + 1) . ': "' . $id . '" is there twice.'];
+        $seen[$id] = true;
+        $args = array_values(array_filter(preg_split('/\s+/', mb_substr($c[2] ?? '', 0, 300)) ?: [], fn($x) => $x !== ''));
+        $tid = strtoupper(preg_replace('/^0x/i', '', $c[3] ?? ''));
+        if ($tid !== '' && !preg_match('/^[0-9A-F]{8}$/', $tid)) return [[], 'Line ' . ($n + 1) . ': a title id is 8 hex digits (4D53082D).'];
+        $inputs = array_values(array_filter(array_map('trim', explode(',', $c[4] ?? '')), fn($x) => preg_match('/^[a-z0-9_.-]{1,40}$/', $x)));
+        $g = array_merge($had[$id] ?? [], ['id' => $id, 'name' => $name]);
+        foreach (['args' => $args, 'title_id' => $tid, 'inputs' => $inputs] as $k => $v) { if ($v === [] || $v === '') unset($g[$k]); else $g[$k] = $v; }
+        $out[] = $g;
+    }
+    if (count($out) > RS_PC_GAMES_MAX) return [[], 'Up to ' . RS_PC_GAMES_MAX . ' games.'];
+    if (count($out) === 1) return [[], 'A pack has two games or more. For one game, leave this empty.'];
+    return [$out, ''];
+}
+function rs_pc_games_text(array $games): string {
+    return implode("\n", array_map(fn($g) => rtrim(implode(' | ', [$g['id'], $g['name'], implode(' ', (array)($g['args'] ?? [])), (string)($g['title_id'] ?? ''), implode(', ', (array)($g['inputs'] ?? []))]), ' |'), $games));
+}
+// Art from SteamGridDB for each game that has none yet (or all of them with $redo). -> [app, games given art]
+function rs_pc_games_art(array $a, bool $redo = false): array {
+    $games = (array)($a['games'] ?? []); $n = 0;
+    foreach ($games as $i => $g) {
+        if (!is_array($g) || (!$redo && (string)($g['cover'] ?? '') !== '')) continue;
+        $art = rs_sgdb_art((string)$g['name']);
+        $m = rs_pc_media_many(array_intersect_key($art, array_flip(['cover', 'hero', 'logo', 'icon'])), $a['id'] . '-' . $g['id']);
+        foreach (['cover', 'hero', 'logo', 'icon'] as $k) if (!empty($m[$k])) $games[$i][$k] = $m[$k];
+        if (!empty($m['cover'])) $n++;
+    }
+    $a['games'] = $games;
+    return [$a, $n];
+}
+// For the catalog: the games with their art as full addresses.
+function rs_pc_games_entry(array $a): array {
+    return array_map(function ($g) {
+        $e = ['id' => (string)$g['id'], 'name' => (string)$g['name']];
+        foreach (['args', 'title_id', 'inputs'] as $k) if (!empty($g[$k])) $e[$k] = $g[$k];
+        foreach (['icon', 'cover', 'hero', 'logo'] as $k) if ((string)($g[$k] ?? '') !== '') $e[$k] = rs_abs((string)$g[$k]);
+        return $e;
+    }, rs_pc_games($a));
+}
+// A game's full id ("cogbox--gow2") -> [recomp, game] when it's one of a pack's games, else null.
+function rs_pc_game_of(string $full): ?array {
+    if (!preg_match('/^([a-z0-9][a-z0-9_.-]*)--([a-z0-9]{1,16})$/i', $full, $m)) return null;
+    $a = rs_pc_app($m[1]);
+    if (!$a) return null;
+    foreach (rs_pc_games($a) as $g) if ($g['id'] === $m[2]) return [$a, $g];
+    return null;
+}
+
 function rs_pc_host(array $a): string { return rs_host_norm((string)($a['host'] ?? '')); }
 function rs_pc_key(array $a): string { return rs_repo_key(rs_pc_host($a), (string)($a['repo'] ?? '')); }
 
@@ -1193,6 +1267,8 @@ function rs_pc_catalog(): array {
             'genre' => isset(RS_PC_GENRES[$a['genre']]) ? $a['genre'] : 'other', 'media' => rs_pc_media_links((string)$a['media']),
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
+        // (4.7) Several games in one recomp: a tile per game in RecompLauncher.
+        if ($pg = rs_pc_games_entry($a)) $e['games'] = $pg;
         // (3.9) A GitLab project: "repo" is its path there (group/project). Left out for GitHub.
         if (rs_pc_host($a) !== '') $e['host'] = rs_pc_host($a); // (4.3) 'gitlab' or 'sourceforge'
         // (3.9) Where its developer wants bugs reported (their own page or issue form).

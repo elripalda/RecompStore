@@ -730,9 +730,16 @@ function rs_ach_app_card(string $game): array {
     $f = dirname(RS_PUBLIC) . '/recompstore-private/pc-app/' . $game . '.json';
     if (rs_ach_game_ok($game) && is_file($f)) $a = (json_decode((string)file_get_contents($f), true) ?: [])['app'] ?? null;
     if (!is_array($a) && function_exists('rs_pc_app')) $a = rs_pc_app($game);
+    // (4.7) One game of a recomp that carries several ("cogbox--gow2"): its own name and art.
+    if (!is_array($a) && function_exists('rs_pc_game_of') && ($pg = rs_pc_game_of($game))) {
+        [$pack, $g] = $pg;
+        $a = ['name' => (string)$g['name'], 'game' => (string)$g['name'], 'pack' => (string)$pack['id'], 'pack_name' => (string)$pack['name']];
+        foreach (['cover', 'icon', 'hero'] as $k) $a[$k] = (string)($g[$k] ?? '') !== '' ? (string)$g[$k] : (string)($pack[$k] ?? '');
+    }
     $a = is_array($a) ? $a : [];
     return $cache[$game] = ['id' => $game, 'name' => (string)($a['name'] ?? $game), 'game' => (string)($a['game'] ?? ''),
-        'cover' => (string)($a['cover'] ?? ''), 'icon' => (string)($a['icon'] ?? ''), 'hero' => (string)($a['hero'] ?? '')];
+        'cover' => (string)($a['cover'] ?? ''), 'icon' => (string)($a['icon'] ?? ''), 'hero' => (string)($a['hero'] ?? '')]
+        + (isset($a['pack']) ? ['pack' => $a['pack'], 'pack_name' => $a['pack_name']] : []);
 }
 
 // How many achievements count for Mastered, and their points.

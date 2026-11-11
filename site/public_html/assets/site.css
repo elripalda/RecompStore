@@ -2935,3 +2935,25 @@ a.ach-item:hover{background:rgba(244,248,252,.04);color:var(--frost)}
 .ach-awards{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 .ach-awards .ach-game{position:relative}
 .ach-awards .ach-tag{position:absolute;top:10px;left:10px;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+
+/* ===== 4.7 recomps that carry several games ======================================== */
+.pk{margin:22px 0 6px;padding:16px;border-radius:16px;background:var(--panel2,#141f33);border:1px solid var(--edge2,rgba(244,248,252,.16))}
+.pk-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;margin:0 2px 14px}
+.pk-head h2{margin:0;font-size:clamp(17px,1.8vw,20px)}
+.pk-head small{font:500 13.5px/1.35 Figtree,sans-serif;color:#a7b3c4}
+.pk-grid{display:grid;grid-template-columns:repeat(var(--pk-cols,3),minmax(0,1fr));gap:12px}
+.pk-game{display:flex;flex-direction:column;gap:7px;min-width:0;color:inherit;text-decoration:none}
+.pk-game img,.pk-pic{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:12px;background:#18233a;display:block;border:1px solid rgba(244,248,252,.08);transition:border-color .2s,transform .2s}
+a.pk-game:hover img{border-color:rgba(52,242,232,.5);transform:translateY(-2px)}
+a.pk-game:focus-visible{outline:2px solid #34F2E8;outline-offset:3px;border-radius:12px}
+.pk-game b{font:750 14.5px/1.25 Archivo,sans-serif;color:#F4F8FC;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pk-game small{font:600 12px Figtree,sans-serif;color:#34F2E8}
+.pk-also{display:flex;flex-direction:column;gap:8px;margin:14px 0 6px}
+.pk-also-it{display:grid;grid-template-columns:40px minmax(0,1fr) 16px;gap:14px;align-items:center;padding:10px 14px;border-radius:14px;background:var(--panel2,#141f33);border:1px solid var(--edge2,rgba(244,248,252,.16));color:inherit;text-decoration:none;transition:border-color .2s}
+.pk-also-it:hover{border-color:rgba(52,242,232,.45)}
+.pk-also-it img{width:40px;height:40px;border-radius:10px;object-fit:cover}
+.pk-also-it span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pk-also-it b{font:750 15px/1.25 Archivo,sans-serif;color:#F4F8FC}
+.pk-also-it small{font:500 13px/1.35 Figtree,sans-serif;color:#a7b3c4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk-also-it svg{width:16px;height:16px;fill:none;stroke:#a7b3c4;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+@media (max-width:640px){.pk-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.pk-game{flex:0 0 42%;scroll-snap-align:start}}

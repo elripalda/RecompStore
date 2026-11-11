@@ -84,6 +84,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a['installer'] = !empty($_POST['installer']);
             if ($a['installer']) $a['setup_required'] = true;
             $a['setup_steps'] = mb_substr(trim(str_replace("\r\n", "\n", (string)($_POST['setup_steps'] ?? ''))), 0, 2000);
+            // (4.7) Several games in one recomp: one per line, "id | name | launch args | title id | inputs".
+            if (isset($_POST['games'])) {
+                [$pg, $pgErr] = rs_pc_games_parse((string)$_POST['games'], (array)($a['games'] ?? []));
+                if ($pgErr !== '') throw new RuntimeException('Games in this recomp: ' . $pgErr);
+                if ($pg) $a['games'] = $pg; else unset($a['games']);
+                if ($pg && (!empty($_POST['games_art']) || array_filter($pg, fn($g) => (string)($g['cover'] ?? '') === ''))) {
+                    [$a, $pgArt] = rs_pc_games_art($a, !empty($_POST['games_art']));
+                    if (!empty($_POST['games_art'])) rs_flash('Art for ' . $pgArt . ' of ' . count($pg) . ' games from SteamGridDB.', $pgArt ? 'ok' : 'err');
+                }
+            }
             // (3.3) The boot profile: one JSON object, or empty for none.
             $boot = trim(str_replace("\r\n", "\n", (string)($_POST['boot'] ?? '')));
             if ($boot !== '') {
@@ -371,6 +381,13 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     <?php endif; ?>
     <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label><label class="check" title="Its release is only a setup .exe: RecompLauncher runs the installer, then finds where it installed (needs a launcher with the installer flow)"><input type="checkbox" name="installer" value="1"<?= !empty($a['installer']) ? ' checked' : '' ?>> Installer only</label></div>
+    <?php $pgList = rs_pc_games($a); ?>
+    <div class="span2 pc-games-adm">
+      <label>Games in this recomp<textarea name="games" rows="<?= max(3, count($pgList) + 1) ?>" maxlength="3000" class="mono" spellcheck="false" placeholder="gow1 | Gears of War | --game=gow1 | 4D5307D5&#10;gow2 | Gears of War 2 | --game=gow2"><?= h(rs_pc_games_text($pgList)) ?></textarea>
+        <small>Only for a recomp that carries several games (a trilogy, a bundle). One per line: <code>id | name | launch args | title id | inputs</code>. Only the id and name are needed. The id is short (gow2) and stays the same, since achievements and saves hang on it. Launch args are what starts that game directly; leave them out when the recomp has no such option and players pick the game in its menu. Title id: Xbox 360 only. Inputs: the setup inputs only that game needs. Each game gets its own art and its own tile in RecompLauncher (from the version that supports it).</small></label>
+      <?php if ($pgList): ?><div class="pc-games-row"><?php foreach ($pgList as $g): ?><span class="pc-games-it"><?php if (!empty($g['cover'])): ?><img src="<?= h((string)$g['cover']) ?>" alt="" width="40" height="60" loading="lazy"><?php else: ?><i></i><?php endif; ?><span><?= h((string)$g['name']) ?><small class="muted mono"><?= h($a['id'] . '--' . $g['id']) ?></small></span></span><?php endforeach; ?></div>
+      <button name="games_art" value="1">Get art for each game again</button><?php endif; ?>
+    </div>
     <label>Setup steps<textarea name="setup_steps" rows="5" maxlength="2000"><?= h((string)($a['setup_steps'] ?? '')) ?></textarea><small>Only for Setup required. One step per line, in order. Shown with the yellow Set Up button and on its page, with a link to the README.</small></label>
     <?php $ab = is_array($a['about'] ?? null) ? $a['about'] : []; ?>
     <div class="span2 pc-about-adm"><strong>About the game</strong> <span class="muted"><?= $ab ? h($ab['name'] . (!empty($ab['released']) ? ' · ' . substr($ab['released'], 0, 4) : '') . (!empty($ab['developer']) ? ' · ' . $ab['developer'] : '')) . ' · <a href="' . h($ab['url'] ?? '') . '" target="_blank">IGDB</a>' : (!empty($a['about_none']) ? 'No close match on IGDB.' : 'Not looked up yet.') ?></span>

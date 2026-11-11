@@ -1926,6 +1926,44 @@
   };
   const titleVersions = (tt) => (tt.pc || []).filter((id) => ((pcCat && pcCat.listed) || []).some((a) => a.id === id)).length + (tt.ps5 || []).length;
   const pcById = (id) => (pcCat ? pcCat.all.find((a) => a.id === id) : null);
+  // (4.7) Recomps that carry several games (a trilogy, a bundle): what each includes, and which of them
+  // carry a given game. Names are matched loosely ("Gears of War 2" = "Gears of War 2 Recomp").
+  const pkNorm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\b(the|recomp(iled)?|pc|port|native|decomp(ilation)?|edition)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+  const isPack = (a) => Array.isArray(a && a.games) && a.games.length >= 2;
+  const packsWith = (a) => {
+    if (!pcCat || !a) return [];
+    const tt = pcTitleOf('pc', a.id);
+    const want = new Set([a.game, a.name, tt && tt.name].map(pkNorm).filter(Boolean));
+    return (pcCat.listed || []).filter((p) => p.id !== a.id && isPack(p) && p.games.some((g) => want.has(pkNorm(g.name))));
+  };
+  const packGameHome = (name) => {
+    const n = pkNorm(name);
+    const hit = ((pcCat && pcCat.listed) || []).find((x) => !isPack(x) && (pkNorm(x.game) === n || pkNorm(x.name) === n));
+    if (!hit) return null;
+    const tt = pcTitleOf('pc', hit.id);
+    return (tt && pcCat.listed.find((x) => x.id === pcLeadOf(tt, pcCat.listed))) || hit;
+  };
+  // Even rows: as many columns as games up to four, then threes or fours so no row is left with one.
+  const packCols = (n) => (n <= 4 ? n : n % 4 === 0 || n % 4 === 3 ? 4 : 3);
+  function packHTML(a) {
+    if (!isPack(a)) return '';
+    const card = (g) => {
+      const home = packGameHome(g.name);
+      const pic = g.cover || a.cover ? `<img src="${esc(thumb(g.cover || a.cover, 300))}" alt="" width="150" height="225" loading="lazy" decoding="async">` : '<span class="pk-pic"></span>';
+      const inner = `${pic}<b dir="auto">${esc(g.name)}</b>${home ? `<small>${t('Other versions')}</small>` : ''}`;
+      return home ? `<a class="pk-game" href="/pc/game/${encodeURIComponent(home.id)}">${inner}</a>` : `<div class="pk-game">${inner}</div>`;
+    };
+    return `<section class="pk" aria-label="${esc(t('Games in this recomp'))}"><div class="pk-head"><h2>${tf('Includes {n} games', { n: fmtNum(a.games.length) })}</h2>
+      <small>${t('One download for all of them. Each gets its own tile in RecompLauncher.')}</small></div>
+      <div class="pk-grid" style="--pk-cols:${packCols(a.games.length)}">${a.games.map(card).join('')}</div></section>`;
+  }
+  function alsoInHTML(a) {
+    const packs = packsWith(a);
+    if (!packs.length) return '';
+    return `<section class="pk-also">${packs.map((p) => `<a class="pk-also-it" href="/pc/game/${encodeURIComponent(p.id)}">${p.icon || p.cover ? `<img src="${esc(thumb(p.icon || p.cover, 96))}" alt="" width="40" height="40" loading="lazy">` : ''}
+      <span><b dir="auto">${tf('Also in {name}', { name: esc(p.name) })}</b><small dir="auto">${esc(tf('{n} games in one download: {games}', { n: fmtNum(p.games.length), games: p.games.map((g) => g.name).join(', ') }))}</small></span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>`).join('')}</section>`;
+  }
   // (4.6) The press kits' "Your app": a search box with a list under it, not one select of every app
   // (well over a thousand). Type part of a name; arrows and Enter, or click. Empty means the store.
   const appCombo = (app, none) => `<span class="app-combo" data-app-combo><input type="search" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list"
@@ -3185,6 +3223,7 @@
             </div>
             ${a.blurb ? `<p class="lead" dir="auto">${esc(a.blurb)}</p>` : ''}
             ${versionsHTML('pc', a.id)}
+            ${packHTML(a)}${alsoInHTML(a)}
             <nav class="pc-tabs" role="tablist"><span class="pc-tab-mark" aria-hidden="true"></span>
               <button type="button" role="tab" data-tab="readme" class="on" aria-selected="true">${t('From the developer')}</button>
               <button type="button" role="tab" data-tab="releases">${t('Updates')}</button>
@@ -3884,7 +3923,7 @@
     if (document.body.dataset.platform === 'pc') {
       const words = fold(q).split(/\s+/).filter(Boolean);
       return ((pcCat && (pcCat.listed || pcCat.apps)) || []).map((a) => {
-        const hay = fold([a.name, a.game, a.author, originName(a.origin)].join(' '));
+        const hay = fold([a.name, a.game, a.author, originName(a.origin), (a.games || []).map((g) => g.name).join(' ')].join(' '));
         if (!words.every((w) => hay.includes(w))) return null;
         const name = fold(a.name + ' ' + (a.game || ''));
         return [a, false, !words.length ? (-(a.downloads || 0)) : name.startsWith(words[0]) ? 0 : name.includes(words[0]) ? 1 : 2, true];
@@ -3907,7 +3946,7 @@
     // (3.7) PC recomps that match come after the PS5 apps (they open on RecompLauncher), so a
     // search for "gears" on the PS5 side still finds them.
     const pcs = ((pcCat && (pcCat.listed || pcCat.apps)) || []).map((a) => {
-      const hay = fold([a.name, a.game, a.author, a.id].join(' '));
+      const hay = fold([a.name, a.game, a.author, a.id, (a.games || []).map((g) => g.name).join(' ')].join(' '));
       if (!words.every((w) => hay.includes(w))) return null;
       const name = fold(a.name + ' ' + (a.game || ''));
       return [a, false, name.startsWith(words[0]) ? 0 : name.includes(words[0]) ? 1 : 2, true];
