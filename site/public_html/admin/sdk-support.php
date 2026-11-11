@@ -61,7 +61,7 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
     $mk = $marks[$a['id']] ?? null;
     // A pull request that got merged and shipped: it's done, whatever the mark says.
     if (in_array($got, ['release', 'repo'], true)) $state = 'ships';
-    elseif ($mk) $state = $mk['kind'] === 'pr' ? 'pr' : 'no';
+    elseif ($mk) $state = in_array($mk['kind'], ['pr', 'locked'], true) ? $mk['kind'] : 'no';
     elseif ($got === 'none') $state = 'missing';
     else $state = 'unknown';
     $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
@@ -79,7 +79,7 @@ function rs_sdk_all(): array {
     $checked = rs_sdk_checks();
     $marks = rs_sdk_marks();
     $rows = [];
-    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'unknown' => 0, 'badge' => 0, 'todo' => 0];
+    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'todo' => 0];
     $due = [];
     foreach ($apps as $i => $a) {
         $row = rs_sdk_row($a, $i + 1, $checked[$a['id']] ?? null, $marks);
@@ -121,7 +121,7 @@ const RS_SDK_NOW = [
     'steps' => ['Setup steps only', 'Players follow written steps before the first play.'],
     'none' => ['Nothing yet', 'Players set it up by hand.'],
 ];
-const RS_SDK_STATE = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ' blue'], 'no' => ['Won\'t support it', ' warn'], 'missing' => ['No file yet', ' bad'], 'unknown' => ['Couldn\'t check yet', '']];
+const RS_SDK_STATE = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ' blue'], 'no' => ['Won\'t support it', ' warn'], 'locked' => ['Pull requests closed', ' violet'], 'missing' => ['No file yet', ' bad'], 'unknown' => ['Couldn\'t check yet', '']];
 
 // One recomp's table row (a <tbody>: the row and its ⋯ panel), for the page and for the live updates.
 function rs_sdk_row_html(array $row, string $csrf): string {
@@ -146,6 +146,7 @@ function rs_sdk_row_html(array $row, string $csrf): string {
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <?php if ($st === 'ships'): ?><?= $row['badge'] ? '' : $badgePrBtn(' primary') ?>
             <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
+            <?php elseif ($st === 'locked'): ?>
             <?php else: ?><?= $promptBtn(' primary') ?><?php endif; ?>
             <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= $id ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
           </div></td>
@@ -163,6 +164,8 @@ function rs_sdk_row_html(array $row, string $csrf): string {
               <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
             <form method="post" class="sdk-mark-form" data-sdk-ajax><?= $csrf ?><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= $id ?>">
               <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Mark</button></form>
+            <form method="post" class="sdk-mark-form" data-sdk-ajax><?= $csrf ?><input type="hidden" name="action" value="mark_locked"><input type="hidden" name="id" value="<?= $id ?>">
+              <label>Pull requests are closed<span class="sdk-mark-note">The repo takes no pull requests or issues, so nothing can be sent.</span></label><button class="btn">Mark</button></form>
           </div>
           <?php endif; ?>
         </div></td></tr>
@@ -210,6 +213,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_log('sdk', $id, $pr ? 'pull request: ' . $link : 'won\'t support' . ($link ? ': ' . $link : ''));
             $msg = $pr ? $a['name'] . ' marked: pull request open.' : $a['name'] . ' marked: won\'t support it.';
         }
+    } elseif (($_POST['action'] ?? '') === 'mark_locked' && ($a = rs_pc_app($id))) {
+        // (4.6) Xarishark: the repo doesn't take pull requests or issues, so there's nothing to link to.
+        $m = rs_sdk_marks();
+        $m[$id] = ['kind' => 'locked', 'url' => '', 'note' => '', 'who' => rs_me_name(), 'at' => gmdate('Y-m-d')];
+        rs_sdk_marks_save($m);
+        rs_log('sdk', $id, 'pull requests closed on its repo');
+        $msg = $a['name'] . ' marked: pull requests closed.';
     } elseif (($_POST['action'] ?? '') === 'unmark' && ($a = rs_pc_app($id))) {
         $m = rs_sdk_marks();
         unset($m[$id]);
@@ -268,8 +278,8 @@ if (mb_strlen($q) >= 2) {
         }
     }
 }
-$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'unknown' => 'Not checked', 'badge' => 'Badge in README'];
-$meter = ['ships' => 'ship their own file', 'missing' => 'no file yet', 'pr' => 'pull request open', 'no' => 'won\'t support it', 'unknown' => 'not checked'];
+$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'unknown' => 'Not checked', 'badge' => 'Badge in README'];
+$meter = ['ships' => 'ship their own file', 'missing' => 'no file yet', 'pr' => 'pull request open', 'no' => 'won\'t support it', 'locked' => 'pull requests closed', 'unknown' => 'not checked'];
 
 rs_head('SDK support', true, ['assets/account.css']);
 ?>
@@ -361,7 +371,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 @keyframes sdkspin{to{transform:rotate(360deg)}}
 .sdk-meter{display:flex;height:10px;border-radius:999px;overflow:hidden;background:rgba(var(--ink-rgb),.08);margin:0 0 14px;gap:2px}
 .sdk-meter span{flex-basis:0;min-width:0;transition:flex-grow .6s ease}
-.m-ships{background:var(--ok)}.m-missing{background:var(--bad)}.m-pr{background:var(--blue)}.m-no{background:var(--warn)}.m-unknown{background:rgba(var(--ink-rgb),.28)}
+.m-ships{background:var(--ok)}.m-missing{background:var(--bad)}.m-pr{background:var(--blue)}.m-no{background:var(--warn)}.m-locked{background:var(--violet)}.m-unknown{background:rgba(var(--ink-rgb),.28)}
 .sdk-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin:0 0 10px}
 .sdk-chips{display:flex;flex-wrap:wrap;gap:8px}
 .sdk-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:999px;border:1px solid rgba(var(--ink-rgb),.16);background:rgba(var(--ink-rgb),.06);color:var(--frost);font:600 14px Figtree,sans-serif;cursor:pointer}
@@ -412,7 +422,9 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-extra td{background:rgba(var(--ink-rgb),.035)}
 .sdk-extra-in{display:flex;flex-direction:column;gap:10px;padding:6px 0}
 .sdk-empty{text-align:center;padding:24px 12px!important}
-.sdk-mark-forms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.sdk-mark-forms{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.sdk-mark-note{display:flex;align-items:center;min-height:40px;color:var(--muted);font-size:13px;font-weight:400}
+.pill.violet{background:rgba(205,184,255,.16);color:var(--violet)}
 .sdk-mark-form{display:flex;gap:8px;align-items:flex-end}
 .sdk-mark-form label{flex:1;margin:0;font-size:14px}
 .btn.sdk-busy{opacity:.6;pointer-events:none}
@@ -440,7 +452,7 @@ rs_head('SDK support', true, ['assets/account.css']);
   var lookup = document.getElementById('sdk-lookup');
   var prog = document.getElementById('sdk-prog'), progT = document.getElementById('sdk-prog-t'), spin = prog.querySelector('.sdk-spin');
   var toast = document.getElementById('sdk-toast'), toastT = 0;
-  var order = {missing: 0, unknown: 1, pr: 2, no: 3, ships: 4};
+  var order = {missing: 0, unknown: 1, pr: 2, locked: 3, no: 4, ships: 5};
   var st = {state: 'all', kind: '', q: '', sort: 'rank', dir: 1};
   var since = Number(table.dataset.now), polling = 0;
   function items() { return Array.prototype.slice.call(table.querySelectorAll('tbody.sdk-item')); }
