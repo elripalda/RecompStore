@@ -47,6 +47,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $a = rs_pc_add((string)($_POST['repo'] ?? ''));
             rs_flash($a['name'] . ' is in, hidden. Look it over, then show it and Publish.');
             $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
+        } elseif ($act === 'soon_check') {
+            // (4.6) Coming soon watch, now instead of tonight.
+            @set_time_limit(150);
+            $n = rs_pc_soon_watch(true);
+            rs_flash($n ? $n . ' new on Coming soon: see below.' : 'Nothing new on Coming soon.');
+            $back = 'dashboard.php#soon';
+        } elseif ($act === 'soon_seen') {
+            rs_pc_soon_dismiss((string)($_POST['id'] ?? ''));
+            $back = 'dashboard.php#soon';
         } elseif ($act === 'add_soon') {
             $a = rs_pc_add_soon((string)($_POST['name'] ?? ''), (string)($_POST['follow'] ?? ''));
             rs_flash($a['name'] . ' is in, on Coming soon and hidden. Set its game and art, then show it and Publish.');

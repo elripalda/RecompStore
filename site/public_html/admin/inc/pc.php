@@ -959,6 +959,92 @@ function rs_pc_media_file(string $tmp, string $id): array {
 // (3.9) $repo: owner/name, a GitHub link, or a GitLab project (gitlab.com/group/project, with or without https://).
 // (4.3) A Coming soon game that has no repo yet (announced on X, say): its name, game, and where to
 // follow it. Shown on Coming soon only; it gets its repo (and downloads) later, through its edit page.
+// (4.6) Coming soon watch. Once a day (from pc-refresh.php, or "Check now" on the Dashboard), every
+// Coming soon listing is looked at: one with a project, for a release or pre-release with files put
+// out since it was added; one with no project yet, for a new GitHub repo named after its game. What
+// turns up stays on the Dashboard until it's dismissed, or the listing leaves Coming soon.
+const RS_SOON_WATCH_EVERY = 86400;
+function rs_pc_soon_watch_state(): array {
+    $kv = rs_kv_get('pc:soon_watch');
+    $w = $kv ? (json_decode((string)$kv['v'], true) ?: []) : [];
+    return ['at' => (int)($w['at'] ?? 0), 'last' => (array)($w['last'] ?? []), 'items' => (array)($w['items'] ?? [])];
+}
+function rs_pc_soon_watch_save(array $w): void {
+    rs_kv_put('pc:soon_watch', json_encode($w, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+}
+function rs_pc_soon_watch(bool $force = false): int {
+    $w = rs_pc_soon_watch_state();
+    if (!$force && time() - $w['at'] < RS_SOON_WATCH_EVERY) return 0;
+    $soon = [];
+    foreach (rs_pc_apps() as $a) if (!empty($a['soon'])) $soon[$a['id']] = $a;
+    $w['items'] = array_filter($w['items'], fn($it) => isset($soon[(string)($it['id'] ?? '')]));
+    $w['last'] = array_intersect_key($w['last'], $soon);
+    $new = 0;
+    foreach ($soon as $id => $a) {
+        $host = rs_pc_host($a);
+        $since = (string)($a['added'] ?? '');
+        try {
+            if ((string)$a['repo'] !== '') {
+                $r = rs_host_releases($host, (string)$a['repo'], 6 * 3600);
+                if ((int)$r['status'] !== 200) continue;
+                $hit = null;
+                foreach ((array)json_decode((string)$r['body'], true) as $x) {
+                    if (!is_array($x) || !empty($x['draft'])) continue;
+                    // Real downloads only: not the source archive, checksums or signatures.
+                    $files = array_values(array_filter(array_map(fn($f) => (string)($f['name'] ?? ''), (array)($x['assets'] ?? [])),
+                        fn($n) => $n !== '' && !preg_match('/(^|[-_.])(source|src)([-_.]|$)|sha256|checksums?|\.sig$|^latest\.json$/i', $n)));
+                    if (!$files) continue;
+                    $hit = ['tag' => (string)($x['tag_name'] ?? ''), 'pre' => !empty($x['prerelease']), 'date' => substr((string)($x['published_at'] ?? ''), 0, 10),
+                        'files' => array_slice($files, 0, 4), 'url' => (string)($x['html_url'] ?? '') ?: rs_host_releases_url($host, (string)$a['repo'])];
+                    break;
+                }
+                if (!$hit) continue;
+                $key = 'r:' . $hit['tag'];
+                if (($w['last'][$id] ?? '') === $key) continue;
+                $w['last'][$id] = $key;
+                if ($since !== '' && $hit['date'] !== '' && $hit['date'] < $since) continue; // already out when it was added
+                $w['items'][$id] = ['id' => $id, 'kind' => $hit['pre'] ? 'pre' : 'release', 'repo' => rs_repo_key($host, (string)$a['repo']), 'found' => gmdate('c')] + $hit;
+                ++$new;
+            } else {
+                $q = trim((string)preg_replace('/[^\pL\pN\s]+/u', ' ', (string)($a['game'] !== '' ? $a['game'] : $a['name'])));
+                if ($q === '') continue;
+                $res = rs_http(rs_gh_api() . '/search/repositories?per_page=5&sort=updated&q=' . rawurlencode($q . ' in:name,description created:>=' . ($since !== '' ? $since : gmdate('Y-m-d', time() - 30 * 86400))), ['github' => true, 'timeout' => 10]);
+                if ((int)$res['status'] !== 200) continue;
+                foreach ((array)(json_decode((string)$res['body'], true)['items'] ?? []) as $it) {
+                    if (!preg_match('/recomp|decomp|port|native|\bpc\b/i', (string)$it['full_name'] . ' ' . (string)($it['description'] ?? ''))) continue;
+                    $key = 'g:' . strtolower((string)$it['full_name']);
+                    if (($w['last'][$id] ?? '') !== $key) {
+                        $w['last'][$id] = $key;
+                        $w['items'][$id] = ['id' => $id, 'kind' => 'repo', 'tag' => '', 'pre' => false, 'date' => substr((string)($it['created_at'] ?? ''), 0, 10), 'files' => [],
+                            'url' => (string)$it['html_url'], 'repo' => (string)$it['full_name'], 'found' => gmdate('c')];
+                        ++$new;
+                    }
+                    break;
+                }
+            }
+        } catch (Throwable $e) { /* looked at again next run */ }
+    }
+    $w['at'] = time();
+    rs_pc_soon_watch_save($w);
+    if ($new) rs_log('pc', 'soon-watch', $new . ' new on Coming soon');
+    return $new;
+}
+// What the watch found, newest first, for the listings still on Coming soon.
+function rs_pc_soon_news(): array {
+    $out = [];
+    foreach (rs_pc_soon_watch_state()['items'] as $it) {
+        $a = rs_pc_app((string)($it['id'] ?? ''));
+        if ($a && !empty($a['soon'])) $out[] = $it + ['name' => $a['name']];
+    }
+    usort($out, fn($x, $y) => strcmp((string)$y['found'], (string)$x['found']));
+    return $out;
+}
+function rs_pc_soon_dismiss(string $id): void {
+    $w = rs_pc_soon_watch_state();
+    if ($id === '*') $w['items'] = []; else unset($w['items'][$id]);
+    rs_pc_soon_watch_save($w);
+}
+
 function rs_pc_add_soon(string $name, string $follow): array {
     $name = trim(preg_replace('/\s+/', ' ', $name));
     if ($name === '' || mb_strlen($name) > 120) throw new RuntimeException('Give it a name.');

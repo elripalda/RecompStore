@@ -15,6 +15,8 @@ $n = rs_pc_refresh_github(1500, in_array('--all', $argv, true) ? 0 : 1800); // -
 echo gmdate('c') . ' checked ' . $n . ' in ' . round(microtime(true) - $t) . "s\n";
 // (4.7) The Home banner's automatic slots move on with what's new and popular, without a Publish.
 try { if (rs_pc_banner_patch()) echo gmdate('c') . " banner updated\n"; } catch (Throwable $e) { echo 'banner: ', $e->getMessage(), "\n"; }
+// (4.6) Coming soon watch: once a day, releases, betas and new repos for the recomps on Coming soon (Dashboard).
+try { $sw = rs_pc_soon_watch(); if ($sw) echo gmdate('c') . ' coming soon: ' . $sw . " new\n"; } catch (Throwable $e) { echo 'coming soon: ', $e->getMessage(), "\n"; }
 // SDK support: look for a recomplauncher.json (and the README badge) in the recomps not checked this week, most downloaded
 // first, for up to four minutes a run, so the admin table fills in without anyone keeping it open.
 $t = microtime(true);

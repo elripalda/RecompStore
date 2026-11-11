@@ -50,6 +50,11 @@ $task = function (int $n, string $one, string $many, string $note, string $href,
 if ($owner && rs_sign_on()) $task(rs_sign_waiting(), 'Thing to sign', 'Things to sign', 'In RecompStore Signer on your PC. Until then they reach no one.', 'settings.php#signer', '', 'owner');
 // PC
 $pcFound = $safe(fn() => count(rs_pc_found('new')));
+// (4.6) Coming soon watch: releases, betas and new repos for the recomps on Coming soon.
+$soonNews = $showPc && rs_can_page('pc.php') ? $safe(function () { require_once __DIR__ . '/inc/pc.php'; return rs_pc_soon_news(); }, []) : [];
+$soonAt = $soonNews || ($showPc && rs_can_page('pc.php')) ? $safe(fn() => rs_pc_soon_watch_state()['at'], 0) : 0;
+$soonCount = $showPc && rs_can_page('pc.php') ? $safe(fn() => count(array_filter(rs_pc_apps(), fn($a) => !empty($a['soon']))), 0) : 0;
+$task(count($soonNews), 'Coming soon update', 'Coming soon updates', 'A recomp on Coming soon put out a release, a beta or a repo.', 'pc.php?show=soon', 'pc');
 $pcPub = $safe(fn() => (string)rs_db()->query("SELECT MAX(at) FROM admin_log WHERE action = 'publish' AND target = 'pc-catalog'")->fetchColumn(), '');
 // Changed since Publish PC: what the catalog would say now against what's live, on the fields a
 // curator changes (not downloads or stars, which GitHub moves all day). Worked out every 5 minutes.
@@ -207,6 +212,28 @@ rs_head('Dashboard', true, ['assets/analytics.css', 'assets/dashboard.css']);
     <?php endif; ?>
   </section>
 
+  <?php if ($showPc && rs_can_page('pc.php')): // (4.6) ?>
+  <section class="card soon-watch" id="soon">
+    <div class="an-head"><h2>Coming soon watch</h2><span class="muted small"><?= $soonAt ? 'Checked ' . h(rs_date('M j, g:i a', $soonAt)) . ' · daily' : 'Checks once a day' ?> · <?= (int)$soonCount ?> on Coming soon</span></div>
+    <?php if ($soonNews): ?>
+    <ul class="soon-news">
+      <?php foreach ($soonNews as $it): $kind = ['release' => 'Release', 'pre' => 'Beta', 'repo' => 'New repo'][$it['kind']] ?? 'News'; ?>
+      <li>
+        <span class="soon-kind k-<?= h($it['kind']) ?>"><?= $kind ?></span>
+        <span class="soon-tx"><strong><?= h($it['name']) ?></strong>
+          <small><?= $it['kind'] === 'repo' ? 'Possible project: ' . h($it['repo']) : h($it['tag']) . ' is out' ?><?= $it['date'] !== '' ? ' · ' . h(rs_date('M j', strtotime($it['date']))) : '' ?><?= $it['files'] ? ' · ' . h(implode(', ', $it['files'])) : '' ?></small></span>
+        <span class="soon-go"><a class="btn" href="<?= h($it['url']) ?>" target="_blank" rel="noopener">Look</a><a class="btn" href="pc.php?edit=<?= h(rawurlencode((string)$it['id'])) ?>#edit">Edit</a>
+          <form method="post" action="pc.php"><?= $csrf ?><input type="hidden" name="action" value="soon_seen"><input type="hidden" name="id" value="<?= h((string)$it['id']) ?>"><button>Dismiss</button></form></span>
+      </li>
+      <?php endforeach; ?>
+    </ul>
+    <?php else: ?><p class="muted">Nothing new from the recomps on Coming soon.</p><?php endif; ?>
+    <div class="soon-tools">
+      <form method="post" action="pc.php"><?= $csrf ?><input type="hidden" name="action" value="soon_check"><button>Check now</button></form>
+      <?php if (count($soonNews) > 1): ?><form method="post" action="pc.php"><?= $csrf ?><input type="hidden" name="action" value="soon_seen"><input type="hidden" name="id" value="*"><button>Dismiss all</button></form><?php endif; ?>
+    </div>
+  </section>
+  <?php endif; ?>
   <?php if ($pcKpis !== ''): ?>
   <section class="dash-block">
     <div class="an-head"><h2><span class="store-dot pc"></span>RecompLauncher</h2><a class="an-csv an-plain" href="launcher-stats.php">More</a></div>
@@ -298,4 +325,14 @@ rs_head('Dashboard', true, ['assets/analytics.css', 'assets/dashboard.css']);
 </aside>
 </div>
 <script>window.RS_CHARTS = <?= json_encode((object)$chartData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<style>
+.soon-news{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}
+.soon-news li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.soon-kind{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--panel-2,rgba(255,255,255,.06))}
+.soon-kind.k-release{color:var(--ok,#4ade80)}.soon-kind.k-pre{color:var(--warn,#facc15)}.soon-kind.k-repo{color:var(--accent,#35d6f4)}
+.soon-tx{display:flex;flex-direction:column;min-width:0}.soon-tx small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soon-go{display:flex;gap:6px;align-items:center}.soon-go form,.soon-tools form{margin:0}
+.soon-tools{display:flex;gap:8px;margin-top:12px}
+@media (max-width:720px){.soon-news li{grid-template-columns:1fr}.soon-go{flex-wrap:wrap}}
+</style>
 <?php rs_foot(['assets/analytics.js']);
