@@ -1341,11 +1341,10 @@ function rs_pc_catalog(): array {
         $devs[] = ['slug' => $slug, 'name' => (string)$d['name'], 'verified' => !empty($d['verified']), 'avatar' => (string)($d['avatar'] ?? '') !== '' ? rs_abs((string)$d['avatar']) : ''];
     // (3.0) Games with more than one version, and art one version lends another.
     $titles = rs_title_catalog($apps);
-    // (3.6) The banner on top of the PC home page, in the order picked on the Banner page.
-    $have = array_flip(array_column($apps, 'id'));
-    $banner = array_values(array_filter(rs_pc_banner(), fn($id) => isset($have[$id])));
-    $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $banner,
-        'bannerInfo' => (object)array_intersect_key(rs_pc_banner_info(), array_flip($banner))];
+    // (4.7) The Home banner: a list per system (fixed picks and slots that fill themselves), merged for launchers.
+    $bn = rs_pc_banner_resolve($apps);
+    $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $bn['merged'],
+        'bannerInfo' => (object)$bn['info'], 'banners' => $bn['banners']];
     if ($newer) foreach ($newer as $min => $list) $cat['apps_min'][] = ['min' => $min, 'apps' => $list];
     // (4.3) Every profile the launcher had built in is in the admin now: Beta 27 and newer use the
     // catalog's alone (its built-in ones only when there's no catalog at all).
@@ -1364,15 +1363,136 @@ function rs_pc_cat_apps(array $cat): array {
 // ---- (3.6) The PC home banner -------------------------------------------------------------------
 // The recomps in the slider on top of recomplauncher.com, in order. Kept as a list (setting
 // pc_banner); each one is also marked Featured, so everything that reads Featured agrees.
-function rs_pc_banner(): array {
-    $ids = json_decode((string)rs_setting('pc_banner', ''), true);
-    if (is_array($ids) && $ids) return array_values(array_filter(array_map('strval', $ids), fn($x) => preg_match('/^[A-Za-z0-9._-]{1,64}$/', $x)));
+// ---- (4.7) The Home banner: a list per system, with fixed picks and slots that fill themselves ----
+// Each list is slots: {type: "pick", id, tag?, text?} or {type: "auto", rule, tag?}. Launchers already
+// hide banner games that don't run on the player's system, so the catalog's "banner" is the three lists
+// merged (Windows first, then what Mac and Linux add), and each system ends up with its own. "banners"
+// carries the lists themselves, for the website (picked by the visitor's system) and newer launchers.
+const RS_BANNER_OS = ['windows' => 'Windows', 'macos' => 'Mac', 'linux' => 'Linux'];
+const RS_BANNER_RULES = [
+    'new' => ['New Release', 'Newest release', 'Out in the last three weeks, the one players took to most.'],
+    'rising' => ['Trending', 'Trending', 'Newer recomps (two months) gaining stars, downloads and players fastest.'],
+    'popular' => ['Most Popular', 'Most popular', 'Played on the most PCs from RecompLauncher (90 days), then downloads.'],
+    'updated' => ['Just Updated', 'Just updated', 'A well-known recomp with a new version this week.'],
+];
+function rs_pc_banner_slots(): array {
+    $j = json_decode((string)rs_setting('pc_banner_slots', ''), true);
     $out = [];
-    foreach (rs_pc_apps(false) as $a) if (!empty($a['featured'])) $out[] = $a['id'];
+    if (is_array($j)) {
+        foreach (array_keys(RS_BANNER_OS) as $os) $out[$os] = rs_pc_banner_clean((array)($j[$os] ?? []));
+        return $out;
+    }
+    // From the one list it was before: the same picks for every system, with their words.
+    $info = rs_pc_banner_info();
+    $old = json_decode((string)rs_setting('pc_banner', ''), true);
+    $slots = [];
+    foreach (is_array($old) ? $old : [] as $id) $slots[] = ['type' => 'pick', 'id' => (string)$id] + ($info[(string)$id] ?? []);
+    foreach (array_keys(RS_BANNER_OS) as $os) $out[$os] = rs_pc_banner_clean($slots);
     return $out;
 }
-// Each banner slide's own words: a tag above it (New release, Most popular...) and, if set, a line
-// in place of the recomp's blurb. {id: {tag, text}}
+function rs_pc_banner_clean(array $slots): array {
+    $out = [];
+    foreach (array_slice($slots, 0, 12) as $sl) {
+        if (!is_array($sl)) continue;
+        $w = ['tag' => mb_substr(trim(preg_replace('/\s+/', ' ', (string)($sl['tag'] ?? ''))), 0, 32), 'text' => mb_substr(trim(preg_replace('/\s+/', ' ', (string)($sl['text'] ?? ''))), 0, 160)];
+        if (($sl['type'] ?? '') === 'auto' && isset(RS_BANNER_RULES[(string)($sl['rule'] ?? '')])) $out[] = array_filter(['type' => 'auto', 'rule' => (string)$sl['rule'], 'tag' => $w['tag']], fn($x) => $x !== '');
+        elseif (($sl['type'] ?? '') === 'pick' && preg_match('/^[A-Za-z0-9._-]{1,64}$/', (string)($sl['id'] ?? ''))) $out[] = array_filter(['type' => 'pick', 'id' => (string)$sl['id']] + $w, fn($x) => $x !== '');
+    }
+    return $out;
+}
+function rs_pc_banner_slots_save(array $slots): array {
+    $clean = [];
+    foreach (array_keys(RS_BANNER_OS) as $os) $clean[$os] = rs_pc_banner_clean((array)($slots[$os] ?? []));
+    rs_set_setting('pc_banner_slots', json_encode($clean, JSON_UNESCAPED_UNICODE));
+    // Featured: the recomps picked by hand for any system.
+    $on = [];
+    foreach ($clean as $list) foreach ($list as $sl) if ($sl['type'] === 'pick') $on[$sl['id']] = true;
+    foreach (rs_pc_apps() as $a) { $want = isset($on[$a['id']]); if ((bool)$a['featured'] !== $want) { $a['featured'] = $want; rs_pc_save($a); } }
+    return $clean;
+}
+// Does a catalog entry run on this system (a build for it), and can it go in the banner (a backdrop)?
+function rs_pc_banner_fits(array $e, string $os): bool {
+    if (!empty($e['soon']) || (string)($e['hero'] ?? '') === '') return false;
+    return in_array($os, (array)($e['systems'] ?? []), true) || !empty(((array)($e['assets'] ?? []))[$os]);
+}
+// How much players took to it: downloads, GitHub stars and RecompLauncher players, on a log scale.
+function rs_pc_banner_pull(array $e): float {
+    return log10(1 + (int)($e['downloads'] ?? 0)) * 2 + log10(1 + (int)($e['stars'] ?? 0)) * 3 + log10(1 + (int)($e['players'] ?? 0)) * 3;
+}
+function rs_pc_banner_days(string $d): float {
+    $t = $d !== '' ? strtotime($d) : false;
+    return $t ? max(0, (time() - $t) / 86400) : 9999;
+}
+// The candidates for an automatic slot, best first.
+function rs_pc_banner_rank(array $apps, string $rule, string $os): array {
+    $c = [];
+    foreach ($apps as $e) {
+        if (!rs_pc_banner_fits($e, $os)) continue;
+        $born = min(rs_pc_banner_days((string)($e['first'] ?? '')), rs_pc_banner_days((string)($e['added'] ?? '')));
+        $upd = rs_pc_banner_days((string)($e['released'] ?? ''));
+        $pull = rs_pc_banner_pull($e);
+        $score = match ($rule) {
+            'new' => $born <= 21 ? $pull + 4 - $born / 7 : null,
+            'rising' => $born <= 60 ? $pull / sqrt($born / 7 + 1) : null,
+            'popular' => (int)($e['players'] ?? 0) * 1000000 + (int)($e['downloads'] ?? 0),
+            'updated' => $upd <= 7 && $born > 21 && $pull >= 8 ? $pull - $upd : null,
+            default => null,
+        };
+        if ($score !== null) $c[] = [$score, $e];
+    }
+    usort($c, fn($x, $y) => $y[0] <=> $x[0]);
+    return array_column($c, 1);
+}
+// The lists filled in: [banners => [os => ids], info => [id => {tag, text}], merged => ids, why => [os => [line]]].
+function rs_pc_banner_resolve(array $apps, ?array $slots = null): array {
+    $slots ??= rs_pc_banner_slots();
+    $by = [];
+    foreach ($apps as $e) $by[(string)$e['id']] = $e;
+    $merged = []; $info = []; $banners = []; $why = [];
+    foreach (array_keys(RS_BANNER_OS) as $os) {
+        $ids = []; $games = [];
+        $add = function (array $e, array $words) use (&$ids, &$games, &$merged, &$info) {
+            $ids[] = $e['id'];
+            $games[(string)($e['title'] ?? $e['id'])] = true;
+            if (!in_array($e['id'], $merged, true)) $merged[] = $e['id'];
+            if (!isset($info[$e['id']]) && ($words = array_filter($words, fn($x) => (string)$x !== ''))) $info[$e['id']] = $words;
+        };
+        foreach ((array)($slots[$os] ?? []) as $sl) {
+            if ($sl['type'] === 'pick') {
+                $e = $by[$sl['id']] ?? null;
+                if (!$e || in_array($e['id'], $ids, true)) { $why[$os][] = ''; continue; }
+                if (!rs_pc_banner_fits($e, $os)) { $why[$os][] = 'Not shown: no ' . RS_BANNER_OS[$os] . ' build' . ((string)($e['hero'] ?? '') === '' ? ' or backdrop' : ''); continue; }
+                $add($e, ['tag' => $sl['tag'] ?? '', 'text' => $sl['text'] ?? '']);
+                $why[$os][] = $e['id'];
+                continue;
+            }
+            $pickFrom = array_values(array_filter(rs_pc_banner_rank($apps, $sl['rule'], $os), fn($e) => !in_array($e['id'], $ids, true) && !isset($games[(string)($e['title'] ?? $e['id'])])));
+            if (!$pickFrom) { $why[$os][] = 'Nothing fits right now'; continue; }
+            // Among the best three, one another system already shows: fewer extra slides on Windows.
+            $e = $pickFrom[0];
+            foreach (array_slice($pickFrom, 0, 3) as $x) if (in_array($x['id'], $merged, true)) { $e = $x; break; }
+            $add($e, ['tag' => $sl['tag'] ?? RS_BANNER_RULES[$sl['rule']][0]]);
+            $why[$os][] = $e['id'];
+        }
+        $banners[$os] = $ids;
+    }
+    return ['banners' => $banners, 'info' => $info, 'merged' => $merged, 'why' => $why];
+}
+// Every 30 minutes (pc-refresh): the automatic slots move on with what's new and popular, without a Publish.
+function rs_pc_banner_patch(): bool {
+    $cat = json_decode((string)@file_get_contents(RS_PC_CATALOG), true);
+    if (!is_array($cat) || !is_array($cat['apps'] ?? null)) return false;
+    $r = rs_pc_banner_resolve($cat['apps']);
+    if (($cat['banner'] ?? null) === $r['merged'] && ($cat['banners'] ?? null) == $r['banners'] && (array)($cat['bannerInfo'] ?? []) == $r['info']) return false;
+    $cat['banner'] = $r['merged']; $cat['banners'] = $r['banners']; $cat['bannerInfo'] = (object)$r['info'];
+    $cat['updated'] = gmdate('c');
+    return rs_pc_write_files($cat);
+}
+// The merged list (old callers).
+function rs_pc_banner(): array {
+    $cat = json_decode((string)@file_get_contents(RS_PC_CATALOG), true);
+    return is_array($cat['banner'] ?? null) ? $cat['banner'] : [];
+}
 function rs_pc_banner_info(): array {
     $j = json_decode((string)rs_setting('pc_banner_info', ''), true);
     $out = [];
@@ -1382,27 +1502,6 @@ function rs_pc_banner_info(): array {
         if ($tag !== '' || $text !== '') $out[(string)$id] = array_filter(['tag' => $tag, 'text' => $text], fn($x) => $x !== '');
     }
     return $out;
-}
-function rs_pc_banner_save_info(array $tags, array $texts, array $ids): void {
-    $out = [];
-    foreach ($ids as $id) {
-        $tag = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($tags[$id] ?? ''))), 0, 32);
-        $text = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($texts[$id] ?? ''))), 0, 160);
-        if ($tag !== '' || $text !== '') $out[$id] = array_filter(['tag' => $tag, 'text' => $text], fn($x) => $x !== '');
-    }
-    rs_set_setting('pc_banner_info', json_encode($out, JSON_UNESCAPED_UNICODE));
-}
-function rs_pc_banner_save(array $ids): array {
-    $ok = [];
-    foreach (rs_pc_apps() as $a) $ok[$a['id']] = $a;
-    $ids = array_values(array_unique(array_filter(array_map('strval', $ids), fn($x) => isset($ok[$x]))));
-    rs_set_setting('pc_banner', json_encode($ids));
-    $on = array_flip($ids);
-    foreach ($ok as $id => $a) {
-        $want = isset($on[$id]);
-        if ((bool)$a['featured'] !== $want) { $a['featured'] = $want; rs_pc_save($a); }
-    }
-    return $ids;
 }
 // (3.5) The published catalog, written in one line (the launcher reads it), and next to it the
 // website's lighter copy: the same list without what only a game's own page shows (the original

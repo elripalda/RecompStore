@@ -2647,8 +2647,12 @@
     const apps = pcCat.apps;
     const byDl = (x, y) => (y.downloads || 0) - (x.downloads || 0);
     // The banner: the recomps picked on the admin's Banner page, in its order (every featured one before that).
-    const slides = Array.isArray(pcCat.banner) && pcCat.banner.length
-      ? pcCat.banner.map((id) => apps.find((a) => a.id === id)).filter((a) => a && a.hero)
+    // (4.7) The list made for the visitor's system when the catalog has one (Windows, Mac or Linux).
+    const ua = String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '').toLowerCase();
+    const myOs = /mac|iphone|ipad/.test(ua) ? 'macos' : /linux|x11|cros/.test(ua) && !/android/.test(ua) ? 'linux' : 'windows';
+    const ids = pcCat.banners && Array.isArray(pcCat.banners[myOs]) && pcCat.banners[myOs].length ? pcCat.banners[myOs] : pcCat.banner;
+    const slides = Array.isArray(ids) && ids.length
+      ? ids.map((id) => apps.find((a) => a.id === id) || (pcCat.all || []).find((a) => a.id === id)).filter((a) => a && a.hero)
       : apps.filter((a) => a.featured && a.hero);
     // (3.6) A slide's own tag and line, set on the Banner page.
     const bInfo = (a) => (pcCat.bannerInfo && pcCat.bannerInfo[a.id]) || {};
