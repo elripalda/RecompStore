@@ -282,9 +282,10 @@ leave out `destination` and pass `"--dlss={input:dlss}"` in `start.args`. On oth
 skipped, and arguments with `{input:dlss}` are left out. Players can turn it off in Easy Setup.
 It never replaces a DLSS file your release ships itself.
 
-Coming soon to RecompLauncher. Launchers from before it show an error in Easy Setup for a file
-with this input, so add it once the version that has it is out. Works with a legacy `game`
-field or with other inputs.
+Needs RecompLauncher 0.90 Beta 37 or newer. Beta 36 and older show an error in Easy Setup for a
+file with this input, so players should update first. From Beta 37 on, an optional input with a
+shared type or role a launcher doesn't know is skipped instead of failing, so new shared types
+won't break launchers again. Works with a legacy `game` field or with other inputs.
 
 ### Looks
 

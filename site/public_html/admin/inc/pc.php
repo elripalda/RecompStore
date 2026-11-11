@@ -1345,6 +1345,12 @@ function rs_pc_catalog(): array {
     $bn = rs_pc_banner_resolve($apps);
     $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $bn['merged'],
         'bannerInfo' => (object)$bn['info'], 'banners' => $bn['banners']];
+    // (4.7) Hidden listings another one replaces (a stale mirror, a moved project): {old id: new id}, so the
+    // launcher can move players who have the old one. Only to a listing that's out.
+    $replaced = [];
+    $have = array_flip(array_column($apps, 'id'));
+    foreach (rs_pc_apps() as $x) if (!empty($x['hidden']) && (string)($x['replaced_by'] ?? '') !== '' && isset($have[(string)$x['replaced_by']])) $replaced[$x['id']] = (string)$x['replaced_by'];
+    $cat['replaced'] = (object)$replaced;
     if ($newer) foreach ($newer as $min => $list) $cat['apps_min'][] = ['min' => $min, 'apps' => $list];
     // (4.3) Every profile the launcher had built in is in the admin now: Beta 27 and newer use the
     // catalog's alone (its built-in ones only when there's no catalog at all).

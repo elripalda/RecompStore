@@ -73,6 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // (4.0) Why it can't be listed yet (no Windows build...): only you see it, and it
             // puts the recomp under Not compatible instead of Hidden.
             $a['blocked_why'] = mb_substr(trim(str_replace(["\r", "\n"], ' ', (string)($_POST['blocked_why'] ?? ''))), 0, 200);
+            // (4.7) Replaced by another listing (a stale mirror, a project that moved to a new listing): players
+            // who have this one are offered the other in RecompLauncher. Only while this one is hidden.
+            $rb = trim((string)($_POST['replaced_by'] ?? ''));
+            if ($rb !== '' && ($rb === $a['id'] || !rs_pc_app($rb))) throw new RuntimeException('Replaced by: that isn\'t another recomp\'s id.');
+            $a['replaced_by'] = $rb;
             // (4.0) Project status: on hold, or ended (no more updates). Empty: active, or worked out from GitHub.
             $a['status'] = in_array((string)($_POST['status'] ?? ''), RS_PC_STATUSES, true) ? (string)$_POST['status'] : '';
             $a['status_note'] = mb_substr(trim(str_replace(["\r", "\n"], ' ', (string)($_POST['status_note'] ?? ''))), 0, 200);
@@ -358,6 +363,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     <label>Project status<select name="status"><option value="">Active</option><option value="complete"<?= ($a['status'] ?? '') === 'complete' ? ' selected' : '' ?>>Feature complete (finished)</option><option value="paused"<?= ($a['status'] ?? '') === 'paused' ? ' selected' : '' ?>>On hold</option><option value="ended"<?= ($a['status'] ?? '') === 'ended' ? ' selected' : '' ?>>Ended (no more updates)</option></select><small><?= !empty($a['archived']) ? 'Archived on GitHub, so it shows as ended unless you pick Feature complete.' : 'Feature complete: finished, never shown as abandoned or quiet. On hold or Ended show a label on its tile and page. Archived GitHub projects show as ended by themselves.' ?></small></label>
     <label>Status note<input name="status_note" value="<?= h((string)($a['status_note'] ?? '')) ?>" maxlength="200" placeholder="The developer moved on to the sequel."><small>Optional. A short line shown under the label, ideally the developer's own words.</small></label>
     <label class="span2">Not compatible yet<input name="blocked_why" value="<?= h((string)($a['blocked_why'] ?? '')) ?>" maxlength="200" placeholder="Like: there's no Windows build yet"><small>Only you see this. A hidden recomp with a reason here sits under Not compatible in the list instead of Hidden, until its developer puts out a build that works.</small></label>
+    <label class="span2">Replaced by<input name="replaced_by" value="<?= h((string)($a['replaced_by'] ?? '')) ?>" maxlength="64" class="mono" spellcheck="false" placeholder="another recomp's id, like dkb-pc-recomp"><small>For a hidden listing another one replaces (a stale mirror, a project that moved). Players who installed this one are offered the other in RecompLauncher (Beta 38 and newer).</small></label>
     <label class="span2">Key features<textarea name="features" rows="5" maxlength="1200" placeholder="One per line"><?= h($a['features']) ?></textarea><small>One per line, shown at the top of its page. Picked up from the README's Features list when it was added.</small></label>
     <label class="span2">Around the web<textarea name="media" rows="4" maxlength="5000" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.reddit.com/r/…/comments/…&#10;https://x.com/…/status/…"><?= h($a['media']) ?></textarea><small>Videos, posts and articles about it, one link per line. YouTube shows as a video, Reddit and X as cards.</small></label>
     <?php $bootBi = (string)($a['boot'] ?? '') === '' ? (rs_boot_builtin()[$a['id']] ?? null) : null; ?>
