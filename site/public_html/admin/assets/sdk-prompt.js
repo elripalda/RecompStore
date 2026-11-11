@@ -8,6 +8,10 @@
     var href = id ? 'https://recomplauncher.com/game/' + id : 'https://recomplauncher.com';
     return '<a href="' + href + '"><picture><source media="(prefers-color-scheme: dark)" srcset="' + BASE + 'badge-light.svg"><img alt="Get it on RecompLauncher" src="' + BASE + 'badge-dark.svg" height="48"></picture></a>';
   }
+  // (4.6) What RecompLauncher is, for developers who've never heard of it: the same words in every PR.
+  var WHAT = 'RecompLauncher (https://recomplauncher.com) is a free, open-source launcher for PC recomps and decomps on Windows, Mac and Linux. ' +
+    'Players point it at their own copy of the game once, and it installs, sets up and updates the recomp from your GitHub releases, with save backups and crash reports in one place. ' +
+    'We want it to be the number one home for recomps and decomps, and we work with developers to help their projects reach more players and hold up to a high standard, for devs and players alike.';
   function prompt(repo, url, game, id) {
     return [
       'Add RecompLauncher support to ' + repo + (game ? ' (a PC recomp of ' + game + ')' : '') + ', ready to send as a pull request. The project: ' + url,
@@ -22,11 +26,13 @@
       badge(id),
       '',
       '5. Code changes stay opt-in (the game starts exactly as before without the new arguments), small, in the project\'s style and in their own commit. Never add game files or keys.',
-      '6. The pull request description, short and friendly, in this order:',
+      '6. The pull request description, short and friendly, written plainly like a person would, in this order:',
+      '   - "What\'s RecompLauncher?": this paragraph, as written: ' + WHAT,
       '   - What it adds for players.',
       '   - The code changes, listed separately, noting they only apply when the launcher passes the new arguments.',
       '   - "Things that would make your recomp better": from the report, one line each.',
       '   - "For the developer": the report\'s "Make it yours on RecompLauncher" part, two or three sentences, not a sales pitch.' + (id ? '' : ' Mention it can be listed on RecompLauncher once it has a release.'),
+      '7. No AI or Claude credit anywhere: no Co-Authored-By trailer, no "Generated with Claude Code" line, in the commits or the pull request.',
       '',
       'When you\'re done, give me the whole report, the pull request description and the branch name.'
     ].join('\n');
@@ -48,6 +54,7 @@
       '6. Push to my fork and open the PR against the default branch. The title is the same as the commit message. The body is short and friendly, and says:',
       '   - the project is on RecompLauncher, so this adds the official badge linking to its page (include the link);',
       '   - a one-line note that nothing else changed;',
+      '   - a short "What\'s RecompLauncher?" part with this paragraph, as written: ' + WHAT,
       '   - an explicit note: "Feel free to move the badge anywhere in the README you prefer, or drop it entirely if you\'d rather not have it. No hard feelings."',
       '   Do not add a Claude attribution line to the PR body either.',
       '7. Give me the PR link and the badge link you used. Clean up the scratchpad clone when done.',
