@@ -7,93 +7,9 @@ declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 rs_require_login();
+require_once __DIR__ . '/inc/sdk.php'; // (4.6) the data helpers, shared with the PR queue's API
+require_once __DIR__ . '/inc/prq.php'; // (4.6) the PR queue
 
-// Recomps taken off the list by hand: a pull request is already open for it ('pr'), or its developer
-// said they don't want to support RecompLauncher ('no'). [id => [kind, url, note, who, at]]
-function rs_sdk_marks(): array { return json_decode((string)rs_setting('sdk_marks', '{}'), true) ?: []; }
-function rs_sdk_marks_save(array $m): void { rs_set_setting('sdk_marks', (string)json_encode($m, JSON_UNESCAPED_SLASHES)); }
-// A GitHub link has to be on this recomp's own repo: github.com/<owner>/<repo>/(pull|issues|discussions)/<n>.
-function rs_sdk_link(array $a, string $url, bool $prOnly): array {
-    $url = trim($url);
-    if (!preg_match('#^https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues|discussions)/(\d+)#i', $url, $m)) return [null, $prOnly ? 'Paste the pull request\'s GitHub link, like github.com/owner/repo/pull/12.' : 'Paste a GitHub link to the pull request, issue or discussion.'];
-    if (strcasecmp($m[1] . '/' . $m[2], (string)$a['repo']) !== 0) return [null, 'That link is on ' . $m[1] . '/' . $m[2] . ', not on ' . $a['repo'] . '. Check you pasted the right one.'];
-    if ($prOnly && strtolower($m[3]) !== 'pull') return [null, 'That\'s an issue or discussion, not a pull request.'];
-    $kind = strtolower($m[3]) === 'pull' ? 'pulls' : (strtolower($m[3]) === 'issues' ? 'issues' : '');
-    if ($kind !== '') {
-        $r = rs_http(rs_gh_api() . '/repos/' . $a['repo'] . '/' . $kind . '/' . $m[4], ['github' => true, 'timeout' => 10, 'max' => 2000000]);
-        if ($r['status'] === 404) return [null, 'GitHub says #' . $m[4] . ' doesn\'t exist on ' . $a['repo'] . '.'];
-    }
-    return ['https://github.com/' . $a['repo'] . '/' . strtolower($m[3]) . '/' . $m[4], ''];
-}
-// A pull request's state on GitHub (open, merged or closed), kept an hour.
-function rs_sdk_pr_state(array $a, string $url): string {
-    if (!preg_match('#/pull/(\d+)$#', $url, $m)) return '';
-    $k = 'sdkpr:' . $a['id'] . ':' . $m[1];
-    if (($c = rs_kv_get($k)) && $c['age'] < 3600) return $c['v'];
-    $r = rs_http(rs_gh_api() . '/repos/' . $a['repo'] . '/pulls/' . $m[1], ['github' => true, 'timeout' => 8, 'max' => 2000000]);
-    $j = $r['status'] === 200 ? json_decode($r['body'], true) : null;
-    $st = is_array($j) ? (!empty($j['merged_at']) ? 'merged' : (string)($j['state'] ?? '')) : '';
-    if ($st !== '') rs_kv_put($k, $st);
-    return $st;
-}
-
-// Every listed recomp with a repo, most downloaded first.
-function rs_sdk_apps(): array {
-    $apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''));
-    usort($apps, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
-    return $apps;
-}
-// All the checks in one query instead of one per recomp. [id => [v, age, t]]
-function rs_sdk_checks(): array {
-    $out = [];
-    try {
-        rs_cache_tables();
-        foreach (rs_db()->query("SELECT k, v, TIMESTAMPDIFF(SECOND, at, NOW()) AS age, UNIX_TIMESTAMP(at) AS t FROM kv_cache WHERE k LIKE 'sdk:%'") as $kr)
-            $out[substr((string)$kr['k'], 4)] = ['v' => json_decode((string)$kr['v'], true), 'age' => (int)$kr['age'], 't' => (int)$kr['t']];
-    } catch (Throwable $e) { rs_errlog('sdk checks', $e); }
-    return $out;
-}
-// One recomp's row: its status, the README badge, what Easy Setup runs on today, and whether it's
-// due a check (never checked, older than a week, or checked before the badge was looked at).
-function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
-    $r = $c && is_array($c['v']) ? $c['v'] : null;
-    $got = $r ? (string)($r['has'] ?? 'unknown') : 'waiting';
-    $mk = $marks[$a['id']] ?? null;
-    // A pull request that got merged and shipped: it's done, whatever the mark says.
-    if (in_array($got, ['release', 'repo'], true)) $state = 'ships';
-    elseif ($mk) $state = in_array($mk['kind'], ['pr', 'locked'], true) ? $mk['kind'] : 'no';
-    elseif ($got === 'none') $state = 'missing';
-    else $state = 'unknown';
-    $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
-    $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
-    return ['a' => $a, 'rank' => $rank, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now,
-        'kind' => in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console',
-        'pr' => $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '',
-        'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
-        // Which badges (checks from before the list only knew the RecompLauncher one)
-        'badges' => $r ? (array)($r['badges'] ?? (!empty($r['badge']) ? ['launcher'] : [])) : [],
-        'dlss' => !empty($r['dlss']),
-        'due' => !$r || $c['age'] >= 7 * 86400 || !array_key_exists('badge', $r)];
-}
-// Every row, the counts per status, and the ones due a check (most downloaded first).
-function rs_sdk_all(): array {
-    $apps = rs_sdk_apps();
-    $checked = rs_sdk_checks();
-    $marks = rs_sdk_marks();
-    $rows = [];
-    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'todo' => 0];
-    $due = [];
-    foreach ($apps as $i => $a) {
-        $row = rs_sdk_row($a, $i + 1, $checked[$a['id']] ?? null, $marks);
-        $row['t'] = (int)($checked[$a['id']]['t'] ?? 0);
-        $rows[$a['id']] = $row;
-        ++$count['all'];
-        ++$count[$row['state']];
-        if ($row['badge']) ++$count['badge'];
-        if ($row['due']) { ++$count['todo']; $due[] = $a['id']; }
-    }
-    return [$rows, $count, $due];
-}
 // One background run at a time, after the answer has gone: the due ones for up to a minute. The
 // half-hourly job does the same; this only speeds it up while someone has the page open.
 function rs_sdk_kick(array $due): bool {
@@ -140,6 +56,7 @@ function rs_sdk_row_html(array $row, string $csrf): string {
     ob_start(); ?>
       <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-find="<?= h($find) ?>">
         <tr>
+          <td class="c-pick"><input type="checkbox" class="sdk-pick" value="<?= $id ?>" aria-label="Pick <?= h($a['name']) ?>"></td>
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
           <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): $bn = implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $row['badges'])); ?><span class="sdk-star" title="Its README has the <?= h($bn) ?> badge" aria-label="Badge in README: <?= h($bn) ?>">★</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
@@ -153,7 +70,7 @@ function rs_sdk_row_html(array $row, string $csrf): string {
             <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= $id ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
           </div></td>
         </tr>
-        <tr class="sdk-extra" id="m-<?= $id ?>" hidden><td colspan="5"><div class="sdk-extra-in">
+        <tr class="sdk-extra" id="m-<?= $id ?>" hidden><td colspan="6"><div class="sdk-extra-in">
           <div class="sdk-btns sdk-btns-l">
             <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= $id ?>">Copy badge</button><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn('') ?><?php endif; ?>
             <?php if ($st === 'pr'): ?><?= $promptBtn('') ?><?php endif; ?>
@@ -228,6 +145,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         rs_sdk_marks_save($m);
         rs_log('sdk', $id, 'back on the list');
         $msg = $a['name'] . '\'s mark is cleared.';
+    } elseif (($_POST['action'] ?? '') === 'recheck_ids' || (($_POST['action'] ?? '') === 'recheck_all' && trim((string)($_POST['ids'] ?? '')) !== '')) {
+        // (4.6) Xarishark: Check again for the picked ones, or for just the ones the filters show.
+        $ids = array_values(array_filter(array_map('trim', explode(',', (string)($_POST['ids'] ?? ''))), fn($x) => preg_match('/^[a-z0-9._-]{1,100}$/i', $x)));
+        if ($ids) {
+            rs_cache_tables();
+            $in = implode(',', array_map(fn($x) => rs_db()->quote('sdk:' . $x), array_slice($ids, 0, 2000)));
+            rs_db()->exec("UPDATE kv_cache SET at = at - INTERVAL 8 DAY WHERE k IN ($in)");
+            $msg = 'Checking ' . count($ids) . ' again. The progress shows next to the button.';
+        } else { $msg = 'Pick some first.'; $kind = 'err'; }
+        $id = '';
+    } elseif (($_POST['action'] ?? '') === 'prq_queue') {
+        $ids = array_filter(array_map('trim', explode(',', (string)($_POST['ids'] ?? ''))));
+        $n = rs_prq_queue($ids);
+        $msg = $n ? $n . ' queued: the next daily drafts do them first.' : 'Nothing new to queue (already in the queue, or not on GitHub).';
+        $id = '';
+        rs_flash($msg, $n ? 'ok' : 'err');
+        header('Location: sdk-support.php#prq'); exit;
+    } elseif (str_starts_with((string)($_POST['action'] ?? ''), 'prq_')) {
+        // (4.6) The PR queue: save, send, skip, draft again; and (owner) the token and the drafter's key.
+        $act = (string)$_POST['action'];
+        $qid = (int)($_POST['qid'] ?? 0);
+        try {
+            if ($act === 'prq_save' || $act === 'prq_send') {
+                $j = json_decode((string)($_POST['json'] ?? ''), true);
+                if (!is_array($j)) throw new RuntimeException('The recomplauncher.json isn\'t valid JSON. Fix it and save again.');
+                rs_db()->prepare("UPDATE pc_prq SET title = ?, body = ?, json = ?, updated = NOW() WHERE id = ? AND status = 'draft'")
+                    ->execute([mb_substr(trim((string)($_POST['title'] ?? '')), 0, 200) ?: RS_PRQ_TITLE, mb_substr(str_replace("\r\n", "\n", (string)($_POST['body'] ?? '')), 0, 60000), json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $qid]);
+                if ($act === 'prq_send') { @set_time_limit(120); $url = rs_prq_send($qid); rs_flash('Pull request sent: ' . $url); }
+                else rs_flash('Saved.');
+            } elseif ($act === 'prq_skip') {
+                rs_db()->prepare("UPDATE pc_prq SET status = 'skipped', updated = NOW() WHERE id = ?")->execute([$qid]);
+                rs_flash('Skipped. It won\'t be drafted again.');
+            } elseif ($act === 'prq_redo') {
+                rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
+                rs_flash('Back in line: the next daily run drafts it again.');
+            } elseif ($act === 'prq_token' && rs_is_owner()) {
+                $t = trim((string)($_POST['token'] ?? ''));
+                rs_secret_put('prq_gh_token', $t);
+                if ($t !== '') { $me = rs_prq_gh('GET', '/user'); if ($me['status'] !== 200) { rs_secret_put('prq_gh_token', ''); throw new RuntimeException('GitHub didn\'t accept that token (' . $me['status'] . ').'); } rs_set_setting('prq_gh_login', (string)$me['json']['login']); rs_flash('Saved. Pull requests will come from @' . $me['json']['login'] . '.'); }
+                else { rs_set_setting('prq_gh_login', ''); rs_flash('Token removed.'); }
+            } elseif ($act === 'prq_key' && rs_is_owner()) {
+                $_SESSION['prq_key_once'] = rs_prq_key_new();
+                rs_flash('New key made. Copy it now: it\'s shown only once.');
+            }
+        } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
+        header('Location: sdk-support.php' . ($qid ? '#q-' . $qid : '#prq')); exit;
     } elseif (($_POST['action'] ?? '') === 'recheck_all') {
         // Everything becomes due, but keeps what it showed until its new check is in.
         rs_cache_tables();
@@ -292,8 +255,66 @@ rs_head('SDK support', true, ['assets/account.css']);
   </div>
   <div class="sdk-head-act">
     <span class="sdk-prog" id="sdk-prog" aria-live="polite"<?= $count['todo'] ? '' : ' hidden' ?>><span class="sdk-spin" aria-hidden="true"></span><span id="sdk-prog-t">Checking: <?= number_format($count['all'] - $count['todo']) ?> of <?= number_format($count['all']) ?> done</span></span>
-    <form method="post" class="actions" data-sdk-ajax id="sdk-all"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><button class="btn">Check them all again</button></form>
+    <form method="post" class="actions" data-sdk-ajax id="sdk-all"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><input type="hidden" name="ids" value=""><button class="btn" id="sdk-all-b">Check them all again</button></form>
   </div>
+</section>
+<?php // (4.6) The PR queue
+$prqDrafts = rs_prq_list(['draft']);
+$prqWaiting = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'todo'")->fetchColumn();
+$prqSent = rs_prq_list(['sent'], 8);
+$prqLogin = (string)rs_setting('prq_gh_login', '');
+$prqHasToken = rs_prq_token() !== '';
+$prqKeyOnce = (string)($_SESSION['prq_key_once'] ?? ''); unset($_SESSION['prq_key_once']);
+$prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queued by hand'];
+?>
+<section class="card prq-card" id="prq">
+  <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting for the next drafts' : '' ?> · drafted daily<?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span></div>
+  <p class="muted small">Every day the drafter picks recomps with no file yet (half just added, half popular console ports, and anything you queued first) and drafts their <code>recomplauncher.json</code> and the pull request. Look each one over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open".</p>
+  <?php if (!$prqHasToken && rs_is_owner()): ?><p class="warn small">Add the GitHub token below before sending: it's the account the pull requests come from.</p><?php endif; ?>
+  <?php if (!$prqDrafts): ?><p class="muted">No drafts right now.</p><?php endif; ?>
+  <?php foreach ($prqDrafts as $q): $qa = rs_pc_app((string)$q['app_id']); if (!$qa) continue; ?>
+  <details class="prq-item" id="q-<?= (int)$q['id'] ?>"<?= (string)$q['error'] !== '' ? ' open' : '' ?>>
+    <summary><span class="prq-name"><strong><?= h($qa['name']) ?></strong><span class="muted small"><?= h($q['repo']) ?> · <?= number_format((int)$qa['downloads']) ?> downloads</span></span>
+      <?php if (isset($prqPick[$q['pick']])): ?><span class="pill"><?= h($prqPick[$q['pick']]) ?></span><?php endif; ?>
+      <?php if ((string)$q['error'] !== ''): ?><span class="pill bad">Didn't send</span><?php endif; ?></summary>
+    <form method="post" class="prq-form"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$q['id'] ?>">
+      <?php if ((string)$q['error'] !== ''): ?><p class="bad small"><?= h((string)$q['error']) ?></p><?php endif; ?>
+      <?php if (trim((string)$q['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$q['note'])) ?></p><?php endif; ?>
+      <div class="prq-links small"><a href="https://github.com/<?= h($q['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($q['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>
+      <div class="prq-grid">
+        <label>Pull request title<input name="title" value="<?= h((string)$q['title']) ?>" maxlength="200"></label>
+        <label class="prq-span">Pull request description<textarea name="body" rows="14"><?= h((string)$q['body']) ?></textarea></label>
+        <label class="prq-span">recomplauncher.json<textarea name="json" rows="14" class="mono" spellcheck="false"><?= h((string)$q['json']) ?></textarea></label>
+      </div>
+      <div class="prq-btns">
+        <button class="btn primary" name="action" value="prq_send" onclick="return confirm('Open this pull request on <?= h(addslashes((string)$q['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>>Send pull request</button>
+        <button class="btn" name="action" value="prq_save">Save</button>
+        <button class="btn" name="action" value="prq_redo" title="The next daily run drafts it again">Draft it again</button>
+        <button class="btn danger" name="action" value="prq_skip">Skip</button>
+      </div>
+    </form>
+  </details>
+  <?php endforeach; ?>
+  <?php if ($prqSent): ?>
+  <h3 class="prq-h3">Sent lately</h3>
+  <ul class="prq-sent"><?php foreach ($prqSent as $q): ?><li><a href="<?= h((string)$q['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$q['repo']) ?></a><span class="muted small"><?= h((string)$q['sent_at']) ?><?= (string)$q['who'] !== '' ? ' · ' . h((string)$q['who']) : '' ?></span></li><?php endforeach; ?></ul>
+  <?php endif; ?>
+  <?php if (rs_is_owner()): ?>
+  <details class="prq-setup"<?= !$prqHasToken || $prqKeyOnce !== '' ? ' open' : '' ?>><summary>Setup</summary>
+    <div class="prq-setup-grid">
+      <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_token">
+        <label>GitHub token for pull requests <span class="muted small"><?= $prqHasToken ? 'saved, for @' . h($prqLogin) : 'not set' ?></span>
+          <input type="password" name="token" autocomplete="off" placeholder="<?= $prqHasToken ? 'Paste a new one to replace it, or leave empty and save to remove it' : 'A fine-grained or classic token with public_repo' ?>"></label>
+        <small class="muted">Make it on github.com → Settings → Developer settings → Personal access tokens, signed in as the account the pull requests should come from. A classic token needs the <code>public_repo</code> scope. It's kept encrypted on the server.</small>
+        <button class="btn">Save token</button></form>
+      <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_key">
+        <label>Drafter key <span class="muted small"><?= (string)rs_setting('prq_key_hash', '') !== '' ? 'set' : 'not set' ?></span></label>
+        <?php if ($prqKeyOnce !== ''): ?><input readonly class="mono" value="<?= h($prqKeyOnce) ?>" onclick="this.select()"><small class="warn">Copy it now into the RecompStore repo on GitHub as the secret <code>RS_PRQ_KEY</code> (Settings → Secrets and variables → Actions). It isn't shown again.</small>
+        <?php else: ?><small class="muted">The daily GitHub Action sends it with every call. Making a new one stops the old one working.</small><?php endif; ?>
+        <button class="btn">Make a new key</button></form>
+    </div>
+  </details>
+  <?php endif; ?>
 </section>
 <section class="card sdk-card">
   <div class="sdk-meter" id="sdk-meter" role="img" aria-label="<?php foreach ($meter as $k => $l) echo number_format($count[$k]) . ' ' . $l . '. '; ?>">
@@ -308,10 +329,19 @@ rs_head('SDK support', true, ['assets/account.css']);
       <input type="search" id="sdk-find" placeholder="Filter by name, game or repo" spellcheck="false" autocomplete="off" aria-label="Filter">
     </div>
   </div>
-  <p class="muted small sdk-shown" id="sdk-shown">Showing <?= number_format($count['all']) ?> of <?= number_format($count['all']) ?></p>
+  <div class="sdk-shown-row">
+    <p class="muted small sdk-shown" id="sdk-shown">Showing <?= number_format($count['all']) ?> of <?= number_format($count['all']) ?></p>
+    <div class="sdk-picked" id="sdk-picked" hidden>
+      <span class="small" id="sdk-picked-n">0 picked</span>
+      <form method="post" data-sdk-ajax data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="recheck_ids"><input type="hidden" name="ids" value=""><button class="btn">Check picked again</button></form>
+      <form method="post" data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="prq_queue"><input type="hidden" name="ids" value=""><button class="btn primary" title="The daily drafts do these first">Queue for PR drafts</button></form>
+      <button type="button" class="btn" id="sdk-pick-none">Clear</button>
+    </div>
+  </div>
   <div class="sdk-scroll">
     <table class="sdk-table" id="sdk-table" data-now="<?= $pageNow ?>" data-todo="<?= $count['todo'] ?>">
       <thead><tr>
+        <th class="c-pick"><input type="checkbox" id="sdk-pick-all" aria-label="Pick every recomp shown" title="Pick every recomp shown (the filters apply)"></th>
         <th class="c-rank"><button type="button" data-sdk-sort="rank" aria-sort="ascending">#</button></th>
         <th><button type="button" data-sdk-sort="name">Recomp</button></th>
         <th class="c-num"><button type="button" data-sdk-sort="dl">Downloads</button></th>
@@ -319,7 +349,7 @@ rs_head('SDK support', true, ['assets/account.css']);
         <th class="c-act"><span class="sr-only">Actions</span></th>
       </tr></thead>
       <?php foreach ($rows as $row) echo rs_sdk_row_html($row, $csrf); ?>
-      <tbody id="sdk-none" hidden><tr><td colspan="5" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
+      <tbody id="sdk-none" hidden><tr><td colspan="6" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
     </table>
   </div>
 </section>
@@ -439,6 +469,27 @@ rs_head('SDK support', true, ['assets/account.css']);
 .sdk-toast{position:fixed;right:20px;bottom:20px;z-index:50;max-width:420px;padding:12px 16px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:14.5px}
 .sdk-toast[hidden]{display:none}
 .sdk-toast.err{border-color:var(--bad);color:var(--bad)}
+.c-pick{width:34px;text-align:center}.c-pick input{width:16px;height:16px;margin:0;cursor:pointer}
+.sdk-shown-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sdk-picked{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sdk-picked form{margin:0}.sdk-picked[hidden]{display:none}
+.prq-card .an-head{margin-bottom:6px}
+.prq-item{border:1px solid var(--line);border-radius:12px;margin-top:10px}
+.prq-item summary{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;list-style:none}
+.prq-item summary::-webkit-details-marker{display:none}
+.prq-name{display:flex;flex-direction:column;flex:1;min-width:0}
+.prq-form{padding:0 14px 14px}
+.prq-grid{display:grid;grid-template-columns:1fr;gap:10px;margin:10px 0}
+.prq-grid label{display:flex;flex-direction:column;gap:6px}
+.prq-grid textarea{font-size:13.5px;line-height:1.45}
+.prq-btns{display:flex;gap:8px;flex-wrap:wrap}
+.prq-note{background:var(--surface-2,rgba(255,255,255,.04));border-radius:10px;padding:10px 12px}
+.prq-h3{margin:18px 0 6px;font-size:15px}
+.prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px}.prq-sent li{display:flex;justify-content:space-between;gap:10px}
+.prq-setup{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.prq-setup summary{cursor:pointer;font-weight:600}
+.prq-setup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:10px}
+.prq-setup-grid form{display:flex;flex-direction:column;gap:8px}.prq-setup-grid label{display:flex;flex-direction:column;gap:6px}
+@media (max-width:820px){.prq-setup-grid{grid-template-columns:1fr}}
+
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (prefers-reduced-motion:reduce){.sdk-spin{animation:none}.sdk-meter span{transition:none}}
 @media (max-width:860px){.sdk-tools{width:100%}.sdk-tools input{min-width:0;flex:1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}.sdk-name>.small{max-width:200px}}
@@ -474,6 +525,10 @@ rs_head('SDK support', true, ['assets/account.css']);
     none.hidden = n > 0;
     if (lookup) { lookup.hidden = !st.q.trim(); lookup.href = 'sdk-support.php?q=' + encodeURIComponent(st.q.trim()) + '#lookup'; }
     shown.textContent = 'Showing ' + fmt(n) + ' of ' + fmt(all.length);
+    // (4.6) With a filter on, "Check them all again" checks just the ones shown.
+    var allB = document.getElementById('sdk-all-b');
+    if (allB) allB.textContent = n < all.length ? 'Check the ' + fmt(n) + ' shown again' : 'Check them all again';
+    if (typeof picked === 'function') picked();
     document.querySelectorAll('[data-sdk-state]').forEach(function (b) { var on = b.dataset.sdkState === st.state; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
     kind.value = st.kind;
   }
@@ -534,6 +589,31 @@ rs_head('SDK support', true, ['assets/account.css']);
         .catch(function () { polling = setTimeout(tick, 15000); });
     }, 4000);
   }
+  // (4.6) Xarishark: pick rows (or every one shown), then Check picked again or queue them for PR drafts.
+  var pickAll = document.getElementById('sdk-pick-all'), pickBar = document.getElementById('sdk-picked'), pickN = document.getElementById('sdk-picked-n');
+  function pickedIds() { return Array.prototype.slice.call(table.querySelectorAll('.sdk-pick:checked')).map(function (c) { return c.value; }); }
+  function shownIds() { return items().filter(function (it) { return !it.hidden; }).map(function (it) { return it.dataset.id; }); }
+  function picked() {
+    if (!pickBar) return; // apply() runs before this part is set up
+    var ids = pickedIds(), vis = items().filter(function (it) { return !it.hidden; });
+    pickBar.hidden = !ids.length;
+    pickN.textContent = fmt(ids.length) + ' picked';
+    var visPicked = vis.filter(function (it) { var c = it.querySelector('.sdk-pick'); return c && c.checked; }).length;
+    pickAll.checked = vis.length > 0 && visPicked === vis.length;
+    pickAll.indeterminate = visPicked > 0 && visPicked < vis.length;
+  }
+  pickAll.addEventListener('change', function () {
+    items().forEach(function (it) { if (!it.hidden) { var c = it.querySelector('.sdk-pick'); if (c) c.checked = pickAll.checked; } });
+    picked();
+  });
+  table.addEventListener('change', function (e) { if (e.target.classList && e.target.classList.contains('sdk-pick')) picked(); });
+  document.getElementById('sdk-pick-none').addEventListener('click', function () { table.querySelectorAll('.sdk-pick:checked').forEach(function (c) { c.checked = false; }); picked(); });
+  // Fill in which ones before the form goes (this runs ahead of the no-reload sender below).
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (f.matches && f.matches('[data-sdk-picks]')) f.ids.value = pickedIds().join(',');
+    if (f.id === 'sdk-all') { var sh = shownIds(); f.ids.value = sh.length < items().length ? sh.join(',') : ''; }
+  }, true);
   // Check again, the marks and Check them all again, without reloading the page.
   document.addEventListener('submit', function (e) {
     var f = e.target.closest('form[data-sdk-ajax]');
