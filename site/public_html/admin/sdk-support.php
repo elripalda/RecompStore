@@ -487,7 +487,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
 .prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px}.prq-sent li{display:flex;justify-content:space-between;gap:10px}
 .prq-setup{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.prq-setup summary{cursor:pointer;font-weight:600}
 .prq-setup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:10px}
-.prq-setup-grid form{display:flex;flex-direction:column;gap:8px}.prq-setup-grid label{display:flex;flex-direction:column;gap:6px}
+.prq-setup-grid form{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--line);border-radius:12px}.prq-setup-grid form > .btn{margin-top:auto;align-self:flex-start}.prq-setup-grid label{display:flex;flex-direction:column;gap:6px}
 @media (max-width:820px){.prq-setup-grid{grid-template-columns:1fr}}
 
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
