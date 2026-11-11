@@ -1,0 +1,35 @@
+# Daily drafts for the RecompLauncher PR queue (recompstore.com admin > SDK support > PR queue).
+# Drafts only: a person looks each one over and sends it from the admin.
+# Secrets: RS_PRQ_KEY (made on SDK support > PR queue > Setup), ANTHROPIC_API_KEY.
+name: PR drafts
+on:
+  schedule:
+    - cron: '23 14 * * *'   # every day, 7:23 AM in Phoenix
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many to draft
+        default: '8'
+permissions:
+  contents: read
+concurrency:
+  group: pr-drafts
+  cancel-in-progress: false
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools/prq
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet jsonschema
+      - run: python tools/prq/draft.py
+        env:
+          RS_PRQ_KEY: ${{ secrets.RS_PRQ_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PRQ_COUNT: ${{ github.event.inputs.count || '8' }}
