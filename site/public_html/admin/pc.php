@@ -356,7 +356,24 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     <label>What players need<input name="needs" value="<?= h($a['needs']) ?>" maxlength="200"><small>Like: Your own US copy of Majora's Mask (a .z64 ROM).</small></label>
     <label>Credits<input name="credits" value="<?= h($a['credits']) ?>" maxlength="1000"></label>
     <label>Made by<input name="author" value="<?= h($a['author']) ?>" maxlength="80"></label>
-    <label>Developer page<select name="dev"><option value="">None</option><?php foreach ($devs as $slug => $d): ?><option value="<?= h($slug) ?>"<?= $a['dev'] === $slug ? ' selected' : '' ?>><?= h((string)$d['name']) ?></option><?php endforeach; ?></select></label>
+    <?php // (4.7) Type to find a developer (hundreds of them): the name or page name, then pick from the list. ?>
+    <label>Developer page<input type="search" list="dev-list" id="dev-find" value="<?= h($a['dev'] !== '' && isset($devs[$a['dev']]) ? (string)$devs[$a['dev']]['name'] . ' · ' . $a['dev'] : '') ?>" placeholder="Search by name, or leave empty for none" autocomplete="off"><input type="hidden" name="dev" id="dev-slug" value="<?= h((string)$a['dev']) ?>">
+      <datalist id="dev-list"><?php foreach ($devs as $slug => $d): ?><option value="<?= h((string)$d['name'] . ' · ' . $slug) ?>"></option><?php endforeach; ?></datalist>
+      <small id="dev-msg" class="muted"></small></label>
+    <script>
+    (() => {
+      const f = document.getElementById('dev-find'), slug = document.getElementById('dev-slug'), msg = document.getElementById('dev-msg');
+      const opts = [...document.querySelectorAll('#dev-list option')].map((o) => o.value);
+      const sync = () => {
+        const v = f.value.trim();
+        if (v === '') { slug.value = ''; msg.textContent = 'No developer page.'; return; }
+        const exact = opts.find((o) => o.toLowerCase() === v.toLowerCase()) || opts.find((o) => o.split(' · ')[1] === v.toLowerCase());
+        if (exact) { slug.value = exact.split(' · ').pop(); msg.textContent = ''; f.setCustomValidity(''); }
+        else { msg.textContent = 'Pick one from the list.'; f.setCustomValidity('Pick a developer from the list, or leave it empty.'); }
+      };
+      f.addEventListener('input', sync); f.addEventListener('change', sync);
+    })();
+    </script>
     <label>Labels<input name="tags" value="<?= h($a['tags']) ?>" maxlength="120" placeholder="Recomp, 4K, Mods"><small>Shown as pills on its page, comma between.</small></label>
  <?php if ((string)$a['repo'] === ''): ?><label>Where to follow it<input name="follow" value="<?= h((string)($a['follow'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://x.com/dev/status/…"><small>No repo yet: the Coming soon page links here (the developer's post or page). https only.</small></label><?php endif; ?>
     <label>How to report bugs<input name="report_url" value="<?= h((string)($a['report_url'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://github.com/owner/name/issues/new/choose"><small>The developer's own page for bug reports. Shown next to the report form. https only.</small></label>

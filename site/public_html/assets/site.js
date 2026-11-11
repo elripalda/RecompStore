@@ -1150,7 +1150,7 @@
     view.innerHTML = `
       <article class="form-page submit-page">
         <a class="back" href="/contact">${backArrow()} ${t('Contact')}</a>
-        <h1>${new URLSearchParams(location.search).get('platform') === 'pc' ? t('Submit your recomp') : t('Submit to RecompStore')}</h1>
+        <h1>${submitPc() ? t('Submit your recomp') : t('Submit to RecompStore')}</h1>
         <p class="lead">${t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.')}</p>
         <div data-sub-who></div>
         <form class="glass form" novalidate enctype="multipart/form-data">
@@ -1165,7 +1165,7 @@
             <div class="sub-sdk-btns"><a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>${agentBtn()}</div>
           </aside>
           <fieldset class="kinds plats"><legend>${t('Where does it run?')}</legend>
-            ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === (new URLSearchParams(location.search).get('platform') === 'pc') ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
+            ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === submitPc() ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
           </fieldset>
           <fieldset class="kinds" data-ps5-only><legend>${t('What is it?')}</legend>
             ${kinds.map(([k, n, d], i) => `<label class="kind"><input type="radio" name="kind" value="${k}"${i === 0 ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
@@ -2029,6 +2029,8 @@
   const thumb = (u, w) => { const m = THUMB_RE.exec(String(u || '')); return m ? `${STORE_ORIGIN}/api/thumb.php?f=${encodeURIComponent(m[1])}&w=${w}` : u; };
   const PHONE = matchMedia('(max-width: 860px)');
   const LAUNCHER_ORIGIN = location.origin.replace(/recompstore/i, 'recomplauncher');
+  // (4.7) The Submit page starts on PC on recomplauncher.com, from the PC side, or with ?platform=pc.
+  const submitPc = () => new URLSearchParams(location.search).get('platform') === 'pc' || LAUNCHER || document.body.dataset.platform === 'pc';
   const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
   const pcOut = (h) => (h === '/pc/launcher' ? '/get' : h.replace(/^\/pc/, '') || '/');
   const pcIn = (p) => (p === '/get' ? '/pc/launcher' : p === '/' ? '/pc' : '/pc' + p);
@@ -6836,7 +6838,11 @@
     const coded = h.match(/^\/(l|r)\/([A-Za-z0-9-]{4,12})$/);
     const dv = h.match(/^\/dev\/([a-z0-9-]{1,40})$/); // (2.6) a developer's page
     const pcm = PC_PATH_RE.test(h); // (2.8) the PC side: RecompLauncher
-    setPlatform(pcm ? 'pc' : 'ps5');
+    // (4.7) Pages both stores share (Submit, Developers, Report, the account...) keep the side the
+    // visitor came from: always PC on recomplauncher.com, or when the link says ?platform=pc.
+    const shared = /^\/(submit|report|developers|contact|press|signin|account(\/reset)?|library|terms|privacy|dmca|beta|dev\/[a-z0-9-]{1,40})$/.test(h);
+    const stayPc = shared && (LAUNCHER || /[?&]platform=pc\b/.test(location.search) || document.body.dataset.platform === 'pc');
+    setPlatform(pcm || stayPc ? 'pc' : 'ps5');
     // The address bar gets the page's own address: /game/<ID>, /games, /how, /dev/<name>...; the rest
     // stay #/... on the home page's address (and ?lang= stays).
     const v2only = ['/games', '/emulators', '/apps', '/tools', '/ids'].includes(h) && !v2on(); // shown as the home page

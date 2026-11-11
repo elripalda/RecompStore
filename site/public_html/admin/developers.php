@@ -113,13 +113,50 @@ rs_head('Developers');
 </form>
 <?php endif; ?>
 
-<section class="devs">
-  <?php if (!$devs): ?><p class="muted">No developers yet. Add one, and the games whose Author matches get a link to their page.</p><?php endif; ?>
-  <?php foreach ($devs as $s => $x): $n = count($byDev[$s] ?? []); ?>
-  <a class="card dev-card<?= $s === $editSlug ? ' on' : '' ?>" href="developers.php?edit=<?= h(rawurlencode($s)) ?>">
-    <span class="dev-avatar"><?= $x['avatar'] !== '' ? '<img src="' . h($x['avatar']) . '" alt="">' : '<span>' . h(mb_strtoupper(mb_substr($x['name'], 0, 1))) . '</span>' ?></span>
-    <span class="dev-words"><strong><?= h($x['name']) ?><?= $x['verified'] ? ' <span class="pill ok">Verified</span>' : '' ?></strong><span class="muted">#/dev/<?= h($s) ?></span><span class="muted"><?= $n === 1 ? '1 game' : $n . ' games' ?></span></span>
-  </a>
-  <?php endforeach; ?>
+<?php
+// (4.7) A list, with a search: there are hundreds of developers now.
+$pcByDev = [];
+foreach (rs_pc_apps() as $x) if ((string)($x['dev'] ?? '') !== '') $pcByDev[(string)$x['dev']] = ($pcByDev[(string)$x['dev']] ?? 0) + 1;
+?>
+<section class="card dv-list">
+  <div class="dv-top"><input type="search" id="dv-q" placeholder="Search <?= count($devs) ?> developers by name or page name" autocomplete="off"><span class="muted" id="dv-n"></span></div>
+  <?php if (!$devs): ?><p class="muted">No developers yet. Add one, and the games whose Author matches get a link to their page.</p><?php else: ?>
+  <table class="dv-table">
+    <thead><tr><th>Developer</th><th>Page</th><th class="num">PS5 apps</th><th class="num">PC recomps</th><th></th></tr></thead>
+    <tbody>
+    <?php foreach ($devs as $s => $x): $n = count($byDev[$s] ?? []); $p = (int)($pcByDev[$s] ?? 0); ?>
+    <tr class="<?= $s === $editSlug ? 'on' : '' ?>" data-find="<?= h(mb_strtolower($x['name'] . ' ' . $s . ' ' . (is_array($x['aliases'] ?? '') ? implode(' ', $x['aliases']) : (string)($x['aliases'] ?? '')))) ?>">
+      <td><a class="dv-who" href="developers.php?edit=<?= h(rawurlencode($s)) ?>"><span class="dev-avatar"><?= $x['avatar'] !== '' ? '<img src="' . h($x['avatar']) . '" alt="" loading="lazy">' : '<span>' . h(mb_strtoupper(mb_substr($x['name'], 0, 1))) . '</span>' ?></span><strong><?= h($x['name']) ?></strong><?= $x['verified'] ? '<span class="pill ok">Verified</span>' : '' ?></a></td>
+      <td class="mono muted">/dev/<?= h($s) ?></td>
+      <td class="num"><?= $n ?: '<span class="muted">0</span>' ?></td>
+      <td class="num"><?= $p ?: '<span class="muted">0</span>' ?></td>
+      <td class="act"><a class="btn" href="developers.php?edit=<?= h(rawurlencode($s)) ?>">Edit</a></td>
+    </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  <?php endif; ?>
 </section>
+<style>
+.dv-top{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.dv-top input{flex:1;min-width:0}
+.dv-table{width:100%;border-collapse:collapse}
+.dv-table th{text-align:left;font-size:12px;color:#93a0b3;font-weight:600;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08)}
+.dv-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+.dv-table tr.on td{background:rgba(52,242,232,.06)}
+.dv-table .num{text-align:right;font-variant-numeric:tabular-nums;width:1%;white-space:nowrap}
+.dv-table .act{text-align:right;width:1%}
+.dv-who{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;min-width:0}
+.dv-who .dev-avatar{width:32px;height:32px;flex:none}
+.dv-who strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:720px){.dv-table th:nth-child(2),.dv-table td:nth-child(2){display:none}}
+</style>
+<script>
+(() => {
+  const q = document.getElementById('dv-q'), rows = [...document.querySelectorAll('.dv-table tbody tr')], n = document.getElementById('dv-n');
+  if (!q) return;
+  const run = () => { const w = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean); let k = 0; rows.forEach((r) => { const on = w.every((x) => r.dataset.find.includes(x)); r.hidden = !on; if (on) k++; }); n.textContent = w.length ? k + ' found' : ''; };
+  q.addEventListener('input', run);
+})();
+</script>
 <?php rs_foot();
