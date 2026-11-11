@@ -70,6 +70,8 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
         'kind' => in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console',
         'pr' => $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '',
         'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
+        // Which badges (checks from before the list only knew the RecompLauncher one)
+        'badges' => $r ? (array)($r['badges'] ?? (!empty($r['badge']) ? ['launcher'] : [])) : [],
         'dlss' => !empty($r['dlss']),
         'due' => !$r || $c['age'] >= 7 * 86400 || !array_key_exists('badge', $r)];
 }
@@ -139,12 +141,12 @@ function rs_sdk_row_html(array $row, string $csrf): string {
       <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-find="<?= h($find) ?>">
         <tr>
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
-          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): ?><span class="sdk-star" title="Its README has the Get it on RecompLauncher badge" aria-label="Badge in README">★</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
+          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): $bn = implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $row['badges'])); ?><span class="sdk-star" title="Its README has the <?= h($bn) ?> badge" aria-label="Badge in README: <?= h($bn) ?>">★</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
           <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span></div></td>
           <td class="c-act"><div class="sdk-btns">
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-            <?php if ($st === 'ships'): ?><?= $row['badge'] ? '' : $badgePrBtn(' primary') ?>
+            <?php if ($st === 'ships'): ?><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn(' primary') ?>
             <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
             <?php elseif ($st === 'locked'): ?>
             <?php else: ?><?= $promptBtn(' primary') ?><?php endif; ?>
@@ -153,7 +155,7 @@ function rs_sdk_row_html(array $row, string $csrf): string {
         </tr>
         <tr class="sdk-extra" id="m-<?= $id ?>" hidden><td colspan="5"><div class="sdk-extra-in">
           <div class="sdk-btns sdk-btns-l">
-            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= $id ?>">Copy badge</button><?= $row['badge'] ? '' : $badgePrBtn('') ?><?php endif; ?>
+            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= $id ?>">Copy badge</button><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn('') ?><?php endif; ?>
             <?php if ($st === 'pr'): ?><?= $promptBtn('') ?><?php endif; ?>
             <?= $form('recheck', 'Check again') ?>
             <?php if ($mk): ?><?= $form('unmark', 'Clear the mark') ?><span class="muted small">Marked by <?= h((string)$mk['who']) ?> on <?= h((string)$mk['at']) ?><?= $st === 'no' && (string)$mk['url'] !== '' ? ' · <a href="' . h((string)$mk['url']) . '" target="_blank" rel="noopener">where they said so ↗</a>' : '' ?></span><?php endif; ?>
@@ -200,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (($_POST['action'] ?? '') === 'recheck' && ($a = rs_pc_app($id))) {
         $r = rs_pc_sdk_check($a, true, true);
         $msg = $a['name'] . ($r['has'] === 'release' || $r['has'] === 'repo' ? ' ships its own recomplauncher.json.' : ($r['has'] === 'none' ? ' doesn\'t ship one yet.' : ': GitHub didn\'t answer. Try again in a minute.'))
-            . (array_key_exists('badge', $r) && $r['badge'] !== null ? ($r['badge'] ? ' Its README has the badge.' : ' No badge in its README.') : '');
+            . (array_key_exists('badge', $r) && $r['badge'] !== null ? ($r['badge'] ? ' Its README has the ' . implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, (array)($r['badges'] ?? []))) . ' badge.' : ' No badge in its README.') : '');
     } elseif (in_array($_POST['action'] ?? '', ['mark_pr', 'mark_no'], true) && ($a = rs_pc_app($id))) {
         $pr = $_POST['action'] === 'mark_pr';
         $url = trim((string)($_POST['url'] ?? ''));
@@ -286,7 +288,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Red ones don't yet, green ones do, and ★ means its README has the "Get it on RecompLauncher" badge. Each red one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the badge and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For green ones without the ★, Copy badge PR prompt adds just the badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
+    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Red ones don't yet, green ones do, and ★ means its README has one of our badges (Get it on RecompLauncher, Get it on RecompStore or Verified developer; hover the ★ to see which). Each red one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the badge and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For green ones without the RecompLauncher badge, Copy badge PR prompt adds just that badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
   </div>
   <div class="sdk-head-act">
     <span class="sdk-prog" id="sdk-prog" aria-live="polite"<?= $count['todo'] ? '' : ' hidden' ?>><span class="sdk-spin" aria-hidden="true"></span><span id="sdk-prog-t">Checking: <?= number_format($count['all'] - $count['todo']) ?> of <?= number_format($count['all']) ?> done</span></span>
