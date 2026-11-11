@@ -1243,12 +1243,27 @@ function rs_pc_art_upgrade(array $a, array $have): array {
     return [$a, $done];
 }
 
+// (4.7) How many PCs played or installed each recomp from RecompLauncher in the last 90 days (the
+// launcher's events, kept 90 days): a number developers can trust, unlike GitHub's download count, which
+// drops when a release's files are uploaded again. Worked out at most once an hour. -> [app id => n]
+function rs_pc_players_map(): array {
+    $c = rs_kv_get('pc:players90');
+    if ($c && $c['age'] < 3600 && is_array($m = json_decode((string)$c['v'], true))) return $m;
+    $m = [];
+    try {
+        foreach (rs_db()->query("SELECT game, COUNT(DISTINCT install_id) n FROM rl_events WHERE kind IN ('install', 'session') AND game <> '' GROUP BY game") as $r) $m[(string)$r['game']] = (int)$r['n'];
+    } catch (Throwable $e) { return $c ? (json_decode((string)$c['v'], true) ?: []) : []; }
+    rs_kv_put('pc:players90', json_encode($m));
+    return $m;
+}
+
 function rs_pc_catalog(): array {
     $abs = 'rs_abs';
     $apps = [];
     // (4.3) Games handheld players say run well (player reports, last 90 days).
     if (!function_exists('rs_handheld_good')) require_once __DIR__ . '/rl_cloud.php';
     $handheld = function_exists('rs_handheld_good') ? rs_handheld_good() : [];
+    $players = rs_pc_players_map(); // (4.7)
     foreach (rs_pc_apps(false) as $i => $a) {
         // (4.3) A SourceForge project goes out only once one of its releases has been checked.
         if (rs_pc_host($a) === 'sourceforge' && ((string)($a['ok_tag'] ?? '') === '' || str_starts_with((string)$a['ok_tag'], 'moved:'))) continue;
@@ -1269,6 +1284,7 @@ function rs_pc_catalog(): array {
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
         // (4.7) Several games in one recomp: a tile per game in RecompLauncher.
         if ($pg = rs_pc_games_entry($a)) $e['games'] = $pg;
+        if (!empty($players[$a['id']])) $e['players'] = $players[$a['id']]; // (4.7) PCs, last 90 days
         // (3.9) A GitLab project: "repo" is its path there (group/project). Left out for GitHub.
         if (rs_pc_host($a) !== '') $e['host'] = rs_pc_host($a); // (4.3) 'gitlab' or 'sourceforge'
         // (3.9) Where its developer wants bugs reported (their own page or issue form).

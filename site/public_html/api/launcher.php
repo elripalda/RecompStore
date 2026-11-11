@@ -15,6 +15,8 @@
 //         423 {ok: false, error: "Cloud saves are paused ..."}.
 //   (3.2) GET a=inbox -> {items[]} (games sent from the website)   POST a=inbox-done {id, result}
 //   (3.2) GET a=betas -> {betas[]}   POST a=beta-join {id}   POST a=beta-leave {id}
+//   (4.7) GET a=library -> {saved: [{id, at}]} (the account's saved PC games, as on the website)
+//         POST a=library-save {game | games[], on} -> {saved} (adds or removes; games[] for the first merge)
 // The launcher, signed in or not (an install ID it made itself):
 //   (3.2) POST a=report {install, app, verdict, version, note, mins, gpu, cpu, ram_gb, osver}
 //         (3.9) and specs (free text, 600). For a log, and the 15-character note rule, use api/pc.php a=feedback.
@@ -226,6 +228,34 @@ try {
             if ($method !== 'POST') rs_rl_err(405, 'POST');
             rs_rl_beta_leave((int)$me['id'], (int)($in['id'] ?? 0));
             rs_rl_out(200, ['betas' => rs_rl_betas_for((int)$me['id'])]);
+        // (4.7) The account's saved games (the website's library), so the launcher's "Not installed" list
+        // is the same on every PC and on the website. PC games only; ids as in the catalog.
+        case 'library': {
+            $out = [];
+            foreach (rs_acct_saved($me) as $r) if (str_starts_with((string)$r['game'], 'pc:')) $out[] = ['id' => substr((string)$r['game'], 3), 'at' => (int)strtotime($r['created'] . ' UTC')];
+            rs_rl_out(200, ['saved' => $out]);
+        }
+        case 'library-save': {
+            if ($method !== 'POST') rs_rl_err(405, 'POST');
+            $ids = isset($in['games']) && is_array($in['games']) ? array_slice($in['games'], 0, 500) : [(string)($in['game'] ?? '')];
+            $keys = array_values(array_filter(array_map(fn($x) => rs_acct_game_key('pc:' . (string)$x), $ids)));
+            if (!$keys) rs_rl_err(400, 'Unknown game.');
+            $uid = (int)$me['id'];
+            if (!empty($in['on'])) {
+                rs_pmail_tables();
+                $n = rs_db()->prepare('SELECT COUNT(*) FROM account_saved WHERE account_id = ?');
+                $n->execute([$uid]);
+                $room = 500 - (int)$n->fetchColumn();
+                $ins = rs_db()->prepare('INSERT IGNORE INTO account_saved (account_id, game, created, seen_version) VALUES (?, ?, UTC_TIMESTAMP(), ?)');
+                foreach ($keys as $k) { if ($room <= 0) break; $ins->execute([$uid, $k, rs_pmail_version_of($k)]); $room -= $ins->rowCount(); }
+            } else {
+                $del = rs_db()->prepare('DELETE FROM account_saved WHERE account_id = ? AND game = ?');
+                foreach ($keys as $k) $del->execute([$uid, $k]);
+            }
+            $out = [];
+            foreach (rs_acct_saved($me) as $r) if (str_starts_with((string)$r['game'], 'pc:')) $out[] = ['id' => substr((string)$r['game'], 3), 'at' => (int)strtotime($r['created'] . ' UTC')];
+            rs_rl_out(200, ['saved' => $out]);
+        }
         case 'save-delete':
             if ($method !== 'POST') rs_rl_err(405, 'POST');
             rs_rl_delete($me, $game, (string)($in['v'] ?? ''));

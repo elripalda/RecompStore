@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 const RS_ACH_POINTS = [5, 10, 25, 50];
 const RS_ACH_SOURCES = ['memory', 'native', 'events'];
-const RS_ACH_CONSOLES = ['n64', 'snes', 'gb', 'gba', 'psx', 'ps2', 'xbox', 'x360'];
+const RS_ACH_CONSOLES = ['n64', 'snes', 'gb', 'gba', 'psx', 'ps2', 'xbox', 'x360', 'dc']; // (4.7) dc: Dreamcast (events lists; memory lists once the launcher reads its RAM)
 const RS_ACH_TYPES = ['progression', 'win', 'missable'];
 const RS_ACH_LB_FORMATS = ['score', 'time', 'frames', 'millisecs', 'seconds', 'minutes', 'value'];
 const RS_ACH_TICKET_KINDS = ['didnt_unlock' => 'Didn\'t unlock', 'too_early' => 'Unlocked by itself or too early', 'wrong_text' => 'Wrong name or description', 'other' => 'Something else'];

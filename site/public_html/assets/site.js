@@ -3169,7 +3169,7 @@
       [t('Runs on'), (a.systems || []).length ? `<span class="pc-sys">${a.systems.map((x) => `<span>${osIcon(x)}${SYS_NAMES[x]}</span>`).join('')}</span>` : ''],
       [t('Last updated'), when ? `${esc(ago(when.toISOString()))}<small>${esc(when.toLocaleDateString(locale(), { dateStyle: 'medium' }))}</small>` : ''],
       [t('Version'), esc(a.version || '')], [t('Download'), esc(a.size || '')],
-      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [byHost(a.host, t('Stars on GitHub'), t('Stars on GitLab'), t('Stars')), a.stars ? esc(fmtNum(a.stars)) : ''],
+      [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [t('Played on RecompLauncher'), a.players ? `${esc(fmtNum(a.players))}<small>${esc(t('PCs in the last 90 days'))}</small>` : ''], [byHost(a.host, t('Stars on GitHub'), t('Stars on GitLab'), t('Stars')), a.stars ? esc(fmtNum(a.stars)) : ''],
       [t('Releases'), a.releases ? esc(fmtNum(a.releases)) : ''], [t('First release'), first ? esc(first.toLocaleDateString(locale(), { dateStyle: 'medium' })) : ''],
       [t('Open issues'), a.repo ? esc(fmtNum(a.issues || 0)) : ''], [t('License'), esc(a.license || '')]].filter(([, v]) => v);
     const tags = (a.tags || []).map((x) => `<a class="pc-tagpill" href="/pc/all?tag=${encodeURIComponent(x)}" title="${esc(tf('All recomps with {tag}', { tag: x }))}">${esc(x)}</a>`).join('');
