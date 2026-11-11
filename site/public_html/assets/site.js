@@ -2368,7 +2368,7 @@
     if (st.tester) {
       box.innerHTML = `<span class="ach-badge on">${ACH_STAR}${t('Tester')}</span><h2>${t('You\'re in')}</h2>
         <p class="muted">${t('Open RecompLauncher, play a game from the list, and your achievements pop up as you earn them. Your profile and rank are on the Achievements page in the launcher.')}</p>
-        <div class="ach-cta"><a class="btn primary" href="/get">${t('Get RecompLauncher')}</a></div>`;
+        <div class="ach-cta"><a class="btn primary" href="/pc/launcher">${t('Get RecompLauncher')}</a></div>`;
       return;
     }
     if (app && app.status === 'pending') {
@@ -2418,7 +2418,7 @@
           <span class="ach-badge">${t('Alpha')}</span>
           <h1>${t('Recomp Achievements')}</h1>
           <p class="lead">${t('Achievements for recompiled games, built into RecompLauncher. Earn them as you play, master whole games, and climb the leaderboards. We\'ve started rolling it out to testers.')}</p>
-          <div class="ach-cta"><a class="btn primary" href="#ach-apply" data-ach-jump>${t('Become a tester')}</a><a class="btn" href="/get">${t('Get RecompLauncher')}</a></div>
+          <div class="ach-cta"><a class="btn primary" href="#ach-apply" data-ach-jump>${t('Become a tester')}</a><a class="btn" href="/pc/launcher">${t('Get RecompLauncher')}</a></div>
         </header>
         <section class="ach-stats" aria-label="${t('Recomp Achievements so far')}">${[[t('Games'), 'games'], [t('Players'), 'players'], [t('Unlocks'), 'unlocks'], [t('Mastered'), 'mastered']].map(([n, k]) => `<div class="glass ach-stat"><strong data-k="${k}">–</strong><span>${n}</span></div>`).join('')}</section>
         <section class="ach-how">${how.map(([i, n, d]) => `<div class="glass ach-card"><i>${i}</i><strong>${n}</strong><span>${d}</span></div>`).join('')}</section>
@@ -3251,7 +3251,7 @@
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
               ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div>${!a.repo && a.follow ? `<a class="btn" href="${esc(a.follow)}" target="_blank" rel="noopener">${/^https:\/\/(x|twitter)\.com\//.test(a.follow) ? t('Follow it on X') : t('Follow it')}</a>` : a.repo ? `<a class="btn" href="${gh}" target="_blank" rel="noopener">${hostSay(t('Follow it on GitHub'), t('Follow it on GitLab'), t('Follow it on SourceForge'))}</a>` : ''}</div>` : `<div class="pc-dl" data-dl>
                 <a class="btn primary pc-open-rl" href="recomplauncher://game/${encodeURIComponent(a.id)}" data-rl-open aria-label="${t('Open in RecompLauncher')}"><img src="/assets/mark.svg" alt="" width="18" height="18">RecompLauncher</a>
-                <p class="pc-open-help" data-rl-help role="status" hidden>${tf('RecompLauncher didn\'t open? {get}, or update it, then try again. You can also download it directly below.', { get: `<a href="/get">${t('Get RecompLauncher')}</a>` })}</p>
+                <p class="pc-open-help" data-rl-help role="status" hidden>${tf('RecompLauncher didn\'t open? {get}, or update it, then try again. You can also download it directly below.', { get: `<a href="/pc/launcher">${t('Get RecompLauncher')}</a>` })}</p>
                 <div class="pc-dl-direct" style="--n:${Math.max(1, Math.min(systems.length, 3))}">${systems.map((sx) => `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${systems.length > 1 ? esc(SYS_NAMES[sx]) : tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>
               </div>`}
               <div data-acct-save></div>
@@ -6961,6 +6961,12 @@
   let devHint = false;
   try { devHint = localStorage.getItem('rs-dev') === '1'; } catch (e) { /* no note: no button */ }
   if (devHint && !LAUNCHER) fetch('/api/dev.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => devHubButton(j && j.account ? j.account : null));
+  // (4.7) RecompLauncher first: recompstore.com opens on the PC store, unless the visitor picked PS5
+  // before (the PS5 tab), the link says ?ps5, or it's a PS5's own browser. The PS5 store is one tap away.
+  const sidePicked = (() => { try { return localStorage.getItem('rs-side'); } catch (e) { return null; } })();
+  if (!LAUNCHER && location.pathname === '/' && !(location.hash.length > 1) && !/[?&]ps5\b/.test(location.search) && sidePicked !== 'ps5' && !/PlayStation/i.test(navigator.userAgent))
+    history.replaceState(history.state, '', '/pc' + location.search);
+  document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('[data-plat]'); if (a) { try { localStorage.setItem('rs-side', a.dataset.plat); } catch (er) {} } }, true);
   // (2.8) The PC store's header from the start on its pages, and its catalog on the way.
   if (LAUNCHER || /^\/pc(\/|$)/.test(location.pathname)) setPlatform('pc');
   fetch('/catalog.json', { cache: 'no-cache' })
