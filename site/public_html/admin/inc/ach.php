@@ -764,7 +764,7 @@ function rs_ach_games(): array {
         if (!$l['live']) continue;
         [$n, $pts] = rs_ach_list_totals($l['list'], $g);
         $out[] = rs_ach_app_card($g) + ['console' => (string)($l['list']['console'] ?? ''), 'source' => (string)($l['list']['source'] ?? ''),
-            'achievements' => $n, 'points' => $pts, 'players' => $players[$g] ?? 0, 'mastered' => $mastered[$g] ?? 0, 'beaten' => $beaten[$g] ?? 0,
+            'achievements' => $n, 'points' => $pts, 'players' => $players[$g] ?? 0, 'mastered_players' => $mastered[$g] ?? 0, 'beaten_players' => $beaten[$g] ?? 0,
             'leaderboards' => count((array)($l['list']['leaderboards'] ?? [])), 'rich_presence' => isset($l['list']['rich_presence']),
             'added' => (int)strtotime($l['updated'] . ' UTC')];
     }
