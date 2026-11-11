@@ -669,11 +669,29 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
         ['Game files included', 'The release looks like it includes game files or other copyrighted content. Releases can\'t include any: players bring their own copy.'],
         ['Already listed', 'It\'s already listed on ' . $where . '.'],
         ['Not a fit', $isPc ? 'It isn\'t a recomp or native port of a console game, so it isn\'t a fit for RecompLauncher.' : 'It isn\'t a fit for RecompStore.'],
-      ]; ?>
-    <details class="reply decline" data-decline>
+      ];
+      // (4.6) Virus scan: what VirusTotal flagged on its newest release, file by file, with the report
+      // links and what to do about it. Offered (and ticked) only when something was flagged.
+      $vtWhy = '';
+      if (function_exists('rs_vt_release') && !empty($latest) && isset($sKey)) {
+          try {
+              [$vRows] = rs_vt_release($sKey, (string)$latest['tag_name']);
+              $vLines = [];
+              foreach ((array)$vRows as $f) {
+                  $n = (int)$f['malicious'] + (int)$f['suspicious'];
+                  if (($f['status'] ?? '') !== 'done' || $n === 0) continue;
+                  $by = trim((string)($f['flagged_by'] ?? ''));
+                  $vLines[] = '- ' . $f['name'] . ': flagged by ' . $n . ' of ' . (int)$f['engines'] . ' engines' . ($by !== '' ? ' (' . $by . ')' : '') . (rs_vt_link($f) !== '' ? "\n  " . rs_vt_link($f) : '');
+              }
+              if ($vLines) $vtWhy = 'VirusTotal flagged your release, which is more than we currently allow:' . "\n\n" . implode("\n", $vLines) . "\n\n"
+                  . 'These are often false positives, especially on unsigned programs. You can ask the vendors named above to recheck it (most have a false-positive form on their website), or change whatever is setting them off. Once the scan comes back clean, you\'re more than welcome to send it again, and we\'ll get it on the site as soon as possible.';
+          } catch (Throwable $e) { $vtWhy = ''; }
+      } ?>
+    <details class="reply decline" data-decline id="dec-<?= (int)$r['id'] ?>">
       <summary>Decline · tell them why</summary>
       <form method="post">
         <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="action" value="decline"><input type="hidden" name="reason" value="">
+        <?php if ($vtWhy !== ''): ?><label class="check dec-vt"><input type="checkbox" data-why="<?= h($vtWhy) ?>" data-short="Virus scan" data-block="1" checked> <strong>Virus scan</strong> <span class="muted">— lists what VirusTotal flagged, with the report links</span></label><?php endif; ?>
         <div class="dec-presets"><?php foreach ($presets as [$k, $v]): ?><label class="check"><input type="checkbox" data-why="<?= h($v) ?>" data-short="<?= h($k) ?>"> <?= h($k) ?></label><?php endforeach; ?></div>
         <label>Anything else <span class="muted">(your own words, optional)</span><textarea data-own rows="2" maxlength="1000" placeholder="For example: the Linux build crashes on start."></textarea></label>
         <label class="check"><input type="checkbox" name="fix" value="1" checked> Let them fix it and send it again (adds a link that opens their submission, filled in)</label>
@@ -689,6 +707,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
         <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done'): ?><button name="action" value="<?= ($d['platform'] ?? '') === 'pc' ? 'to_ps5' : 'to_pc' ?>"><?= ($d['platform'] ?? '') === 'pc' ? 'Move to PS5' : 'Move to PC' ?></button><?php endif; ?>
         <?php if ($r['status'] === 'done'): ?><button name="action" value="new">Reopen</button>
         <?php else: ?><button name="action" value="done"<?= $r['kind'] === 'submit' && !empty($r['data']) ? '' : ' class="primary"' ?>>Mark done</button><?php endif; ?>
+        <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done' && ($to ?? '') !== '' && $mailReady): ?><button type="button" class="danger" data-open-decline="<?= (int)$r['id'] ?>">Decline</button><?php endif; ?>
       </form>
       <form method="post" onsubmit="return confirm('Delete this message for good?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button name="action" value="delete" class="danger">Delete</button></form>
       <?php if ($r['kind'] === 'logs'): /* (2.6) everything they sent, in one zip */ ?><a class="btn zip-dl" href="log-zip.php?id=<?= (int)$r['id'] ?>" download title="Every log, their message as message.txt, and any pictures">Download as zip</a><?php endif; ?>
@@ -715,6 +734,7 @@ if ($rows) {
 .decline summary{color:var(--bad)}
 .dec-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;margin:10px 0 12px}
 @media (max-width:820px){.dec-presets{grid-template-columns:1fr}}
+.dec-vt{margin:10px 0 0}
 </style>
 <script>
 // (3.6) Decline: the reasons you tick become the email, which stays yours to change before Send.
@@ -726,10 +746,13 @@ document.querySelectorAll('[data-decline]').forEach((box) => {
     const picked = [...f.querySelectorAll('[data-why]:checked')];
     f.reason.value = [...picked.map((c) => c.dataset.short), own.value.trim()].filter(Boolean).join(' · ');
     if (touched) return;
-    const lines = picked.map((c) => '- ' + c.dataset.why);
+    // One-line reasons become a list; a longer one (the virus scan) is its own paragraph.
+    const lines = picked.filter((c) => !c.dataset.block).map((c) => '- ' + c.dataset.why);
     if (own.value.trim()) lines.push('- ' + own.value.trim());
+    const parts = [...picked.filter((c) => c.dataset.block).map((c) => c.dataset.why)];
+    if (lines.length) parts.push(lines.join('\n'));
     body.value = body.dataset.hello + '\n\n' + 'Thanks for sending in ' + body.dataset.name + '. Before it can go on ' + body.dataset.where + ', '
-      + (lines.length ? 'it needs a few changes:\n\n' + lines.join('\n') : 'it needs a few changes.')
+      + (parts.length ? 'it needs a few changes:\n\n' + parts.join('\n\n') : 'it needs a few changes.')
       + (fix.checked ? '\n\nUse the link below to open your submission with everything filled in, fix what\'s needed and send it again.' : '')
       + '\n\nThanks again, and feel free to reply with any questions.';
   };
@@ -737,6 +760,13 @@ document.querySelectorAll('[data-decline]').forEach((box) => {
   own.addEventListener('input', build);
   build();
 });
+// (4.6) The Decline button next to Mark done opens the decline box and brings it into view.
+document.querySelectorAll('[data-open-decline]').forEach((b) => b.addEventListener('click', () => {
+  const box = document.getElementById('dec-' + b.dataset.openDecline);
+  if (!box) return;
+  box.open = true;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}));
 </script>
 <?php
 rs_foot(['assets/inbox.js']);
