@@ -221,7 +221,7 @@ rs_head('Dashboard', true, ['assets/analytics.css', 'assets/dashboard.css']);
       <li>
         <span class="soon-kind k-<?= h($it['kind']) ?>"><?= $kind ?></span>
         <span class="soon-tx"><strong><?= h($it['name']) ?></strong>
-          <small><?= $it['kind'] === 'repo' ? 'Possible project: ' . h($it['repo']) : h($it['tag']) . ' is out' ?><?= $it['date'] !== '' ? ' · ' . h(rs_date('M j', strtotime($it['date']))) : '' ?><?= $it['files'] ? ' · ' . h(implode(', ', $it['files'])) : '' ?></small></span>
+          <small><?= $it['kind'] === 'repo' ? 'Possible project: ' . h($it['repo']) : h($it['tag']) . ' is out' ?><?= $it['date'] !== '' ? ' · ' . h(gmdate('M j', (int)strtotime($it['date'] . ' 12:00:00 UTC'))) : '' ?><?= $it['files'] ? ' · ' . h(implode(', ', $it['files'])) : '' ?></small></span>
         <span class="soon-go"><a class="btn" href="<?= h($it['url']) ?>" target="_blank" rel="noopener">Look</a><a class="btn" href="pc.php?edit=<?= h(rawurlencode((string)$it['id'])) ?>#edit">Edit</a>
           <form method="post" action="pc.php"><?= $csrf ?><input type="hidden" name="action" value="soon_seen"><input type="hidden" name="id" value="<?= h((string)$it['id']) ?>"><button>Dismiss</button></form></span>
       </li>
