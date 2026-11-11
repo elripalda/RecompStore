@@ -6963,6 +6963,13 @@
   if (devHint && !LAUNCHER) fetch('/api/dev.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => devHubButton(j && j.account ? j.account : null));
   // (4.7) RecompLauncher first: recompstore.com opens on the PC store, unless the visitor picked PS5
   // before (the PS5 tab), the link says ?ps5, or it's a PS5's own browser. The PS5 store is one tap away.
+  // The PS5 tab links to /?ps5 (it can come from recomplauncher.com, which keeps its own storage): that
+  // choice is kept here, and the address goes back to plain /.
+  if (!LAUNCHER && /[?&]ps5\b/.test(location.search)) {
+    try { localStorage.setItem('rs-side', 'ps5'); } catch (e) {}
+    const q = new URLSearchParams(location.search); q.delete('ps5');
+    history.replaceState(history.state, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+  }
   const sidePicked = (() => { try { return localStorage.getItem('rs-side'); } catch (e) { return null; } })();
   if (!LAUNCHER && location.pathname === '/' && !(location.hash.length > 1) && !/[?&]ps5\b/.test(location.search) && sidePicked !== 'ps5' && !/PlayStation/i.test(navigator.userAgent))
     history.replaceState(history.state, '', '/pc' + location.search);
