@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'remove') {
             rs_auto_remove($id);
             rs_flash('Draft removed (and the hidden listing it made).');
-        } elseif (in_array($act, ['req_add', 'req_mark'], true)) {
+        } elseif (in_array($act, ['req_add', 'req_mark', 'req_delete'], true)) {
             // (4.8) A player's request: Auto-add it, or mark it handled.
             $rq = rs_req_get((int)($_POST['req'] ?? 0));
             if (!$rq) throw new RuntimeException('That request isn\'t there anymore.');
@@ -82,6 +82,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_req_mark((int)$rq['id'], 'added');
                 rs_flash('Working on it. Its draft is on Drafts.');
                 header('Location: auto.php#d-' . (int)$jid);
+                exit;
+            }
+            if ($act === 'req_delete') {
+                rs_req_delete((int)$rq['id']);
+                rs_flash('Deleted.');
+                header('Location: auto.php?view=requests' . (!empty($_POST['handled']) ? '&handled=1' : ''));
                 exit;
             }
             $to = (string)($_POST['to'] ?? '');
@@ -143,16 +149,19 @@ if ($reqView):
         <td class="req-n"><strong><?= (int)$r['asks'] ?></strong><?php if ($r['signed']): ?><span class="muted small"><?= (int)$r['signed'] ?> signed in</span><?php endif; ?></td>
         <td class="req-url"><a href="<?= h((string)$r['url']) ?>" target="_blank" rel="noopener noreferrer" class="mono"><?= h($label) ?> ↗</a></td>
         <td class="req-notes"><?php if (!$r['notes']): ?><span class="muted small">No notes</span><?php else: ?>
-          <?php foreach ($r['notes'] as $i => $n): ?><p class="small<?= $i ? ' req-more' : '' ?>"><?= h($n['note']) ?></p><?php endforeach; ?>
-        <?php endif; ?></td>
+          <?php foreach ($r['notes'] as $i => $n): ?><p class="small<?= $i ? ' req-more' : '' ?>"><?= h($n['note']) ?> <span class="muted">· <?= h($n['who']) ?><?= $n['version'] !== '' ? ', ' . h($n['version']) : '' ?></span></p><?php endforeach; ?>
+        <?php endif; ?>
+          <details class="req-who small"><summary>Who asked (<?= count($r['people']) ?><?= (int)$r['asks'] > count($r['people']) ? '+' : '' ?>)</summary><ul><?php foreach ($r['people'] as $p): ?><li><?= $p['signed'] ? '<b>' . h($p['who']) . '</b>' : h($p['who']) ?> <span class="muted">· <?= h($p['version'] !== '' ? $p['version'] : 'version not sent') ?> · <?= h(rs_date('M j, g:i a', strtotime($p['at'] . ' UTC'))) ?></span></li><?php endforeach; ?></ul></details></td>
         <td class="req-when small"><?php if ($handled): ?><span class="pill<?= $r['status'] === 'declined' ? ' bad' : ($r['status'] === 'added' ? ' ok' : '') ?>"><?= h(RS_REQ_STATUS[$r['status']] ?? $r['status']) ?></span><span class="muted"><?= h((string)$r['handled_by']) ?><?= $r['handled_at'] ? ', ' . h(rs_date('M j', strtotime($r['handled_at'] . ' UTC'))) : '' ?></span>
           <?php else: ?><span><?= h(rs_date('M j, g:i a', $last)) ?></span><?php if ($last - $first > 60): ?><span class="muted">first <?= h(rs_date('M j', $first)) ?></span><?php endif; ?><?php endif; ?></td>
         <td class="req-act">
           <?php if ($handled): ?>
           <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="new"><button>Back to New</button></form>
+          <form method="post" onsubmit="return confirm('Delete this request and every player\'s ask for it?')"><?= $csrf ?><input type="hidden" name="action" value="req_delete"><input type="hidden" name="handled" value="1"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><button class="danger">Delete</button></form>
           <?php else: ?>
           <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_add"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><button class="primary">Auto-add</button></form>
           <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="listed"><button>Already listed</button></form>
+          <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="done"><button>Mark done</button></form>
           <form method="post" onsubmit="return confirm('Decline <?= h(addslashes($label)) ?>? Players who ask for it later are told it can\'t go on RecompLauncher.')"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="declined"><button class="danger">Decline</button></form>
           <?php endif; ?>
         </td>
@@ -174,7 +183,7 @@ if ($reqView):
 .req-table th{font-size:12px;color:var(--muted);font-weight:600}
 .req-n{width:80px}.req-n strong{display:block;font-size:20px;line-height:1.1}.req-n span{display:block;margin-top:2px}
 .req-url{width:30%}.req-url a{overflow-wrap:anywhere}
-.req-notes p{margin:0 0 6px;overflow-wrap:anywhere}.req-notes p:last-child{margin:0}.req-notes .req-more{color:var(--muted)}
+.req-notes p{margin:0 0 6px;overflow-wrap:anywhere}.req-who{margin-top:6px}.req-who summary{cursor:pointer;color:var(--muted)}.req-who ul{margin:6px 0 0;padding-left:16px}.req-notes p:last-child{margin:0}.req-notes .req-more{color:var(--muted)}
 .req-when{width:140px}.req-when>span{display:block}.req-when .pill{margin:0 0 4px}
 .req-act{width:1%;white-space:nowrap}.req-act form{display:block;margin:0 0 6px}.req-act form:last-child{margin:0}.req-act button{width:100%}
 .pill.bad{background:rgba(255,95,95,.14);color:var(--bad)}

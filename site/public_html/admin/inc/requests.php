@@ -6,9 +6,9 @@ declare(strict_types=1);
 
 const RS_REQ_URL_MAX = 300;
 const RS_REQ_NOTE_MAX = 500;
-const RS_REQ_PER_INSTALL = 5;   // a day
-const RS_REQ_PER_NETWORK = 20;  // a day
-const RS_REQ_STATUS = ['new' => 'New', 'added' => 'Auto-added', 'listed' => 'Already listed', 'declined' => 'Declined'];
+const RS_REQ_PER_INSTALL = 10;  // a day, per install (and per account when signed in)
+const RS_REQ_PER_NETWORK = 30;  // a day
+const RS_REQ_STATUS = ['new' => 'New', 'added' => 'Auto-added', 'listed' => 'Already listed', 'done' => 'Done', 'declined' => 'Declined'];
 
 function rs_req_tables(): void {
     static $done = false;
@@ -58,15 +58,28 @@ function rs_req_key(string $url): string {
     return substr($host . '/' . $path, 0, 191);
 }
 
-// A link the launcher sends, checked again here: https, a real host, no sign-in in it, 300 characters.
+// A link the launcher sends, checked again here (Beta 41: GitHub or GitLab, typed as developer/project):
+// https://github.com/<owner>/<repo> or https://gitlab.com/<group>/.../<project>, nothing else. A link to a
+// page inside the project (its releases, a file) counts as the project. -> the clean link, or null.
 function rs_req_clean(string $url): ?string {
     $url = trim($url);
     if ($url === '' || mb_strlen($url) > RS_REQ_URL_MAX || preg_match('/\s/', $url)) return null;
     $u = parse_url($url);
-    if (!$u || strtolower((string)($u['scheme'] ?? '')) !== 'https' || isset($u['user']) || isset($u['pass'])) return null;
-    $host = strtolower((string)($u['host'] ?? ''));
-    if (!preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $host) || trim((string)($u['path'] ?? ''), '/') === '') return null;
-    return (string)preg_replace('#(\.git)?/*$#', '', $url);
+    if (!$u || strtolower((string)($u['scheme'] ?? '')) !== 'https' || isset($u['user']) || isset($u['pass']) || isset($u['port'])) return null;
+    $host = (string)preg_replace('/^www\./', '', strtolower((string)($u['host'] ?? '')));
+    $parts = array_values(array_filter(explode('/', (string)preg_replace('#\.git$#i', '', trim((string)($u['path'] ?? ''), '/'))), 'strlen'));
+    if ($host === 'github.com') {
+        if (count($parts) < 2 || !preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/', $parts[0]) || !preg_match('/^[A-Za-z0-9._-]{1,100}$/', $parts[1])) return null;
+        return 'https://github.com/' . $parts[0] . '/' . (string)preg_replace('/\.git$/i', '', $parts[1]);
+    }
+    if ($host === 'gitlab.com') {
+        $cut = array_search('-', $parts, true);
+        if ($cut !== false) $parts = array_slice($parts, 0, $cut);
+        if (count($parts) < 2) return null;
+        foreach ($parts as $p) if (!preg_match('/^[A-Za-z0-9._-]{1,100}$/', $p)) return null;
+        return 'https://gitlab.com/' . implode('/', $parts);
+    }
+    return null;
 }
 
 // The recomp already on RecompLauncher for this link: [app, 'listed' | 'soon'], or null. Hidden
@@ -84,14 +97,20 @@ function rs_req_add(string $url, string $note, string $install, string $version,
     rs_req_tables();
     $db = rs_db();
     $clean = rs_req_clean($url);
-    if ($clean === null) return 'That doesn\'t look like a project link. Paste the address of its page on GitHub, GitLab, Codeberg or wherever it lives.';
+    if ($clean === null) return 'Request a project on GitHub or GitLab.';
     $key = rs_req_key($clean);
-    if ($known = rs_req_known($key)) return $known[1] === 'soon' ? $known[0]['name'] . ' is already on its way. Press Notify Me on it in Coming Soon.' : $known[0]['name'] . ' is already on RecompLauncher.';
+    if ($known = rs_req_known($key)) return $known[1] === 'soon' ? 'It\'s already in RecompLauncher\'s Coming Soon. Press Notify Me on it to hear when it\'s out.' : 'It\'s already in RecompLauncher.';
     $who = hash('sha256', 'rq|' . $install);
     $ip = rs_ip_hash();
     $st = $db->prepare('SELECT COUNT(*) FROM pc_request_asks WHERE install = ? AND created > (UTC_TIMESTAMP() - INTERVAL 1 DAY)');
     $st->execute([$who]);
-    if ((int)$st->fetchColumn() >= RS_REQ_PER_INSTALL) return 'That\'s enough requests for today. Try again tomorrow.';
+    $many = (int)$st->fetchColumn() >= RS_REQ_PER_INSTALL;
+    if (!$many && $accountId) {
+        $st = $db->prepare('SELECT COUNT(*) FROM pc_request_asks WHERE account_id = ? AND created > (UTC_TIMESTAMP() - INTERVAL 1 DAY)');
+        $st->execute([$accountId]);
+        $many = (int)$st->fetchColumn() >= RS_REQ_PER_INSTALL;
+    }
+    if ($many) return 'That\'s a lot of requests for today. Try again tomorrow.';
     $st = $db->prepare('SELECT COUNT(*) FROM pc_request_asks WHERE ip_hash = ? AND created > (UTC_TIMESTAMP() - INTERVAL 1 DAY)');
     $st->execute([$ip]);
     if ((int)$st->fetchColumn() >= RS_REQ_PER_NETWORK) return 'Too many requests from your network today. Try again tomorrow.';
@@ -101,8 +120,8 @@ function rs_req_add(string $url, string $note, string $install, string $version,
     if ($row) {
         $mine = $db->prepare('SELECT 1 FROM pc_request_asks WHERE request_id = ? AND install = ?');
         $mine->execute([(int)$row['id'], $who]);
-        if ($mine->fetchColumn()) return 'You already asked for this one. We\'ll take a look.';
         if ($row['status'] === 'declined') return 'We looked at this one already and it can\'t go on RecompLauncher.';
+        if ($mine->fetchColumn()) return ''; // the same player again: fine, but still one vote
         $rid = (int)$row['id'];
         $db->prepare('UPDATE pc_requests SET asks = asks + 1, updated = UTC_TIMESTAMP() WHERE id = ?')->execute([$rid]);
     } else {
@@ -110,7 +129,7 @@ function rs_req_add(string $url, string $note, string $install, string $version,
         $rid = (int)$db->lastInsertId();
     }
     $db->prepare('INSERT INTO pc_request_asks (request_id, install, account_id, note, version, ip_hash, created) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
-        ->execute([$rid, $who, $accountId, mb_substr(trim($note), 0, RS_REQ_NOTE_MAX), mb_substr($version, 0, 40), $ip]);
+        ->execute([$rid, $who, $accountId, mb_substr(trim((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', str_replace("\r\n", "\n", $note))), 0, RS_REQ_NOTE_MAX), mb_substr((string)preg_replace('/[^\w.+-]/', '', $version), 0, 40), $ip]);
     return '';
 }
 
@@ -127,14 +146,27 @@ function rs_req_list(bool $handled, int $limit = 200): array {
     $ids = array_map(fn($r) => (int)$r['id'], $rows);
     $notes = [];
     $signed = [];
-    $st = $db->query('SELECT request_id, note, account_id, created FROM pc_request_asks WHERE request_id IN (' . implode(',', $ids) . ') ORDER BY created DESC');
-    foreach ($st as $n) {
+    $people = [];
+    $asks = $db->query('SELECT request_id, install, note, account_id, version, created FROM pc_request_asks WHERE request_id IN (' . implode(',', $ids) . ') ORDER BY created DESC')->fetchAll();
+    // (4.8) Who asked: the account's username when they were signed in, otherwise their install (shortened).
+    $accIds = array_values(array_unique(array_filter(array_map(fn($n) => (int)$n['account_id'], $asks))));
+    $names = $accIds ? $db->query('SELECT id, username FROM accounts WHERE id IN (' . implode(',', $accIds) . ')')->fetchAll(PDO::FETCH_KEY_PAIR) : [];
+    foreach ($asks as $n) {
         $rid = (int)$n['request_id'];
         if ($n['account_id'] !== null) $signed[$rid] = ($signed[$rid] ?? 0) + 1;
-        if (trim((string)$n['note']) !== '' && count($notes[$rid] ?? []) < 5) $notes[$rid][] = ['note' => (string)$n['note'], 'at' => (string)$n['created']];
+        $who = $n['account_id'] !== null && (string)($names[(int)$n['account_id']] ?? '') !== '' ? (string)$names[(int)$n['account_id']] : 'Player ' . substr((string)$n['install'], 0, 6);
+        if (trim((string)$n['note']) !== '' && count($notes[$rid] ?? []) < 5) $notes[$rid][] = ['note' => (string)$n['note'], 'at' => (string)$n['created'], 'who' => $who, 'version' => (string)$n['version']];
+        if (count($people[$rid] ?? []) < 20) $people[$rid][] = ['who' => $who, 'signed' => $n['account_id'] !== null, 'version' => (string)$n['version'], 'at' => (string)$n['created'], 'note' => (string)$n['note']];
     }
-    foreach ($rows as &$r) { $r['notes'] = $notes[(int)$r['id']] ?? []; $r['signed'] = $signed[(int)$r['id']] ?? 0; }
+    foreach ($rows as &$r) { $r['notes'] = $notes[(int)$r['id']] ?? []; $r['signed'] = $signed[(int)$r['id']] ?? 0; $r['people'] = $people[(int)$r['id']] ?? []; }
     return $rows;
+}
+
+// (4.8) A request gone for good, with every player's ask.
+function rs_req_delete(int $id): void {
+    rs_req_tables();
+    rs_db()->prepare('DELETE FROM pc_request_asks WHERE request_id = ?')->execute([$id]);
+    rs_db()->prepare('DELETE FROM pc_requests WHERE id = ?')->execute([$id]);
 }
 
 function rs_req_get(int $id): ?array {
