@@ -45,6 +45,21 @@ if ($fixIn > 0) {
         rs_sub_out(200, ['ok' => true, 'data' => $out, 'reason' => (string)($fd['declined']['reason'] ?? ''), 'shots' => (int)$sh->fetchColumn(), 'icon' => (int)$ic->fetchColumn() > 0]);
     }
 }
+// (4.8) Submit > Easy Setup, "Check my repo": is recomplauncher.json in the project yet?
+//   GET a=sdk-check&repo=<owner/name or link>&asset=<Windows file pattern> -> {ok, has, tag, easy, settings, dumps}
+if (($_GET['a'] ?? '') === 'sdk-check') {
+    $in = trim((string)($_GET['repo'] ?? ''));
+    $host = '';
+    if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/(.+)$#i', $in, $gm)) { $host = 'gitlab'; $in = preg_replace('#/-(/.*)?$#', '', $gm[1]); }
+    $repo = trim((string)preg_replace(['#^(?:https?://)?(?:www\.)?github\.com/#i', '#[?\#].*$#', '#\.git$#i'], '', $in), '/');
+    $ok = $host === 'gitlab' ? (bool)preg_match('#^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}){1,5}$#', $repo) : rs_repo_ok($repo);
+    if (!$ok) rs_sub_out(200, ['ok' => false, 'error' => 'Add your project\'s link on the first step.']);
+    if (rs_rate_over('sdkprobe', 20, 600)) rs_sub_out(200, ['ok' => false, 'error' => 'That\'s a lot of checks. Wait a few minutes and try again.']);
+    rs_rate_hit('sdkprobe');
+    try { $r = rs_pc_sdk_probe($repo, $host, mb_substr(trim((string)($_GET['asset'] ?? '')), 0, 160)); }
+    catch (Throwable $e) { rs_sub_out(200, ['ok' => false, 'error' => 'We couldn\'t reach the project just now. Try again in a minute.']); }
+    rs_sub_out(200, ['ok' => true] + $r);
+}
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_sub_out(405, ['ok' => false, 'error' => 'Send the form.']);
 $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
 $host = (string)($_SERVER['HTTP_HOST'] ?? '');

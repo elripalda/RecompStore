@@ -1155,6 +1155,13 @@
     ['High FPS', t('Unlocked frame rate')], ['HDR', t('HDR')], ['Upscaling', t('DLSS or FSR')],
     ['Mods', t('Mod support')], ['Texture packs', t('Texture packs')], ['Controller', t('Controller support')],
     ['Keyboard and mouse', t('Keyboard and mouse')], ['Gyro', t('Gyro aiming')], ['Cheats', t('Cheats')]];
+  const SVG_OUT = '<svg class="out-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>';
+  // (4.8) The PC Submit form's four steps.
+  const SX_STEPS = () => [t('Your project'), t('Easy Setup'), t('Details and art'), t('Review and send')];
+  const SVG_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+  const SVG_BACK = '<svg class="sx-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>';
+  const SVG_NEXT = '<svg class="sx-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+  const SVG_WAIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>';
   const SVG_EZ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>';
   const SVG_SLIDERS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>';
   function submitPage() {
@@ -1167,34 +1174,33 @@
         <p class="lead">${t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.')}</p>
         <div data-sub-who></div>
         <form class="glass form" novalidate enctype="multipart/form-data">
-          <div class="sub-repos" data-sub-repos hidden></div>
-          <aside class="sub-sdk-top" data-pc-only>
-            <div class="sub-sdk-words"><span class="kicker">${t('RecompLauncher SDK')}</span><strong>${t('Make it one click for players')}</strong>
-              <p>${t('Add one small file, recomplauncher.json, to your release. Your recomp doesn\'t change, and it\'s free.')}</p></div>
-            <div class="sub-sdk-cards">
-              <div class="sub-sdk-card"><span class="ez-badge">${SVG_EZ}${t('Easy Setup')}</span><strong>${t('Drop in a disc, press Play')}</strong><span>${t('RecompLauncher checks the player\'s own disc, sets the game up and starts it. About ten minutes to add, and it earns the Easy Setup badge players look for.')}</span></div>
-              <div class="sub-sdk-card"><span class="ez-badge alt">${SVG_SLIDERS}${t('Settings')}</span><strong>${t('Settings in the launcher')}</strong><span>${t('Resolution, frame rate and controls on its page and in Big Picture mode, saved to your settings file for the player.')}</span></div>
-              <div class="sub-sdk-card"><img class="sub-sdk-badge" src="/assets/press/launcher/badge-dark.svg" alt="${t('Get it on RecompLauncher')}" width="150" height="45" loading="lazy"><strong>${t('One click from your README')}</strong><span>${t('Put the Get it on RecompLauncher badge in your README. One click takes players to its page, and Open in RecompLauncher installs it.')}</span></div>
-            </div>
-            <div class="sub-sdk-btns"><a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>${agentBtn()}<a class="btn" href="/press" target="_blank" rel="noopener">${t('Get the badge')}</a></div>
-          </aside>
-          <fieldset class="kinds plats"><legend>${t('Where does it run?')}</legend>
+          <fieldset class="kinds plats"${LAUNCHER ? ' hidden' : ''}><legend>${t('Where does it run?')}</legend>
             ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === submitPc() ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
           </fieldset>
+          <ol class="sx-steps" data-pc-only>${SX_STEPS().map((n, i) => `<li data-sx-go="${i + 1}"><button type="button"><i>${i + 1}</i><span>${n}</span></button></li>`).join('')}</ol>
+          <div class="sx-pane" data-sx="1">
+            <div class="sx-head" data-pc-only><h2>${t('Your project')}</h2><p>${t('Paste the link to your recomp. We fill in the rest from your latest release.')}</p></div>
+            <div class="sub-repos" data-sub-repos hidden></div>
+            <div class="sx-repo" data-pc-only><div class="sx-repo-slot" data-repo-slot></div><button type="button" class="btn" data-sx-look>${t('Look it up')}</button></div>
+            <p class="sub-rel" data-rel-status role="status" data-pc-only></p>
           <fieldset class="kinds" data-ps5-only><legend>${t('What is it?')}</legend>
             ${kinds.map(([k, n, d], i) => `<label class="kind"><input type="radio" name="kind" value="${k}"${i === 0 ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
           </fieldset>
-          <h2>${t('The basics')}</h2>
+          <h2 data-ps5-only>${t('The basics')}</h2>
           <div class="two">
             <label>${t('Name')}<input name="name" maxlength="120" required placeholder="${t('What players will see')}"></label>
             <label>${t('Made by')}<input name="author" maxlength="80" required autocomplete="nickname" placeholder="${t('Your name or handle')}"></label>
             <label>${t('Email')}<input name="contact" type="email" maxlength="200" required autocomplete="email" placeholder="you@example.com"><small>${t('Required: it\'s how we tell you it\'s live, or what to change.')}</small></label>
-            <label><span data-ps5-only>${t('GitHub repository')}</span><span data-pc-only hidden>${t('GitHub or GitLab project')}</span><input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
+            <label data-repo-label><span data-ps5-only>${t('GitHub repository')}</span><span data-pc-only hidden>${t('GitHub or GitLab project')}</span><input name="repo" maxlength="255" required placeholder="https://github.com/you/your-app" inputmode="url" spellcheck="false"></label>
             <label data-ps5-only>${t('Release file')} <span class="opt">${t('optional')}</span><input name="asset" maxlength="160" placeholder="MyApp-*.zip" spellcheck="false"><small>${t('The .zip or .7z on your GitHub release the store should install. Put * for the part that changes with each version.')}</small></label>
             <label>${t('Version')} <span class="opt" data-ps5-only>${t('optional')}</span><input name="version" maxlength="40" placeholder="1.0.0"></label>
             <label data-ps5-only>${t('Title ID')} <span class="opt">${t('optional')}</span><input name="title_id" maxlength="9" placeholder="PPSA12345" spellcheck="false" class="mono"><small>${tf('Already have one? Check it doesn\'t clash on the {link}. No? We\'ll pick one with you.', { link: `<a href="/ids" target="_blank">${t('Title IDs page')}</a>` })}</small><small class="tid-check" data-tid-check role="status"></small></label>
           </div>
           <div data-pc-only>
+            <div class="two">
+              <label>${t('Original console')}<select name="origin"><option value="">${t('Pick one')}</option>${Object.keys(PC_ORIGINS).filter((k) => k !== 'other').sort((x, y) => PC_ORIGINS[x].localeCompare(PC_ORIGINS[y])).map((k) => `<option value="${k}">${esc(PC_ORIGINS[k])}</option>`).join('')}<option value="other">${t('Other')}</option></select></label>
+              <label>${t('Which copy players need')}<input name="disc" maxlength="120" placeholder="${t('For example: USA disc, SLUS-21590')}"><small>${t('The region or version your recomp works with, if it matters.')}</small></label>
+            </div>
             <h2>${t('Builds')}</h2>
             <p class="form-note">${t('Switch on each system you ship a build for. One is enough. We read your latest release and fill in the file names when we can. Use * for the part that changes with each version.')}</p>
             <div class="sub-plats">
@@ -1206,11 +1212,24 @@
                 <small class="sub-plat-check" data-plat-check="${k}"></small>
               </div>`).join('')}
             </div>
-            <p class="sub-rel" data-rel-status role="status"></p>
-            <h2>${t('The game')}</h2>
-            <div class="two">
-              <label>${t('Original console')}<select name="origin"><option value="">${t('Pick one')}</option>${Object.keys(PC_ORIGINS).filter((k) => k !== 'other').sort((x, y) => PC_ORIGINS[x].localeCompare(PC_ORIGINS[y])).map((k) => `<option value="${k}">${esc(PC_ORIGINS[k])}</option>`).join('')}<option value="other">${t('Other')}</option></select></label>
-              <label>${t('Which copy players need')}<input name="disc" maxlength="120" placeholder="${t('For example: USA disc, SLUS-21590')}"><small>${t('The region or version your recomp works with, if it matters.')}</small></label>
+          </div>
+          </div>
+          <div class="sx-pane" data-sx="2" data-pc-only>
+            <div class="sx-head"><h2>${t('Easy Setup')} <span class="sx-rec">${SVG_EZ}${t('Recommended')}</span></h2><p>${t('One small file in your release, recomplauncher.json, and players just drop in their disc and press Play. Your recomp doesn\'t change.')}</p></div>
+            <div class="sx-why">
+              <div><span class="sx-ic">${SVG_EZ}</span><span><b>${t('Disc in, press Play')}</b><span>${t('The launcher checks the player\'s copy and sets the game up.')}</span></span></div>
+              <div><span class="sx-ic">${SVG_SLIDERS}</span><span><b>${t('Settings in the launcher')}</b><span>${t('Resolution, frame rate and controls on its page.')}</span></span></div>
+              <div><span class="sx-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.8 6.6 19.8l1.2-6.1-4.5-4.2 6.1-.7z"/></svg></span><span><b>${t('The Easy Setup badge')}</b><span>${t('Shown on its tile, and players look for it.')}</span></span></div>
+            </div>
+            <div class="sx-box hot">
+              <div class="sx-box-h"><i>1</i><b>${t('Have your AI agent add it')}</b><small>${t('About ten minutes')}</small></div>
+              <pre class="sx-prompt" data-sx-prompt></pre>
+              <div class="sx-btns">${agentBtn('primary')}<a class="btn" href="/pc/sdk" target="_blank" rel="noopener">${t('Or read the SDK and do it yourself')}</a></div>
+            </div>
+            <div class="sx-box">
+              <div class="sx-box-h"><i>2</i><b>${t('Put it in a release, then check')}</b></div>
+              <div class="sx-check"><span class="form-note">${t('We look in your latest release for recomplauncher.json and read it.')}</span><button type="button" class="btn primary" data-sx-check>${t('Check my repo')}</button></div>
+              <div class="sx-res" data-sx-res hidden></div>
             </div>
             <fieldset class="sub-box sub-rl"><legend>${t('Works with RecompLauncher')}</legend>
               <p class="form-note">${tf('These make your recomp feel like it was made for RecompLauncher. Both come from one small file you add to your release, described in the {sdk}.', { sdk: `<a href="/pc/sdk" target="_blank" rel="noopener">${t('RecompLauncher SDK')}</a>` })}</p>
@@ -1229,8 +1248,11 @@
                 <span class="sub-q-t">${t('Would you add them in a future update?')}</span>
                 <div class="ai-yn"><label class="check"><input type="radio" name="rl_future" value="yes"> ${t('Yes')}</label><label class="check"><input type="radio" name="rl_future" value="maybe"> ${t('Maybe')}</label><label class="check"><input type="radio" name="rl_future" value="no"> ${t('No')}</label></div>
               </div>
-              <a class="btn sub-sdk-btn" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>
             </fieldset>
+          </div>
+          <div class="sx-pane" data-sx="3">
+            <div class="sx-head" data-pc-only><h2>${t('Details and art')}</h2><p>${t('What goes on its page: the words, what it has and the pictures.')}</p></div>
+          <div data-pc-only>
             <fieldset class="sub-box sub-ach"><legend>${t('Recomp Achievements')} <span class="sub-rec">${t('Recommended')}</span></legend>
               <p class="form-note">${t('RecompLauncher\'s own achievements. Not required, but players love them: our testers are already playing with achievements, and games that have them get played longer and come back to the front page.')}</p>
               <div class="sub-ach-how">
@@ -1275,10 +1297,15 @@
             <label class="pic">${t('Logo')}<input type="file" name="logo" accept="image/png,image/webp" data-pic="logo"><small>${t('Its title as a picture, on a transparent background. Shown over the backdrop.')}</small></label>
             <label class="pic"><span data-ps5-only>${t('Screenshots')}</span><span data-pc-only>${t('Screenshots of it running')} <span class="req">${t('needed')}</span></span><input type="file" name="shots[]" accept="image/png,image/jpeg,image/webp" multiple data-pic="shots"><small data-ps5-only>${t('Up to 4, from the PS5.')}</small><small data-pc-only>${t('At least one, up to 4. Show the game actually running in your recomp, in game, not a menu or a mockup.')}</small><span class="pv shots" data-pv="shots" aria-hidden="true"></span></label>
           </div>
+          </div>
+          <div class="sx-pane" data-sx="4">
+            <div class="sx-head" data-pc-only><h2>${t('Review and send')}</h2><p>${t('Check it over. Anything wrong? Press Change to go back to that step.')}</p></div>
+            <div class="sx-review" data-sx-review data-pc-only></div>
           <label>${t('Anything else?')} <span class="opt">${t('optional')}</span><textarea name="notes" rows="3" maxlength="2000" placeholder="${LAUNCHER ? t('Anything the developer of RecompStore should know').replace(/RecompStore/g, 'RecompLauncher') : t('Anything the developer of RecompStore should know')}"></textarea></label>
           <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
           <label class="check"><input type="checkbox" name="rights" value="1" required> ${t('I made this, or I\'m allowed to submit it. It doesn\'t include game files or anything else copyrighted.')}</label>
-          <div class="form-row"><button class="btn primary" type="submit">${t('Send it')}</button><span class="status" role="status"></span></div>
+          </div>
+          <div class="form-row sx-foot"><button type="button" class="btn sx-back" data-sx-back hidden>${SVG_BACK}${t('Back')}</button><button class="btn primary" type="submit">${t('Send it')}</button><button type="button" class="btn primary sx-next" data-sx-next hidden></button><span class="status" role="status"></span></div>
         </form>
       </article>`;
     setBackdrop(null);
@@ -1411,12 +1438,179 @@
       const subH = view.querySelector('.submit-page > h1');
       if (subH) subH.textContent = pc ? t('Submit your recomp') : t('Submit to RecompStore');
       const subLead = view.querySelector('.submit-page > .lead');
-      if (subLead) subLead.textContent = pc ? t('Made a PC recomp? Send it in for RecompLauncher. Everything you fill in here goes on its page, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.').replace(/RecompStore/g, 'RecompLauncher')
+      if (subLead) subLead.textContent = pc ? t('Made a PC recomp? Send it in. Four short steps, and everything you fill in goes on its page.')
         : t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.');
       needs.hidden = kindNow() !== 'games';
+      // (4.8) PC: the project link comes first, on its own row with Look it up; PS5: back among the basics.
+      const repoLab = form.querySelector('[data-repo-label]');
+      if (pc) form.querySelector('[data-repo-slot]').appendChild(repoLab);
+      else form.querySelector('[name="asset"]').closest('label').before(repoLab);
+      sxGo(pc ? sxStep : 0);
       // Even rows: an odd last field in a two-column row takes the whole row.
       form.querySelectorAll('.two').forEach((g) => { const vis = [...g.children].filter((c) => !c.hidden); g.children.length && [...g.children].forEach((c) => { c.style.gridColumn = ''; }); if (vis.length % 2) vis[vis.length - 1].style.gridColumn = '1 / -1'; });
     };
+    // (4.8) PC: the form in four steps (Your project, Easy Setup, Details and art, Review and send),
+    // one at a time, each checked before the next. PS5 keeps the whole form on one page.
+    const SX_N = 4;
+    let sxStep = 1, sxMax = 1;
+    let sxEz = null; // what Check my repo found: {key, has, easy, settings, dumps, tag}
+    const sxPanes = [...form.querySelectorAll('.sx-pane')];
+    const sxBack = form.querySelector('[data-sx-back]'), sxNext = form.querySelector('[data-sx-next]'), sxSend = form.querySelector('.sx-foot button[type="submit"]');
+    const sxRl = form.querySelector('.sub-rl');
+    const F = (k) => form.querySelector(`[name="${k}"]`);
+    const fv = (k) => String((F(k) && F(k).value) || '').trim();
+    const radio = (k) => (form.querySelector(`input[name="${k}"]:checked`) || {}).value || '';
+    const sxOn = () => platNow() === 'pc';
+    const sxRepoKey = () => { const pr = parseRepo(fv('repo')); return pr ? (pr.host ? pr.host + ':' : '') + pr.repo.toLowerCase() : ''; };
+    const sxEasy = () => !!(sxEz && sxEz.easy && sxEz.key === sxRepoKey());
+    function sxFoot() {
+      sxBack.hidden = sxStep === 1;
+      sxNext.hidden = sxStep === SX_N;
+      sxSend.hidden = sxStep !== SX_N;
+      const label = sxStep === 1 ? t('Next: Easy Setup') : sxStep === 2 ? (sxEasy() ? t('Next: Details and art') : t('Continue without Easy Setup')) : t('Next: Review');
+      sxNext.innerHTML = `<span>${esc(label)}</span>${SVG_NEXT}`;
+      sxNext.classList.toggle('primary', sxStep !== 2 || sxEasy());
+    }
+    function sxGo(n, scroll) {
+      const on = sxOn();
+      form.classList.toggle('sx-on', on);
+      if (!on) { sxPanes.forEach((p) => p.classList.remove('on')); sxBack.hidden = true; sxNext.hidden = true; sxSend.hidden = false; return; }
+      sxStep = Math.max(1, Math.min(SX_N, n || 1));
+      sxMax = Math.max(sxMax, sxStep);
+      sxPanes.forEach((p) => p.classList.toggle('on', +p.dataset.sx === sxStep));
+      form.querySelectorAll('[data-sx-go]').forEach((li) => {
+        const k = +li.dataset.sxGo;
+        li.className = k < sxStep ? 'done' : k === sxStep ? 'on' : '';
+        li.querySelector('button').disabled = k > sxMax;
+        li.querySelector('i').innerHTML = k < sxStep ? SVG_TICK : String(k);
+        if (k === sxStep) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+      });
+      sxFoot();
+      status.textContent = ''; status.className = 'status';
+      if (sxStep === 2) sxEnter2();
+      if (sxStep === 4) sxReview();
+      if (scroll) window.scrollTo({ top: Math.max(0, form.getBoundingClientRect().top + window.scrollY - 96), behavior: 'smooth' });
+    }
+    const sxBad = (msg, el, signIn) => ({ msg, el, signIn });
+    const sxCheck = {
+      1: () => {
+        if (!parseRepo(fv('repo'))) return sxBad(t('Add the GitHub or GitLab project.'), F('repo'));
+        if (!dev && !/gitlab\.com\//i.test(fv('repo'))) return sxBad(t('Sign in with GitHub first (free developer account, above), so we can confirm the project is yours.'), null, true);
+        if (!fv('name')) return sxBad(t('Give it a name.'), F('name'));
+        if (!fv('author')) return sxBad(t('Say who made it.'), F('author'));
+        if (!fv('contact')) return sxBad(t('Leave your email address.'), F('contact'));
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(fv('contact'))) return sxBad(t('Leave a real email address, so we can reach you.'), F('contact'));
+        if (!fv('version')) return sxBad(t('Add the version.'), F('version'));
+        if (!fv('origin')) return sxBad(t('Pick the console the game is from.'), F('origin'));
+        const sys = ['win', 'mac', 'linux'].filter((k) => F('sys_' + k).checked);
+        if (!sys.length) return sxBad(t('Switch on at least one system it runs on.'), F('sys_win'));
+        for (const k of sys) if (!fv('asset_' + k)) return sxBad(t('Name the release file for each system you switched on.'), F('asset_' + k));
+        return null;
+      },
+      2: () => {
+        if (!radio('rl_quick') || !radio('rl_settings')) return sxBad(t('Answer the two Works with RecompLauncher questions.'), form.querySelector('input[name=rl_quick]'));
+        if (radio('rl_quick') !== 'yes' && radio('rl_settings') === 'no' && !radio('rl_future')) return sxBad(t('Say whether you\'d add them in a future update.'), form.querySelector('input[name=rl_future]'));
+        if (radio('rl_quick') === 'setup' && !fv('setup_steps')) return sxBad(t('Write the steps players need to follow.'), F('setup_steps'));
+        return null;
+      },
+      3: () => {
+        if (!fv('description')) return sxBad(t('Add a description.'), F('description'));
+        if (!fv('needs')) return sxBad(t('Say what players need, like their own copy of the game.'), F('needs'));
+        if (!radio('ai')) return sxBad(t('Say whether AI tools helped make it.'), form.querySelector('input[name=ai]'));
+        if (!fixIcon && !(F('icon').files || []).length) return sxBad(t('Add an icon: square, 512×512 or bigger.'), F('icon'));
+        if (!fixShots && !(F('shots[]').files || []).length) return sxBad(t('Add at least one screenshot of it running.'), F('shots[]'));
+        return null;
+      },
+      4: () => (form.querySelector('input[name=rights]').checked ? null : sxBad(t('Tick the box to confirm you made it or may submit it.'), form.querySelector('input[name=rights]')))
+    };
+    const sxSay = (b) => {
+      status.textContent = b.msg; status.className = 'status bad';
+      if (b.signIn) who.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      else if (b.el) { b.el.scrollIntoView({ behavior: 'smooth', block: 'center' }); try { b.el.focus({ preventScroll: true }); } catch (e) { /* not focusable */ } }
+    };
+    // Every step up to (not including) n, checked: -> the first problem, on its step.
+    const sxUpTo = (n) => { for (let k = 1; k < n; k++) { const b = sxCheck[k](); if (b) return [k, b]; } return null; };
+    sxNext.addEventListener('click', () => {
+      const b = sxCheck[sxStep]();
+      if (b) { sxSay(b); return; }
+      sxGo(sxStep + 1, true);
+    });
+    sxBack.addEventListener('click', () => sxGo(sxStep - 1, true));
+    form.querySelectorAll('[data-sx-go] button').forEach((btn) => btn.addEventListener('click', () => {
+      const k = +btn.parentElement.dataset.sxGo;
+      if (k > sxStep) { const bad = sxUpTo(k); if (bad) { sxGo(bad[0], true); sxSay(bad[1]); return; } }
+      sxGo(k, true);
+    }));
+    form.querySelector('[data-sx-look]').addEventListener('click', () => {
+      if (!parseRepo(fv('repo'))) { status.textContent = t('Add the GitHub or GitLab project.'); status.className = 'status bad'; F('repo').focus(); return; }
+      relRepo = '';
+      if (dev && !/gitlab\.com\//i.test(fv('repo'))) lookup(fv('repo')); else readRelease();
+    });
+    // Step 2: the prompt, and whether recomplauncher.json is in the project yet.
+    const sxRes = form.querySelector('[data-sx-res]'), sxCheckBtn = form.querySelector('[data-sx-check]');
+    function sxEnter2() {
+      const pre = form.querySelector('[data-sx-prompt]');
+      if (!pre.textContent) pre.textContent = AGENT_PROMPT();
+      if (!sxEz || sxEz.key !== sxRepoKey()) sxProbe();
+      sxRl.hidden = sxEasy();
+    }
+    function sxProbe() {
+      const key = sxRepoKey();
+      if (!key) return;
+      sxCheckBtn.disabled = true;
+      sxRes.hidden = false;
+      sxRes.className = 'sx-res';
+      sxRes.innerHTML = `<span class="sx-res-ic">${SVG_WAIT}</span><div><b>${esc(t('Looking in your project…'))}</b></div>`;
+      fetch('/api/submit.php?a=sdk-check&repo=' + encodeURIComponent(fv('repo')) + '&asset=' + encodeURIComponent(fv('asset_win')), { cache: 'no-store' })
+        .then((r) => r.json()).catch(() => null).then((j) => {
+          sxCheckBtn.disabled = false;
+          if (sxRepoKey() !== key) return;
+          const box = (ok, title, line, chips) => {
+            sxRes.className = 'sx-res ' + (ok ? 'ok' : 'wait');
+            sxRes.innerHTML = `<span class="sx-res-ic">${ok ? SVG_TICK : SVG_WAIT}</span><div><b>${esc(title)}</b><span>${esc(line)}</span>${chips && chips.length ? `<ul>${chips.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div>`;
+          };
+          if (!j || !j.ok) { sxEz = null; box(false, t('We couldn\'t check just now'), (j && j.error) || t('We couldn\'t reach the project just now. Try again in a minute.')); sxFoot(); return; }
+          const there = j.has === 'repo' || j.has === 'release';
+          sxEz = { key, has: j.has, easy: there && !!j.easy, settings: !!j.settings, dumps: !!j.dumps, tag: j.tag || '' };
+          const where = j.has === 'repo' ? t('your repo') : (j.tag || t('your latest release'));
+          if (sxEz.easy) {
+            box(true, tf('Found it in {where}', { where }), tf('{name} gets Easy Setup.', { name: fv('name') || t('Your recomp') }),
+              [t('Easy Setup')].concat(sxEz.settings ? [t('Settings in the launcher')] : [], sxEz.dumps ? [t('Known good copies')] : []));
+            const q = form.querySelector('input[name="rl_quick"][value="yes"]'); if (q) q.checked = true;
+            const st = form.querySelector(`input[name="rl_settings"][value="${sxEz.settings ? 'yes' : 'no'}"]`); if (st) st.checked = true;
+            platCheck();
+          } else if (there && j.bad) box(false, t('Found recomplauncher.json, but we couldn\'t read it'), t('Check it against the schema in the SDK, then check again.'));
+          else if (there) box(false, t('Found recomplauncher.json, without Easy Setup yet'), t('Easy Setup needs its game and start parts. The prompt above covers them.'));
+          else if (j.norelease) box(false, t('No release yet'), t('Publish a release with your builds and the file inside, then check again.'));
+          else if (j.has === 'none') box(false, tf('Not in {tag} yet', { tag: j.tag || t('your latest release') }), t('Add the file, publish a new release, then check again. Not ready yet? You can still send it now and add the file later.'));
+          else box(false, t('We couldn\'t look inside your release'), t('Check again in a minute, or send it now and add the file later.'));
+          sxCheckBtn.textContent = sxEz.easy ? t('Check again') : t('Check my repo');
+          sxCheckBtn.classList.toggle('primary', !sxEz.easy);
+          sxRl.hidden = sxEz.easy;
+          sxFoot();
+        });
+    }
+    sxCheckBtn.addEventListener('click', sxProbe);
+    // A fixed field clears the last complaint.
+    form.addEventListener('input', () => { if (sxOn() && status.classList.contains('bad')) { status.textContent = ''; status.className = 'status'; } });
+    form.addEventListener('change', () => { if (sxOn() && status.classList.contains('bad')) { status.textContent = ''; status.className = 'status'; } });
+    // Step 4: everything at a glance, with a way back to each step.
+    function sxReview() {
+      const sys = ['win', 'mac', 'linux'].filter((k) => F('sys_' + k).checked).map((k) => ({ win: 'Windows', mac: 'macOS', linux: 'Linux' })[k]);
+      const shots = (F('shots[]').files || []).length || fixShots;
+      const pics = [(F('icon').files || []).length || fixIcon ? t('Icon') : '', shots ? tn(Math.min(4, shots), '1 screenshot', '{n} screenshots') : '',
+        (F('hero').files || []).length ? t('Backdrop') : '', (F('logo').files || []).length ? t('Logo') : ''].filter(Boolean).join(', ');
+      const yn = (v) => (v === 'yes' ? t('Yes') : v === 'no' ? t('No') : '');
+      const desc = fv('description');
+      const groups = [
+        [1, t('Your project'), [[t('Project'), fv('repo')], [t('Name'), fv('name')], [t('Made by'), fv('author')], [t('Email'), fv('contact')], [t('Version'), fv('version')], [t('Runs on'), sys.join(', ')], [t('Original console'), fv('origin') ? originName(fv('origin')) : '']]],
+        [2, t('Easy Setup'), [[t('Easy Setup'), sxEasy() ? tf('Yes, found in {where}', { where: sxEz.has === 'repo' ? t('your repo') : sxEz.tag }) : radio('rl_quick') === 'setup' ? t('Set up first') : yn(radio('rl_quick'))], [t('Settings in the launcher'), yn(radio('rl_settings'))]]],
+        [3, t('Details and art'), [[t('Description'), desc.length > 160 ? desc.slice(0, 157) + '…' : desc], [t('What players need'), fv('needs')], [t('Recomp Achievements'), ({ yes: t('Yes'), planned: t('It\'s planned'), no: t('Not yet') })[radio('rl_ach')] || ''], [t('AI-assisted'), yn(radio('ai'))], [t('Pictures'), pics]]]
+      ];
+      form.querySelector('[data-sx-review]').innerHTML = groups.map(([k, h, rows]) => `<section class="sx-rv"><header><b>${esc(h)}</b><button type="button" class="sx-rv-edit" data-sx-edit="${k}">${t('Change')}</button></header>
+        <dl>${rows.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd dir="auto">${dd ? esc(dd) : '<span class="muted">&ndash;</span>'}</dd></div>`).join('')}</dl></section>`).join('');
+      form.querySelectorAll('[data-sx-edit]').forEach((b) => b.addEventListener('click', () => sxGo(+b.dataset.sxEdit, true)));
+    }
     showPlat();
     // (3.6) PC: the systems it runs on, read from its latest GitHub release.
     const relBox = form.querySelector('[data-rel-status]');
@@ -1482,7 +1676,7 @@
           if (a) { form['asset_' + k].value = toPattern(a.name, relTag); form['sys_' + k].checked = true; filled++; }
         });
         relBox.textContent = (listed ? tf('Heads up: {repo} is already on RecompLauncher as {name}.', { repo, name: listed.name }) + ' ' : '')
-          + (relAssets.length ? tf(relAssets.length === 1 ? 'Read {tag}: 1 file. {filled}' : 'Read {tag}: {n} files. {filled}', { tag: relTag, n: relAssets.length, filled: filled ? t('We filled in what we found. Check it over.') : t('Pick the systems and name the files.') }) : tf('{tag} has no files to download yet.', { tag: relTag }));
+          + (relAssets.length ? tf(relAssets.length === 1 ? 'Read {tag}: 1 file. {filled}' : 'Read {tag}: {n} files. {filled}', { tag: relTag, n: relAssets.length, filled: filled ? t('We filled in what we found. Check it over.') : ['win', 'mac', 'linux'].some((k) => form['sys_' + k].checked && form['asset_' + k].value.trim()) ? t('Check the files below.') : t('Pick the systems and name the files.') }) : tf('{tag} has no files to download yet.', { tag: relTag }));
         relBox.className = 'sub-rel ' + (listed ? 'bad' : 'ok');
         platCheck();
       });
@@ -1520,6 +1714,7 @@
       ['repo', t('Add the GitHub or GitLab project.')], ['description', t('Add a description.')]];
     form.addEventListener('submit', (e) => {
       e.preventDefault();
+      if (sxOn()) { const bad = sxUpTo(SX_N + 1); if (bad) { sxGo(bad[0], true); sxSay(bad[1]); return; } }
       const fd = new FormData(form);
       for (const [k, msg] of need) if (!String(fd.get(k) || '').trim()) { status.textContent = msg; status.className = 'status bad'; form.querySelector(`[name="${k}"]`).focus(); return; }
       // (4.6) An email is required, and a GitHub project is sent from the GitHub account it belongs to.
@@ -1594,6 +1789,93 @@
 
   // ---- Contact: the two forms, a message, and the email address ---------------------------
   const CONTACT_EMAIL = 'info@recompstore.com';
+  // (4.8) The Team (recomplauncher.com/team): who runs RecompLauncher, so a developer someone reaches
+  // out to can check it's really us. The team comes from the admin's Team page (only who's ticked to
+  // show); under it, everyone who has worked on the code, from GitHub; then how to help.
+  const TM_ICON = {
+    gh: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>',
+    dc: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18.2 18.2 0 0 0-5.5 0L8.7 3a19.5 19.5 0 0 0-4.9 1.5C.7 9.1-.2 13.6.3 18.1a19.8 19.8 0 0 0 6 3l1.3-2.1a12.8 12.8 0 0 1-2-1l.5-.4a14 14 0 0 0 12 0l.5.4c-.6.4-1.3.7-2 1l1.3 2.1a19.7 19.7 0 0 0 6-3c.5-5.2-.9-9.7-3.6-13.7zM8.3 15.3c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4z"/></svg>',
+    go: '<svg class="tm-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>',
+    copy: '<svg class="tm-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6.1c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V5.6z"/><path d="m8.8 12.2 2.3 2.3 4.4-4.6"/></svg>',
+    code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/></svg>',
+    lang: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.2 2.6 5.8 6 7.5M11 5c-.8 3.8-3.4 6.7-7 8.5"/><path d="m13 21 4-9 4 9M14.4 18h5.2"/></svg>',
+    test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v6.2L4.6 18.4A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.4-2.6L14 9.2V3"/><path d="M7.5 14.5h9"/></svg>',
+    heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.3s-7.6-4.6-7.6-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.6 2.7c0 5.6-7.6 10.2-7.6 10.2z"/></svg>'
+  };
+  const tmHue = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  // A GitHub picture, with the first letter underneath for when it doesn't load.
+  const tmAv = (name, src, soft) => `<span class="tm-av${soft ? ' soft' : ''}" style="--h:${tmHue(name)}" aria-hidden="true">${esc(String(name || '?').slice(0, 1).toUpperCase())}${src ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}</span>`;
+  function teamPage() {
+    const REPO = 'https://github.com/elripalda/RecompLauncher';
+    const help = [
+      ['code', t('Code'), t('Send a pull request'), t('RecompLauncher is open source. Pick an open issue on GitHub and have a go.'), t('Open issues'), REPO + '/issues', true],
+      ['lang', t('Translations'), t('Put it in your language'), t('Spot a line that reads wrong in your language? Tell us on GitHub and we\'ll fix it.'), t('Tell us'), REPO + '/issues/new', true],
+      ['test', t('Testing'), t('Try betas, send logs'), t('When something breaks, send a report from the launcher. The log comes with it, so we can see what went wrong.'), t('Get the beta'), '/get', false],
+      ['heart', t('Donate'), t('Keep it running'), t('Servers, code signing and test hardware cost money. Ko-fi helps cover them.'), 'Ko-fi', 'https://ko-fi.com/recomp', true]
+    ];
+    view.innerHTML = `
+      <article class="page tm">
+        <header class="page-head">
+          <span class="kicker">RecompLauncher</span>
+          <h1>${t('The Team')}</h1>
+          <p class="lead">${t('RecompLauncher is made by a small team. If someone tells you they\'re with us, check them against this page.')}</p>
+        </header>
+        <div class="tm-team" data-tm-team><div class="glass tm-card tm-wait"></div><div class="glass tm-card tm-wait"></div></div>
+        <div class="glass tm-check">
+          <span class="tm-shield">${TM_ICON.shield}</span>
+          <div><strong>${t('Got a message from someone saying they\'re with us?')}</strong>
+          <p>${t('It\'s us only if the account matches one of the cards above. We never ask for money, passwords or game files. Not sure? Ask us before you reply.')}</p></div>
+          <a class="btn" href="/contact">${t('Ask us')}</a>
+        </div>
+        <section class="tm-sec" data-tm-people-sec>
+          <h2>${t('Everyone who\'s helped build it')}</h2>
+          <p class="tm-sub">${t('Straight from GitHub, so new contributors show up on their own.')}</p>
+          <div class="tm-people" data-tm-people></div>
+        </section>
+        <section class="tm-sec">
+          <h2>${t('Help out')}</h2>
+          <p class="tm-sub">${t('You don\'t need to write code to help.')}</p>
+          <div class="tm-help">
+            ${help.map(([ic, k, h, d, more, href, out]) => `<a class="glass help-card${ic === 'heart' ? ' tm-kofi' : ''}" href="${href}"${out ? ' target="_blank" rel="noopener"' : ''}><span class="tm-ic">${TM_ICON[ic]}</span><span class="kicker">${k}</span><strong>${h}</strong><span class="tm-d">${d}</span><span class="tm-more">${more} &rarr;</span></a>`).join('')}
+          </div>
+        </section>
+      </article>`;
+    setBackdrop(null);
+    const here = current();
+    fetch('/api/team.php').then((r) => (r.ok ? r.json() : null)).catch(() => null).then((j) => {
+      if (current() !== here) return;
+      const box = view.querySelector('[data-tm-team]');
+      const team = (j && j.team) || [];
+      const people = (j && j.people) || [];
+      if (box) {
+        const n = team.length;
+        box.style.setProperty('--cols', n <= 3 ? Math.max(1, n) : n % 3 === 0 ? 3 : 2);
+        box.innerHTML = n ? team.map((p) => `<div class="glass tm-card">
+            <div class="tm-top">${tmAv(p.name, p.avatar)}<div class="tm-name"><strong dir="auto">${esc(p.name)}</strong>${p.github ? `<span class="tm-h">@${esc(p.github)}</span>` : ''}${p.title ? `<span class="tm-role">${esc(p.title)}</span>` : ''}</div></div>
+            ${p.about ? `<p class="tm-does" dir="auto">${esc(p.about)}</p>` : ''}
+            <div class="tm-ids">
+              ${p.github ? `<a class="tm-id" href="https://github.com/${encodeURIComponent(p.github)}" target="_blank" rel="noopener">${TM_ICON.gh}<span><small>GitHub</small><b>${esc(p.github)}</b></span>${TM_ICON.go}</a>` : ''}
+              ${p.discord ? `<button type="button" class="tm-id" data-tm-copy="${esc(p.discord)}" title="${esc(t('Copy the Discord name'))}">${TM_ICON.dc}<span><small>Discord</small><b>${esc(p.discord)}</b></span>${TM_ICON.copy}</button>` : ''}
+            </div>
+          </div>`).join('') : `<p class="muted">${t('The team list didn\'t load. Try again in a minute.')}</p>`;
+      }
+      const grid = view.querySelector('[data-tm-people]');
+      if (grid) {
+        if (!people.length) { view.querySelector('[data-tm-people-sec]').hidden = true; return; }
+        // The "You?" tile fills whatever is left of the last row, so no row has a gap.
+        [4, 3, 2].forEach((k) => grid.style.setProperty('--fill' + k, k - (people.length % k)));
+        grid.innerHTML = people.map((p) => `<a class="tm-person" href="https://github.com/${encodeURIComponent(p.login)}" target="_blank" rel="noopener">${tmAv(p.login, p.avatar, true)}<span><b>${esc(p.login)}</b><small>${esc(tn(p.commits, '1 commit', '{n} commits'))}</small></span></a>`).join('')
+          + `<a class="tm-person tm-you" href="${REPO}" target="_blank" rel="noopener"><span class="tm-av" aria-hidden="true">+</span><span><b>${t('You?')}</b><small>${t('Start on GitHub')}</small></span></a>`;
+      }
+    });
+    view.querySelector('.tm').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tm-copy]');
+      if (!b || !navigator.clipboard) return;
+      navigator.clipboard.writeText(b.dataset.tmCopy).then(() => { const s = b.querySelector('small'); if (!s) return; s.textContent = t('Copied'); setTimeout(() => (s.textContent = 'Discord'), 1400); }, () => {});
+    });
+  }
+
   function contactPage() {
     view.innerHTML = `
       <article class="page contact">
@@ -2078,7 +2360,7 @@
   // (4.8) recomplauncher.com also has the developer hub (/dev, which the old /developers and /hub
   // addresses become), developers' pages, accounts, Submit, Contact and Copyright, so nobody who came for
   // the PC side is sent over to recompstore.com.
-  const LAUNCHER_OWN = /^\/(dev|dev\/[a-z0-9-]{1,40}|signin|account|account\/reset|library|terms|privacy|submit|contact|dmca)$/;
+  const LAUNCHER_OWN = /^\/(dev|dev\/[a-z0-9-]{1,40}|signin|account|account\/reset|library|terms|privacy|submit|contact|dmca|team)$/;
   const DEV_JOIN = LAUNCHER ? '/dev' : '/developers';
   const DEV_HOME = LAUNCHER ? '/dev' : '/hub';
   const pcOut = (h) => (h === '/pc/launcher' ? '/get' : LAUNCHER && (h === '/developers' || h === '/hub') ? '/dev' : h.replace(/^\/pc/, '') || '/');
@@ -2164,7 +2446,13 @@
   const shortGame = (g) => (/: /.test(g) ? String(g).split(': ').slice(1).join(': ') : g);
   const fitAttrs = (full, short) => (short && short !== full ? ` data-short="${esc(short)}" data-full="${esc(full)}"` : '');
   const starCount = (n) => { try { return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n); } catch (e) { return fmtNum(n); } };
-  const osBadges = (a) => (OS_LOGOS.length && (a.systems || []).length ? `<span class="pc-os" aria-label="${esc((a.systems || []).map((k) => SYS_NAMES[k] || k).join(', '))}">${['windows', 'macos', 'linux'].filter((k) => a.systems.includes(k)).map(osIcon).join('')}</span>` : '');
+  // (4.8) The PS5 version of the same game, when RecompStore has one (pc-catalog.json's titles pair them).
+  const ps5Twin = (id) => { const tt = pcCat && pcTitleOf('pc', id); return (tt && (tt.ps5 || [])[0]) || null; };
+  const osBadges = (a) => {
+    if (!OS_LOGOS.length || !(a.systems || []).length) return '';
+    const p5 = ps5Twin(a.id);
+    return `<span class="pc-os" aria-label="${esc((a.systems || []).map((k) => SYS_NAMES[k] || k).concat(p5 ? [t('Also on PS5')] : []).join(', '))}">${['windows', 'macos', 'linux'].filter((k) => a.systems.includes(k)).map(osIcon).join('')}${p5 ? '<b class="pc-os-ps5" aria-hidden="true">PS5</b>' : ''}</span>`;
+  };
   // (4.1) Long lists come in pages: 84 tiles (12 rows of 7, even at 6, 4, 3 and 2 across too), so
   // the browser never draws a thousand covers at once.
   const PC_PER_PAGE = 84;
@@ -3224,8 +3512,9 @@
     const systems = (a.systems || []).slice().sort((x, y) => (x === os ? -1 : y === os ? 1 : 0));
     const when = a.released ? new Date(a.released + 'T12:00:00Z') : null;
     const first = a.first ? new Date(a.first + 'T12:00:00Z') : null;
+    const p5 = ps5Twin(a.id);
     const facts = [
-      [t('Runs on'), (a.systems || []).length ? `<span class="pc-sys">${a.systems.map((x) => `<span>${osIcon(x)}${SYS_NAMES[x]}</span>`).join('')}</span>` : ''],
+      [t('Runs on'), (a.systems || []).length ? `<span class="pc-sys">${a.systems.map((x) => `<span>${osIcon(x)}${SYS_NAMES[x]}</span>`).join('')}${p5 ? `<a class="pc-sys-ps5" href="/game/${encodeURIComponent(p5.id)}" title="${esc(t('Also on PS5, through RecompStore'))}">PS5${SVG_OUT}</a>` : ''}</span>` : ''],
       [t('Last updated'), when ? `${esc(ago(when.toISOString()))}<small>${esc(when.toLocaleDateString(locale(), { dateStyle: 'medium' }))}</small>` : ''],
       [t('Version'), esc(a.version || '')], [t('Download'), esc(a.size || '')],
       [t('Downloads'), a.downloads ? esc(fmtNum(a.downloads)) : ''], [t('Played on RecompLauncher'), a.players ? `${esc(fmtNum(a.players))}<small>${esc(t('PCs in the last 90 days'))}</small>` : ''], [byHost(a.host, t('Stars on GitHub'), t('Stars on GitLab'), t('Stars')), a.stars ? esc(fmtNum(a.stars)) : ''],
@@ -3272,7 +3561,7 @@
             <div class="pc-game-head">
               ${a.cover ? `<img class="pc-game-cover" src="${esc(thumb(a.cover, 400))}" alt="" width="200" height="300">` : ''}
               <div class="pc-game-words">
-                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}</div>
+                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}${p5 ? `<a class="pc-pill ps5-pill" href="/game/${encodeURIComponent(p5.id)}" title="${esc(t('Also on PS5, through RecompStore'))}">${t('Also on PS5')}${SVG_OUT}</a>` : ''}</div>
                 <h1 dir="auto">${esc(a.name)}</h1>
                 ${a.game && a.game !== a.name ? `<p class="pc-based big">${SVG_DISC}${tf('Rebuilt from {game}', { game: `<strong dir="auto">${esc(a.game)}</strong>` })}</p>` : ''}
                 ${pcByLine(a)}
@@ -3953,6 +4242,7 @@
       .map((a) => `<a href="${a.getAttribute('href')}"${a.hasAttribute('aria-current') ? ' aria-current="page"' : ''}>${esc(a.textContent)}</a>`).join('');
     nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">${t('For developers')}</span>
       ${document.body.dataset.platform === 'pc' ? `<a href="/pc/sdk">${t('RecompLauncher SDK')}</a>` : ''}<a href="/developers">${t('Developer accounts')}</a><a href="/developers?signin=1">${t('Developer sign in')}</a></div>`);
+    if (LAUNCHER) nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">RecompLauncher</span><a href="/team">${t('The Team')}</a><a href="/contact">${t('Contact')}</a></div>`);
   }
   // (4.8) Whether it's open goes by its class, not by hidden: a tap while it was still sliding
   // shut used to do nothing. And a link in it closes it at once, before the new page is drawn, so
@@ -4227,7 +4517,7 @@
       [t('Get started'), [['/pc/how', t('How it works')], ['/pc/launcher', t('Get RecompLauncher')]]],
       [t('Developers'), [['/pc/sdk', t('RecompLauncher SDK')], ['/dev', t('Developer accounts')], ['/dev?signin=1', t('Developer sign in')], ['/submit', t('Submit a game')], ['/pc/press', t('Press kit')]]],
       // (4.8) RecompLauncher's own Contact, Copyright and Terms pages; RecompStore is one link for PS5.
-      [t('About'), [['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA'], ['/terms', t('Terms and Privacy')], ['/status', t('Status')], ['/', 'RecompStore "PS5"']]],
+      [t('About'), [['/team', t('The Team')], ['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA'], ['/terms', t('Terms and Privacy')], ['/status', t('Status')], ['/', 'RecompStore "PS5"']]],
     ] : [
       [t('Store'), [['/', t('Discover')], ...cats.map((c) => [c.route, t(c.name)]), ...(cat.soon && cat.soon.length ? [['/soon', t('Coming soon')]] : []), ['/pc', 'RecompLauncher']]],
       [t('Get started'), [['/get', t('Get RecompStore')], ['/how', t('How it works')], ['/beta', t('Betas')], ...(v2on() ? [['/link', t('Link your PS5')]] : [])]],
@@ -6926,7 +7216,7 @@
   // (2.6) The tab's title, the same as the server's (page.php, share.php) for each page.
   const PAGE_TITLES = {
     '/games': N_('PS5 homebrew games'), '/emulators': N_('PS5 emulators'), '/apps': N_('PS5 homebrew apps'), '/tools': N_('PS5 homebrew tools'),
-    '/how': N_('How it works'), '/get': N_('How to install RecompStore on a jailbroken PS5'), '/about': N_('About'), '/contact': N_('Contact'), '/dmca': 'Copyright & DMCA', '/submit': N_('Submit to RecompStore'),
+    '/how': N_('How it works'), '/get': N_('How to install RecompStore on a jailbroken PS5'), '/about': N_('About'), '/contact': N_('Contact'), '/team': N_('The Team'), '/dmca': 'Copyright & DMCA', '/submit': N_('Submit to RecompStore'),
     '/report': N_('Report a bug'), '/ids': N_('Title IDs'), '/press': N_('Press kit'), '/beta': N_('Betas'), '/developers': N_('For developers'), '/hub': N_('Developer hub'), '/soon': N_('Coming soon'), '/link': N_('Link your PS5'), '/my-ps5': N_('My PS5'),
   };
   // (2.7.1) An app's title says what it is on PS5, as the server's does (share.php), so search
@@ -7004,6 +7294,7 @@
     else if (h === '/report') formPage('bug');
     else if (h === '/submit') submitPage();
     else if (h === '/contact') contactPage();
+    else if (h === '/team' && LAUNCHER) teamPage();
     else if (h === '/dmca') dmcaPage();
     else if (h === '/press') pressPage();
     else if (h === '/beta') betaPage();

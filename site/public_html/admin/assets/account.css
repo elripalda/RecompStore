@@ -56,3 +56,11 @@ form.inline input{width:140px}
 .member-remove{display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line)}
 .member-remove label{margin:0;flex:1;min-width:220px}
 .once-card{border-color:rgba(52,242,232,.45)}
+/* (4.8) On the website: how someone shows on recomplauncher.com/team. */
+.team-pub{grid-template-columns:repeat(4,minmax(0,1fr));margin:6px 0 14px;padding:14px 0 0;border-top:1px solid var(--line)}
+.team-pub h3{grid-column:1/-1;margin:0 0 2px;font-size:16px}
+.team-pub>p,.team-pub>label.check{grid-column:1/-1;margin:0 0 12px}
+.team-pub .wide{grid-column:span 3}
+.team-pub .go{grid-column:1/-1}
+@media (max-width:980px){.team-pub{grid-template-columns:repeat(2,minmax(0,1fr))}.team-pub .wide{grid-column:1/-1}}
+@media (max-width:560px){.team-pub{grid-template-columns:minmax(0,1fr)}}

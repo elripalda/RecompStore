@@ -67,7 +67,7 @@ try {
 
     // (4.8) recomplauncher.com's own developer hub (/dev), developer pages, accounts and Submit page:
     // RecompLauncher's names and words, so PC developers and players never meet recompstore.com.
-    if (rs_launcher() && (in_array($p, ['developers', 'hub', 'dev', 'submit', 'contact', 'dmca'], true) || str_starts_with($p, 'acct-'))) {
+    if (rs_launcher() && (in_array($p, ['developers', 'hub', 'dev', 'submit', 'contact', 'dmca', 'team'], true) || str_starts_with($p, 'acct-'))) {
         $nameL = fn(string $title) => $title . ' · RecompLauncher';
         $navL = '<nav><a href="/">RecompLauncher</a> · <a href="/all">' . $e(t('All PC recomps')) . '</a> · <a href="/sdk">' . $e(t('RecompLauncher SDK')) . '</a> · <a href="/dev">' . $e(t('For developers')) . '</a></nav>';
         $devDesc = t('A free developer account on RecompLauncher: claim your recomps, keep their pages up to date, see your numbers and answer your players\' reports. We approve every account by hand.');
@@ -103,6 +103,9 @@ try {
         } elseif ($p === 'contact') {
             $m = ['title' => $nameL(t('Contact')), 'path' => '/contact', 'desc' => t('Questions, ideas or problems with RecompLauncher: send us a message.'),
                 'body' => '<h1>' . $e(t('Contact')) . '</h1>' . $navL];
+        } elseif ($p === 'team') {
+            $d = t('The people who run RecompLauncher, with their GitHub and Discord, and everyone who has worked on its code. If someone says they\'re with us, check them here.');
+            $m = ['title' => $nameL(t('The Team')), 'path' => '/team', 'desc' => $d, 'body' => '<h1>' . $e(t('The Team')) . '</h1><p>' . $e($d) . '</p>' . $navL];
         } elseif ($p === 'dmca') {
             $m = ['title' => 'Copyright & DMCA · RecompLauncher', 'path' => '/dmca', 'langs' => false,
                 'desc' => 'RecompLauncher doesn\'t host any games or game files. Every recomp is its developer\'s own project on GitHub. How to send a copyright notice or counter-notice.',

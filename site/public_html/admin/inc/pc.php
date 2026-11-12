@@ -689,6 +689,57 @@ function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false)
     return $out;
 }
 
+// (4.8) Submit > Easy Setup, "Check my repo": the same look as the SDK check (the repo's top folder,
+// then the top of the newest release's zip) for a project that may not be listed yet. Releases are read
+// fresh (a minute), so a release published a moment ago is seen. Nothing is kept.
+// -> ['has' => repo|release|none|unknown, 'tag', 'easy', 'settings', 'dumps', 'norelease']
+function rs_pc_sdk_probe(string $repo, string $host, string $pat): array {
+    $out = ['has' => 'unknown'];
+    $read = function (string $txt) use (&$out, $repo) {
+        $k = rs_pc_sdk_keys($txt);
+        $keys = (array)($k['keys'] ?? []);
+        $out['easy'] = in_array('game', $keys, true) && in_array('start', $keys, true);
+        $out['settings'] = in_array('settings', $keys, true) || in_array('config', $keys, true);
+        $out['dumps'] = !empty($k['dumps']);
+        $out['bad'] = !$keys; // there, but not JSON we can read
+    };
+    if ($host === '') {
+        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
+        if ($r['status'] === 200) {
+            $out['has'] = 'repo';
+            $j = json_decode((string)$r['body'], true);
+            $read(is_array($j) && isset($j['content']) ? (string)base64_decode((string)$j['content']) : '');
+        } elseif ($r['status'] === 404) $out['has'] = 'none';
+    }
+    $rel = rs_host_releases($host, $repo, 60);
+    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    $x = null;
+    foreach ($list as $y) if (empty($y['draft']) && empty($y['prerelease'])) { $x = $y; break; }
+    if (!$x) foreach ($list as $y) if (empty($y['draft'])) { $x = $y; break; }
+    if (!$x) { $out['norelease'] = $rel['status'] === 200; return $out; }
+    $out['tag'] = (string)($x['tag_name'] ?? ($x['name'] ?? ''));
+    if ($out['has'] === 'repo') return $out;
+    // The zips to look in: the Windows file they named, else any zip that looks like a build (two at most).
+    $zips = [];
+    foreach ((array)$x['assets'] as $f) {
+        $n = (string)($f['name'] ?? '');
+        if (!preg_match('/\.zip$/i', $n) || preg_match('/source|src|symbols|debug|pdb/i', $n)) continue;
+        if ($pat !== '' && rs_pattern_matches($pat, $n)) array_unshift($zips, $f); else $zips[] = $f;
+    }
+    foreach (array_slice($zips, 0, 2) as $f) {
+        $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
+        if (empty($z['ok'])) continue;
+        if ($out['has'] === 'unknown') $out['has'] = 'none';
+        foreach ((array)$z['entries'] as $n => $en) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) {
+            $out['has'] = 'release';
+            $txt = rs_zip_file((string)$f['browser_download_url'], $en, 400000);
+            $read(is_string($txt) ? $txt : '');
+            return $out;
+        }
+    }
+    return $out;
+}
+
 // (4.6) Which of our badges a README has: "launcher" (Get it on RecompLauncher), "store" (Get it on
 // RecompStore) and "dev" (Verified developer on RecompStore, which links to the developer's page, not
 // the app). Any of them counts as a badge in the SDK support table.

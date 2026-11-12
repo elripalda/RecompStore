@@ -6,6 +6,8 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 rs_require_login();
 rs_roles_schema();
+require_once __DIR__ . '/inc/teampub.php';
+rs_tp_schema();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
@@ -23,6 +25,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_team_save($id, (string)($_POST['display_name'] ?? ''), (string)($_POST['role'] ?? ''), (array)($_POST['stores'] ?? []));
             rs_log('team', 'changed', $who . ': ' . ($_POST['role'] ?? '') . ', ' . implode('+', (array)($_POST['stores'] ?? [])));
             rs_flash('Saved ' . $who . '.');
+        } elseif ($act === 'pub') {
+            // (4.8) How they show on recomplauncher.com/team.
+            rs_tp_save($id, $_POST);
+            rs_log('team', 'website', $who . ': ' . (!empty($_POST['show']) ? 'shown' : 'hidden'));
+            rs_flash(!empty($_POST['show']) ? $who . ' shows on the Team page.' : $who . ' doesn\'t show on the Team page.');
         } elseif ($act === 'reset') {
             $pw = rs_team_reset($id);
             $_SESSION['team_once'] = ['user' => $who, 'pw' => $pw, 'new' => false];
@@ -55,6 +62,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $team = rs_team();
+// (4.8) What each one shows on recomplauncher.com/team.
+$pub = [];
+foreach (rs_db()->query('SELECT id, pub_show, pub_name, pub_title, pub_github, pub_discord, pub_about, pub_order FROM users') as $r) $pub[(int)$r['id']] = $r;
 $once = $_SESSION['team_once'] ?? null;
 unset($_SESSION['team_once']);
 $meId = (int)$_SESSION['uid'];
@@ -135,6 +145,7 @@ Temporary password: <?= h($once['pw']) ?></pre>
         <span class="role-chip role-<?= h((string)$t['role']) ?>"><?= h(RS_ROLES[$t['role']] ?? $t['role']) ?></span>
         <?php foreach (explode(',', (string)$t['stores']) as $s): if (!isset(RS_STORES[$s])) continue; ?><span class="store-chip store-<?= h($s) ?>"><?= h(RS_STORES[$s]) ?></span><?php endforeach; ?>
         <?php if ((int)$t['twostep']): ?><span class="pill ok" title="Two-step login is on">2-step</span><?php endif; ?>
+        <?php if (!empty($pub[$tid]['pub_show'])): ?><span class="pill ok" title="Shown on recomplauncher.com/team">On the website</span><?php endif; ?>
         <?php if ((int)$t['must_change']): ?><span class="pill warn" title="Hasn't set their own password yet">Invited</span><?php endif; ?>
         <?php if ($off): ?><span class="pill">Switched off</span><?php endif; ?>
       </div>
@@ -146,6 +157,20 @@ Temporary password: <?= h($once['pw']) ?></pre>
         <label>Name<input name="display_name" maxlength="80" value="<?= h((string)$t['display_name']) ?>"></label>
         <label>Role<select name="role"><?= $rolePick((string)$t['role']) ?></select></label>
         <fieldset><legend>Stores</legend><div class="row"><?= $storePick((string)$t['stores']) ?></div></fieldset>
+        <div class="go"><button class="btn primary">Save</button></div>
+      </form>
+      <?php $pb = $pub[$tid] ?? []; ?>
+      <form method="post" class="team-add team-pub">
+        <?= $csrf ?><input type="hidden" name="action" value="pub"><input type="hidden" name="id" value="<?= $tid ?>">
+        <h3>On the website</h3>
+        <p class="muted small">recomplauncher.com/team, so developers can check that someone who reaches out is really with us. Leave a box empty to use their name and role.</p>
+        <label class="check"><input type="checkbox" name="show" value="1"<?= !empty($pb['pub_show']) ? ' checked' : '' ?>> Show on the Team page</label>
+        <label>Name<input name="name" maxlength="60" value="<?= h((string)($pb['pub_name'] ?? '')) ?>" placeholder="<?= h((string)($t['display_name'] ?: $t['username'])) ?>"></label>
+        <label>Title<input name="title" maxlength="40" value="<?= h((string)($pb['pub_title'] ?? '')) ?>" placeholder="<?= h(RS_ROLES[$t['role']] ?? '') ?>"></label>
+        <label>GitHub<input name="github" maxlength="40" value="<?= h((string)($pb['pub_github'] ?? '')) ?>" placeholder="username" spellcheck="false"></label>
+        <label>Discord<input name="discord" maxlength="40" value="<?= h((string)($pb['pub_discord'] ?? '')) ?>" placeholder="username" spellcheck="false"></label>
+        <label class="wide">What they do<input name="about" maxlength="200" value="<?= h((string)($pb['pub_about'] ?? '')) ?>" placeholder="One line, like: Talks to developers and tests every beta."></label>
+        <label>Order<input name="order" type="number" min="-99" max="99" value="<?= (int)($pb['pub_order'] ?? 0) ?>"></label>
         <div class="go"><button class="btn primary">Save</button></div>
       </form>
       <div class="member-actions">

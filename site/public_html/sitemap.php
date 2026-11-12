@@ -47,7 +47,7 @@ if (!$L) foreach (rs_seo_devs() as $d) {
 }
 // (4.8) RecompLauncher's developer hub, Submit page and each developer with a PC recomp.
 if ($L) {
-    array_push($urls, ['/dev', '0.6'], ['/submit', '0.5'], ['/contact', '0.3'], ['/dmca', '0.3']);
+    array_push($urls, ['/dev', '0.6'], ['/submit', '0.5'], ['/team', '0.4'], ['/contact', '0.3'], ['/dmca', '0.3']);
     foreach (rs_seo_devs() as $d) {
         foreach ($pcApps as $a) if (($a['dev'] ?? '') === $d['slug']) { $urls[] = ['/dev/' . $d['slug'], '0.5']; break; }
     }

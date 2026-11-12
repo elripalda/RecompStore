@@ -74,7 +74,7 @@ RewriteRule ^dev/?$ page.php?p=developers [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
 RewriteRule ^dev/([a-z0-9-]{1,40})/?$ page.php?p=dev&slug=$1 [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
-RewriteRule ^(submit|contact|dmca)/?$ page.php?p=$1 [L,QSA]
+RewriteRule ^(submit|contact|dmca|team)/?$ page.php?p=$1 [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
 RewriteRule ^(signin|account|library|terms|privacy)/?$ page.php?p=acct-$1 [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
@@ -92,6 +92,9 @@ RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
 RewriteRule ^pc/?$ https://recomplauncher.com/ [L,R=301]
 RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
 RewriteRule ^pc/(.+?)/?$ https://recomplauncher.com/$1 [L,R=301]
+# (4.8) The Team page lives on recomplauncher.com.
+RewriteCond %{HTTP_HOST} ^(www\.)?recompstore\.com$ [NC]
+RewriteRule ^team/?$ https://recomplauncher.com/team [L,R=301]
 
 # A game's own link, /game/<ID> (Coming soon: /soon/<ID>), and its preview picture, /og/<ID>.jpg:
 # shared anywhere, the link shows a card with the game's name and art.
