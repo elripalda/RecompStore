@@ -276,11 +276,21 @@ function rs_check_csrf(): void {
 
 function h(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
+// (4.6) A change to the session on a page that already let it go (rs_session_release): it's opened
+// again for just this write and closed right after, so messages and one-time values survive the reload.
+function rs_session_write(callable $fn): void {
+    if (session_status() === PHP_SESSION_ACTIVE || empty($GLOBALS['rs_session_done'])) { rs_session(); $fn(); return; }
+    if (headers_sent()) { $fn(); return; }
+    if (!@session_start()) { $fn(); return; }
+    $fn();
+    session_write_close();
+}
+
 function rs_flash(?string $msg = null, string $kind = 'ok'): ?array {
     rs_session();
-    if ($msg !== null) { $_SESSION['flash'] = ['msg' => $msg, 'kind' => $kind]; return null; }
+    if ($msg !== null) { rs_session_write(function () use ($msg, $kind) { $_SESSION['flash'] = ['msg' => $msg, 'kind' => $kind]; }); return null; }
     $f = $_SESSION['flash'] ?? null;
-    unset($_SESSION['flash']);
+    if ($f !== null) rs_session_write(function () { unset($_SESSION['flash']); });
     return $f;
 }
 
