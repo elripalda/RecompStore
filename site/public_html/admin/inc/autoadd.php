@@ -148,7 +148,16 @@ function rs_auto_run(int $id): void {
     try {
         // 1. The repo and its newest release (the finder's reader).
         rs_auto_step($id, 'read', 'run');
-        $f = rs_pc_find_one($job['link']);
+        // (4.7) GitHub slow for a moment: the site pauses asking it (rs_gh_cool, 90 s to 5 min), and
+        // every read in that window fails at once. In the background we can wait it out and try again.
+        for ($try = 0; ; $try++) {
+            $f = rs_pc_find_one($job['link']);
+            if (!empty($f['ok']) || $try >= 4 || !preg_match('/didn.t answer|busy/i', (string)($f['why'] ?? ''))) break;
+            rs_auto_step($id, 'read', 'run', 'GitHub is busy for a moment; trying again shortly');
+            $cool = rs_gh_cool_file('github');
+            clearstatcache(true, $cool);
+            sleep(max(15, min(310, (is_file($cool) ? (int)filemtime($cool) - time() : 0) + 5)));
+        }
         if (empty($f['ok'])) throw new RuntimeException($f['why'] ?? 'That repo couldn\'t be read.');
         $host = rs_host_norm((string)($f['host'] ?? (rs_repo_from_link($job['link'])['host'] ?? '')));
         $key = rs_repo_key($host, (string)$f['repo']);
