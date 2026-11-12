@@ -140,7 +140,16 @@ rs_head('Auto-add');
       <div class="auto-title"><strong><?= h($title) ?></strong>
         <span class="muted small"><?= $j['repo_key'] !== '' ? '<a href="' . h(rs_host_web(str_starts_with($j['repo_key'], 'gitlab.com/') ? 'gitlab' : (str_starts_with($j['repo_key'], 'sourceforge.net/') ? 'sourceforge' : ''), preg_replace('#^(gitlab\.com|sourceforge\.net)/#', '', $j['repo_key']))) . '" target="_blank" rel="noopener">' . h($j['repo_key']) . ' ↗</a>' : h($j['link']) ?><?= $a && $a['game'] !== '' ? ' · ' . h($a['game']) : '' ?><?= $a ? ' · ' . h(RS_PC_ORIGINS[$a['origin']] ?? $a['origin']) : '' ?> · <?= h($j['who']) ?>, <?= h(rs_date('M j, g:i a', strtotime($j['created'] . ' UTC'))) ?></span></div>
       <span class="pill<?= $j['status'] === 'review' ? ' cyan' : ($j['status'] === 'published' ? ' ok' : ($j['status'] === 'failed' || $stuck ? ' bad' : '')) ?>"><?php if ($live): ?><span class="sdk-spin" aria-hidden="true"></span> <?php endif; ?><?= h($st) ?></span>
-      <?php if (isset($verdictName[$j['verdict']]) && $j['status'] === 'review'): [$vn, $vc] = $verdictName[$j['verdict']]; ?><span class="pill <?= $vc ?>"><?= h($vn) ?></span><?php endif; ?>
+      <?php
+      // Claude's verdict is written before VirusTotal answers, so the live VirusTotal state wins:
+      // flagged turns it red, still checking holds it at "Wait for VirusTotal".
+      if (isset($verdictName[$j['verdict']]) && $j['status'] === 'review'):
+          [$vn, $vc] = $verdictName[$j['verdict']];
+          $vtS = $steps['vt']['s'] ?? '';
+          if ($vtS === 'bad') [$vn, $vc] = ['VirusTotal flagged it', 'bad'];
+          elseif ($vtS === 'run' && $j['verdict'] === 'good') [$vn, $vc] = ['Wait for VirusTotal', 'warn'];
+          elseif ($vtS === 'warn' && $j['verdict'] === 'good') [$vn, $vc] = ['Look first', 'warn'];
+      ?><span class="pill <?= $vc ?>"><?= h($vn) ?></span><?php endif; ?>
     </div>
     <div class="auto-bar" role="progressbar" aria-valuemin="0" aria-valuemax="<?= count(RS_AUTO_STEPS) ?>" aria-valuenow="<?= $done ?>"><span style="width:<?= round($done / count(RS_AUTO_STEPS) * 100) ?>%"></span></div>
     <ul class="auto-steps">
