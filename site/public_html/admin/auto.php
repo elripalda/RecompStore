@@ -29,8 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $links = array_values(array_unique(array_filter(array_map('trim', preg_split('/[\s,]+/', (string)($_POST['links'] ?? '')) ?: []))));
             if (!$links) throw new RuntimeException('Paste a link first.');
             $n = 0; $bad = [];
-            foreach (array_slice($links, 0, 15) as $l) { try { rs_auto_start($l, rs_me_name()); ++$n; } catch (RuntimeException $e) { $bad[] = $l . ': ' . $e->getMessage(); } }
-            rs_flash(($n ? 'Working on ' . $n . '. Each one shows its progress below.' : '') . ($bad ? ' ' . implode(' ', $bad) : ''), $n ? 'ok' : 'err');
+            $made = [];
+            foreach (array_slice($links, 0, 15) as $l) { try { $made[] = rs_auto_start($l, rs_me_name(), false); ++$n; } catch (RuntimeException $e) { $bad[] = $l . ': ' . $e->getMessage(); } }
+            rs_auto_launch_many($made); // (4.7) one after another, not all at once
+            rs_flash(($n ? 'Working on ' . $n . ($n > 1 ? ', one after another' : '') . '. Each one shows its progress below.' : '') . ($bad ? ' ' . implode(' ', $bad) : ''), $n ? 'ok' : 'err');
         } elseif ($act === 'scout_now') {
             rs_flash(rs_scout_launch() ? 'The scout is running. It shows what it\'s doing here.' : 'The scout is already running.', 'ok');
         } elseif ($act === 'scout_toggle') {
@@ -79,7 +81,7 @@ $jobs = rs_auto_list();
 $working = false;
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $icon = ['ok' => '✓', 'warn' => '!', 'bad' => '✕', 'skip' => '–', 'run' => '', '' => ''];
-$statusName = ['queued' => 'Starting', 'running' => 'Working on it', 'review' => 'Ready to look at', 'failed' => 'Didn\'t finish', 'published' => 'Published'];
+$statusName = ['queued' => 'In line', 'running' => 'Working on it', 'review' => 'Ready to look at', 'failed' => 'Didn\'t finish', 'published' => 'Published'];
 $verdictName = ['good' => ['Looks good', 'ok'], 'check' => ['Look first', 'warn'], 'skip' => ['Don\'t list it', 'bad']];
 $hasAi = rs_secret_get('prq_ai_key') !== '';
 $scoutOn = rs_scout_on();

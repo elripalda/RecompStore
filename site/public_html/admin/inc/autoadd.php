@@ -124,11 +124,17 @@ function rs_auto_dir(): string {
     if (!is_dir($d)) @mkdir($d, 0750, true);
     return $d;
 }
-function rs_auto_launch(int $id): void {
-    $p = proc_open('setsid php ' . escapeshellarg(__DIR__ . '/auto-run.php') . ' ' . $id . ' >> ' . escapeshellarg(rs_auto_dir() . '/run.log') . ' 2>&1 &',
+function rs_auto_launch(int $id): void { rs_auto_launch_many([$id]); }
+// (4.7) Several drafts, one after another in one background run (each downloads and scans a build).
+function rs_auto_launch_many(array $ids): void {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($i) => $i > 0)));
+    // Only drafts waiting to start: one already running or done (a repo that was in already) is left as it is.
+    if ($ids) $ids = array_map('intval', rs_db()->query("SELECT id FROM pc_auto WHERE status = 'queued' AND id IN (" . implode(',', $ids) . ') ORDER BY id')->fetchAll(PDO::FETCH_COLUMN));
+    if (!$ids) return;
+    $p = proc_open('setsid php ' . escapeshellarg(__DIR__ . '/auto-run.php') . ' ' . implode(' ', $ids) . ' >> ' . escapeshellarg(rs_auto_dir() . '/run.log') . ' 2>&1 &',
         [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, rs_auto_dir(),
         ['PATH' => '/usr/local/bin:/usr/bin:/bin', 'HOME' => rs_auto_dir(), 'LANG' => 'C.UTF-8']);
-    if (!is_resource($p)) { rs_auto_set($id, ['status' => 'failed', 'notes' => 'The background run didn\'t start on the server.']); return; }
+    if (!is_resource($p)) { foreach ($ids as $id) rs_auto_set($id, ['status' => 'failed', 'notes' => 'The background run didn\'t start on the server.']); return; }
     proc_close($p);
 }
 

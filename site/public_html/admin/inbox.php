@@ -61,6 +61,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $action = $_POST['action'] ?? '';
     $db = rs_db();
+    // (4.7) The picked PC submissions into Auto-add, run one after another in the background.
+    if ($action === 'bulk_auto' && $SUBS) {
+        $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_POST['ids'] ?? ''))), fn($i) => $i > 0))), 0, 60);
+        $back = (string)($_POST['back'] ?? '');
+        if (!str_starts_with($back, $self . '?')) $back = $self . '?show=' . urlencode($show);
+        require_once __DIR__ . '/inc/pc.php';
+        if (is_file(__DIR__ . '/inc/vt.php')) require_once __DIR__ . '/inc/vt.php';
+        require_once __DIR__ . '/inc/autoadd.php';
+        $drafts = []; $skipped = 0; $bad = [];
+        foreach ($ids as $sid) {
+            $st = $db->prepare("SELECT data, status FROM inbox WHERE id = ? AND kind = 'submit'");
+            $st->execute([$sid]);
+            $r = $st->fetch();
+            $d = $r ? json_decode((string)$r['data'], true) : null;
+            if (!is_array($d) || ($d['platform'] ?? '') !== 'pc' || (string)($d['repo'] ?? '') === '' || $r['status'] === 'done') { ++$skipped; continue; }
+            try {
+                $drafts[] = rs_auto_start(rs_host_web(rs_host_norm((string)($d['host'] ?? '')), (string)$d['repo']), rs_me_name(), false, $sid);
+                $db->prepare("UPDATE inbox SET status = 'read' WHERE id = ? AND status = 'new'")->execute([$sid]);
+            } catch (Throwable $e) { $bad[] = (string)($d['name'] ?? $sid) . ': ' . $e->getMessage(); }
+        }
+        $drafts = array_values(array_unique($drafts));
+        if ($drafts) rs_auto_launch_many($drafts);
+        $n = count($drafts);
+        rs_flash(($n ? 'Sent ' . $n . ' to Auto-add. They run one after another; watch them here.' : 'Nothing sent.')
+            . ($skipped ? ' ' . $skipped . ' skipped (only PC submissions with a repo can go).' : '') . ($bad ? ' ' . implode(' ', $bad) : ''), $n ? 'ok' : 'err');
+        header('Location: ' . ($n ? 'auto.php' : $back));
+        exit;
+    }
     // (3.7) Many at once: the ones picked, or a whole day.
     if (in_array($action, ['bulk_done', 'bulk_new', 'bulk_delete'], true)) {
         $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_POST['ids'] ?? ''))), fn($i) => $i > 0))), 0, 2000);
@@ -516,6 +544,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
   <span class="muted" data-pick-count>None picked</span>
   <?php if ($show === 'done'): ?><button name="action" value="bulk_new" class="primary" data-pick-go disabled>Open picked again</button>
   <?php else: ?><button name="action" value="bulk_done" class="primary" data-pick-go disabled>Mark picked done</button><?php endif; ?>
+  <?php if ($SUBS && $show !== 'done'): ?><button name="action" value="bulk_auto" data-pick-go disabled title="PC submissions only: each runs every check and waits on Auto-add for you to Publish">Send picked to Auto-add</button><?php endif; ?>
   <button name="action" value="bulk_delete" class="danger" data-pick-go disabled onclick="return confirm('Delete the picked ones for good?')">Delete picked</button>
   <?php if ($show === 'logs'): ?>
   <button formaction="log-zip.php" data-pick-go disabled>Download picked</button>
