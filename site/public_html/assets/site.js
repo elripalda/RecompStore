@@ -6252,6 +6252,9 @@
   const LAUNCH_SEEN = 'rs-launch-pop';
   function launchNav(L) {
     document.querySelectorAll('a.get-pc').forEach((a) => { a.textContent = t('Get the Beta'); });
+    // (4.8) No launch pop-up any more: with a new beta most days it came back over the page again
+    // and again. The header button already says the beta is out.
+    if (L) return;
     let seen = true;
     try { seen = localStorage.getItem(LAUNCH_SEEN) === L.version; } catch (e) { /* no pop-up then */ }
     if (seen || /^\/get\/?$/.test(location.pathname)) return;
