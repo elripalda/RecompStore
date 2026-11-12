@@ -2958,3 +2958,38 @@ a.pk-game:focus-visible{outline:2px solid #34F2E8;outline-offset:3px;border-radi
 .pk-also-it small{font:500 13px/1.35 Figtree,sans-serif;color:#a7b3c4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pk-also-it svg{width:16px;height:16px;fill:none;stroke:#a7b3c4;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 @media (max-width:640px){.pk-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.pk-game{flex:0 0 42%;scroll-snap-align:start}}
+
+/* (4.7) Submit a recomp: the SDK strip in three even cards, builds as switches, Recomp Achievements, more features. */
+.sub-sdk-top{grid-template-columns:minmax(0,1fr);align-items:stretch}
+.sub-sdk-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sub-sdk-card{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border-radius:14px;background:rgba(2,5,9,.35);border:1px solid var(--line);font-size:14px;color:var(--muted);line-height:1.45}
+.sub-sdk-card strong{color:var(--frost);font-size:15px}
+.sub-sdk-card .sub-sdk-badge{height:40px;width:auto;align-self:flex-start;margin-bottom:2px}
+.ez-badge{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;height:28px;padding:0 12px 0 9px;margin-bottom:8px;border-radius:999px;font-size:13px;font-weight:700;color:#05080d;background:var(--brand)}
+.ez-badge svg{width:15px;height:15px}
+.ez-badge.alt{color:var(--frost);background:rgba(55,123,182,.35);border:1px solid rgba(52,242,232,.35)}
+.sub-sdk-btns{flex-direction:row;flex-wrap:wrap}
+.sub-plat{gap:10px}
+.sub-plat-on{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;margin:0}
+.sub-plat-os{display:inline-flex;align-items:center;gap:10px}
+.sub-plat-os .os-ico{width:22px;height:22px;background:var(--frost)}
+.sub-plat:not(.on) .sub-plat-os{opacity:.7}
+.sub-plat.on .sub-plat-off{display:none}
+.sub-plat-off{font-size:13px}
+.sub-sw{position:relative;display:inline-block;width:42px;height:24px;flex:none}
+.sub-sw input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.sub-sw i{position:absolute;inset:0;border-radius:999px;background:rgba(244,248,252,.18);transition:background .2s}
+.sub-sw i::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--frost);transition:transform .2s}
+.sub-sw input:checked + i{background:var(--cyan)}
+.sub-sw input:checked + i::after{transform:translateX(18px);background:#05080d}
+.sub-sw input:focus-visible + i{box-shadow:0 0 0 2px var(--frost),0 0 0 4px var(--cyan)}
+.sub-ach{border-color:rgba(52,242,232,.4);background:linear-gradient(135deg,rgba(52,242,232,.06),rgba(55,123,182,.06))}
+.sub-rec{font-size:12px;font-weight:700;color:#05080d;background:var(--cyan);border-radius:999px;padding:2px 8px;margin-inline-start:6px;vertical-align:1px}
+.sub-ach-how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sub-ach-how > div{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:12px;background:rgba(2,5,9,.3);border:1px solid var(--line);font-size:14px;color:var(--muted);line-height:1.45}
+.sub-ach-how b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--cyan);color:#05080d;font-size:12px;margin-bottom:2px}
+.sub-ach-how strong{color:var(--frost);font-size:15px}
+.sub-ach-btns{display:flex;flex-wrap:wrap;gap:10px}
+@media (max-width:900px){.sub-sdk-cards,.sub-ach-how{grid-template-columns:minmax(0,1fr)}}
+.form .sub-plat-on{flex-direction:row;align-items:center;justify-content:space-between;font-weight:600}
+.form .sub-plat-os{flex-direction:row}

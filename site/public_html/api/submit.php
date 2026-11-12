@@ -40,7 +40,9 @@ if ($fixIn > 0) {
         $sh = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'shot'");
         $sh->execute([$fixIn]);
         $out = array_diff_key($fd, array_flip(['account', 'account_name', 'verified', 'declined', 'declined_at', 'resubmitted']));
-        rs_sub_out(200, ['ok' => true, 'data' => $out, 'reason' => (string)($fd['declined']['reason'] ?? ''), 'shots' => (int)$sh->fetchColumn()]);
+        $ic = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'icon'");
+        $ic->execute([$fixIn]);
+        rs_sub_out(200, ['ok' => true, 'data' => $out, 'reason' => (string)($fd['declined']['reason'] ?? ''), 'shots' => (int)$sh->fetchColumn(), 'icon' => (int)$ic->fetchColumn() > 0]);
     }
 }
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_sub_out(405, ['ok' => false, 'error' => 'Send the form.']);
@@ -93,7 +95,11 @@ if (($d['platform'] ?? '') === 'pc') {
     $d['setup'] = $d['rl_quick'] === 'setup' ? 'yes' : 'no';
     $d['setup_steps'] = $d['setup'] === 'yes' ? $s('setup_steps', 2000) : '';
     if ($d['setup'] === 'yes' && trim($d['setup_steps']) === '') rs_sub_out(422, ['ok' => false, 'error' => 'Write the steps players need to follow.']);
-    $d['features'] = array_values(array_intersect(['Online', 'Multiplayer', 'Widescreen', 'High FPS', 'Mods', 'Controller'], array_map('strval', (array)($_POST['features'] ?? []))));
+    // (4.7) More to pick from; they become tags on its listing.
+    $d['features'] = array_values(array_intersect(['Online', 'Multiplayer', 'Co-op', 'Split-screen', 'Widescreen', 'Ultrawide', '4K', '60 FPS', '120 FPS', 'High FPS', 'HDR', 'Upscaling',
+        'Mods', 'Texture packs', 'Controller', 'Keyboard and mouse', 'Gyro', 'Cheats'], array_map('strval', (array)($_POST['features'] ?? []))));
+    // (4.7) Recomp Achievements: recommended, not required.
+    $d['rl_ach'] = $yn('rl_ach', ['yes', 'planned', 'no']);
     if ($d['version'] === '') rs_sub_out(422, ['ok' => false, 'error' => 'Add the version.']);
     if (mb_strlen($d['needs']) < 3) rs_sub_out(422, ['ok' => false, 'error' => 'Say what players need, like their own copy of the game.']);
 }
@@ -161,6 +167,11 @@ if (($d['platform'] ?? '') === 'pc') {
     if (is_array($sf) && is_array($sf['error'] ?? null)) foreach ($sf['error'] as $er) if ((int)$er !== UPLOAD_ERR_NO_FILE) $has = true;
     if (!$has && $fixRow) { $sh = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'shot'"); $sh->execute([(int)$fixRow['id']]); $has = (int)$sh->fetchColumn() > 0; }
     if (!$has) rs_sub_out(422, ['ok' => false, 'error' => 'Add at least one screenshot of it running.']);
+    // (4.7) And an icon.
+    $if = $_FILES['icon'] ?? null;
+    $hasIcon = is_array($if) && !is_array($if['error'] ?? null) && (int)$if['error'] !== UPLOAD_ERR_NO_FILE;
+    if (!$hasIcon && $fixRow) { $ic = rs_db()->prepare("SELECT COUNT(*) FROM inbox_pictures WHERE inbox_id = ? AND role = 'icon'"); $ic->execute([(int)$fixRow['id']]); $hasIcon = (int)$ic->fetchColumn() > 0; }
+    if (!$hasIcon) rs_sub_out(422, ['ok' => false, 'error' => 'Add an icon: square, 512×512 or bigger.']);
 }
 foreach (['icon', 'hero', 'logo'] as $role) {
     $f = $_FILES[$role] ?? null;

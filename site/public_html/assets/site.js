@@ -1144,6 +1144,16 @@
 
   // (2.1) Submit a game port, emulator, app or tool: its repo, the details for its page and, if the
   // developer wants, its pictures. Lands in the admin's Inbox, ready to add to the store as a draft.
+  // (4.7) What a PC recomp can say it has (they become tags on its listing). 'High FPS' stays the
+  // value of the unlocked frame rate one, for submissions sent before.
+  const SUB_FEATS = () => [['Online', t('Online play')], ['Multiplayer', t('Local multiplayer')], ['Co-op', t('Co-op')],
+    ['Split-screen', t('Split-screen')], ['Widescreen', t('Widescreen')], ['Ultrawide', t('Ultrawide')],
+    ['4K', t('4K')], ['60 FPS', t('60 FPS')], ['120 FPS', t('120 FPS and up')],
+    ['High FPS', t('Unlocked frame rate')], ['HDR', t('HDR')], ['Upscaling', t('DLSS or FSR')],
+    ['Mods', t('Mod support')], ['Texture packs', t('Texture packs')], ['Controller', t('Controller support')],
+    ['Keyboard and mouse', t('Keyboard and mouse')], ['Gyro', t('Gyro aiming')], ['Cheats', t('Cheats')]];
+  const SVG_EZ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>';
+  const SVG_SLIDERS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>';
   function submitPage() {
     const kinds = [['games', t('Game port'), t('A recompiled or ported game')], ['emulators', t('Emulator'), t('Plays other consoles\' games')],
       ['apps', t('App'), t('Media, streaming, anything else')], ['tools', t('Tool'), t('For the PS5 itself: files, payloads, mods')]];
@@ -1157,12 +1167,13 @@
           <div class="sub-repos" data-sub-repos hidden></div>
           <aside class="sub-sdk-top" data-pc-only>
             <div class="sub-sdk-words"><span class="kicker">${t('RecompLauncher SDK')}</span><strong>${t('Make it one click for players')}</strong>
-              <p>${t('Add one small file, recomplauncher.json, to your release and RecompLauncher installs your recomp, sets it up from the player\'s own disc and shows its settings. Your recomp doesn\'t change, and it\'s free.')}</p></div>
-            <ol class="sub-sdk-levels">
-              <li><b>1</b><span><strong>${t('Easy Setup')}</strong>${t('Players drop in their disc and press Play. About ten minutes to add, and it gets the Easy Setup badge.')}</span></li>
-              <li><b>2</b><span><strong>${t('Settings in the launcher')}</strong>${t('Resolution, frame rate and controls on its page and in Big Picture mode.')}</span></li>
-            </ol>
-            <div class="sub-sdk-btns"><a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>${agentBtn()}</div>
+              <p>${t('Add one small file, recomplauncher.json, to your release. Your recomp doesn\'t change, and it\'s free.')}</p></div>
+            <div class="sub-sdk-cards">
+              <div class="sub-sdk-card"><span class="ez-badge">${SVG_EZ}${t('Easy Setup')}</span><strong>${t('Drop in a disc, press Play')}</strong><span>${t('RecompLauncher checks the player\'s own disc, sets the game up and starts it. About ten minutes to add, and it earns the Easy Setup badge players look for.')}</span></div>
+              <div class="sub-sdk-card"><span class="ez-badge alt">${SVG_SLIDERS}${t('Settings')}</span><strong>${t('Settings in the launcher')}</strong><span>${t('Resolution, frame rate and controls on its page and in Big Picture mode, saved to your settings file for the player.')}</span></div>
+              <div class="sub-sdk-card"><img class="sub-sdk-badge" src="/assets/press/launcher/badge-dark.svg" alt="${t('Get it on RecompLauncher')}" width="150" height="45" loading="lazy"><strong>${t('One click from your README')}</strong><span>${t('Put the Get it on RecompLauncher badge in your README. One click takes players to its page, and Open in RecompLauncher installs it.')}</span></div>
+            </div>
+            <div class="sub-sdk-btns"><a class="btn primary" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>${agentBtn()}<a class="btn" href="/press" target="_blank" rel="noopener">${t('Get the badge')}</a></div>
           </aside>
           <fieldset class="kinds plats"><legend>${t('Where does it run?')}</legend>
             ${[['ps5', 'PS5', t('A homebrew app for jailbroken PS5')], ['pc', 'PC', t('A recomp for Windows, Linux or Mac')]].map(([k, n, d]) => `<label class="kind"><input type="radio" name="platform" value="${k}"${(k === 'pc') === submitPc() ? ' checked' : ''}><span><strong>${n}</strong><small>${d}</small></span></label>`).join('')}
@@ -1181,13 +1192,14 @@
             <label data-ps5-only>${t('Title ID')} <span class="opt">${t('optional')}</span><input name="title_id" maxlength="9" placeholder="PPSA12345" spellcheck="false" class="mono"><small>${tf('Already have one? Check it doesn\'t clash on the {link}. No? We\'ll pick one with you.', { link: `<a href="/ids" target="_blank">${t('Title IDs page')}</a>` })}</small><small class="tid-check" data-tid-check role="status"></small></label>
           </div>
           <div data-pc-only>
-            <h2>${t('Where it runs')}</h2>
-            <p class="form-note">${t('Switch on each system it has a build for, and name the file on your GitHub release. We read your latest release and fill these in when we can. Use * for the part that changes with each version, like MyRecomp-*-Windows-x64.zip.')}</p>
+            <h2>${t('Builds')}</h2>
+            <p class="form-note">${t('Switch on each system you ship a build for. One is enough. We read your latest release and fill in the file names when we can. Use * for the part that changes with each version.')}</p>
             <div class="sub-plats">
-              ${[['win', 'Windows', 'MyRecomp-*-Windows-x64.zip'], ['mac', 'macOS', 'MyRecomp-*-macOS.zip'], ['linux', 'Linux', 'MyRecomp-*-x86_64.AppImage']].map(([k, n, ph]) => `
+              ${[['win', 'windows', 'Windows', 'MyRecomp-*-Windows-x64.zip'], ['mac', 'macos', 'macOS', 'MyRecomp-*-macOS.zip'], ['linux', 'linux', 'Linux', 'MyRecomp-*-x86_64.AppImage']].map(([k, os, n, ph]) => `
               <div class="sub-plat" data-plat="${k}">
-                <label class="check sub-plat-on"><input type="checkbox" name="sys_${k}" value="1"> <strong>${n}</strong></label>
-                <input name="asset_${k}" maxlength="160" placeholder="${ph}" spellcheck="false" class="mono" aria-label="${tf('{system} release file', { system: n })}">
+                <label class="sub-plat-on"><span class="sub-plat-os">${osIcon(os)}<strong>${n}</strong></span><span class="sub-sw"><input type="checkbox" name="sys_${k}" value="1" role="switch" aria-label="${tf('{system} build', { system: n })}"><i aria-hidden="true"></i></span></label>
+                <span class="sub-plat-off muted">${t('No build')}</span>
+                <input name="asset_${k}" maxlength="160" placeholder="${ph}" spellcheck="false" class="mono" aria-label="${tf('{system} release file', { system: n })}" hidden>
                 <small class="sub-plat-check" data-plat-check="${k}"></small>
               </div>`).join('')}
             </div>
@@ -1216,8 +1228,21 @@
               </div>
               <a class="btn sub-sdk-btn" href="/pc/sdk" target="_blank" rel="noopener">${t('Read the SDK')}</a>
             </fieldset>
+            <fieldset class="sub-box sub-ach"><legend>${t('Recomp Achievements')} <span class="sub-rec">${t('Recommended')}</span></legend>
+              <p class="form-note">${t('RecompLauncher\'s own achievements. Not required, but players love them: our testers are already playing with achievements, and games that have them get played longer and come back to the front page.')}</p>
+              <div class="sub-ach-how">
+                <div><b>1</b><strong>${t('Add the library')}</strong><span>${t('One small C library in your recomp reports unlocks to the launcher.')}</span></div>
+                <div><b>2</b><strong>${t('Pick how they unlock')}</strong><span>${t('The game\'s own achievements (Xbox 360), rules on console memory, or events you fire from your code. Recent ReXGlue builds may already work.')}</span></div>
+                <div><b>3</b><strong>${t('Players chase them')}</strong><span>${t('Unlocks pop up while they play, games can be Beaten and Mastered, and Ranked points go on the leaderboards.')}</span></div>
+              </div>
+              <div class="sub-q">
+                <span class="sub-q-t">${t('Does it support Recomp Achievements?')}</span>
+                <div class="ai-yn"><label class="check"><input type="radio" name="rl_ach" value="yes"> ${t('Yes')}</label><label class="check"><input type="radio" name="rl_ach" value="planned"> ${t('It\'s planned')}</label><label class="check"><input type="radio" name="rl_ach" value="no"> ${t('Not yet')}</label></div>
+              </div>
+              <div class="sub-ach-btns"><a class="btn primary" href="/pc/sdk#achievements" target="_blank" rel="noopener">${t('How to add achievements')}</a><a class="btn" href="/pc/achievements" target="_blank" rel="noopener">${t('See Recomp Achievements')}</a></div>
+            </fieldset>
             <fieldset class="sub-box"><legend>${t('What it has')} <span class="opt">${t('optional')}</span></legend>
-              <div class="ai-uses sub-feats">${[['Online', t('Online play')], ['Multiplayer', t('Local multiplayer')], ['Widescreen', t('Widescreen')], ['High FPS', t('High frame rate')], ['Mods', t('Mod support')], ['Controller', t('Controller support')]].map(([k, n]) => `<label class="check"><input type="checkbox" name="features[]" value="${k}"> ${n}</label>`).join('')}</div>
+              <div class="ai-uses sub-feats">${SUB_FEATS().map(([k, n]) => `<label class="check"><input type="checkbox" name="features[]" value="${k}"> ${n}</label>`).join('')}</div>
             </fieldset>
           </div>
           <h2>${t('Its page in the store')}</h2>
@@ -1240,9 +1265,9 @@
           </div>
           <h2>${t('Pictures')} <span class="opt" data-ps5-only>${t('optional')}</span></h2>
           <p class="form-note" data-ps5-only>${t('PNG, JPEG or WebP, 8 MB each. No pictures? They can be added later.')}</p>
-          <p class="form-note" data-pc-only>${t('A screenshot of it running is needed. The icon, backdrop and logo are optional: we can find art for it. PNG, JPEG or WebP, 8 MB each.')}</p>
+          <p class="form-note" data-pc-only>${t('An icon and at least one screenshot of it running are needed. The backdrop and logo are optional: we can find art for those. PNG, JPEG or WebP, 8 MB each.')}</p>
           <div class="pics">
-            <label class="pic">${t('Icon')}<input type="file" name="icon" accept="image/png,image/jpeg,image/webp" data-pic="icon"><small>${t('Square, 512×512 or bigger.')}</small><span class="pv icon" data-pv="icon" aria-hidden="true"></span></label>
+            <label class="pic"><span>${t('Icon')} <span class="req" data-pc-only>${t('needed')}</span></span><input type="file" name="icon" accept="image/png,image/jpeg,image/webp" data-pic="icon"><small>${t('Square, 512×512 or bigger.')}</small><span class="pv icon" data-pv="icon" aria-hidden="true"></span></label>
             <label class="pic">${t('Backdrop')}<input type="file" name="hero" accept="image/png,image/jpeg,image/webp" data-pic="hero"><small>${t('16:9, ideally 3840×2160. Behind its page and on Discover.')}</small><span class="pv hero" data-pv="hero" aria-hidden="true"><span class="pv-logo" data-pv="logo"></span></span></label>
             <label class="pic">${t('Logo')}<input type="file" name="logo" accept="image/png,image/webp" data-pic="logo"><small>${t('Its title as a picture, on a transparent background. Shown over the backdrop.')}</small></label>
             <label class="pic"><span data-ps5-only>${t('Screenshots')}</span><span data-pc-only>${t('Screenshots of it running')} <span class="req">${t('needed')}</span></span><input type="file" name="shots[]" accept="image/png,image/jpeg,image/webp" multiple data-pic="shots"><small data-ps5-only>${t('Up to 4, from the PS5.')}</small><small data-pc-only>${t('At least one, up to 4. Show the game actually running in your recomp, in game, not a menu or a mockup.')}</small><span class="pv shots" data-pv="shots" aria-hidden="true"></span></label>
@@ -1261,7 +1286,7 @@
     // back, filled in, with what we asked for on top. Sending it updates the same one.
     const qs = new URLSearchParams(location.search);
     const fixId = qs.get('fix'), fixKey = qs.get('t');
-    let fixShots = 0;
+    let fixShots = 0, fixIcon = false;
     if (fixId && fixKey) fetch('/api/submit.php?fix=' + encodeURIComponent(fixId) + '&t=' + encodeURIComponent(fixKey), { cache: 'no-store' }).then((r) => r.json()).then((j) => {
       if (!j || !j.ok) { status.textContent = (j && j.error) || t('That link didn\'t work. Send it again from the start.'); status.className = 'status bad'; return; }
       const d = j.data || {};
@@ -1273,11 +1298,12 @@
       set('repo', d.repo ? repoWeb(d.repo, d.host) : '');
       (d.links || []).forEach((u, i) => set('link' + (i + 1), u));
       Object.entries(d.assets || {}).forEach(([k, v]) => { const c = form.querySelector(`[name="sys_${k}"]`); if (c) c.checked = true; set('asset_' + k, v); });
-      ['rl_quick', 'rl_settings', 'rl_future', 'ai'].forEach((k) => d[k] && pick(k, d[k]));
+      ['rl_quick', 'rl_settings', 'rl_future', 'rl_ach', 'ai'].forEach((k) => d[k] && pick(k, d[k]));
       (d.ai_uses || []).forEach((v) => { const c = form.querySelector(`input[name="ai_uses[]"][value="${v}"]`); if (c) c.checked = true; });
       if (d.ai === 'yes') form.querySelector('.sub-ai .ai-yes').hidden = false;
       (d.features || []).forEach((v) => { const c = form.querySelector(`input[name="features[]"][value="${v}"]`); if (c) c.checked = true; });
       fixShots = j.shots || 0;
+      fixIcon = !!j.icon;
       const box = document.createElement('aside');
       box.className = 'glass sub-dev sub-fix';
       box.innerHTML = `<div><strong>${t('We asked for a few changes')}</strong><span class="sub-fix-why"></span><span>${t('Everything you sent is filled in below. Fix what\'s needed and send it again: it updates the same submission. Your pictures are kept, so only add new ones if you want to replace them.')}</span></div>`;
@@ -1418,6 +1444,7 @@
       ['win', 'mac', 'linux'].forEach((k) => {
         const on = form['sys_' + k].checked, inp = form['asset_' + k], out = form.querySelector(`[data-plat-check="${k}"]`);
         inp.disabled = !on;
+        inp.hidden = !on;
         form.querySelector(`[data-plat="${k}"]`).classList.toggle('on', on);
         const v = inp.value.trim();
         if (!on || !v) { out.textContent = ''; out.className = 'sub-plat-check'; return; }
@@ -1487,7 +1514,7 @@
       if (pv) pv.style.backgroundImage = files[0] ? `url("${url(files[0])}")` : '';
     });
     const need = [['name', t('Give it a name.')], ['author', t('Say who made it.')], ['contact', t('Leave your email address.')],
-      ['repo', t('Add the GitHub repository.')], ['description', t('Add a description.')]];
+      ['repo', t('Add the GitHub or GitLab project.')], ['description', t('Add a description.')]];
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(form);
@@ -1507,6 +1534,7 @@
         if (fd.get('rl_quick') !== 'yes' && fd.get('rl_settings') === 'no' && !fd.get('rl_future') && bad(t('Say whether you\'d add them in a future update.'), form.querySelector('input[name=rl_future]'))) return;
         if (fd.get('rl_quick') === 'setup' && !String(fd.get('setup_steps') || '').trim() && bad(t('Write the steps players need to follow.'), form.setup_steps)) return;
         if (!fd.get('ai') && bad(t('Say whether AI tools helped make it.'), form.querySelector('input[name=ai]'))) return;
+        if (!fixIcon && !(fd.get('icon') && fd.get('icon').size) && bad(t('Add an icon: square, 512×512 or bigger.'), form.querySelector('input[name="icon"]'))) return;
         if (!fixShots && !fd.getAll('shots[]').some((f) => f && f.size) && bad(t('Add at least one screenshot of it running.'), form.querySelector('input[name="shots[]"]'))) return;
       }
       if (!fd.get('rights')) { status.textContent = t('Tick the box to confirm you made it or may submit it.'); status.className = 'status bad'; return; }
@@ -2334,6 +2362,9 @@
       const slug = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       toc.innerHTML = `<strong>${t('Contents')}</strong>` + [...doc.querySelectorAll('h3')].map((h) => { h.id = slug(h.textContent); return `<a href="#${h.id}">${esc(h.textContent)}</a>`; }).join('');
       toc.querySelectorAll('a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const el = doc.querySelector(a.getAttribute('href')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+      // (4.7) Opened at a section (/pc/sdk#achievements, from the submit form): scrolled to it.
+      const at = /^#[a-z0-9-]+$/.test(location.hash) ? doc.querySelector(location.hash) : null;
+      if (at) setTimeout(() => at.scrollIntoView({ block: 'start' }), 60);
     };
     if (sdkText) { show(sdkText); return; }
     fetch('/sdk-files/guide.md?v=5', { cache: 'no-cache' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
