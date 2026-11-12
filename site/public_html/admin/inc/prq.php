@@ -57,7 +57,9 @@ function rs_prq_key_ok(string $k): bool {
     $h = (string)rs_setting('prq_key_hash', '');
     if ($h !== '' && hash_equals($h, hash('sha256', $k))) return true;
     // (4.7) Draft now: the run on this server carries its own key, good for an hour.
-    $run = json_decode((string)rs_setting('prq_run_keys', '[]'), true) ?: [];
+    // Kept in the database's key-value table: the public pages read settings from a copy that can be
+    // a minute behind, and the run asks for its picks a second after it starts.
+    $run = json_decode((string)(rs_kv_get('prq_run_keys')['v'] ?? '[]'), true) ?: [];
     foreach ($run as $r) if (is_array($r) && (int)($r['until'] ?? 0) > time() && hash_equals((string)$r['h'], hash('sha256', $k))) return true;
     return false;
 }
@@ -80,9 +82,9 @@ function rs_prq_run(array $appIds): int {
     }
     if (!$ids) return 0;
     $key = 'prqrun_' . bin2hex(random_bytes(20));
-    $run = array_values(array_filter(json_decode((string)rs_setting('prq_run_keys', '[]'), true) ?: [], fn($r) => is_array($r) && (int)($r['until'] ?? 0) > time()));
+    $run = array_values(array_filter(json_decode((string)(rs_kv_get('prq_run_keys')['v'] ?? '[]'), true) ?: [], fn($r) => is_array($r) && (int)($r['until'] ?? 0) > time()));
     $run[] = ['h' => hash('sha256', $key), 'until' => time() + 3600];
-    rs_set_setting('prq_run_keys', json_encode(array_slice($run, -20)));
+    rs_kv_put('prq_run_keys', (string)json_encode(array_slice($run, -20)));
     $dir = dirname(rs_prq_script());
     $env = ['PATH' => '/usr/local/bin:/usr/bin:/bin', 'HOME' => $dir, 'LANG' => 'C.UTF-8', 'RS_SITE' => rtrim((string)rs_setting('site_url', 'https://recompstore.com'), '/'), 'RS_PRQ_KEY' => $key,
         'ANTHROPIC_API_KEY' => rs_secret_get('prq_ai_key'), 'GITHUB_TOKEN' => rs_prq_token(), 'PRQ_IDS' => implode(',', $ids), 'PRQ_COUNT' => (string)count($ids)];
