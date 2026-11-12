@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily drafts for the RecompLauncher PR queue (SDK support > PR queue on recompstore.com).
+"""Daily drafts for the RecompLauncher PR queue (SDK support > PR queue in the admin).
 
 For each pick the site hands out (half just-added recomps, half popular console ports, anything queued
 by hand first), it reads the project on GitHub, drafts recomplauncher.json and the pull request's
@@ -228,7 +228,7 @@ def body_text(p, what, d):
     if better:
         lines += ["", "**Things that would make your recomp better**"] + [f"- {x}" for x in better]
     lines += ["", "**For the developer**",
-              "A free developer account at https://recompstore.com/hub (sign in with GitHub) lets you claim the recomp on RecompLauncher. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see stats and read player reports with their logs.",
+              "A free developer account at https://recomplauncher.com/dev (sign in with GitHub) lets you claim the recomp on RecompLauncher. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see stats and read player reports with their logs.",
               "", "If you'd rather not have the badge, a plain link to its RecompLauncher page somewhere in the README works too.",
               "", "Feel free to change anything here, or close this if it's not for you. No hard feelings."]
     return "\n".join(lines)
