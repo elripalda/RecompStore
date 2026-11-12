@@ -341,6 +341,12 @@ if ($show === '') {
     $show = 'bug';
     foreach (['bug', 'logs', 'message', 'copyright', 'source'] as $k) if (!empty($counts[$k])) { $show = $k; break; }
 }
+// (4.7) A PC submission whose project is already live on RecompLauncher is done: closed on sight.
+try {
+    require_once __DIR__ . '/inc/pc.php';
+    require_once __DIR__ . '/inc/autoadd.php';
+    if ($closed = rs_sub_close_live()) rs_flash($closed . ' ' . ($closed === 1 ? 'submission was' : 'submissions were') . ' already live on RecompLauncher, so ' . ($closed === 1 ? 'it\'s' : 'they\'re') . ' marked done.');
+} catch (Throwable $e) { /* next time */ }
 $where = match ($show) {
     'bug' => "WHERE kind = 'bug' AND status <> 'done'",
     'submit' => "WHERE kind = 'submit' AND status <> 'done'",

@@ -106,6 +106,25 @@ function rs_auto_dismiss(int $id = 0): int {
     $st->execute($id ? [$id] : []);
     return $st->rowCount();
 }
+// (4.7) Waiting PC submissions whose project is live on RecompLauncher (published from Auto-add, the
+// scout, the PC page or anywhere else) are marked done. -> how many.
+function rs_sub_close_live(): int {
+    if (!function_exists('rs_pc_apps')) require_once __DIR__ . '/pc.php';
+    $live = [];
+    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '' && empty($a['hidden'])) $live[strtolower(rs_pc_key($a))] = $a['id'];
+    if (!$live) return 0;
+    $n = 0;
+    foreach (rs_db()->query("SELECT id, data FROM inbox WHERE kind = 'submit' AND status <> 'done'") as $r) {
+        $d = json_decode((string)$r['data'], true);
+        if (!is_array($d) || ($d['platform'] ?? '') !== 'pc' || (string)($d['repo'] ?? '') === '') continue;
+        $k = strtolower(rs_repo_key((string)($d['host'] ?? ''), (string)$d['repo']));
+        if (!isset($live[$k])) continue;
+        rs_db()->prepare("UPDATE inbox SET status = 'done' WHERE id = ?")->execute([(int)$r['id']]);
+        rs_log('submission-done', (string)$r['id'], 'already live as ' . $live[$k]);
+        ++$n;
+    }
+    return $n;
+}
 // (4.7) What the developer sent with a submission, for Claude and the listing. [] when none.
 function rs_auto_sub(array $job): array {
     if (empty($job['sub_id'])) return [];
@@ -458,6 +477,7 @@ function rs_auto_publish(int $id): string {
         rs_db()->prepare("UPDATE inbox SET status = 'done' WHERE id = ?")->execute([(int)$job['sub_id']]);
         rs_log('pc-live', $a['id'], 'from submission ' . (int)$job['sub_id'] . ' (Auto-add)');
     }
+    try { rs_sub_close_live(); } catch (Throwable $e) { /* the Submissions page closes it when opened */ }
     return $a['name'];
 }
 // Remove a draft; the hidden listing it made goes too (one that was already there stays).
