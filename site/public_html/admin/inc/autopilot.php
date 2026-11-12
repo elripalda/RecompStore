@@ -179,6 +179,18 @@ function rs_ps5_heal(): array {
 
 // ---- Submissions: ready or not ------------------------------------------------------------------
 
+// (4.8) Whether a cached release list should be looked at again for a submission: it says the project
+// can't be found, has no release, or its newest release doesn't have the files they named, and it's
+// more than 15 minutes old. A list that matches can stay a week.
+function rs_sub_rel_stale(array $d, array $rel, array $rels): bool {
+    if ((int)($rel['age'] ?? PHP_INT_MAX) <= 900 || !in_array((int)$rel['status'], [200, 404], true)) return false;
+    if ((int)$rel['status'] === 404 || !$rels) return true;
+    $names = array_map(fn($x) => (string)$x['name'], (array)($rels[0]['assets'] ?? []));
+    $pats = ($d['platform'] ?? '') === 'pc' ? array_values((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
+    foreach ($pats as $p) if (!array_filter($names, fn($n) => rs_pattern_matches((string)$p, $n))) return true;
+    return false;
+}
+
 // -> [kind ready|check|stop, [[ok|warn|bad, text]]]
 function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
     $items = [];
