@@ -29,6 +29,7 @@ function rs_icon(string $n): string {
         'search' => '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
         'pin' => '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
         'x' => '<path d="M6 6l12 12M18 6L6 18"/>',
+        'map' => '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
         'dollar' => '<path d="M12 3v18M16.5 7.5c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.6 4.5 3 4.5 1.3 4.5 3-2 3-4.5 3-4.5-1.3-4.5-3"/>',
     ][$n] ?? '';
     return '<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . $p . '</svg>';
@@ -96,6 +97,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
             ['dev-accounts.php', 'Developer requests', 'dev', [], $devReq],
             ['security.php', 'Security', 'shield', [], $vtNeed],
             ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
+            ['roadmap.php', 'Roadmap', 'map', [], 0], // (4.8) the team's features and fixes
         ],
         'People' => [
             ['players.php', 'Players', 'players', [['players.php', 'Players', null], ['accounts.php', 'Sign-in & moderation', null], ['mail.php', 'Mail', null]], 0],
