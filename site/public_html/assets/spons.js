@@ -17,7 +17,7 @@
       + '.sp:hover{border-color:rgba(244,248,252,.28)}.sp img{display:block;width:100%;height:auto}'
       + '.sp-tag{position:absolute;right:8px;bottom:8px;font:600 10px/1 Figtree,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:rgba(244,248,252,.8);background:rgba(11,18,32,.72);padding:4px 6px;border-radius:5px}'
       + '.sp-rail{position:fixed;top:96px;z-index:5;display:none}.sp-rail.on{display:block}'
-      + '.sp-banner{margin:28px 0 8px}.sp-game{margin-top:16px}';
+      + '.sp-banner{margin:28px 0 8px}.sp-banner img{max-height:180px;object-fit:cover}.sp-game{margin-top:16px}.sp-game img{max-height:500px;object-fit:cover}.sp-rail img{max-height:calc(100vh - 140px);object-fit:cover}';
     var el = document.createElement('style'); el.textContent = css; document.head.appendChild(el);
   }
   // Views: once per spot per page, sent together.
