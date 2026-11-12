@@ -163,6 +163,29 @@ function rs_dev_redirect(): string {
     return rs_abs('/api/dev.php');
 }
 
+// (4.8) The developer hub is on both sites: recompstore.com/hub and recomplauncher.com/dev. These give
+// this request's own address and the hub's paths on it, so links and emails stay on the site in use.
+function rs_dev_here(): string { return strtolower((string)preg_replace('/^www\.|:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''))); }
+function rs_dev_on_launcher(): bool { return rs_dev_here() === 'recomplauncher.com'; }
+function rs_dev_site(): string { return rs_dev_on_launcher() ? 'https://recomplauncher.com' : rtrim(rs_abs('/'), '/'); }
+function rs_dev_hub_path(): string { return rs_dev_on_launcher() ? '/dev' : '/hub'; }
+function rs_dev_join_path(): string { return rs_dev_on_launcher() ? '/dev' : '/developers'; }
+// A one-time pass (2 minutes) that signs a developer in on the other site: GitHub only sends people
+// back to the one address its app allows, and a sign-in that started on recomplauncher.com ends there.
+function rs_dev_handoff_new(int $id): string {
+    $t = bin2hex(random_bytes(24));
+    rs_kv_put('devho:' . hash('sha256', $t), (string)$id);
+    return $t;
+}
+function rs_dev_handoff_use(string $t): int {
+    if (!preg_match('/^[0-9a-f]{48}$/', $t)) return 0;
+    $k = 'devho:' . hash('sha256', $t);
+    $c = rs_kv_get($k);
+    if (!$c) return 0;
+    rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute([$k]);
+    return $c['age'] <= 120 ? (int)$c['v'] : 0;
+}
+
 // -> [status, decoded JSON]
 function rs_dev_call(string $method, string $url, array $o = []): array {
     $c = curl_init($url);
@@ -617,7 +640,7 @@ function rs_dev_mail_link(int $id, string $kind): string {
     $token = bin2hex(random_bytes(32));
     rs_db()->prepare('UPDATE dev_accounts SET mail_token = ?, mail_token_until = NOW() + INTERVAL ' . ($kind === 'reset' ? '2 HOUR' : '2 DAY') . ' WHERE id = ?')
         ->execute([hash('sha256', $kind . '|' . $token), $id]);
-    return rs_abs($kind === 'reset' ? '/developers?reset=' . $token : '/api/dev.php?a=confirm&t=' . $token);
+    return rs_dev_site() . ($kind === 'reset' ? rs_dev_join_path() . '?reset=' . $token : '/api/dev.php?a=confirm&t=' . $token);
 }
 
 function rs_dev_by_token(string $kind, string $token): ?array {
@@ -630,15 +653,16 @@ function rs_dev_by_token(string $kind, string $token): ?array {
 
 function rs_dev_send_link(array $acc, string $kind): void {
     $url = rs_dev_mail_link((int)$acc['id'], $kind);
+    $brand = rs_dev_on_launcher() ? 'RecompLauncher' : 'RecompStore'; // (4.8) the site they signed up on
     $blocks = $kind === 'reset'
-        ? [['t' => 'text', 'text' => "Hi {name},\n\nSomeone (hopefully you) asked to set a new password for your RecompStore developer account. The link works for 2 hours."],
+        ? [['t' => 'text', 'text' => "Hi {name},\n\nSomeone (hopefully you) asked to set a new password for your $brand developer account. The link works for 2 hours."],
            ['t' => 'button', 'label' => 'Set a new password', 'url' => $url, 'style' => 'main'],
            ['t' => 'text', 'text' => "Didn't ask for this? Ignore it and nothing changes."]]
-        : [['t' => 'text', 'text' => "Hi {name},\n\nConfirm your email to finish setting up your RecompStore developer account."],
+        : [['t' => 'text', 'text' => "Hi {name},\n\nConfirm your email to finish setting up your $brand developer account."],
            ['t' => 'button', 'label' => 'Confirm my email', 'url' => $url, 'style' => 'main'],
            ['t' => 'text', 'text' => "Didn't sign up? Ignore this and nothing happens."]];
     [$html, $text] = rs_mb_email($blocks, ['name' => $acc['name'] ?: 'there'], rs_mail_get('mail_sign'), '');
-    rs_mail_send((string)$acc['email'], $kind === 'reset' ? 'Set a new password for RecompStore' : 'Confirm your email for RecompStore', $text, ['html' => $html]);
+    rs_mail_send((string)$acc['email'], $kind === 'reset' ? 'Set a new password for ' . $brand : 'Confirm your email for ' . $brand, $text, ['html' => $html]);
 }
 
 // ---- (2.7.3) The weekly email to developers ------------------------------------------------------

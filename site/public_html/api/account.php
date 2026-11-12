@@ -117,13 +117,13 @@ try {
     // ---- Coming back from an email link, or from the other site ----
     if ($a === 'confirm') {
         $r = rs_acct_token_use((string)($_GET['t'] ?? ''), 'confirm');
-        if (!$r) rs_ac_go('https://recompstore.com/account?note=link-old');
+        if (!$r) rs_ac_go(rs_acct_site() . '/account?note=link-old');
         $acc = rs_acct_get($r[0]);
         if ($acc && (string)$acc['email_lc'] === $r[1]) {
             rs_acct_update((int)$acc['id'], ['email_ok' => 1]);
             if (!$me) rs_acct_sign_in($acc);
         }
-        rs_ac_go('https://recompstore.com/account?note=confirmed');
+        rs_ac_go(rs_acct_site() . '/account?note=confirmed');
     }
     if ($a === 'handoff') {
         $r = rs_acct_token_use((string)($_GET['t'] ?? ''), 'handoff');
@@ -133,9 +133,16 @@ try {
     }
     if ($a === 'oauth') {
         $p = (string)($_GET['p'] ?? '');
-        if (!in_array($p, rs_acct_ready_providers(), true)) rs_ac_go('https://recompstore.com/signin?note=provider-off');
-        // Every sign-in with a provider happens on recompstore.com (the address they send people back to).
-        if (rs_acct_host() !== 'recompstore.com') rs_ac_go('https://recompstore.com/api/account.php?' . http_build_query($_GET));
+        if (!in_array($p, rs_acct_ready_providers(), true)) rs_ac_go(rs_acct_site() . '/signin?note=provider-off');
+        // Every sign-in with a provider happens on recompstore.com (the address they send people back to),
+        // and comes back to the page it started on. (4.8) Linking one from RecompLauncher's account page
+        // signs the account in over there first, so it's added to the right account.
+        if (rs_acct_host() !== 'recompstore.com') {
+            $q = $_GET;
+            $q['back'] = rs_acct_back((string)($_GET['back'] ?? '/account'));
+            $to = 'https://recompstore.com/api/account.php?' . http_build_query($q);
+            rs_ac_go(!empty($_GET['link']) && $me ? rs_acct_after((int)$me['id'], $to) : $to);
+        }
         $link = !empty($_GET['link']) && $me;
         rs_ac_go(rs_acct_oauth_url($p, rs_acct_state_make($p, $link ? 'link' : 'in', (string)($_GET['back'] ?? '/account'))));
     }

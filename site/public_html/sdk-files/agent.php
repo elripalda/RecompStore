@@ -61,7 +61,7 @@ End with a message to the developer, in this shape:
 >
 > **Anything I wasn't sure about.**
 >
-> **Make it yours on RecompLauncher**: a free developer account at https://recompstore.com/hub (sign in with GitHub, which finds your repos) lets you claim the recomp. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see its stats, read player reports with their logs, and your new releases reach players faster.
+> **Make it yours on RecompLauncher**: a free developer account at https://recomplauncher.com/dev (sign in with GitHub, which finds your repos) lets you claim the recomp. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see its stats, read player reports with their logs, and your new releases reach players faster.
 
 ---
 

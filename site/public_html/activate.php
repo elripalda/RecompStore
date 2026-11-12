@@ -41,9 +41,10 @@ try {
     if (!rs_acct_on()) rs_rl_page('Coming soon', '<h1>Accounts are coming soon</h1><p>Signing in to RecompLauncher opens here when accounts do. Everything in the launcher works without one.</p>');
     $me = rs_acct_current();
     if (!$me || $me['username'] === null) {
-        // Sign in (or make an account) on recompstore.com, then straight back to this page.
+        // Sign in (or make an account) on this site, then straight back to this page. (4.8) It was
+        // recompstore.com's sign-in; recomplauncher.com has its own now.
         $new = !empty($_GET['new']) ? 'new=1&' : '';
-        header('Location: https://recompstore.com/signin?' . $new . 'back=' . rawurlencode($here), true, 302);
+        header('Location: /signin?' . $new . 'back=' . rawurlencode($here), true, 302);
         exit;
     }
     $who = '<div class="who">' . (rs_acct_avatar_url($me) !== '' ? '<img src="' . $h(rs_acct_avatar_url($me)) . '" alt="">' : '') . '<span>Signed in as <b>' . $h($me['username']) . '</b></span></div>';
@@ -68,7 +69,7 @@ try {
         . '<p>Check that this is the code RecompLauncher shows.</p>'
         . '<form method="post" action="/activate"><input type="hidden" name="code" value="' . $h($code) . '"><input type="hidden" name="check" value="' . $h($check) . '">'
         . '<div class="acts"><button class="btn" type="submit" name="answer" value="no">Not me</button><button class="btn main" type="submit" name="answer" value="yes">Sign in</button></div></form>'
-        . '<p class="small">Not ' . $h($me['username']) . '? <a href="https://recompstore.com/account">Switch accounts</a></p>');
+        . '<p class="small">Not ' . $h($me['username']) . '? <a href="/account">Switch accounts</a></p>');
 } catch (Throwable $e) {
     if (function_exists('rs_errlog')) rs_errlog('activate.php', $e);
     rs_rl_page('Something went wrong', '<h1>Something went wrong</h1><p>Try again in a moment.</p>');

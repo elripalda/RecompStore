@@ -360,7 +360,7 @@ function rs_play_reply_add(array $report, string $text, ?array $dev, ?int $accou
     }
     foreach (rs_play_app_devs($app) as $d) {
         rs_play_later(fn() => rs_play_mail((string)$d['email'], 'A player answered you about ' . $game,
-            'The player who sent a report on ' . $game . " answered you:\n\n" . $text . "\n\nAnswer them in your developer hub:\n" . rs_abs('/hub?tab=reports') . "\n"));
+            'The player who sent a report on ' . $game . " answered you:\n\n" . $text . "\n\nAnswer them in your developer hub:\n" . 'https://recomplauncher.com/dev?tab=reports' . "\n"));
     }
 }
 
@@ -461,7 +461,7 @@ function rs_play_dev_mail(string $appId, string $since): void {
     $lines = array_map(fn($r) => '- ' . (RS_PLAY_VERDICTS[$r['verdict']] ?? $r['verdict']) . ' · ' . (RS_PLAY_PC_SYS[$r['sys']] ?? $r['sys'])
         . ($r['version'] !== '' ? ' · ' . $r['version'] : '') . ($r['note'] !== '' ? ': ' . mb_strimwidth(preg_replace('/\s+/', ' ', (string)$r['note']) ?? '', 0, 200, '…') : ''), array_slice($rows, 0, 10));
     $text = ($n === 1 ? 'A player reported a problem with ' : $n . ' players reported problems with ') . $game . ":\n\n" . implode("\n", $lines)
-        . ($n > 10 ? "\n…and " . ($n - 10) . ' more.' : '') . "\n\nRead them, download logs and answer in your developer hub:\n" . rs_abs('/hub?tab=reports')
+        . ($n > 10 ? "\n…and " . ($n - 10) . ' more.' : '') . "\n\nRead them, download logs and answer in your developer hub:\n" . 'https://recomplauncher.com/dev?tab=reports'
         . "\n\nYou get at most one of these an hour for each of your recomps.\n";
     foreach ($devs as $d) rs_play_mail((string)$d['email'], ($n === 1 ? 'New report' : $n . ' new reports') . ' for ' . $game, $text);
 }

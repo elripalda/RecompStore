@@ -774,7 +774,7 @@
       .map(([k, u]) => `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener">${esc(t(DEV_LINKS[k]))}</a>`).join('');
     view.innerHTML = `
       <article class="devpage">
-        <a class="back" href="/">${backArrow()} ${t('All games')}</a>
+        <a class="back" href="${LAUNCHER ? '/pc/all' : '/'}">${backArrow()} ${LAUNCHER ? t('All recomps') : t('All games')}</a>
         <header class="dev-head">
           <span class="dev-pic">${d.avatar ? `<img src="${esc(d.avatar)}" alt="">` : `<span>${esc(String(d.name || '?').slice(0, 1).toUpperCase())}</span>`}</span>
           <div class="dev-words">
@@ -784,18 +784,21 @@
             ${links ? `<div class="dev-links">${links}</div>` : ''}
           </div>
         </header>
-        <section class="games"><h2>${tn(apps.length, '1 app in RecompStore', '{n} apps in RecompStore')}</h2>
+        ${LAUNCHER ? '' : `<section class="games"><h2>${tn(apps.length, '1 app in RecompStore', '{n} apps in RecompStore')}</h2>
           ${apps.length ? `<div class="grid">${apps.map((x) => tileHTML(x, false)).join('')}</div>` : `<p class="muted">${t('Nothing listed right now.')}</p>`}
-        </section>
+        </section>`}
       </article>`;
     setBackdrop(apps.find((x) => art(x)) || null);
     setAccent(apps[0] || null);
     // (2.8) Their PC recomps too.
     const page = view.querySelector('.devpage');
+    // (4.8) On recomplauncher.com their recomps come first, and their PS5 apps (if any) after.
     pcLoad().then(() => {
       const pcs = (pcCat.listed || pcCat.apps).filter((x) => x.dev === d.slug);
-      if (!pcs.length || !page.isConnected) return;
-      page.insertAdjacentHTML('beforeend', `<section class="games"><h2>${t('PC recomps')}</h2><div class="pc-grid">${pcs.map(pcPoster).join('')}</div></section>`);
+      if (!page.isConnected) return;
+      if (pcs.length) page.insertAdjacentHTML('beforeend', `<section class="games"><h2>${t('PC recomps')}</h2><div class="pc-grid">${pcs.map(pcPoster).join('')}</div></section>`);
+      else if (LAUNCHER) page.insertAdjacentHTML('beforeend', `<section class="games"><h2>${t('PC recomps')}</h2><p class="muted">${t('Nothing listed right now.')}</p></section>`);
+      if (LAUNCHER && apps.length) page.insertAdjacentHTML('beforeend', `<section class="games"><h2>${tn(apps.length, '1 app in RecompStore', '{n} apps in RecompStore')}</h2><div class="grid">${apps.map((x) => tileHTML(x, false)).join('')}</div></section>`);
     });
   }
 
@@ -1272,7 +1275,7 @@
             <label class="pic">${t('Logo')}<input type="file" name="logo" accept="image/png,image/webp" data-pic="logo"><small>${t('Its title as a picture, on a transparent background. Shown over the backdrop.')}</small></label>
             <label class="pic"><span data-ps5-only>${t('Screenshots')}</span><span data-pc-only>${t('Screenshots of it running')} <span class="req">${t('needed')}</span></span><input type="file" name="shots[]" accept="image/png,image/jpeg,image/webp" multiple data-pic="shots"><small data-ps5-only>${t('Up to 4, from the PS5.')}</small><small data-pc-only>${t('At least one, up to 4. Show the game actually running in your recomp, in game, not a menu or a mockup.')}</small><span class="pv shots" data-pv="shots" aria-hidden="true"></span></label>
           </div>
-          <label>${t('Anything else?')} <span class="opt">${t('optional')}</span><textarea name="notes" rows="3" maxlength="2000" placeholder="${t('Anything the developer of RecompStore should know')}"></textarea></label>
+          <label>${t('Anything else?')} <span class="opt">${t('optional')}</span><textarea name="notes" rows="3" maxlength="2000" placeholder="${LAUNCHER ? t('Anything the developer of RecompStore should know').replace(/RecompStore/g, 'RecompLauncher') : t('Anything the developer of RecompStore should know')}"></textarea></label>
           <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
           <label class="check"><input type="checkbox" name="rights" value="1" required> ${t('I made this, or I\'m allowed to submit it. It doesn\'t include game files or anything else copyrighted.')}</label>
           <div class="form-row"><button class="btn primary" type="submit">${t('Send it')}</button><span class="status" role="status"></span></div>
@@ -1408,7 +1411,7 @@
       const subH = view.querySelector('.submit-page > h1');
       if (subH) subH.textContent = pc ? t('Submit your recomp') : t('Submit to RecompStore');
       const subLead = view.querySelector('.submit-page > .lead');
-      if (subLead) subLead.textContent = pc ? t('Made a PC recomp? Send it in for RecompLauncher. Everything you fill in here goes on its page, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.')
+      if (subLead) subLead.textContent = pc ? t('Made a PC recomp? Send it in for RecompLauncher. Everything you fill in here goes on its page, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.').replace(/RecompStore/g, 'RecompLauncher')
         : t('Made something for jailbroken PS5? Send it in. Everything you fill in here goes on its page in the store, so the more you give, the faster it can go live. Only the RecompStore developer sees this form.');
       needs.hidden = kindNow() !== 'games';
       // Even rows: an odd last field in a two-column row takes the whole row.
@@ -1595,12 +1598,21 @@
     view.innerHTML = `
       <article class="page contact">
         <header class="page-head center">
-          <span class="kicker">RecompStore</span>
+          <span class="kicker">${LAUNCHER ? 'RecompLauncher' : 'RecompStore'}</span>
           <h1>${t('Contact')}</h1>
           <p class="lead">${t('Found a bug, made a recomp, or have a question? Here\'s how to reach us.')}</p>
         </header>
         <section class="help contact-cards">
-          <a class="glass help-card" href="/report">
+          ${LAUNCHER ? `<a class="glass help-card" href="https://github.com/elripalda/RecompLauncher/issues" target="_blank" rel="noopener">
+            <span class="kicker">${t('Found a bug?')}</span>
+            <strong>${t('Report it on GitHub')}</strong>
+            <span>${t('Something wrong with RecompLauncher itself? Open an issue, with what you did right before.')}</span>
+          </a>
+          <a class="glass help-card" href="/submit">
+            <span class="kicker">${t('Made a PC recomp?')}</span>
+            <strong>${t('Submit your recomp')}</strong>
+            <span>${t('Its GitHub, details and pictures, and it can go on RecompLauncher.')}</span>
+          </a>` : `<a class="glass help-card" href="/report">
             <span class="kicker">${t('Found a bug?')}</span>
             <strong>${t('Report it')}</strong>
             <span>${t('Pick the game and tell us what happened. It goes straight to the developer.')}</span>
@@ -1609,7 +1621,7 @@
             <span class="kicker">${t('Made something for PS5?')}</span>
             <strong>${t('Submit to RecompStore')}</strong>
             <span>${t('A game port, an emulator, an app or a tool, with its details and pictures.')}</span>
-          </a>
+          </a>`}
           <a class="glass help-card" href="mailto:${CONTACT_EMAIL}">
             <span class="kicker">${t('Email us')}</span>
             <strong class="mail">${CONTACT_EMAIL}</strong>
@@ -1622,7 +1634,7 @@
           <label>${t('Email')}<input name="email" type="email" maxlength="200" required autocomplete="email" placeholder="${t('So we can reply')}"></label>
           <label>${t('Message')}<textarea name="body" rows="6" maxlength="5000" required></textarea></label>
           <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
-          <p class="form-note">${t('Only the RecompStore developer sees this. Your email is used just to reply.')}</p>
+          <p class="form-note">${LAUNCHER ? t('Only the RecompStore developer sees this. Your email is used just to reply.').replace(/RecompStore/g, 'RecompLauncher') : t('Only the RecompStore developer sees this. Your email is used just to reply.')}</p>
           <div class="form-row"><button class="btn primary" type="submit">${t('Send the message')}</button><span class="status" role="status"></span></div>
         </form>
       </article>`;
@@ -2063,7 +2075,13 @@
   // (4.7) The Submit page starts on PC on recomplauncher.com, from the PC side, or with ?platform=pc.
   const submitPc = () => new URLSearchParams(location.search).get('platform') === 'pc' || LAUNCHER || document.body.dataset.platform === 'pc';
   const PC_PATH_RE = /^\/pc(\/(all|how|top|new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
-  const pcOut = (h) => (h === '/pc/launcher' ? '/get' : h.replace(/^\/pc/, '') || '/');
+  // (4.8) recomplauncher.com also has the developer hub (/dev, which the old /developers and /hub
+  // addresses become), developers' pages, accounts, Submit, Contact and Copyright, so nobody who came for
+  // the PC side is sent over to recompstore.com.
+  const LAUNCHER_OWN = /^\/(dev|dev\/[a-z0-9-]{1,40}|signin|account|account\/reset|library|terms|privacy|submit|contact|dmca)$/;
+  const DEV_JOIN = LAUNCHER ? '/dev' : '/developers';
+  const DEV_HOME = LAUNCHER ? '/dev' : '/hub';
+  const pcOut = (h) => (h === '/pc/launcher' ? '/get' : LAUNCHER && (h === '/developers' || h === '/hub') ? '/dev' : h.replace(/^\/pc/, '') || '/');
   const pcIn = (p) => (p === '/get' ? '/pc/launcher' : p === '/' ? '/pc' : '/pc' + p);
   // The other side gets this one's language along.
   const withLang = (u) => { if (!lang || lang === 'en') return u; const x = new URL(u); if (!x.searchParams.has('lang')) x.searchParams.set('lang', lang); return x.href; };
@@ -2084,7 +2102,8 @@
     if (PC_PATH_RE.test(path)) {
       const out = pcOut(path) + u.search + u.hash;
       a.setAttribute('href', LAUNCHER ? out : LAUNCHER_ORIGIN + out);
-    } else if (LAUNCHER && !/^\/(api|assets|media)\//.test(path)) a.setAttribute('href', STORE_ORIGIN + href);
+    } else if (LAUNCHER && (path === '/developers' || path === '/hub')) a.setAttribute('href', '/dev' + u.search + u.hash);
+    else if (LAUNCHER && !LAUNCHER_OWN.test(path) && !/^\/(api|assets|media|sdk-files|schema)\/|^\/(status|activate)$/.test(path)) a.setAttribute('href', STORE_ORIGIN + href);
   }
   const siteLinks = (root) => { if (!SPLIT || !root) return; if (root.matches && root.matches('a[href]')) siteLink(root); if (root.querySelectorAll) root.querySelectorAll('a[href]').forEach((a) => siteLink(a)); };
   if (SPLIT) {
@@ -2390,7 +2409,7 @@
       <p>${t('Your username, points, unlocks and Mastered games show on the leaderboards and the achievement pages.')}</p>
       <p>${t('Play fair. Unlocks that look copied or cheated count as Casual, and testers who abuse the system can be removed.')}</p>
       <p>${t('You can stop testing at any time. Ask us on Discord and we\'ll clear your achievement data.')}</p>
-      <p>${tf('Your account\'s {terms} still apply.', { terms: `<a href="${(LAUNCHER ? STORE_ORIGIN : '')}/terms">${t('Terms and Privacy')}</a>` })}</p>
+      <p>${tf('Your account\'s {terms} still apply.', { terms: `<a href="/terms">${t('Terms and Privacy')}</a>` })}</p>
     </div></details>`;
   }
   function achApplyBox(box, st) {
@@ -4206,8 +4225,9 @@
     const cols = LAUNCHER ? [
       ['RecompLauncher', [['/pc', t('Discover')], ['/pc/all', t('All recomps')], ['/pc/top', t('Top charts')], ['/pc/new', t('New')], ['/pc/soon', t('Coming soon')], ['/pc/consoles', t('Consoles')], ['/pc/settings', t('Settings')]]],
       [t('Get started'), [['/pc/how', t('How it works')], ['/pc/launcher', t('Get RecompLauncher')]]],
-      [t('Developers'), [['/pc/sdk', t('RecompLauncher SDK')], ['/developers', t('Developer accounts')], ['/developers?signin=1', t('Developer sign in')], ['/submit?platform=pc', t('Submit a game')], ['/pc/press', t('Press kit')]]],
-      ['RecompStore', [['/', 'RecompStore "PS5"'], ['/about', t('About')], ['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA']]],
+      [t('Developers'), [['/pc/sdk', t('RecompLauncher SDK')], ['/dev', t('Developer accounts')], ['/dev?signin=1', t('Developer sign in')], ['/submit', t('Submit a game')], ['/pc/press', t('Press kit')]]],
+      // (4.8) RecompLauncher's own Contact, Copyright and Terms pages; RecompStore is one link for PS5.
+      [t('About'), [['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA'], ['/terms', t('Terms and Privacy')], ['/status', t('Status')], ['/', 'RecompStore "PS5"']]],
     ] : [
       [t('Store'), [['/', t('Discover')], ...cats.map((c) => [c.route, t(c.name)]), ...(cat.soon && cat.soon.length ? [['/soon', t('Coming soon')]] : []), ['/pc', 'RecompLauncher']]],
       [t('Get started'), [['/get', t('Get RecompStore')], ['/how', t('How it works')], ['/beta', t('Betas')], ...(v2on() ? [['/link', t('Link your PS5')]] : [])]],
@@ -4443,9 +4463,18 @@
     const note = notes[q.get('gh')] || (q.get('mail') === 'old' ? t('That link has run out. Sign in, or ask for a new one.') : '');
     const jump = q.has('signin') || q.has('signup') || !!reset;
     const wantSignup = q.has('signup');
-    if (q.get('gh') || q.has('signin') || q.has('signup') || q.get('mail') || reset) history.replaceState(history.state, '', '/developers' + (invite ? '?invite=' + invite : ''));
+    if (q.get('gh') || q.has('signin') || q.has('signup') || q.get('mail') || reset) history.replaceState(history.state, '', DEV_JOIN + (invite ? '?invite=' + invite : ''));
     const signIn = '/api/dev.php?a=login' + (invite ? '&invite=' + encodeURIComponent(invite) : '');
-    const perks = [
+    // (4.8) On RecompLauncher (recomplauncher.com/dev, or the PC side) it's about recomps.
+    const pcSide = LAUNCHER || document.body.dataset.platform === 'pc';
+    const perks = pcSide ? [
+      ['★', t('A verified developer page'), t('Your recomps, your links and a Verified developer badge, on a page you look after yourself. Verified developers\' updates also reach players faster.')],
+      ['↗', t('Your numbers'), t('GitHub downloads for each of your recomps, and how players say they run: Plays great or Has problems.')],
+      ['✉', t('Your players\' reports'), t('What players say when something goes wrong, with their PC\'s specs and logs. Answer them right there.')],
+      ['✓', t('Claim your recomps'), t('Already on RecompLauncher? Claim it, and it shows as yours, linked to your page.')],
+      ['♥', t('Support from players'), t('Your Ko-fi, Patreon or PayPal as a Support button on every one of your recomp pages.')],
+      ['✎', t('Your pages, kept up to date'), t('Change your recomps\' pages and art, send in new ones and talk with the team, all from one place.')],
+    ] : [
       ['★', t('A verified developer page'), t('Your apps, your links and a Verified developer badge, on a page you look after yourself. Verified developers\' updates also go out faster.')],
       ['↗', t('Your numbers'), t('How many PS5s have each of your apps, new installs this week, GitHub downloads and likes.')],
       ['✉', t('Your players\' logs'), t('The logs players send from RecompStore when something goes wrong with your app, with what they say happened.')],
@@ -4458,8 +4487,8 @@
         <header class="get-hero glass">
           <div>
             <span class="kicker">${t('For developers')}</span>
-            <h1>${t('Your apps, your page, your players')}</h1>
-            <p class="lead">${t('A developer account on RecompStore gives you a verified page, your numbers, your players\' logs and betas for your apps. It\'s free, and we approve every account by hand.')}</p>
+            <h1>${pcSide ? t('Your recomps, your page, your players') : t('Your apps, your page, your players')}</h1>
+            <p class="lead">${pcSide ? t('A developer account on RecompLauncher gives you a verified page, your numbers and your players\' reports for your recomps. It\'s free, and we approve every account by hand.') : t('A developer account on RecompStore gives you a verified page, your numbers, your players\' logs and betas for your apps. It\'s free, and we approve every account by hand.')}</p>
             <div data-dev-hello></div>
           </div>
           <div class="glass dev-auth" id="signin" data-dev-cta>
@@ -4490,7 +4519,7 @@
             <li>${t('Sign in with GitHub (your apps are found from your repositories), or make an account with your email.')}</li>
             <li>${t('Ask for a developer account, or follow the invite we emailed you.')}</li>
             <li>${t('We check it\'s really you and approve it, usually within a day.')}</li>
-            <li>${t('Your hub opens: your page, your numbers, your logs and your betas.')}</li></ol></div>
+            <li>${pcSide ? t('Your hub opens: your page, your recomps, your numbers and your players\' reports.') : t('Your hub opens: your page, your numbers, your logs and your betas.')}</li></ol></div>
           <aside class="glass card-pad"><span class="kicker">${t('What signing in shares')}</span>
             <ul class="press-rules">
               <li>${t('Only your public GitHub profile: your name, username and picture.')}</li>
@@ -4550,7 +4579,7 @@
         btn.disabled = false;
         if (!res.ok) { tell(f, false, res.error || t('That didn\'t go through.')); return; }
         if (kind === 'signup') { f.innerHTML = `<h2>${t('Check your email')}</h2><p>${tf('We sent a link to {email}. Open it to finish setting up your account.', { email: `<strong>${esc(res.sent || data.email)}</strong>` })}</p>`; return; }
-        location.href = '/hub';
+        location.href = DEV_HOME;
       });
     }));
     const forgot = auth.querySelector('[data-forgot]');
@@ -4580,12 +4609,12 @@
     const dcNote = dcMsgs[q.get('dc')] ? dcMsgs[q.get('dc')]
       : q.get('gh') === 'linked' ? t('GitHub is linked. Your apps are found from your repositories now.') : q.get('gh') === 'taken' ? t('That GitHub account already has its own developer account. Sign in with GitHub instead.') : '';
     const dcBad = ['no', 'role', 'again', 'signin', 'err'].includes(q.get('dc')) || q.get('gh') === 'taken';
-    if (q.get('dc') || q.get('gh')) history.replaceState(history.state, '', '/hub');
+    if (q.get('dc') || q.get('gh')) history.replaceState(history.state, '', DEV_HOME);
     let data = null;
     const load = () => fetch('/api/dev.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => {
       if (!page.isConnected) return;
       if (!j || !j.ok) { page.innerHTML = `<p class="status bad">${t('The developer hub isn\'t available right now. Try again later.')}</p>`; return; }
-      if (!j.account) { devHubButton(null); history.replaceState(null, '', '/developers'); developersPage(); return; }
+      if (!j.account) { devHubButton(null); history.replaceState(null, '', DEV_JOIN + location.search); developersPage(); if (LAUNCHER) document.title = `${t('For developers')} · RecompLauncher`; return; }
       devHubButton(j.account);
       data = j; draw();
     });
@@ -4612,8 +4641,10 @@
         <path d="M0,${h} L${pts.join(' L')} L${w},${h} Z" class="area"/><polyline points="${pts.join(' ')}" class="line"/></svg>
         <figcaption><span>${t('New installs, last 30 days')}</span><strong>${num(total)}</strong></figcaption></figure>`;
     };
-    const appsList = () => data.apps.length ? `<ul class="hub-found">${data.apps.map((a) => `<li>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="36" height="36">` : ''}<span>${esc(a.name)}${a.beta ? ` <span class="tag">${t('Beta')}</span>` : ''}</span></li>`).join('')}</ul>`
-      : `<p class="muted">${t('None of your GitHub repositories are in RecompStore yet. That\'s fine: you can send one in once you\'re approved.')}</p>`;
+    // (4.8) On recomplauncher.com/dev the hub leads with their PC recomps.
+    const found = () => (LAUNCHER ? (data.pcApps || []).concat(data.apps) : data.apps);
+    const appsList = () => found().length ? `<ul class="hub-found">${found().map((a) => `<li>${a.icon || a.cover ? `<img src="${esc(thumb(a.icon || a.cover, 256))}" alt="" width="36" height="36">` : ''}<span>${esc(a.name)}${a.beta ? ` <span class="tag">${t('Beta')}</span>` : ''}</span></li>`).join('')}</ul>`
+      : `<p class="muted">${LAUNCHER ? t('None of your GitHub repositories are on RecompLauncher yet.') : t('None of your GitHub repositories are in RecompStore yet. That\'s fine: you can send one in once you\'re approved.')}</p>`;
     const draw = () => {
       const acc = data.account;
       if (acc.status !== 'approved') {
@@ -4635,7 +4666,7 @@
                 </div>
                 <fieldset class="hub-ask-plat"><legend>${t('What do you make apps for?')}</legend>
                   <label class="check"><input type="radio" name="platform" value="ps5" required> PS5</label>
-                  <label class="check"><input type="radio" name="platform" value="pc"> PC</label>
+                  <label class="check"><input type="radio" name="platform" value="pc"${LAUNCHER ? ' checked' : ''}> PC</label>
                   <label class="check"><input type="radio" name="platform" value="both"> ${t('Both')}</label>
                 </fieldset>
                 <label>${t('What are you working on?')}<textarea name="work" rows="5" maxlength="2000" required placeholder="${t('Your projects, what they do, how far along they are, and what you\'ve made before.')}"></textarea><small>${t('A few sentences at least.')}</small></label>
@@ -4651,15 +4682,25 @@
       }
       // (3.9) Reports: what players say about their PC recomps, with a count of the ones not read yet.
       const hasPc = (data.pcApps || []).length > 0;
-      const tabs = [['apps', t('Your apps')], ['pc', t('PC recomps')], ...(hasPc ? [['reports', t('Reports') + '<span class="hub-count" data-unseen></span>']] : []), ['page', t('Your page')], ['betas', t('Betas')], ['logs', t('Logs')], ['ids', t('Title IDs')]];
-      const firstTab = hasPc && new URLSearchParams(location.search).get('tab') === 'reports' ? 'reports' : 'apps';
+      const reportsTab = hasPc ? [['reports', t('Reports') + '<span class="hub-count" data-unseen></span>']] : [];
+      // (4.8) On recomplauncher.com/dev: PC recomps first, with their numbers on top. (hub-ext.js hides
+      // the PS5 tabs from developers who only make PC recomps, on both sites.)
+      const ps5Tabs = [['betas', t('Betas')], ['logs', t('Logs')], ['ids', t('Title IDs')]];
+      const tabs = LAUNCHER ? [['pc', t('PC recomps')], ...reportsTab, ['page', t('Your page')], ['apps', t('Your apps')], ...ps5Tabs]
+        : [['apps', t('Your apps')], ['pc', t('PC recomps')], ...reportsTab, ['page', t('Your page')], ...ps5Tabs];
+      const firstTab = hasPc && new URLSearchParams(location.search).get('tab') === 'reports' ? 'reports' : LAUNCHER ? 'pc' : 'apps';
       const tot = data.apps.reduce((o, a) => { const st = a.stats || {}; ['installs', 'week', 'downloads', 'likes'].forEach((k) => { o[k] += Number(st[k] || 0); }); return o; }, { installs: 0, week: 0, downloads: 0, likes: 0 });
-      page.innerHTML = head(acc) + teamNotesHTML(data.notes, 'hub') + `
-        <dl class="hub-totals">
+      // The same numbers hub-ext.js shows a PC-only developer.
+      const pcTot = (data.pcApps || []).reduce((o, a) => { const st = a.stats || {}; ['downloads', 'stars', 'runs', 'issues', 'broken'].forEach((k) => { o[k] += Number(st[k] || 0); }); return o; }, { downloads: 0, stars: 0, runs: 0, issues: 0, broken: 0 });
+      const totals = LAUNCHER ? `
+          <div><dt>${t('Recomps')}</dt><dd>${num((data.pcApps || []).length)}</dd></div><div><dt>${t('GitHub downloads')}</dt><dd>${num(pcTot.downloads)}</dd></div>
+          <div><dt>${t('GitHub stars')}</dt><dd>${num(pcTot.stars)}</dd></div><div><dt>${t('Plays great')}</dt><dd>${num(pcTot.runs)}</dd></div><div><dt>${t('Has problems')}</dt><dd>${num(pcTot.issues + pcTot.broken)}</dd></div>` : `
           <div><dt>${t('Apps')}</dt><dd>${num(data.apps.length)}</dd></div><div><dt>${t('On PS5s now')}</dt><dd>${num(tot.installs)}</dd></div>
-          <div><dt>${t('New this week')}</dt><dd>${num(tot.week)}</dd></div><div><dt>${t('GitHub downloads')}</dt><dd>${num(tot.downloads)}</dd></div><div><dt>${t('Likes')}</dt><dd>${num(tot.likes)}</dd></div></dl>
+          <div><dt>${t('New this week')}</dt><dd>${num(tot.week)}</dd></div><div><dt>${t('GitHub downloads')}</dt><dd>${num(tot.downloads)}</dd></div><div><dt>${t('Likes')}</dt><dd>${num(tot.likes)}</dd></div>`;
+      page.innerHTML = head(acc) + teamNotesHTML(data.notes, 'hub') + `
+        <dl class="hub-totals">${totals}</dl>
         <div class="hub-bar"><nav class="hub-tabs" role="tablist">${tabs.map(([k, n]) => `<button type="button" role="tab" aria-selected="${k === firstTab}" class="${k === firstTab ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('')}</nav>
-          <a class="btn primary hub-submit" href="/submit">+ ${t('Submit an app')}</a></div>
+          <a class="btn primary hub-submit" href="/submit">+ ${LAUNCHER ? t('Submit your recomp') : t('Submit an app')}</a></div>
         <div data-pane></div>`;
       wireOut();
       page.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.tab)));
@@ -4671,7 +4712,7 @@
       const n = (data.pcApps || []).reduce((x, a) => x + Number(a.unseen || 0), 0), el = page.querySelector('[data-unseen]');
       if (el) { el.textContent = n ? num(n) : ''; el.hidden = !n; }
     };
-    const wireOut = () => { const o = page.querySelector('[data-out]'); if (o) o.addEventListener('click', () => call('out').then(() => { devHubButton(null); location.href = '/developers'; })); };
+    const wireOut = () => { const o = page.querySelector('[data-out]'); if (o) o.addEventListener('click', () => call('out').then(() => { devHubButton(null); location.href = DEV_JOIN; })); };
     const pane = () => page.querySelector('[data-pane]');
     const show = (tab, arg) => ({ apps: showApps, pc: showPc, reports: showReports, page: showPage, betas: showBetas, logs: showLogs, ids: showIds })[tab](arg);
     // (2.7.3) Title IDs: a free one, or one they picked, held for them while their app is on its way.
@@ -5363,8 +5404,8 @@
 
   // ---- (3.0) Accounts: sign in, your account, your library, comments, Save, Terms and Privacy ----------
   // Everything here waits for /api/account.php?a=me: while accounts are off (acct.on false) nothing
-  // shows. Sign-in pages live on recompstore.com; RecompLauncher sends people there and gets them back
-  // signed in (a hand-off link).
+  // shows. (4.8) Both sites have the sign-in pages. Google, Discord and GitHub send people back to
+  // recompstore.com, which hands a sign-in that started on recomplauncher.com straight back there.
   const acct = { on: false, me: null, providers: [], ts: '', contact: '', mail: false, loaded: false };
   const ACCT_PAGES = { '/signin': N_('Sign in'), '/account': N_('Your account'), '/account/reset': N_('Set a new password'), '/library': N_('Your library'), '/terms': N_('Terms and Privacy'), '/privacy': N_('Terms and Privacy') };
   const ACCT_PROV = { google: 'Google', discord: 'Discord', github: 'GitHub' };
@@ -5388,7 +5429,7 @@
     return acct;
   });
   const acctGo = (path) => { history.pushState(null, '', path); route(); };
-  const acctSignHref = () => (LAUNCHER ? STORE_ORIGIN : '') + '/signin?back=' + encodeURIComponent(location.href);
+  const acctSignHref = () => '/signin?back=' + encodeURIComponent(location.href);
   // Where to go once signed in: back on this site, or on to RecompLauncher signed in there too.
   const acctBack = () => new URLSearchParams(location.search).get('back') || '/account';
   const acctFinish = () => {
@@ -5402,6 +5443,8 @@
     acctReady.then(() => fetch('/api/account.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json())).then((j) => {
       acct.me = (j && j.account) || null;
       acctHeader();
+      // (4.8) A page the site doesn't draw itself (recomplauncher.com/activate) loads as a page.
+      if (u && u.origin === location.origin && !/^\/signin/.test(u.pathname) && !ownPath(u.pathname.replace(/(.)\/+$/, '$1'))) { location.href = u.href; return; }
       acctGo(u && u.origin === location.origin && !/^\/signin/.test(u.pathname) ? u.pathname + u.search : '/account');
     });
   };
@@ -5409,7 +5452,8 @@
   // The header: Sign in, or your picture with a menu (your account, library, developer hub, settings,
   // sign out). Signed in, the gear and the Developer hub button fold into that menu.
   const avatarHTML = (me, size) => (me && me.avatar ? `<img class="acct-av" src="${esc(me.avatar)}" alt="" width="${size}" height="${size}">` : `<b class="acct-av acct-av-l" aria-hidden="true">${esc(((me && me.username) || '?').slice(0, 1).toUpperCase())}</b>`);
-  const storeLink = (p) => (LAUNCHER ? STORE_ORIGIN : '') + p;
+  // (4.8) A page RecompLauncher doesn't have opens on recompstore.com; its own (account, hub...) stay here.
+  const storeLink = (p) => { const path = p.split(/[?#]/)[0]; return !LAUNCHER || LAUNCHER_OWN.test(path) ? p : path === '/hub' || path === '/developers' ? '/dev' + p.slice(path.length) : STORE_ORIGIN + p; };
   function acctHeader() {
     let wrap = document.getElementById('top-acct');
     document.body.classList.toggle('acct-in-on', !!(acct.on && acct.me));
@@ -5557,7 +5601,9 @@
     setBackdrop(null);
     const back = acctBack();
     const keep = q.get('back') ? '&back=' + encodeURIComponent(back) : '';
-    const provBtns = acct.providers.map((p) => `<a class="btn acct-prov" href="/api/account.php?a=oauth&amp;p=${p}&amp;back=${encodeURIComponent(back)}" data-fx>${ACCT_ICONS[p]}<span>${tf('Continue with {name}', { name: ACCT_PROV[p] })}</span></a>`).join('');
+    // (4.8) The whole address to come back to: a sign-in from recomplauncher.com ends there.
+    const backAbs = (() => { try { return new URL(back, location.origin).href; } catch (e) { return back; } })();
+    const provBtns = acct.providers.map((p) => `<a class="btn acct-prov" href="/api/account.php?a=oauth&amp;p=${p}&amp;back=${encodeURIComponent(backAbs)}" data-fx>${ACCT_ICONS[p]}<span>${tf('Continue with {name}', { name: ACCT_PROV[p] })}</span></a>`).join('');
     const tsBox = acct.ts ? '<div class="acct-ts" data-ts></div>' : '';
     const tabs = (on) => `<nav class="auth-tabs" role="tablist"><a role="tab" href="/signin?${keep.slice(1)}" aria-selected="${on === 'in'}" class="${on === 'in' ? 'on' : ''}">${t('Sign in')}</a><a role="tab" href="/signin?new=1${keep}" aria-selected="${on === 'up'}" class="${on === 'up' ? 'on' : ''}">${t('Sign up')}</a></nav>`;
     let inner = '', head = '';
@@ -5880,8 +5926,9 @@
       view.querySelector('.acct-lib').innerHTML = `<h1>${t('Your library')}</h1>
         ${!ps5.length && !pc.length ? `<div class="glass lib-empty"><span class="lib-empty-ico" aria-hidden="true">${SVG_HEART}</span><h2>${t('Nothing saved yet')}</h2>
           <p>${t('Press Save on any game\'s page and it lands here, with the PS5 and PC ones side by side. If you turn on update emails, you\'ll hear when a saved game gets a new version.')}</p>
-          <div class="lib-empty-btns"><a class="btn primary" href="/">${t('Browse PS5 games')}</a><a class="btn" href="${LAUNCHER ? '/' : LAUNCHER_ORIGIN + '/'}">${t('Browse PC recomps')}</a></div></div>
-          ${(cat && cat.apps || []).length >= 6 ? `<section class="games"><h2>${t('Popular on RecompStore')}</h2><div class="grid lib-pop">${cat.apps.slice().sort((x, y) => ((charts && charts.stats && charts.stats[y.id] && charts.stats[y.id].installs) || 0) - ((charts && charts.stats && charts.stats[x.id] && charts.stats[x.id].installs) || 0)).slice(0, 6).map((x) => tileHTML(x, false)).join('')}</div></section>` : ''}` : ''}
+          <div class="lib-empty-btns">${LAUNCHER ? `<a class="btn primary" href="/pc">${t('Browse PC recomps')}</a><a class="btn" href="/">${t('Browse PS5 games')}</a>`
+            : `<a class="btn primary" href="/">${t('Browse PS5 games')}</a><a class="btn" href="${LAUNCHER_ORIGIN}/">${t('Browse PC recomps')}</a>`}</div></div>
+          ${!LAUNCHER && (cat && cat.apps || []).length >= 6 ? `<section class="games"><h2>${t('Popular on RecompStore')}</h2><div class="grid lib-pop">${cat.apps.slice().sort((x, y) => ((charts && charts.stats && charts.stats[y.id] && charts.stats[y.id].installs) || 0) - ((charts && charts.stats && charts.stats[x.id] && charts.stats[x.id].installs) || 0)).slice(0, 6).map((x) => tileHTML(x, false)).join('')}</div></section>` : ''}` : ''}
         ${ps5.length ? `<section class="games"><h2>${t('PS5')}</h2><div class="grid">${ps5.map((x) => tileHTML(x.a, false).replace('<span class="tile-name"', upd(x) + '<span class="tile-name"')).join('')}</div></section>` : ''}
         ${pc.length ? `<section class="games"><h2>${t('PC')}</h2><div class="pc-grid lib-pc">${pc.map((x) => pcPoster(x.a).replace('<strong class="pc-name', upd(x) + '<strong class="pc-name')).join('')}</div></section>` : ''}`;
     });
@@ -6309,7 +6356,7 @@
         <div class="beta-row"><input name="email" type="email" autocomplete="email" placeholder="${t('Your email')}" aria-label="${t('Your email')}" value="${esc((acct.me && acct.me.email) || '')}" required><button class="btn primary" type="submit">${t('Get beta access')}</button></div>
         <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
         <p class="status" role="status">${q === 'old' ? t('That link has expired. Sign up again and we\'ll send a new one.') : ''}</p>
-        ${acct.on && !acct.me ? `<p class="beta-early">${t('Want to set up your account early?')} <a href="${STORE_ORIGIN}/signin?new=1&amp;back=${encodeURIComponent(location.origin + '/get')}" data-fx>${t('Make a RecompStore account')}</a></p>` : ''}
+        ${acct.on && !acct.me ? `<p class="beta-early">${t('Want to set up your account early?')} <a href="${LAUNCHER ? '' : STORE_ORIGIN}/signin?new=1&amp;back=${encodeURIComponent(location.origin + '/get')}" data-fx>${LAUNCHER ? t('Create an account') : t('Make a RecompStore account')}</a></p>` : ''}
       </form>`;
     const form = box.querySelector('form'), st = form.querySelector('.status'), btn = form.querySelector('button');
     form.addEventListener('submit', (e) => {
@@ -6323,7 +6370,7 @@
           if (!j.ok) { say(st, j.error || t('That didn\'t go through. Try again.'), 'bad'); return; }
           betaMarkSeen();
           box.innerHTML = `<p class="beta-done ok">${j.state === 'there' ? t('You\'re on the list. We\'ll email you when the beta opens.') : tf('Almost there: we sent a link to {email}. Click it to confirm your spot.', { email: `<b>${esc(email)}</b>` })}</p>
-            ${acct.on && !acct.me && where === 'pop' ? `<p class="beta-early">${t('Want to set up your account early?')} <a href="${STORE_ORIGIN}/signin?new=1&amp;back=${encodeURIComponent(location.href)}" data-fx>${t('Make a RecompStore account')}</a></p>` : ''}`;
+            ${acct.on && !acct.me && where === 'pop' ? `<p class="beta-early">${t('Want to set up your account early?')} <a href="${LAUNCHER ? '' : STORE_ORIGIN}/signin?new=1&amp;back=${encodeURIComponent(location.href)}" data-fx>${LAUNCHER ? t('Create an account') : t('Make a RecompStore account')}</a></p>` : ''}`;
         }).catch(() => { btn.disabled = false; say(st, t('That didn\'t go through. Try again.'), 'bad'); });
     });
   }
@@ -6848,7 +6895,14 @@
   const pathNow = () => location.pathname.replace(/(.)\/+$/, '$1');
   const pathPage = () => !(location.hash.length > 1) && (PATHS.includes(pathNow()) || /^\/dev\/[a-z0-9-]{1,40}$/.test(pathNow()) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(pathNow()));
   function current() {
-    if (LAUNCHER) { const h = pcIn(pathNow()); return PC_PATH_RE.test(h) ? h : '/pc'; }
+    if (LAUNCHER) {
+      const p = pathNow();
+      // /dev is the hub (or how to get one, signed out); a sign-in, sign-up, invite or reset link opens
+      // that page straight away.
+      if (p === '/dev') return /[?&](signin|signup|invite|reset|mail)=|[?&]gh=(no|err|again|off)\b/.test(location.search) ? '/developers' : '/hub';
+      if (LAUNCHER_OWN.test(p)) return p;
+      const h = pcIn(p); return PC_PATH_RE.test(h) ? h : '/pc';
+    }
     if (location.hash.length > 1) return location.hash.slice(1);
     if (pathPage()) return pathNow();
     const p = location.pathname.match(/^\/(game|soon)\/([A-Za-z0-9_-]+)\/?$/);
@@ -6878,6 +6932,8 @@
   // engines that run this script see the same title.
   const APP_HEADS = { games: N_('{name} — PS5 homebrew game'), emulators: N_('{name} — PS5 emulator'), apps: N_('{name} — PS5 homebrew app'), tools: N_('{name} — PS5 homebrew tool') };
   function pageTitle(h, here, m, ms, dv) {
+    // (4.8) recomplauncher.com's own pages (the hub, accounts, Submit...) say RecompLauncher.
+    if (LAUNCHER) { const n = ACCT_PAGES[h] ? t(ACCT_PAGES[h]) : dv ? (devBySlug(dv[1]) || {}).name : h === '/submit' ? t('Submit your recomp') : PAGE_TITLES[h] ? t(PAGE_TITLES[h]) : ''; return n ? `${n} · RecompLauncher` : 'RecompLauncher'; }
     if (ACCT_PAGES[h]) return `${t(ACCT_PAGES[h])} · RecompStore`;
     const app = m ? byId(decodeURIComponent(m[1])) : null;
     if (app && app.name) return `${tf(APP_HEADS[app.category] || APP_HEADS.games, { name: app.name })} · RecompStore`;
@@ -6926,7 +6982,7 @@
     // visitor came from: always PC on recomplauncher.com, or when the link says ?platform=pc.
     const shared = /^\/(submit|report|developers|contact|press|signin|account(\/reset)?|library|terms|privacy|dmca|beta|dev\/[a-z0-9-]{1,40})$/.test(h);
     const stayPc = shared && (LAUNCHER || /[?&]platform=pc\b/.test(location.search) || document.body.dataset.platform === 'pc');
-    setPlatform(pcm || stayPc ? 'pc' : 'ps5');
+    setPlatform(pcm || stayPc || LAUNCHER ? 'pc' : 'ps5');
     // The address bar gets the page's own address: /game/<ID>, /games, /how, /dev/<name>...; the rest
     // stay #/... on the home page's address (and ?lang= stays).
     const v2only = ['/games', '/emulators', '/apps', '/tools', '/ids'].includes(h) && !v2on(); // shown as the home page
@@ -6993,7 +7049,7 @@
   }
 
   // (2.6) Links to the site's own pages (/games, /game/<ID>...) open here, without loading the page again.
-  const ownPath = (p) => LAUNCHER ? PC_PATH_RE.test(pcIn(p)) : p === '/' || PATHS.includes(p) || /^\/(game|soon)\/[A-Za-z0-9_-]+$/.test(p) || /^\/dev\/[a-z0-9-]{1,40}$/.test(p) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(p);
+  const ownPath = (p) => LAUNCHER ? PC_PATH_RE.test(pcIn(p)) || LAUNCHER_OWN.test(p) : p === '/' || PATHS.includes(p) || /^\/(game|soon)\/[A-Za-z0-9_-]+$/.test(p) || /^\/dev\/[a-z0-9-]{1,40}$/.test(p) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(p);
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest('a[href]');

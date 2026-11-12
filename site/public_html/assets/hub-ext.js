@@ -8,6 +8,8 @@
 // Every English text goes through t(); assets/i18n/hub/<code>.json has the translations.
 (() => {
   'use strict';
+  // (4.8) The hub is recomplauncher.com/dev on RecompLauncher's address, recompstore.com/hub on RecompStore's.
+  const HUB = /(^|\.)recomplauncher\./i.test(location.hostname) ? '/dev' : '/hub';
   const VER = ((document.currentScript && document.currentScript.src.match(/[?&]v=([\w.-]+)/)) || [])[1] || '';
   let dict = {};
   const dicts = {};
@@ -142,7 +144,7 @@
     // A PC developer's hub opens on their recomps, and sends new ones in as a PC game.
     const sub = page.querySelector('.hub-submit');
     if (sub) {
-      if (pc && !ps5) { sub.href = '/submit?platform=pc'; sub.textContent = '+ ' + t('Submit a game'); } else { sub.href = '/submit'; sub.textContent = '+ ' + t('Submit an app'); }
+      if ((pc && !ps5) || HUB === '/dev') { sub.href = '/submit?platform=pc'; sub.textContent = '+ ' + t('Submit a game'); } else { sub.href = '/submit'; sub.textContent = '+ ' + t('Submit an app'); }
     }
     const totals = page.querySelector('.hub-totals');
     if (totals) {
@@ -160,7 +162,7 @@
   };
   const offX = (bar) => bar.querySelectorAll('[data-xtab]').forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
   // The address shows the tab you're on (and the doc), so a link to it works.
-  const setUrl = (q) => { try { history.replaceState(history.state, '', '/hub' + (q ? '?' + q : '')); } catch (e) { /* only for links */ } };
+  const setUrl = (q) => { try { history.replaceState(history.state, '', HUB + (q ? '?' + q : '')); } catch (e) { /* only for links */ } };
   const openX = (page, which, arg) => {
     const bar = page.querySelector('.hub-tabs');
     bar.querySelectorAll('[data-tab],[data-xtab]').forEach((x) => { const on = x.dataset.xtab === which; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); });
@@ -325,7 +327,7 @@
         <section class="glass card-pad hx-doc-group">
           <h3><span class="tag ${k === 'ps5' ? 'info' : k === 'pc' ? 'good' : ''}">${esc(k === 'all' ? t('Everyone') : k === 'pc' ? 'PC' : 'PS5')}</span>${esc(AUD[k]())}</h3>
           <ol class="hx-doc-list">${list.map((d, i) => `
-            <li><a href="/hub?tab=docs&amp;doc=${encodeURIComponent(d.slug)}" data-doc="${esc(d.slug)}">
+            <li><a href="${HUB}?tab=docs&amp;doc=${encodeURIComponent(d.slug)}" data-doc="${esc(d.slug)}">
               <span class="hx-doc-n">${i + 1}</span>
               <span class="hx-doc-words"><strong>${esc(d.title)}</strong>${d.summary ? `<small>${esc(d.summary)}</small>` : ''}</span>
               <span class="hx-doc-min">${esc(tf('{n} min read', { n: d.minutes }))}</span>
@@ -358,7 +360,7 @@
         <aside class="hx-doc-side">
           <button type="button" class="linkish hx-doc-back" data-back>← ${esc(t('All docs'))}</button>
           <span class="hx-side-h">${esc(AUD[d.audience]())}</span>
-          <ol class="hx-doc-nav">${same.map((x, i) => `<li><a href="/hub?tab=docs&amp;doc=${encodeURIComponent(x.slug)}" data-doc="${esc(x.slug)}"${x.slug === slug ? ' aria-current="page"' : ''}><span>${i + 1}</span>${esc(x.title)}</a></li>`).join('')}</ol>
+          <ol class="hx-doc-nav">${same.map((x, i) => `<li><a href="${HUB}?tab=docs&amp;doc=${encodeURIComponent(x.slug)}" data-doc="${esc(x.slug)}"${x.slug === slug ? ' aria-current="page"' : ''}><span>${i + 1}</span>${esc(x.title)}</a></li>`).join('')}</ol>
           ${r.toc.length > 1 ? `<span class="hx-side-h">${esc(t('On this page'))}</span><ul class="hx-doc-toc">${r.toc.map((h) => `<li class="l${h.level}"><a href="#d-${esc(h.id)}" data-toc="d-${esc(h.id)}">${esc(h.text)}</a></li>`).join('')}</ul>` : ''}
         </aside>
         <article class="glass hx-doc-article">
@@ -371,8 +373,8 @@
           </header>
           <div class="md hx-md">${r.html}</div>
           <nav class="hx-doc-pager">
-            ${prev ? `<a href="/hub?tab=docs&amp;doc=${encodeURIComponent(prev.slug)}" data-doc="${esc(prev.slug)}" class="prev"><small>${esc(t('Previous'))}</small><strong>${esc(prev.title)}</strong></a>` : '<span></span>'}
-            ${next ? `<a href="/hub?tab=docs&amp;doc=${encodeURIComponent(next.slug)}" data-doc="${esc(next.slug)}" class="next"><small>${esc(t('Next'))}</small><strong>${esc(next.title)}</strong></a>` : '<span></span>'}
+            ${prev ? `<a href="${HUB}?tab=docs&amp;doc=${encodeURIComponent(prev.slug)}" data-doc="${esc(prev.slug)}" class="prev"><small>${esc(t('Previous'))}</small><strong>${esc(prev.title)}</strong></a>` : '<span></span>'}
+            ${next ? `<a href="${HUB}?tab=docs&amp;doc=${encodeURIComponent(next.slug)}" data-doc="${esc(next.slug)}" class="next"><small>${esc(t('Next'))}</small><strong>${esc(next.title)}</strong></a>` : '<span></span>'}
           </nav>
         </article>
       </div>`;
@@ -398,7 +400,7 @@
       setTimeout(done, 1500);
     });
     const lb = box.querySelector('[data-link]');
-    lb.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(`${location.origin}/hub?tab=docs&doc=${encodeURIComponent(slug)}`).then(() => { lb.textContent = t('Copied'); setTimeout(() => { lb.textContent = t('Copy link'); }, 1500); }); });
+    lb.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(`${location.origin}${HUB}?tab=docs&doc=${encodeURIComponent(slug)}`).then(() => { lb.textContent = t('Copied'); setTimeout(() => { lb.textContent = t('Copy link'); }, 1500); }); });
     window.scrollTo({ top: Math.max(0, box.getBoundingClientRect().top + window.scrollY - 120), behavior: 'smooth' });
   };
 

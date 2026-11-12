@@ -116,6 +116,15 @@ function rs_acct_host(): string {
     $h = preg_replace('/^www\./', '', $h) ?? $h;
     return in_array($h, RS_ACCT_HOSTS, true) ? $h : $h;
 }
+// (4.8) This site's own address and name, for links and emails: a sign-up on recomplauncher.com
+// gets RecompLauncher's, so people who came for the PC side never land on recompstore.com.
+function rs_acct_site(): string { $h = rs_acct_host(); return 'https://' . (in_array($h, RS_ACCT_HOSTS, true) ? $h : 'recompstore.com'); }
+function rs_acct_brand(): string { return rs_acct_host() === 'recomplauncher.com' ? 'RecompLauncher' : 'RecompStore'; }
+// The site a sign-in started on (where it ends): the address it goes back to.
+function rs_acct_home(string $back): string {
+    $h = preg_replace('/^www\./', '', strtolower((string)parse_url(rs_acct_back($back), PHP_URL_HOST)));
+    return 'https://' . (in_array($h, RS_ACCT_HOSTS, true) ? $h : 'recompstore.com');
+}
 function rs_acct_https(): bool { return !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'; }
 
 function rs_acct_cookie(string $name, string $value, int $days, string $path = '/', string $same = 'Lax'): void {
@@ -352,18 +361,20 @@ function rs_acct_token_use(string $raw, string $kind, bool $keep = false): ?arra
 function rs_acct_mail_confirm(array $a): void {
     if (!rs_mail_ready() || $a['email'] === null) return;
     $t = rs_acct_token_new((int)$a['id'], 'confirm', 60 * 48, (string)$a['email_lc']);
-    $link = 'https://recompstore.com/api/account.php?a=confirm&t=' . $t;
-    rs_mailq_add((string)$a['email'], 'Confirm your RecompStore account',
-        "Hi " . ($a['username'] ?: 'there') . ",\n\nConfirm your email for RecompStore with this link:\n$link\n\nIt works for 48 hours. If you didn't make an account, ignore this email and nothing happens.",
+    $link = rs_acct_site() . '/api/account.php?a=confirm&t=' . $t;
+    $brand = rs_acct_brand();
+    rs_mailq_add((string)$a['email'], 'Confirm your ' . $brand . ' account',
+        "Hi " . ($a['username'] ?: 'there') . ",\n\nConfirm your email for $brand with this link:\n$link\n\nIt works for 48 hours. If you didn't make an account, ignore this email and nothing happens.",
         ['kind' => 'confirm'], 1, true);
 }
 
 function rs_acct_mail_reset(array $a): void {
     if (!rs_mail_ready() || $a['email'] === null) return;
     $t = rs_acct_token_new((int)$a['id'], 'reset', 30);
-    $link = 'https://recompstore.com/account/reset?t=' . $t;
-    rs_mailq_add((string)$a['email'], 'Set a new RecompStore password',
-        "Hi " . ($a['username'] ?: 'there') . ",\n\nSet a new password for RecompStore here:\n$link\n\nThe link works once, for 30 minutes. If you didn't ask for this, ignore this email: your password stays as it is.",
+    $link = rs_acct_site() . '/account/reset?t=' . $t;
+    $brand = rs_acct_brand();
+    rs_mailq_add((string)$a['email'], 'Set a new ' . $brand . ' password',
+        "Hi " . ($a['username'] ?: 'there') . ",\n\nSet a new password for $brand here:\n$link\n\nThe link works once, for 30 minutes. If you didn't ask for this, ignore this email: your password stays as it is.",
         ['kind' => 'reset'], 1, true);
 }
 
@@ -489,14 +500,15 @@ function rs_acct_state_read(string $state): ?array {
     return $j;
 }
 
-// Where to go after signing in: a page on one of the two sites, else the account page.
+// Where to go after signing in: a page on one of the two sites, else the account page (a path is on
+// this site).
 function rs_acct_back(string $b): string {
     $u = parse_url($b);
-    if (!$u) return 'https://recompstore.com/account';
+    if (!$u) return rs_acct_site() . '/account';
     $host = preg_replace('/^www\./', '', strtolower((string)($u['host'] ?? '')));
-    if ($host === '' && str_starts_with($b, '/') && !str_starts_with($b, '//')) return 'https://recompstore.com' . $b;
+    if ($host === '' && str_starts_with($b, '/') && !str_starts_with($b, '//')) return rs_acct_site() . $b;
     if (in_array($host, RS_ACCT_HOSTS, true) && ($u['scheme'] ?? '') === 'https') return $b;
-    return 'https://recompstore.com/account';
+    return rs_acct_site() . '/account';
 }
 
 // After signing in on recompstore.com, going on to recomplauncher.com signs in there too.

@@ -1,7 +1,9 @@
 <?php
-// RecompStore website (2.7.2): developer accounts and the developer hub (recompstore.com/hub).
+// RecompStore website (2.7.2): developer accounts and the developer hub (recompstore.com/hub, and
+// (4.8) recomplauncher.com/dev, the same hub on RecompLauncher's address).
 //   GET  a=login [invite]         -> off to GitHub to sign in (public profile only)
-//   GET  ?code=&state=            -> back from GitHub: signed in, then /hub
+//   GET  ?code=&state=            -> back from GitHub: signed in, then /hub (or recomplauncher.com/dev)
+//   GET  a=handoff t [gh]         -> (4.8) on recomplauncher.com: signed in with a one-time pass, then /dev
 //   GET  a=invite code            -> {ok, name} for an invite link's welcome
 //   GET  a=me                     -> {ok, account, profile, apps, stats, changes, betas} (or {ok, account: null})
 //   GET  a=logs                   -> {ok, logs}            players' logs for their apps
@@ -57,7 +59,7 @@ $in = $post ? (str_starts_with((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multip
 $a = is_string($in['a'] ?? null) ? $in['a'] : (isset($_GET['code']) || isset($_GET['error']) ? 'back' : '');
 if ($post) {
     $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
-    if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''))) rs_dev_out(403, ['ok' => false, 'error' => 'Do this from recompstore.com.']);
+    if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''))) rs_dev_out(403, ['ok' => false, 'error' => 'Do this from the website.']);
 }
 $cookie = ['path' => '/api/dev.php', 'secure' => !empty($_SERVER['HTTPS']), 'httponly' => true, 'samesite' => 'Lax'];
 
@@ -66,20 +68,42 @@ try {
     $db = rs_db();
 
     // ---- Signing in with GitHub -----------------------------------------------------------
+    // (4.8) GitHub sends people back to the one address its app allows (recompstore.com/api/dev.php),
+    // so a sign-in from recomplauncher.com/dev goes there and comes straight back signed in (a
+    // one-time pass). Adding GitHub to an email account takes the account along the same way.
+    $ghHost = strtolower((string)parse_url(rs_dev_redirect(), PHP_URL_HOST));
     if ($a === 'login') {
-        if (!rs_dev_ready()) { header('Location: /developers?gh=off'); exit; }
+        if (!rs_dev_ready()) { header('Location: ' . rs_dev_join_path() . '?gh=off'); exit; }
         $invite = preg_replace('/[^A-Za-z0-9]/', '', (string)($_GET['invite'] ?? '')) ?? '';
+        if (rs_dev_on_launcher() && $ghHost !== '' && $ghHost !== rs_dev_here()) {
+            $q = ['a' => 'login', 'from' => 'rl'];
+            if ($invite !== '') $q['invite'] = $invite;
+            if (!empty($_GET['link']) && ($me = rs_dev_current())) { $q['link'] = '1'; $q['ho'] = rs_dev_handoff_new((int)$me['id']); }
+            header('Location: https://' . $ghHost . '/api/dev.php?' . http_build_query($q));
+            exit;
+        }
+        if (($ho = (string)($_GET['ho'] ?? '')) !== '' && ($hid = rs_dev_handoff_use($ho))) rs_dev_session_start($hid);
+        $from = ($_GET['from'] ?? '') === 'rl' ? 'rl' : '';
         $state = bin2hex(random_bytes(16)) . (!empty($_GET['link']) ? 'L' : '');
-        setcookie('rs_dev_state', $state . '|' . $invite, ['expires' => time() + 600] + $cookie);
+        setcookie('rs_dev_state', $state . '|' . $invite . '|' . $from, ['expires' => time() + 600] + $cookie);
         header('Location: ' . rs_dev_login_url($state));
         exit;
     }
     if ($a === 'back') {
         $saved = (string)($_COOKIE['rs_dev_state'] ?? '');
         setcookie('rs_dev_state', '', ['expires' => time() - 3600] + $cookie);
-        [$state, $invite] = array_pad(explode('|', $saved, 2), 2, '');
-        if ($state === '' || !hash_equals($state, (string)($_GET['state'] ?? ''))) { header('Location: /developers?gh=again'); exit; }
-        if (isset($_GET['error'])) { header('Location: /developers?gh=no'); exit; }
+        [$state, $invite, $from] = array_pad(explode('|', $saved, 3), 3, '');
+        // Where it ends: recomplauncher.com/dev for a sign-in that started there, else this site's hub.
+        $rl = $from === 'rl';
+        $join = $rl ? 'https://recomplauncher.com/dev' : rs_dev_join_path();
+        $hub = $rl ? 'https://recomplauncher.com/dev' : rs_dev_hub_path();
+        $done = function (int $id, string $note = '') use ($rl, $hub): void {
+            if (!$rl) { header('Location: ' . $hub . ($note !== '' ? '?gh=' . $note : '')); exit; }
+            header('Location: https://recomplauncher.com/api/dev.php?' . http_build_query(['a' => 'handoff', 't' => rs_dev_handoff_new($id), 'gh' => $note]));
+            exit;
+        };
+        if ($state === '' || !hash_equals($state, (string)($_GET['state'] ?? ''))) { header('Location: ' . $join . '?gh=again'); exit; }
+        if (isset($_GET['error'])) { header('Location: ' . $join . '?gh=no'); exit; }
         try {
             $u = rs_dev_finish((string)$_GET['code']);
             $me = str_ends_with($state, 'L') ? rs_dev_current() : null;
@@ -87,22 +111,28 @@ try {
                 // Adding GitHub to an email account (unless that GitHub already has its own account).
                 $other = $db->prepare('SELECT id FROM dev_accounts WHERE gh_id = ?');
                 $other->execute([$u['id']]);
-                if ($other->fetchColumn()) { header('Location: /hub?gh=taken'); exit; }
+                if ($other->fetchColumn()) { header('Location: ' . $hub . '?gh=taken'); exit; }
                 $db->prepare('UPDATE dev_accounts SET gh_id = ?, gh_login = ?, avatar = IF(avatar = \'\', ?, avatar) WHERE id = ?')->execute([$u['id'], $u['login'], $u['avatar'], $me['id']]);
                 if ($me['status'] === 'approved') {
                     $prof = rs_dev_profile($me);
                     if ($prof && empty($prof['links']['github'])) { $prof['links']['github'] = 'https://github.com/' . $u['login']; rs_dev_save($prof, $prof['slug']); }
                 }
-                header('Location: /hub?gh=linked');
-                exit;
+                $done((int)$me['id'], 'linked');
             }
             $acc = rs_dev_upsert($u, $invite);
         } catch (RuntimeException $e) {
-            header('Location: /developers?gh=err');
+            header('Location: ' . $join . '?gh=err');
             exit;
         }
-        rs_dev_session_start((int)$acc['id']);
-        header('Location: /hub');
+        if (!$rl) rs_dev_session_start((int)$acc['id']);
+        $done((int)$acc['id']);
+    }
+    // (4.8) On recomplauncher.com, back from signing in on recompstore.com: signed in here too.
+    if ($a === 'handoff') {
+        $hid = rs_dev_handoff_use((string)($_GET['t'] ?? ''));
+        if ($hid) rs_dev_session_start($hid);
+        $note = in_array($_GET['gh'] ?? '', ['linked'], true) ? '?gh=' . $_GET['gh'] : '';
+        header('Location: ' . ($hid ? rs_dev_hub_path() . $note : rs_dev_join_path() . '?gh=again'));
         exit;
     }
     if ($a === 'invite') {
@@ -144,7 +174,7 @@ try {
     }
     if ($a === 'confirm') {
         $acc = rs_dev_by_token('confirm', (string)($_GET['t'] ?? ''));
-        if (!$acc) { header('Location: /developers?signin=1&mail=old'); exit; }
+        if (!$acc) { header('Location: ' . rs_dev_join_path() . '?signin=1&mail=old'); exit; }
         $db->prepare('UPDATE dev_accounts SET email_ok = 1, mail_token = NULL, mail_token_until = NULL, last_seen = NOW() WHERE id = ?')->execute([$acc['id']]);
         if (preg_match('/^invite:([A-Za-z0-9]{24})$/', (string)$acc['note'], $m)) {
             $db->prepare("UPDATE dev_accounts SET note = '' WHERE id = ?")->execute([$acc['id']]);
@@ -152,7 +182,7 @@ try {
             rs_dev_use_invite($acc, $m[1]);
         }
         rs_dev_session_start((int)$acc['id']);
-        header('Location: /hub');
+        header('Location: ' . rs_dev_hub_path());
         exit;
     }
     if ($a === 'signin' && $post) {

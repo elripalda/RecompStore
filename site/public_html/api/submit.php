@@ -48,7 +48,7 @@ if ($fixIn > 0) {
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') rs_sub_out(405, ['ok' => false, 'error' => 'Send the form.']);
 $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
 $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('http://' . $host, PHP_URL_HOST)) rs_sub_out(403, ['ok' => false, 'error' => 'Send it from recompstore.com.']);
+if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('http://' . $host, PHP_URL_HOST)) rs_sub_out(403, ['ok' => false, 'error' => 'Send it from the website.']);
 $subAcc = defined('RS_SUB_ACCOUNT') ? RS_SUB_ACCOUNT : null;
 if (empty($_POST) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) rs_sub_out(413, ['ok' => false, 'error' => 'The pictures are too big together. Send smaller ones.']);
 
@@ -137,7 +137,7 @@ if ($repoHost === '' && !preg_match('#^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100
 // organizations), signed in to a developer account. GitLab projects are checked by hand in the admin.
 if ($repoHost === '') {
     $ghOwner = strtolower((string)strtok($d['repo'], '/'));
-    if (!$subAcc || (string)($subAcc['gh_login'] ?? '') === '') rs_sub_out(403, ['ok' => false, 'error' => 'Sign in with GitHub first (a free developer account at recompstore.com/developers), so we can confirm the project is yours.']);
+    if (!$subAcc || (string)($subAcc['gh_login'] ?? '') === '') rs_sub_out(403, ['ok' => false, 'error' => 'Sign in with GitHub first (a free developer account at ' . (($d['platform'] ?? '') === 'pc' ? 'recomplauncher.com/dev' : 'recompstore.com/developers') . '), so we can confirm the project is yours.']);
     if (!in_array($ghOwner, rs_dev_owners($subAcc), true)) rs_sub_out(403, ['ok' => false, 'error' => 'That repo belongs to ' . $ghOwner . ', not your GitHub (@' . $subAcc['gh_login'] . ') or one of its organizations. Send it from the GitHub account it belongs to. (If it\'s under an organization, make your membership public on GitHub.)']);
 }
 if ($d['title_id'] !== '' && !preg_match('/^[A-Z]{4}\d{5}$/', $d['title_id'])) rs_sub_out(422, ['ok' => false, 'error' => 'A title ID is four letters and five numbers, like PPSA12345. Leave it empty if you don\'t have one yet.']);
@@ -240,8 +240,8 @@ try {
             $txt = 'Hi ' . ($d['author'] !== '' ? $d['author'] : 'there') . ",\n\n"
                 . 'Thanks for sending ' . $d['name'] . ' to ' . $store . '. It came through' . ($fixRow ? ' with your changes' : '') . ' and it\'s in line for review.' . "\n\n"
                 . 'Every submission is looked at by hand. It can take 24 to 48 hours, but most get an answer within a day. We\'ll write to you at this address either way.' . "\n\n"
-                . ($subAcc ? 'You can follow it in your developer hub: https://recompstore.com/hub' . "\n\n"
-                    : 'Tip: a free developer account lets you follow your submission, update your listing yourself and answer players. Make one here: https://recompstore.com/developers?signup=1' . "\n\n")
+                . ($subAcc ? 'You can follow it in your developer hub: ' . ($pc ? 'https://recomplauncher.com/dev' : 'https://recompstore.com/hub') . "\n\n"
+                    : 'Tip: a free developer account lets you follow your submission, update your listing yourself and answer players. Make one here: ' . ($pc ? 'https://recomplauncher.com/dev?signup=1' : 'https://recompstore.com/developers?signup=1') . "\n\n")
                 . ($invite !== '' ? 'Questions in the meantime? Come say hi on our Discord: ' . $invite . "\n\n" : '')
                 . 'Ripalda' . "\n" . $store;
             rs_mailq_add($d['contact'], 'We got your submission: ' . $d['name'], $txt, ['kind' => 'submit-confirm'], 2, true);

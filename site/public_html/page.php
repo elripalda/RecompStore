@@ -8,7 +8,8 @@ declare(strict_types=1);
 // (2.9) Maintenance mode: while a side is down, its pages show only the logo and the admin's message.
 $p0 = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'home';
 require __DIR__ . '/admin/inc/maint.php';
-rs_maint_gate(str_starts_with($p0, 'pc') ? 'pc' : 'ps5');
+// (4.8) Everything on recomplauncher.com is the PC side, its developer hub and accounts included.
+rs_maint_gate(str_starts_with($p0, 'pc') || preg_match('/(^|\.)recomplauncher\./i', (string)($_SERVER['HTTP_HOST'] ?? '')) ? 'pc' : 'ps5');
 
 $page = (string)file_get_contents(__DIR__ . '/index.html');
 header('Content-Type: text/html; charset=utf-8');
@@ -64,7 +65,58 @@ try {
         'url' => $base . '/game/' . rawurlencode((string)$a['id']), 'name' => (string)($a['name'] ?? $a['id'])], $items, array_keys($items))];
     $m = null;
 
-    if ($p === 'home') {
+    // (4.8) recomplauncher.com's own developer hub (/dev), developer pages, accounts and Submit page:
+    // RecompLauncher's names and words, so PC developers and players never meet recompstore.com.
+    if (rs_launcher() && (in_array($p, ['developers', 'hub', 'dev', 'submit', 'contact', 'dmca'], true) || str_starts_with($p, 'acct-'))) {
+        $nameL = fn(string $title) => $title . ' · RecompLauncher';
+        $navL = '<nav><a href="/">RecompLauncher</a> · <a href="/all">' . $e(t('All PC recomps')) . '</a> · <a href="/sdk">' . $e(t('RecompLauncher SDK')) . '</a> · <a href="/dev">' . $e(t('For developers')) . '</a></nav>';
+        $devDesc = t('A free developer account on RecompLauncher: claim your recomps, keep their pages up to date, see your numbers and answer your players\' reports. We approve every account by hand.');
+        $acctT = ['signin' => t('Sign in'), 'account' => t('Your account'), 'reset' => t('Set a new password'), 'library' => t('Your library'), 'terms' => t('Terms and Privacy'), 'privacy' => t('Terms and Privacy')];
+        if ($p === 'developers' || $p === 'hub') {
+            $m = ['title' => $nameL(t('For developers')), 'path' => '/dev', 'desc' => $devDesc,
+                'body' => '<h1>' . $e(t('Your recomps, your page, your players')) . '</h1><p>' . $e($devDesc) . '</p>'
+                    . '<p><a href="/sdk">' . $e(t('RecompLauncher SDK')) . '</a> · <a href="/submit">' . $e(t('Submit your recomp')) . '</a></p>' . $navL];
+        } elseif ($p === 'dev') {
+            $slug = preg_replace('/[^a-z0-9-]/', '', is_string($_GET['slug'] ?? null) ? $_GET['slug'] : '');
+            $dev = null;
+            foreach (rs_seo_devs() as $d) if ($d['slug'] === $slug) $dev = $d;
+            require_once __DIR__ . '/admin/inc/catcache.php';
+            $pcc = rs_json_cached(__DIR__ . '/pc-catalog.json');
+            $mine = $dev === null ? [] : array_values(array_filter(is_array($pcc['apps'] ?? null) ? $pcc['apps'] : [], fn($a) => ($a['dev'] ?? '') === $slug));
+            if ($dev === null) {
+                http_response_code(404);
+                $m = ['title' => 'RecompLauncher', 'path' => '/', 'noindex' => true, 'desc' => t('That page isn\'t here.')];
+            } else {
+                $dn = (string)($dev['name'] ?? $slug);
+                $about = trim((string)($dev['about'] ?? ''));
+                $m = ['title' => $nameL($dn), 'ogTitle' => $dn, 'path' => '/dev/' . $slug, 'noindex' => !$mine,
+                    'desc' => $about !== '' ? rs_seo_short($about) : tf('PC recomps by {name} on RecompLauncher.', ['name' => $dn]),
+                    'image' => is_string($dev['avatar'] ?? null) && preg_match('#^https?://#', $dev['avatar']) ? $dev['avatar'] : null, 'imageW' => 512, 'imageH' => 512,
+                    'body' => '<h1>' . $e($dn) . '</h1>' . ($about !== '' ? '<p>' . $e($about) . '</p>' : '') . $navL
+                        . ($mine ? '<ul>' . implode('', array_map(fn($a) => '<li><a href="/game/' . rawurlencode((string)$a['id']) . '">' . $e((string)$a['name']) . '</a></li>', $mine)) . '</ul>' : ''),
+                    'jsonld' => ['@context' => 'https://schema.org', '@type' => 'ProfilePage', 'url' => $base . '/dev/' . $slug, 'mainEntity' => ['@type' => 'Person', 'name' => $dn]]];
+                if ($m['image'] === null) unset($m['image'], $m['imageW'], $m['imageH']);
+            }
+        } elseif ($p === 'submit') {
+            $d = t('Made a PC recomp? Send in its GitHub and it can go on RecompLauncher, with its own page, one-click installs and updates.');
+            $m = ['title' => $nameL(t('Submit your recomp')), 'path' => '/submit', 'desc' => $d, 'body' => '<h1>' . $e(t('Submit your recomp')) . '</h1><p>' . $e($d) . '</p>' . $navL];
+        } elseif ($p === 'contact') {
+            $m = ['title' => $nameL(t('Contact')), 'path' => '/contact', 'desc' => t('Questions, ideas or problems with RecompLauncher: send us a message.'),
+                'body' => '<h1>' . $e(t('Contact')) . '</h1>' . $navL];
+        } elseif ($p === 'dmca') {
+            $m = ['title' => 'Copyright & DMCA · RecompLauncher', 'path' => '/dmca', 'langs' => false,
+                'desc' => 'RecompLauncher doesn\'t host any games or game files. Every recomp is its developer\'s own project on GitHub. How to send a copyright notice or counter-notice.',
+                'body' => '<h1>Copyright &amp; DMCA</h1><h2>We don\'t host games.</h2><p>RecompLauncher doesn\'t host, sell or share any games. No ROMs, no ISOs, no disc images, no game files and no game content of any kind. Each recomp points to a fan project published by its own developer on GitHub, and every one of them needs your own legally owned copy of the game.</p>' . $navL];
+        } else {
+            $k = substr($p, 5);
+            $m = ['title' => $nameL($acctT[$k] ?? 'RecompLauncher'), 'path' => '/' . ($k === 'reset' ? 'account/reset' : $k), 'noindex' => !in_array($k, ['terms', 'privacy'], true),
+                'desc' => in_array($k, ['terms', 'privacy'], true) ? t('The terms for your account, and what we keep about you and why.') : t('Your account: your library, saves and settings, on every device.')];
+        }
+    }
+
+    if ($m !== null) {
+        // drawn above
+    } elseif ($p === 'home') {
         $body = '<h1>' . $e(!empty($site['tagline']) ? t((string)$site['tagline']) : t('Recompiled games, native on PS5.')) . '</h1>'
             . '<p>' . $e(t('Install and update PS5 ports of recompiled games. No account, no game files: bring your own disc.')) . '</p>' . $nav;
         if (rs_seo_v2()) {

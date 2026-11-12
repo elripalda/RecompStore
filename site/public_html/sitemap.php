@@ -45,6 +45,13 @@ if ($L && $pcApps) {
 if (!$L) foreach (rs_seo_devs() as $d) {
     foreach ($apps as $a) if (($a['dev'] ?? '') === $d['slug']) { $urls[] = ['/dev/' . $d['slug'], '0.5']; break; }
 }
+// (4.8) RecompLauncher's developer hub, Submit page and each developer with a PC recomp.
+if ($L) {
+    array_push($urls, ['/dev', '0.6'], ['/submit', '0.5'], ['/contact', '0.3'], ['/dmca', '0.3']);
+    foreach (rs_seo_devs() as $d) {
+        foreach ($pcApps as $a) if (($a['dev'] ?? '') === $d['slug']) { $urls[] = ['/dev/' . $d['slug'], '0.5']; break; }
+    }
+}
 echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 foreach ($urls as $row) {
