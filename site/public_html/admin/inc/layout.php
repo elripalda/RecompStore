@@ -75,7 +75,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'Stores' => [
             ['pc.php', 'PC · RecompLauncher', 'pc', [
-                ['pc.php', 'Recomps', $pcAt('')], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
+                ['pc.php', 'Recomps', $pcAt('')], ['auto.php', 'Auto-add', null], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
                 ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['sdk-support.php', 'SDK support', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null],
                 ['launcher-beta.php', 'Launcher beta', null], ['launcher-stats.php', 'Launcher stats', null], ['launcher.php', 'Launcher', null]], 0],
             ['index.php', 'PS5 · RecompStore', 'ps5', [

@@ -531,6 +531,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
       <span><?= (int)$f['stars'] ?></span>
       <span class="ft-btns">
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="add"><input type="hidden" name="repo" value="<?= h($f['key']) ?>"><button class="primary">Add</button></form>
+        <form method="post" action="auto.php"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="start"><input type="hidden" name="links" value="<?= h(rs_host_web($f['host'], $f['repo'])) ?>"><button title="Scan it, write the listing, art and boot profile: lands as a draft on Auto-add">Auto-add</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="skip"><input type="hidden" name="repo" value="<?= h($f['key']) ?>"><button title="Not a PC recomp, or not good enough">Skip</button></form>
       </span>
       <?php // (3.8) Pre-checked: VirusTotal, already listed, game data, how recent.
