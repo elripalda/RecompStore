@@ -7182,7 +7182,7 @@
   // address bar always has the link that shows the game's card when it's shared.
   // (2.6) The site's own pages also have plain addresses (recompstore.com/games, /how, /get...), which
   // the server answers with the page's title and links for search engines; here they're the same page.
-  const PATHS = ['/games', '/emulators', '/apps', '/tools', '/how', '/get', '/about', '/contact', '/submit', '/report', '/ids', '/soon', '/link', '/my-ps5', '/press', '/beta', '/developers', '/hub', '/dmca', '/signin', '/account', '/account/reset', '/library', '/terms', '/privacy', '/pc', '/pc/all', '/pc/how', '/pc/top', '/pc/new', '/pc/consoles', '/pc/launcher', '/pc/settings', '/pc/sdk', '/pc/action', '/pc/adventure', '/pc/platformers', '/pc/racing', '/pc/fighting', '/pc/shooters', '/pc/sports', '/pc/rpg', '/pc/puzzle'];
+  const PATHS = ['/games', '/emulators', '/apps', '/tools', '/how', '/get', '/about', '/contact', '/team', '/submit', '/report', '/ids', '/soon', '/link', '/my-ps5', '/press', '/beta', '/developers', '/hub', '/dmca', '/signin', '/account', '/account/reset', '/library', '/terms', '/privacy', '/pc', '/pc/all', '/pc/how', '/pc/top', '/pc/new', '/pc/consoles', '/pc/launcher', '/pc/settings', '/pc/sdk', '/pc/action', '/pc/adventure', '/pc/platformers', '/pc/racing', '/pc/fighting', '/pc/shooters', '/pc/sports', '/pc/rpg', '/pc/puzzle'];
   const pathNow = () => location.pathname.replace(/(.)\/+$/, '$1');
   const pathPage = () => !(location.hash.length > 1) && (PATHS.includes(pathNow()) || /^\/dev\/[a-z0-9-]{1,40}$/.test(pathNow()) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(pathNow()));
   function current() {
