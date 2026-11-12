@@ -4195,7 +4195,7 @@
       ['RecompLauncher', [['/pc', t('Discover')], ['/pc/all', t('All recomps')], ['/pc/top', t('Top charts')], ['/pc/new', t('New')], ['/pc/soon', t('Coming soon')], ['/pc/consoles', t('Consoles')], ['/pc/settings', t('Settings')]]],
       [t('Get started'), [['/pc/how', t('How it works')], ['/pc/launcher', t('Get RecompLauncher')]]],
       [t('Developers'), [['/pc/sdk', t('RecompLauncher SDK')], ['/developers', t('Developer accounts')], ['/developers?signin=1', t('Developer sign in')], ['/submit?platform=pc', t('Submit a game')], ['/pc/press', t('Press kit')]]],
-      ['RecompStore', [['/', t('PS5 homebrew store')], ['/about', t('About')], ['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA']]],
+      ['RecompStore', [['/', 'RecompStore "PS5"'], ['/about', t('About')], ['/contact', t('Contact')], ['/dmca', 'Copyright & DMCA']]],
     ] : [
       [t('Store'), [['/', t('Discover')], ...cats.map((c) => [c.route, t(c.name)]), ...(cat.soon && cat.soon.length ? [['/soon', t('Coming soon')]] : []), ['/pc', 'RecompLauncher']]],
       [t('Get started'), [['/get', t('Get RecompStore')], ['/how', t('How it works')], ['/beta', t('Betas')], ...(v2on() ? [['/link', t('Link your PS5')]] : [])]],
@@ -6910,7 +6910,8 @@
     // (4.7) Pages both stores share (Submit, Developers, Report, the account...) keep the side the
     // visitor came from: always PC on recomplauncher.com, or when the link says ?platform=pc.
     const shared = /^\/(submit|report|developers|contact|press|signin|account(\/reset)?|library|terms|privacy|dmca|beta|dev\/[a-z0-9-]{1,40})$/.test(h);
-    const stayPc = shared && (LAUNCHER || /[?&]platform=pc\b/.test(location.search) || document.body.dataset.platform === 'pc');
+    // (4.8) Only on recomplauncher.com: RecompStore's own pages stay RecompStore (Submit there still starts on PC from ?platform=pc).
+    const stayPc = shared && LAUNCHER;
     setPlatform(pcm || stayPc ? 'pc' : 'ps5');
     // The address bar gets the page's own address: /game/<ID>, /games, /how, /dev/<name>...; the rest
     // stay #/... on the home page's address (and ?lang= stays).

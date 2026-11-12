@@ -3011,3 +3011,10 @@ a.pk-game:focus-visible{outline:2px solid #34F2E8;outline-offset:3px;border-radi
    (hundreds on a long list); they're already nearly solid, so the blur goes. Glass blurs less. */
 .rank,.pc-os,.pc-deck-b,.pc-life-b,.pc-count,.pc-cat-go,.play,.pc-media.yt .pc-media-pic i{-webkit-backdrop-filter:none;backdrop-filter:none}
 .glass{-webkit-backdrop-filter:blur(14px) saturate(140%);backdrop-filter:blur(14px) saturate(140%)}
+
+/* (4.8) RecompLauncher is PC only: no PC/PS5 switch (RecompStore is linked in the footer), and the
+   header lines up with the page: the logo over its left edge, Support and Get the Beta over its right. */
+body[data-platform="pc"] .plat{display:none!important}
+body[data-platform="pc"] .top-in{max-width:calc(1320px + 2 * var(--gut))}
+body[data-platform="pc"] .main-nav{margin-inline:auto}
+body[data-platform="pc"] .top-actions{margin-inline-start:0}
