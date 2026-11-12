@@ -412,85 +412,6 @@ function rs_pc_find(int $budget = 25): array {
     return [$new, $looked];
 }
 
-// (4.3) Quiver Launcher's public catalog: desktop recomps it lists that we don't, into the found list
-// (marked "Also on Quiver"). Its newest additions first; each project's details asked once and kept.
-// Only "port" entries with a Windows, Linux or Mac build, from GitHub or GitLab. -> [new found, looked at, problem]
-const RS_QV_API = 'https://api.quiverlauncher.com/api/v1';
-function rs_pc_find_quiver(int $budget = 40, int $pages = 8): array {
-    rs_pc_tables();
-    $start = microtime(true);
-    $done = function (int $new, int $looked, string $why) {
-        rs_kv_put('pc_find_qv', (string)json_encode(['at' => time(), 'new' => $new, 'looked' => $looked, 'why' => $why]));
-        return [$new, $looked, $why];
-    };
-    $get = function (string $path): ?array {
-        $r = rs_http(RS_QV_API . $path, ['max' => 4 << 20, 'timeout' => 12]);
-        if ($r['status'] !== 200) return null;
-        $j = json_decode((string)$r['body'], true);
-        return is_array($j) ? $j : null;
-    };
-    $db = rs_db();
-    $have = [];
-    foreach ($db->query('SELECT repo, state, UNIX_TIMESTAMP(checked) t FROM pc_found')->fetchAll() as $r) $have[strtolower((string)$r['repo'])] = [(string)$r['state'], (int)$r['t']];
-    $listed = [];
-    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '') $listed[strtolower(rs_pc_key($a))] = true;
-    $put = $db->prepare('INSERT INTO pc_found (repo, data, found, checked, state) VALUES (?, ?, NOW(), NOW(), ?) ON DUPLICATE KEY UPDATE data = VALUES(data), checked = NOW(),
-        state = IF(state IN (\'skip\', \'added\'), state, VALUES(state))');
-    // Where the last run stopped: entries added before that were all looked at already.
-    $last = (int)(json_decode((string)(rs_kv_get('pc_find_qv_seen')['v'] ?? '0'), true) ?: 0);
-    $newest = $last;
-    $new = $looked = 0;
-    $cursor = '';
-    for ($p = 0; $p < $pages; $p++) {
-        if (microtime(true) - $start > $budget) break;
-        $list = $get('/apps?limit=48&sort=added' . ($cursor !== '' ? '&cursor=' . rawurlencode($cursor) : ''));
-        if ($list === null) return $p === 0 ? $done(0, 0, 'Quiver\'s catalog didn\'t answer. It tries again tomorrow.') : $done($new, $looked, '');
-        $stop = false;
-        foreach ((array)($list['items'] ?? []) as $e) {
-            if (microtime(true) - $start > $budget) { $stop = true; break; }
-            $added = (int)(($e['addedAt'] ?? 0) / 1000);
-            $newest = max($newest, $added);
-            if ($last && $added <= $last) { $stop = true; break; }
-            if ((string)($e['projectType'] ?? '') !== 'port') continue;
-            if (!array_intersect((array)($e['supportedOS'] ?? []), ['windows', 'linux', 'macos', 'mac'])) continue;
-            // From a console: Quiver also lists PC-original fan games and tools as "ports", and phone-only builds.
-            $cons = array_values(array_diff(array_map('strval', (array)($e['consoles'] ?? [])), ['pc', 'mobile']));
-            if (!$cons) continue;
-            $slug = (string)($e['slug'] ?? '');
-            if (!preg_match('/^[a-z0-9-]{1,120}$/', $slug)) continue;
-            $kk = 'qv:' . $slug;
-            $det = rs_kv_get($kk);
-            $info = $det ? json_decode($det['v'], true) : null;
-            if (!is_array($info)) {
-                $d = $get('/apps/' . rawurlencode($slug));
-                $pr = is_array($d) ? (array)($d['project'] ?? ($d['entry']['project'] ?? [])) : [];
-                $info = ['repo' => (string)($pr['repository'] ?? ''), 'provider' => (string)($pr['provider'] ?? '')];
-                rs_kv_put($kk, json_encode($info));
-            }
-            $host = $info['provider'] === 'gitlab' ? 'gitlab' : ($info['provider'] === 'github' ? '' : null);
-            if ($host === null || !rs_host_repo_ok($host, $info['repo'])) continue;
-            $k = strtolower(rs_repo_key($host, $info['repo']));
-            if (isset($listed[$k])) continue;
-            if (isset($have[$k]) && ($have[$k][0] !== 'none' || $have[$k][1] > time() - 7 * 86400)) continue;
-            ++$looked;
-            $r = rs_pc_read_repo($info['repo'], $host);
-            $have[$k] = ['none', time()];
-            if (!$r['ok']) continue;
-            $r['via'] = 'quiver';
-            $r['qv_consoles'] = $cons;
-            $state = ($r['assets']['win'] === '' && $r['assets']['linux'] === '' && $r['assets']['mac'] === '') ? 'none' : 'new';
-            $put->execute([rs_repo_key($host, (string)$r['repo']), json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $state]);
-            $have[$k] = [$state, time()];
-            if ($state === 'new') ++$new;
-        }
-        if ($stop || empty($list['nextCursor']) || !empty($list['isDone'])) break;
-        $cursor = (string)$list['nextCursor'];
-    }
-    // Only move the mark forward when the run got through to it (or there was none yet and it ran out of time).
-    if ($newest > $last && (microtime(true) - $start <= $budget || !$last)) rs_kv_put('pc_find_qv_seen', (string)$newest);
-    return $done($new, $looked, '');
-}
-
 // (4.1) The Discord server's #recomp-suggestions: links people post there land in the found list too,
 // read with the site's bot (it needs View Channel and Read Message History there, and the Message
 // Content Intent switched on for the app). Each link is looked at once, then again after 3 days if it
@@ -1183,7 +1104,7 @@ function rs_pc_readme(string $repo, string $host = '', int $maxAge = 86400): arr
     });
     $j = json_decode((string)$r['body'], true) ?: [];
     $dir = trim(dirname((string)($j['path'] ?? 'README.md')), './');
-    return ['status' => $r['status'], 'md' => (string)($j['md'] ?? ''), 'url' => (string)($j['url'] ?? ''),
+    return ['status' => $r['status'], 'md' => (string)($j['md'] ?? ''), 'url' => (string)($j['url'] ?? ''), 'age' => (int)($r['age'] ?? 0),
         'raw' => 'https://raw.githubusercontent.com/' . $repo . '/HEAD/' . ($dir !== '' ? $dir . '/' : ''),
         'blob' => 'https://github.com/' . $repo . '/blob/HEAD/' . ($dir !== '' ? $dir . '/' : '')];
 }

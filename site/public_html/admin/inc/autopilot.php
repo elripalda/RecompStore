@@ -35,7 +35,6 @@ function rs_auto_morning_run(): array {
     $out = ['found' => 0, 'ps5_fixed' => [], 'grouped' => 0];
     try { [$out['found']] = rs_pc_find(120); } catch (Throwable $e) { /* tomorrow */ }
     try { $out['found'] += rs_pc_find_discord(40)[0]; } catch (Throwable $e) { /* tomorrow */ } // (4.1)
-    try { $out['found'] += rs_pc_find_quiver(60, 10)[0]; } catch (Throwable $e) { /* tomorrow */ } // (4.3)
     rs_auto_prevet();
     try { $out['ps5_fixed'] = rs_ps5_heal(); } catch (Throwable $e) { /* tomorrow */ }
     try { $out['grouped'] = rs_titles_autogroup(); } catch (Throwable $e) { /* next time */ }
@@ -233,16 +232,20 @@ function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
         elseif ($by === $ghOwner) $items[] = ['ok', 'Sent from the owner\'s GitHub (@' . $by . ')'];
         else $items[] = ['warn', 'Sent by @' . $by . ', repo is under ' . $ghOwner . ' (one of their orgs?)'];
     }
-    // (4.6) Xarishark: our badge in its README, or if they'd rather not, at least a link to us.
+    // (4.6) Xarishark: our badge in its README, or if they'd rather not, at least a link to us. (4.8) Optional:
+    // it never makes a submission look like it needs a look. A README without it is read again after 30
+    // minutes (they often add it once asked), not a day.
     if ($relStatus !== 404 && (string)($d['repo'] ?? '') !== '' && in_array($host, ['', 'gitlab'], true)) {
         try {
             $rd = rs_pc_readme((string)$d['repo'], $host, 86400);
+            $neg = (int)$rd['status'] === 404 || ((int)$rd['status'] === 200 && !rs_pc_badge_kinds((string)$rd['md']) && !rs_pc_readme_link((string)$rd['md']));
+            if ($neg && (int)($rd['age'] ?? 0) > 1800) $rd = rs_pc_readme((string)$d['repo'], $host, 1800);
             if ((int)$rd['status'] === 200) {
                 $bk = rs_pc_badge_kinds((string)$rd['md']);
                 if ($bk) $items[] = ['ok', 'README has the ' . implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $bk)) . ' badge'];
                 elseif (rs_pc_readme_link((string)$rd['md'])) $items[] = ['ok', 'README links to us (no badge)'];
-                else $items[] = ['warn', 'No badge or link to us in its README'];
-            } elseif ((int)$rd['status'] === 404) $items[] = ['warn', 'No README, so no badge or link to us'];
+                else $items[] = ['info', 'No badge or link to us in its README (optional)'];
+            } elseif ((int)$rd['status'] === 404) $items[] = ['info', 'No README, so no badge or link to us (optional)'];
         } catch (Throwable $e) { /* shows next time */ }
     }
     $kind = array_filter($items, fn($x) => $x[0] === 'bad') ? 'stop' : (array_filter($items, fn($x) => $x[0] === 'warn') ? 'check' : 'ready');
@@ -252,7 +255,7 @@ function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
 function rs_sub_precheck_html(array $d, ?array $latest, int $relStatus): string {
     [$kind, $items] = rs_sub_precheck($d, $latest, $relStatus);
     $head = ['ready' => 'Ready to approve', 'check' => 'Looks good, with a note', 'stop' => 'Needs a look before approving'][$kind];
-    $icon = ['ok' => '✓', 'warn' => '!', 'bad' => '✕'];
+    $icon = ['ok' => '✓', 'warn' => '!', 'bad' => '✕', 'info' => '–'];
     $out = '<div class="pre-check ' . $kind . '"><strong>' . h($head) . '</strong><ul>';
     foreach ($items as [$k, $t]) $out .= '<li class="' . $k . '"><span>' . $icon[$k] . '</span>' . h($t) . '</li>';
     return $out . '</ul></div>';

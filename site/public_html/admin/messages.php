@@ -9,6 +9,9 @@ rs_require_login();
 rs_dev_tables();
 $db = rs_db();
 $view = in_array($_GET['view'] ?? '', ['lounge', 'all'], true) ? (string)$_GET['view'] : 'dm';
+// (4.8) A game curator talks with developers one to one; the Lounge and Send to all stay with the owner.
+$limitedMsg = !rs_can_act('messages.php', 'broadcast');
+if ($limitedMsg) $view = 'dm';
 $room = array_key_exists($_GET['room'] ?? '', RS_DEV_ROOMS) ? (string)$_GET['room'] : 'general';
 $devId = (int)($_GET['dev'] ?? 0);
 
@@ -135,8 +138,8 @@ rs_head('Messages', true, ['assets/messages.css']);
 </section>
 <nav class="tabs" aria-label="Messages">
   <a href="messages.php"<?= $view === 'dm' ? ' aria-current="page"' : '' ?>>Developers<?= ($u = rs_dev_admin_unread()) ? ' <span class="count">' . $u . '</span>' : '' ?></a>
-  <a href="messages.php?view=lounge"<?= $view === 'lounge' ? ' aria-current="page"' : '' ?>>Lounge</a>
-  <a href="messages.php?view=all"<?= $view === 'all' ? ' aria-current="page"' : '' ?>>Send to all</a>
+  <?php if (!$limitedMsg): ?><a href="messages.php?view=lounge"<?= $view === 'lounge' ? ' aria-current="page"' : '' ?>>Lounge</a>
+  <a href="messages.php?view=all"<?= $view === 'all' ? ' aria-current="page"' : '' ?>>Send to all</a><?php endif; ?>
 </nav>
 
 <?php if ($view === 'dm'): ?>

@@ -59,7 +59,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
 <?php if (!$nav): $GLOBALS['rs_head_bare'] = true; ?>
 <body class="bare">
 <header class="bar">
-  <a class="brand" href="dashboard.php"><img src="/assets/mark.svg" alt=""><span>Recomp<b>Store</b></span><em>admin</em></a>
+  <a class="brand" href="<?= h(function_exists('rs_home_page') && !empty($_SESSION['uid']) ? rs_home_page() : 'dashboard.php') ?>"><img src="/assets/mark.svg" alt=""><span>Recomp<b>Store</b></span><em>admin</em></a>
 </header>
 <main>
 <?php if ($flash): ?><div class="flash <?= h($flash['kind']) ?>"><?= h($flash['msg']) ?></div><?php endif; ?>
@@ -73,10 +73,29 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $cnt = fn(int $n) => $n ? ' <span class="count">' . $n . '</span>' : '';
     // (4.7) Auto-add drafts waiting to be looked at (the daily scout's included).
     $autoN = 0;
-    if (rs_can_page('auto.php')) { try { $autoN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_auto WHERE status = 'review'")->fetchColumn(); } catch (Throwable $e) { /* no table yet */ } }
+    if (rs_can_page('hub.php') && rs_has_store('pc')) { try { $autoN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_auto WHERE status = 'review'")->fetchColumn(); } catch (Throwable $e) { /* no table yet */ } }
     // (4.8) Projects players asked for from RecompLauncher's Coming Soon page, not looked at yet.
     $reqN = 0;
-    if (rs_can_page('auto.php')) { require_once __DIR__ . '/requests.php'; $reqN = rs_req_new_count(); }
+    if (rs_can_page('hub.php') && rs_has_store('pc')) { require_once __DIR__ . '/requests.php'; $reqN = rs_req_new_count(); }
+    // (4.8) The Submissions hub: what's waiting on someone in the stores this login works on, and flags.
+    $hubN = 0; $flagN = 0;
+    if (rs_can_page('hub.php')) {
+        try {
+            $mineS = rs_me()['stores_list'] ?? [];
+            foreach (rs_db()->query("SELECT data FROM inbox WHERE kind = 'submit' AND status = 'new'") as $x) { $dd = json_decode((string)$x['data'], true); if (is_array($dd) && in_array(($dd['platform'] ?? '') === 'pc' ? 'pc' : 'ps5', $mineS, true)) $hubN++; }
+        } catch (Throwable $e) { /* inbox not made yet */ }
+        $hubN += $autoN;
+        try {
+            if (rs_setting('hub_schema', '') === '1') {
+                if (rs_role_at_least('manager')) $flagN = (int)rs_db()->query("SELECT COUNT(*) FROM hub_flags WHERE status = 'open' AND answer IS NULL")->fetchColumn();
+                else { $fs = rs_db()->prepare('SELECT COUNT(*) FROM hub_flags WHERE uid = ? AND seen = 0'); $fs->execute([(int)(rs_me()['id'] ?? 0)]); $flagN = (int)$fs->fetchColumn(); }
+            }
+        } catch (Throwable $e) { /* no flags yet */ }
+    }
+    $hubTab = (string)($_GET['tab'] ?? '');
+    $hubAt = fn(string $t) => fn() => $here === 'hub.php' && ($hubTab === $t || ($t === 'board' && !in_array($hubTab, ['requests', 'found', 'flags', 'handled', 'guide'], true)));
+    $hubKids = [['hub.php', 'Board' . $cnt($hubN), $hubAt('board')]];
+    if (rs_has_store('pc')) { $hubKids[] = ['hub.php?tab=requests', 'Requests' . $cnt($reqN), $hubAt('requests')]; $hubKids[] = ['hub.php?tab=found', 'Found on GitHub', $hubAt('found')]; }
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
     // it's the file in the address (and, for pc.php, the ?view=).
     $pcAt = fn(string $v) => fn() => $here === 'pc.php' && $view === $v;
@@ -87,21 +106,21 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     // admin. A section with several pages shows them as tabs across the top of the page.
     $devReq = rs_dev_waiting();
     $devUnread = rs_dev_admin_unread();
+    array_push($hubKids, ['dev-accounts.php', 'Developer requests' . $cnt($devReq), null], ['messages.php', 'Messages' . $cnt($devUnread), null], ['security.php', 'Security' . $cnt($vtNeed), null],
+        ['hub.php?tab=flags', 'Flags' . $cnt($flagN), $hubAt('flags')], ['hub.php?tab=handled', 'Handled', $hubAt('handled')], ['hub.php?tab=guide', 'How to approve', $hubAt('guide')]);
     $sections = [
         'Home' => [
             ['dashboard.php', 'Overview', 'home', [], 0],
         ],
         'To do' => [
-            ['submissions.php', 'Submissions', 'send', [], $subNew],
-            ['auto.php', 'Auto-add', 'bolt', [['auto.php', 'Drafts' . $cnt($autoN), fn() => $here === 'auto.php' && $view !== 'requests'], ['auto.php?view=requests', 'Requests' . $cnt($reqN), fn() => $here === 'auto.php' && $view === 'requests']], $autoN + $reqN],
-            ['dev-accounts.php', 'Developer requests', 'dev', [], $devReq],
-            ['security.php', 'Security', 'shield', [], $vtNeed],
+            // (4.8) Submissions, Auto-add, requests, finds, developers' requests, messages, Security and flags, together.
+            ['hub.php', 'Submissions', 'send', $hubKids, $hubN + $flagN + $reqN],
             ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
             ['roadmap.php', 'Roadmap', 'map', [], 0], // (4.8) the team's features and fixes
         ],
         'People' => [
             ['players.php', 'Players', 'players', [['players.php', 'Players', null], ['accounts.php', 'Sign-in & moderation', null], ['mail.php', 'Mail', null]], 0],
-            ['developers.php', 'Developers', 'team', [['developers.php', 'Developer pages', null], ['messages.php', 'Messages' . $cnt($devUnread), null], ['community.php', 'Discord & notes', null], ['docs.php', 'Docs', null]], $devUnread],
+            ['developers.php', 'Developers', 'team', [['developers.php', 'Developer pages', null], ['community.php', 'Discord & notes', null], ['docs.php', 'Docs', null]], 0],
         ],
         'Stores' => [
             ['pc.php', 'PC recomps', 'pc', [
@@ -128,7 +147,8 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     ];
     // Pages that live under another section's link.
     $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php', 'statcard.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
-        'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['messages.php', 'community.php', 'docs.php'], 'index.php' => ['edit.php']];
+        'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
+        'hub.php' => ['dev-accounts.php', 'messages.php', 'security.php', 'submissions.php', 'auto.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;
         return $m ? (bool)$m() : $here === basename((string)strtok($href, '?'));
@@ -138,12 +158,12 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $me = rs_me();
     $first = mb_strtoupper(mb_substr(rs_me_name(), 0, 1));
     // (4.8) Counts by page, for the pinned column.
-    $GLOBALS['rs_nav_counts'] = ['submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
+    $GLOBALS['rs_nav_counts'] = ['hub.php' => $hubN + $flagN + $reqN, 'submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
     ?>
 <body class="adm">
 <input type="checkbox" id="side-open" class="side-check" hidden>
 <aside class="side" aria-label="Admin menu">
-  <a class="brand" href="dashboard.php"><img src="/assets/mark.svg" alt=""><span>Recomp<b>Store</b></span><em>admin</em></a>
+  <a class="brand" href="<?= h(function_exists('rs_home_page') && !empty($_SESSION['uid']) ? rs_home_page() : 'dashboard.php') ?>"><img src="/assets/mark.svg" alt=""><span>Recomp<b>Store</b></span><em>admin</em></a>
   <nav class="side-nav">
   <?php foreach ($sections as $group => $items):
       $shown = array_values(array_filter($items, fn($it) => rs_can_page($it[0])));
@@ -239,7 +259,7 @@ function rs_foot(array $scripts = []): void {
 function rs_pins(): array {
     $uid = (int)($_SESSION['uid'] ?? (rs_me()['id'] ?? 0));
     $raw = rs_setting('pins_' . $uid, '');
-    $list = $raw !== '' ? json_decode((string)$raw, true) : [['href' => 'submissions.php', 'label' => 'Submissions'], ['href' => 'auto.php', 'label' => 'Auto-add'],
+    $list = $raw !== '' ? json_decode((string)$raw, true) : [['href' => 'hub.php', 'label' => 'Submissions'], ['href' => 'roadmap.php', 'label' => 'Roadmap'],
         ['href' => 'sdk-support.php', 'label' => 'SDK support'], ['href' => 'inbox.php?show=logs', 'label' => 'Player logs'], ['href' => 'players.php', 'label' => 'Find a player']];
     $out = [];
     foreach ((array)$list as $p) {

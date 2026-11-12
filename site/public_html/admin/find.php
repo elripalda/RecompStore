@@ -13,7 +13,7 @@ $lq = mb_strtolower($q);
 $has = fn(string ...$hay) => (bool)array_filter($hay, fn($x) => $x !== '' && str_contains(mb_strtolower($x), $lq));
 
 // Admin pages
-$pages = [['dashboard.php', 'Overview'], ['submissions.php', 'Submissions'], ['auto.php', 'Auto-add'], ['dev-accounts.php', 'Developer requests'], ['security.php', 'Security'],
+$pages = [['dashboard.php', 'Overview'], ['hub.php', 'Submissions'], ['hub.php?tab=requests', 'Requests'], ['hub.php?tab=found', 'Found on GitHub'], ['hub.php?tab=guide', 'How to approve'], ['roadmap.php', 'Roadmap'], ['dev-accounts.php', 'Developer requests'], ['security.php', 'Security'],
     ['inbox.php', 'Inbox'], ['inbox.php?show=logs', 'Player logs'], ['players.php', 'Players'], ['accounts.php', 'Sign-in & moderation'], ['mail.php', 'Mail'], ['developers.php', 'Developer pages'],
     ['messages.php', 'Developer messages'], ['community.php', 'Discord & notes'], ['docs.php', 'Docs'], ['pc.php', 'PC recomps'], ['pc.php?view=found', 'Found on GitHub (PC)'],
     ['pc.php?view=reports', 'Player reports'], ['titles.php', 'Versions'], ['boot.php', 'Boot profiles'], ['achievements.php', 'Achievements'], ['pc-banner.php', 'Banner'], ['ai.php', 'AI check'],

@@ -185,7 +185,7 @@ rs_head('Security', true, ['assets/vt.css']);
         <?php if ($isHeld): ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($app['id']) ?>"><button>Approve</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="block"><input type="hidden" name="id" value="<?= h($app['id']) ?>"><button class="danger">Block</button></form>
-        <?php elseif ($f['source'] === 'submission'): ?><a class="button" href="submissions.php#<?= h($f['ref']) ?>">Open submission</a><?php endif; ?>
+        <?php elseif ($f['source'] === 'submission'): ?><a class="button" href="hub.php#<?= h(preg_replace('/^m(\d+)$/', 'sub:$1', (string)$f['ref'])) ?>">Open submission</a><?php endif; ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="seen"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><button class="ghost">Mark seen</button></form>
       </div>
     </div>

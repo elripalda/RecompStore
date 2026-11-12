@@ -122,7 +122,7 @@ $pcReports = $safe(fn() => (int)rs_db()->query("SELECT COUNT(*) FROM play_report
 $pcHeld = $safe(fn() => count(array_filter(rs_pc_apps(), fn($x) => !empty($x['pending']['tag']))));
 $task($pcFound, 'Recomp found on GitHub', 'Recomps found on GitHub', 'New ones the finder spotted. Add the good ones, skip the rest.', 'pc.php?view=found', 'pc');
 $task($pcChanged, 'Recomp changed, not published', 'Recomps changed, not published', 'Players see them after Publish PC' . ($pcPub !== '' ? ' (last ' . rs_date('M j, g:i a', (int)strtotime($pcPub)) . ')' : '') . '.', 'pc.php', 'pc');
-$task($subs['pc'], 'PC submission', 'PC submissions', 'Recomps developers sent in.', 'submissions.php' . ($both ? '?pf=pc' : ''), 'pc');
+$task($subs['pc'], 'PC submission', 'PC submissions', 'Recomps developers sent in.', 'hub.php?store=pc', 'pc');
 $task($pcHeld, 'Update on hold', 'Updates on hold', 'New releases waiting for their virus check or for you.', 'security.php', 'pc');
 $task($pcReports, 'Flagged player report', 'Flagged player reports', 'Other players flagged these. Hide them or keep them.', 'pc.php?view=reports', 'pc');
 // PS5
@@ -132,7 +132,7 @@ $health = $showPs5 && rs_has_store('ps5') ? $safe(function () { rs_health_maybe(
 $psFound = $showPs5 && rs_has_store('ps5') ? $safe(fn() => count(rs_found_list()['new'])) : 0;
 $task($psFound, 'PS5 app found', 'PS5 apps found', 'On GitHub and in other catalogs, not in the store yet.', 'health.php#found', 'ps5');
 $task($psChanged, 'Game changed, not published', 'Games changed, not published', $published !== '' ? 'Last published ' . rs_date('M j, g:i a', (int)strtotime($published)) . '.' : 'Not published yet.', 'index.php', 'ps5');
-$task($subs['ps5'], 'PS5 submission', 'PS5 submissions', 'Apps developers sent in for the store.', 'submissions.php' . ($both ? '?pf=ps5' : ''), 'ps5');
+$task($subs['ps5'], 'PS5 submission', 'PS5 submissions', 'Apps developers sent in for the store.', 'hub.php?store=ps5', 'ps5');
 $task((int)$health['bad'] + (int)$health['warn'], 'Listing needs a look', 'Listings need a look', 'A renamed repo, a missing zip, a changed title ID or a dead link.', 'health.php', 'ps5');
 // Both stores
 $task($safe(fn() => rs_vt_need_count()), 'Download flagged', 'Downloads flagged', 'Flagged by several virus scanners. Look before it goes out.', 'security.php');

@@ -683,6 +683,7 @@ body.adm{display:block}
 .role-manager{color:var(--violet);border-color:rgba(138,75,255,.45);background:rgba(138,75,255,.12)}
 .role-curator{color:var(--cyan-ink);border-color:rgba(52,242,232,.45);background:rgba(52,242,232,.1)}
 .role-maker{color:var(--good,#3ddc97);border-color:rgba(61,220,151,.45);background:rgba(61,220,151,.1)}
+.role-gcurator{color:#d7c6ff;border-color:rgba(205,184,255,.45);background:rgba(205,184,255,.1)}
 .store-pc{color:var(--cyan-ink)}.store-ps5{color:var(--blue)}
 /* Light look: cards on white with a soft shadow instead of glass. */
 :root[data-theme=light] .card,:root[data-theme=light] .row{box-shadow:var(--shadow);backdrop-filter:none}

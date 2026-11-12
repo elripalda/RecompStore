@@ -255,16 +255,19 @@ $pic = fn(array $r, int $n) => (string)$r['avatar'] !== ''
 $when = fn(?string $d) => $d ? rs_date('M j, Y', strtotime($d)) : '';
 $fieldNames = ['name' => 'Name', 'tags' => 'Tags', 'setup_steps' => 'Setup steps', 'art' => 'Pictures', 'blurb' => 'One-line summary', 'description' => 'Description', 'news' => 'What\'s new', 'needs' => 'What players need', 'credits' => 'Credits', 'video' => 'Video', 'features' => 'What\'s in it', 'media' => 'Around the web'];
 
+// (4.8) A game curator sees what developers changed and claimed, not the accounts and invites.
+$limited = !rs_can_act('dev-accounts.php', 'approve');
 rs_head('Developer accounts');
 ?>
 <section class="head-row">
   <div>
     <h1>Developer accounts</h1>
-    <p class="muted">Developers sign in with GitHub (or an email and password) at <a href="/developers" target="_blank">recompstore.com/developers</a> and ask for a hub, or follow an invite you sent. Nobody gets in until you approve them here. Approving gives them a Verified developer page they look after themselves.</p>
+    <?php if (!$limited): ?><p class="muted">Developers sign in with GitHub (or an email and password) at <a href="/developers" target="_blank">recompstore.com/developers</a> and ask for a hub, or follow an invite you sent. Nobody gets in until you approve them here. Approving gives them a Verified developer page they look after themselves.</p><?php else: ?><p class="muted">Changes developers made to their own pages, and projects they say are theirs. Approve what's right and turn down what isn't. Anything about accounts or invites goes to the owner: flag it on the Submissions hub.</p><?php endif; ?>
   </div>
-  <div class="actions"><a class="btn" href="developers.php">Developer pages</a></div>
+  <?php if (!$limited): ?><div class="actions"><a class="btn" href="developers.php">Developer pages</a></div><?php endif; ?>
 </section>
 
+<?php if (!$limited): ?>
 <section class="card" id="requests">
   <h2>Waiting for you <?= $pending ? '<span class="count">' . count($pending) . '</span>' : '' ?></h2>
   <?php if (!$pending): ?><p class="muted">No requests right now.</p><?php endif; ?>
@@ -304,6 +307,7 @@ rs_head('Developer accounts');
   <?php endforeach; ?>
 </section>
 
+<?php endif; ?>
 <section class="card" id="changes">
   <h2>App page changes to review <?= $changes ? '<span class="count">' . count($changes) . '</span>' : '' ?></h2>
   <?php if (!$changes): ?><p class="muted">Nothing waiting.</p><?php endif; ?>
@@ -385,6 +389,7 @@ rs_head('Developer accounts');
   <?php endforeach; ?>
 </section>
 
+<?php if (!$limited): ?>
 <section class="card" id="invite">
   <h2>Set up and invite a developer</h2>
   <p class="muted">Get their page ready first: pick the page their apps are on, or type their GitHub username and their page is made or matched for you, with their GitHub picture and link, and their apps on it. Then keep the invite for later or send it now. They make their account with the link (GitHub or email) and show up under Waiting for you, already linked to their page, for you to look over and approve. Tick "Approve them as soon as they accept" to skip that step.</p>
@@ -461,7 +466,7 @@ rs_head('Developer accounts');
     <button class="primary">Save</button>
   </form>
 </section>
-<?php ?>
+<?php endif; ?>
 <style>
 .dev-decline{margin-top:10px;grid-column:1/-1}
 .dev-decline summary{cursor:pointer;color:var(--bad)}

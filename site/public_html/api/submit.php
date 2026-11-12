@@ -266,7 +266,7 @@ try {
         try {
             if (rs_mail_ready()) rs_mail_send(rs_mail_get('mail_from'), 'New app from ' . $d['account_name'] . ': ' . $d['name'],
                 $d['account_name'] . ($d['verified'] ? ' (verified developer)' : '') . ' sent in ' . $d['name'] . ' (' . preg_replace('#^https://#', '', rs_host_web($repoHost, $d['repo'])) . ') from their developer hub.'
-                . "\n\nSee it in Submissions: " . rs_abs('/admin/submissions.php#m' . $id));
+                . "\n\nSee it in Submissions: " . rs_abs('/admin/hub.php#sub:' . $id));
         } catch (Throwable $e) { /* it's in the Inbox either way */ }
         rs_sub_out(200, ['ok' => true, 'hub' => true, 'message' => 'Thanks! ' . $d['name'] . ' is in. Reviews take 24 to 48 hours, usually less than a day. You can follow it in your developer hub, and you\'ll hear back at ' . $d['contact'] . '.']);
     }

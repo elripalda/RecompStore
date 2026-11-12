@@ -433,7 +433,7 @@ function rs_tid_all(): array {
     try {
         rs_inbox_table();
         foreach (rs_db()->query("SELECT id, app_id, name, repo FROM inbox WHERE kind = 'submit' AND status = 'new' AND app_id <> '' ORDER BY id DESC LIMIT 500")->fetchAll() as $r)
-            $add((string)$r['app_id'], 'submission', (string)$r['name'], (string)preg_replace('#^https?://(www\.)?github\.com/#i', '', (string)$r['repo']), 'submissions.php#m' . (int)$r['id']);
+            $add((string)$r['app_id'], 'submission', (string)$r['name'], (string)preg_replace('#^https?://(www\.)?github\.com/#i', '', (string)$r['repo']), 'hub.php#sub:' . (int)$r['id']);
     } catch (Throwable $e) { /* no Inbox yet */ }
     try {
         rs_health_tables();

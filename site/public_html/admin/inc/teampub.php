@@ -31,7 +31,7 @@ function rs_tp_members(): array {
     require_once __DIR__ . '/adminlink.php';
     rs_al_schema();
     $rows = rs_db()->query("SELECT username, display_name, role, pub_name, pub_title, pub_github, pub_discord, pub_about, account_id FROM users
-        WHERE pub_show = 1 AND active = 1 ORDER BY pub_order, FIELD(role, 'owner', 'manager', 'curator', 'maker'), id")->fetchAll();
+        WHERE pub_show = 1 AND active = 1 ORDER BY pub_order, FIELD(role, 'owner', 'manager', 'curator', 'gcurator', 'maker'), id")->fetchAll();
     $out = [];
     foreach ($rows as $r) {
         $gh = (string)$r['pub_github'];

@@ -1,6 +1,6 @@
 <?php
-// (4.7) The daily scout: every day at noon (Phoenix) the server looks for new recomps (GitHub, the
-// Discord suggestions, Quiver's catalog), has Claude sort the real ones (a native PC build of a console
+// (4.7) The daily scout: every day at noon (Phoenix) the server looks for new recomps (GitHub and the
+// Discord suggestions), has Claude sort the real ones (a native PC build of a console
 // game, players bring their own copy) from the rest (emulators, tools, mods, fan games, no build yet),
 // and sends the ones it picks through Auto-add one after another. They wait on Auto-add as drafts;
 // nothing goes live until Publish. Run from cron (scout-run.php) or with "Run now" on Auto-add.
@@ -113,8 +113,6 @@ function rs_scout_run(bool $fresh = true): array {
             try { $sum['found'] += rs_pc_find(150)[0]; } catch (Throwable $e) { /* the others still run */ }
             $state('Reading the Discord suggestions');
             try { $sum['found'] += rs_pc_find_discord(40)[0]; } catch (Throwable $e) {}
-            $state('Looking at Quiver\'s catalog');
-            try { $sum['found'] += rs_pc_find_quiver(60, 10)[0]; } catch (Throwable $e) {}
         }
         // 2. Claude sorts what it hasn't looked at (or has a new release since).
         $seen = rs_scout_seen();

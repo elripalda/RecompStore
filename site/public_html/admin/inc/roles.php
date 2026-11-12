@@ -4,16 +4,19 @@
 //   manager  curation, plus the Inbox, logs, analytics, player accounts and Mail.
 //   curator  the recomps and games, Found on GitHub, developer submissions and messages, Security.
 //   maker    (4.6) achievement makers: Recomp Achievements' lists and player reports, nothing else.
+//   gcurator (4.8) game curators: the Submissions hub only (submissions, Auto-add drafts, requests,
+//            finds, developers' changes, messages with developers, Security), and flags for the owner.
 // Stores: PC, PS5 or both. A store someone doesn't work on isn't in their menu, and its pages
 // answer "not for you". Pages are checked here on the server, not just hidden in the menu.
 declare(strict_types=1);
 
-const RS_ROLES = ['owner' => 'Owner', 'manager' => 'Manager', 'curator' => 'Curator', 'maker' => 'Achievement maker'];
-const RS_ROLE_RANK = ['maker' => 0, 'curator' => 1, 'manager' => 2, 'owner' => 3];
+const RS_ROLES = ['owner' => 'Owner', 'manager' => 'Manager', 'curator' => 'Store curator', 'gcurator' => 'Game curator', 'maker' => 'Achievement maker'];
+const RS_ROLE_RANK = ['maker' => 0, 'gcurator' => 0, 'curator' => 1, 'manager' => 2, 'owner' => 3];
 const RS_ROLE_ABOUT = [
     'maker' => 'Recomp Achievements only: writing and fixing achievement lists, and answering players\' reports about them.',
+    'gcurator' => 'The Submissions hub only: new submissions, Auto-add drafts, players\' requests and finds, developers\' changes, messages with developers and Security. Anything unsure gets flagged to the owner.',
     'curator' => 'Recomps and games, Found on GitHub, developer submissions and messages, Security, and publishing the catalog.',
-    'manager' => 'Everything a curator does, plus the Inbox, logs, analytics, player accounts and Mail.',
+    'manager' => 'Everything a store curator does, plus the Inbox, logs, analytics, player accounts and Mail.',
     'owner' => 'Everything, including Settings, the launcher\'s builds and the team.',
 ];
 const RS_STORES = ['pc' => 'PC', 'ps5' => 'PS5'];
@@ -30,7 +33,7 @@ const RS_PAGE_ACCESS = [
     'beta.php' => ['curator', 'ps5'], 'beta-upload.php' => ['curator', 'ps5'], 'feedback.php' => ['curator', 'ps5'], 'import.php' => ['curator', 'ps5'],
     'health.php' => ['curator', 'ps5'], 'icons.php' => ['curator', 'ps5'], 'r2.php' => ['curator', 'ps5'],
     // Developers and Security
-    'developers.php' => ['curator', ''], 'submissions.php' => ['curator', ''], 'dev-accounts.php' => ['curator', ''],
+    'developers.php' => ['curator', ''], 'submissions.php' => ['curator', ''], 'dev-accounts.php' => ['curator', ''], 'hub.php' => ['curator', ''],
     'messages.php' => ['curator', ''], 'community.php' => ['curator', ''], 'security.php' => ['curator', ''],
     // Managers
     'inbox.php' => ['manager', ''], 'log.php' => ['manager', ''], 'log-file.php' => ['manager', ''], 'log-zip.php' => ['manager', ''],
@@ -40,6 +43,25 @@ const RS_PAGE_ACCESS = [
     'settings.php' => ['owner', ''], 'launcher.php' => ['owner', 'pc'], 'launcher-beta.php' => ['owner', 'pc'], 'launcher-upload.php' => ['owner', 'pc'],
     'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''], 'sponsors.php' => ['owner', ''],
 ];
+// (4.8) Roles that don't climb the ladder above: only these pages (and each page's store still counts).
+const RS_ROLE_PAGES = [
+    'gcurator' => ['hub.php', 'account.php', 'picture.php', 'dev-accounts.php', 'messages.php', 'security.php', 'find.php', 'pins.php'],
+];
+// (4.8) Buttons such a role can't press on a page it can open: role => page => actions.
+const RS_ROLE_DENY = [
+    'gcurator' => [
+        'dev-accounts.php' => ['approve', 'access', 'decline', 'remove', 'invite', 'invite-hold', 'invite-send', 'weekly', 'weekly-now', 'uninvite', 'github', 'dev-note'],
+        'messages.php' => ['broadcast', 'lounge-post', 'lounge-delete', 'lounge-restore'],
+        'security.php' => ['clear-list'],
+    ],
+];
+// Whether the signed-in person may press $action on $page (owner-only buttons and the role's own limits).
+function rs_can_act(string $page, string $action): bool {
+    $role = (string)(rs_me()['role'] ?? '');
+    if (in_array($action, RS_ROLE_DENY[$role][$page] ?? [], true)) return false;
+    if (isset(RS_OWNER_ACTIONS[$page]) && $role !== 'owner') { $a = RS_OWNER_ACTIONS[$page]; if (in_array('*', $a, true) || in_array($action, $a, true)) return false; }
+    return true;
+}
 // Buttons on shared pages that only owners may press: page => actions.
 const RS_OWNER_ACTIONS = [
     'security.php' => ['key', 'forget', 'settings'],
@@ -81,7 +103,7 @@ function rs_me(): ?array {
 }
 function rs_me_name(): string { $m = rs_me(); return $m ? ((string)$m['display_name'] !== '' ? (string)$m['display_name'] : (string)$m['username']) : ''; }
 // Where a login lands: the Dashboard, or Recomp Achievements for achievement makers.
-function rs_home_page(): string { return (rs_me()['role'] ?? '') === 'maker' ? 'achievements.php' : 'dashboard.php'; }
+function rs_home_page(): string { return ['maker' => 'achievements.php', 'gcurator' => 'hub.php'][rs_me()['role'] ?? ''] ?? 'dashboard.php'; }
 function rs_is_owner(): bool { return (rs_me()['role'] ?? '') === 'owner'; }
 // Whether the signed-in person's role is at least $role.
 function rs_role_at_least(string $role): bool {
@@ -98,6 +120,8 @@ function rs_has_store(string $store): bool {
 function rs_can_page(string $page): bool {
     $page = basename((string)strtok($page, '?'));
     [$role, $store] = RS_PAGE_ACCESS[$page] ?? ['owner', ''];
+    $mine = RS_ROLE_PAGES[rs_me()['role'] ?? ''] ?? null; // (4.8) a role with its own page list
+    if ($mine !== null) return in_array($page, $mine, true) && rs_has_store($store);
     return rs_role_at_least($role) && rs_has_store($store);
 }
 
@@ -128,6 +152,8 @@ function rs_gate(bool $json = false): void {
         $acts = RS_OWNER_ACTIONS[$page];
         if (in_array('*', $acts, true) || in_array((string)($_POST['action'] ?? $_POST['act'] ?? ''), $acts, true)) $out(403, 'Only the owner can change that.');
     }
+    // (4.8) What a game curator (or another limited role) can't press on a page it can open.
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? $_POST['act'] ?? ''), RS_ROLE_DENY[$m['role']][$page] ?? [], true)) $out(403, 'That isn\'t part of your role. Flag it for the owner on the Submissions hub.');
 }
 // For the few admin endpoints that answer JSON and check the session themselves.
 function rs_gate_json(): void {
@@ -155,7 +181,7 @@ function rs_login_done(int $uid): void {
 // ---- The team (Team page, owners only) ----------------------------------------------------------
 function rs_team(): array {
     rs_roles_schema();
-    return rs_db()->query('SELECT id, username, display_name, role, stores, active, must_change, totp_secret <> \'\' AS twostep, last_login, created FROM users ORDER BY FIELD(role, \'owner\', \'manager\', \'curator\', \'maker\'), username')->fetchAll();
+    return rs_db()->query('SELECT id, username, display_name, role, stores, active, must_change, totp_secret <> \'\' AS twostep, last_login, created FROM users ORDER BY FIELD(role, \'owner\', \'manager\', \'curator\', \'gcurator\', \'maker\'), username')->fetchAll();
 }
 function rs_team_clean_stores(array $in): string {
     $s = array_values(array_intersect(array_keys(RS_STORES), $in));

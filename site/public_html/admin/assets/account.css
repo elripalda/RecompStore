@@ -34,8 +34,10 @@ form.inline input{width:140px}
 .role-card .n{position:absolute;top:12px;right:16px;font:700 26px Sora,sans-serif}
 .role-card p{margin:10px 0 0}
 .role-cards.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.role-cards.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:1800px){.role-cards.five{grid-template-columns:repeat(6,minmax(0,1fr))}.role-cards.five>:nth-child(-n+2){grid-column:span 3}.role-cards.five>:nth-child(n+3){grid-column:span 2}}
 @media (max-width:1100px){.role-cards.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:860px){.role-cards{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:860px){.role-cards,.role-cards.five{grid-template-columns:minmax(0,1fr)}.role-cards.five>*{grid-column:auto!important}}
 .team-add{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:0 14px;align-items:end}
 .team-add fieldset{border:0;padding:0;margin:0 0 14px}
 .team-add legend{font-weight:600;font-size:15px;margin-bottom:6px}

@@ -113,8 +113,8 @@ Temporary password: <?= h($once['pw']) ?></pre>
 </section>
 <?php endif; ?>
 
-<div class="role-cards four">
-  <?php foreach (['maker', 'curator', 'manager', 'owner'] as $r): ?>
+<div class="role-cards five">
+  <?php foreach (['maker', 'gcurator', 'curator', 'manager', 'owner'] as $r): ?>
   <div class="role-card"><span class="role-chip role-<?= $r ?>"><?= h(RS_ROLES[$r]) ?></span><span class="n"><?= (int)($counts[$r] ?? 0) ?></span><p class="muted small"><?= h(RS_ROLE_ABOUT[$r]) ?></p></div>
   <?php endforeach; ?>
 </div>

@@ -101,6 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// (4.8) Auto-add is part of the Submissions hub now: drafts are on its board, requests on its Requests tab.
+if (empty($_GET['legacy'])) { header('Location: hub.php' . ($reqView ? '?tab=requests' : '')); exit; }
 $jobs = rs_auto_list();
 $working = false;
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
@@ -207,7 +209,7 @@ if ($reqView):
 </section>
 <section class="card auto-box scout-box">
   <div class="scout-top"><b>Daily scout</b><span class="pill<?= $scoutOn ? ' ok' : '' ?>"><?= $scoutOn ? 'On · every day at 12 pm' : 'Off' ?></span></div>
-  <p class="muted small">Looks on GitHub, the Discord suggestions and Quiver for new recomps, has Claude pick the real ones, and makes a draft below for each. Nothing goes live until you Publish.</p>
+  <p class="muted small">Looks on GitHub and the Discord suggestions for new recomps, has Claude pick the real ones, and makes a draft below for each. Nothing goes live until you Publish.</p>
   <p class="scout-now small" role="status">
     <?php if ($scoutRun): ?><span class="sdk-spin" aria-hidden="true"></span> <?= h((string)($scoutState['phase'] ?? 'Working')) ?><?= !empty($scoutState['total']) ? ' · ' . (int)$scoutState['done'] . ' of ' . (int)$scoutState['total'] : '' ?>
     <?php elseif ($scoutLast): ?>Last run <?= h(rs_date('M j, g:i a', (int)$scoutLast['at'])) ?>: looked at <?= (int)$scoutLast['looked'] ?> new <?= (int)$scoutLast['looked'] === 1 ? 'find' : 'finds' ?>, picked <?= (int)$scoutLast['picked'] ?>, made <?= count((array)$scoutLast['drafted']) ?> <?= count((array)$scoutLast['drafted']) === 1 ? 'draft' : 'drafts' ?>.<?= (int)($scoutLast['waiting'] ?? 0) ? ' ' . (int)$scoutLast['waiting'] . ' more wait for the next run.' : '' ?><?php if (($scoutLast['error'] ?? '') !== ''): ?> <span class="warn"><?= h((string)$scoutLast['error']) ?></span><?php endif; ?>

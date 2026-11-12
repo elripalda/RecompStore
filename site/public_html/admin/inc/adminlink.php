@@ -42,7 +42,7 @@ function rs_al_account_for(int $uid): ?array {
 // Every admin login with the account it's merged with (for the Players page's picker).
 function rs_al_admins(): array {
     rs_al_schema();
-    return rs_db()->query("SELECT id, username, display_name, role, active, account_id FROM users ORDER BY FIELD(role, 'owner', 'manager', 'curator', 'maker'), username")->fetchAll();
+    return rs_db()->query("SELECT id, username, display_name, role, active, account_id FROM users ORDER BY FIELD(role, 'owner', 'manager', 'curator', 'gcurator', 'maker'), username")->fetchAll();
 }
 
 // Merges admin login $uid with player account $accId. -> the admin login's new username.
