@@ -6910,8 +6910,7 @@
     // (4.7) Pages both stores share (Submit, Developers, Report, the account...) keep the side the
     // visitor came from: always PC on recomplauncher.com, or when the link says ?platform=pc.
     const shared = /^\/(submit|report|developers|contact|press|signin|account(\/reset)?|library|terms|privacy|dmca|beta|dev\/[a-z0-9-]{1,40})$/.test(h);
-    // (4.8) Only on recomplauncher.com: RecompStore's own pages stay RecompStore (Submit there still starts on PC from ?platform=pc).
-    const stayPc = shared && LAUNCHER;
+    const stayPc = shared && (LAUNCHER || /[?&]platform=pc\b/.test(location.search) || document.body.dataset.platform === 'pc');
     setPlatform(pcm || stayPc ? 'pc' : 'ps5');
     // The address bar gets the page's own address: /game/<ID>, /games, /how, /dev/<name>...; the rest
     // stay #/... on the home page's address (and ?lang= stays).
