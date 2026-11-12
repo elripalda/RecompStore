@@ -277,7 +277,10 @@ function rs_pc_assets(array $assets, array &$flags): array {
             : (preg_match('/(mac|osx|darwin|\.dmg)/', $l) ? 'mac' : 'win'));
         $inst = (bool)preg_match('/(setup|installer|(^|[-_. ])install(?!ed)|\.msi$)/', $l);
         $sc = 10;
-        if ($sys === 'win' && preg_match('/(win|windows|x64|x86_64|msvc|pc)/', $l)) $sc += 3;
+        // A file that names Windows beats one that only says "pc" or "x64" (a project's own updater zip,
+        // "Game-PC-1.0.zip", sits next to "Game.PC.1.0.-.Windows.zip" in some releases).
+        if ($sys === 'win' && preg_match('/(windows|win64|(^|[-_. ])win([-_. ]|$))/', $l)) $sc += 3;
+        elseif ($sys === 'win' && preg_match('/(win|x64|x86_64|msvc|pc)/', $l)) $sc += 2;
         if (preg_match('/(x86(?!_64)|win32|i386|i686|32-?bit)/', $l)) $sc -= 2;
         if ($sys === 'linux' && preg_match('/(arm64|aarch64)/', $l)) $sc -= 2;
         if ($sys === 'mac' && preg_match('/(arm64|universal|apple)/', $l)) $sc += 2;

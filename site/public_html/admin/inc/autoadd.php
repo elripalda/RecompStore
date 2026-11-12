@@ -138,7 +138,9 @@ function rs_auto_run(int $id): void {
         $warnRead = [];
         if (!empty($f['archived'])) $warnRead[] = 'archived';
         if (!empty($f['fork'])) $warnRead[] = 'a fork';
-        rs_auto_step($id, 'read', $warnRead ? 'warn' : 'ok', ($f['version'] !== '' ? 'v' . $f['version'] . ' · ' : '') . implode(', ', $files) . ' · ' . (int)$f['stars'] . ' stars' . ($warnRead ? ' · ' . implode(', ', $warnRead) : ''));
+        $per = [];
+        foreach (['win' => 'Windows', 'linux' => 'Linux', 'mac' => 'Mac'] as $sk => $sl) if ((string)$f['assets'][$sk] !== '') $per[] = $sl . ': ' . $f['assets'][$sk];
+        rs_auto_step($id, 'read', $warnRead ? 'warn' : 'ok', ($f['version'] !== '' ? 'v' . $f['version'] . ' · ' : '') . implode(' · ', $per) . ' · ' . (int)$f['stars'] . ' stars' . ($warnRead ? ' · ' . implode(', ', $warnRead) : ''));
 
         // 2. The listing, hidden. One the catalog already has is left alone.
         $cur = 'add';
@@ -296,7 +298,7 @@ Rules:
 - setup_required: true only when players must do something by hand before the first play that the boot profile can\'t do; then setup_steps, short and in order, as a player would follow them in the launcher (Open Folder is the button that opens the install folder).
 - tags: up to 6, from: Widescreen, 60 FPS, High FPS, Mods, Online, Multiplayer, Controller, Ray Tracing, Upscaling, Ultrawide, HDR, Achievements.
 - boot: a recomplauncher.json for the catalog (format 1, start.program from the download\'s file list, and game, inputs, prepare, config and settings only where the README or files show how). null when there isn\'t enough to go on. Never invent arguments or config keys.
-- concerns: anything an admin must know before listing it: an emulator wrapped up as a "recomp", no playable build yet, game files in the download, a fork that only repackages another project, a project that says it\'s not ready. verdict: good (list it), check (look first), skip (don\'t list).
+- concerns: anything an admin must know before listing it: an emulator wrapped up as a "recomp", no playable build yet, game files in the download, a fork that only repackages another project, a project that says it\'s not ready. launcher_downloads is what the launcher will download on each system; only bring up other release files if one of those picks looks wrong. verdict: good (list it), check (look first), skip (don\'t list).
 - notes: one or two short lines for the admin.
 
 Answer with one JSON object and nothing else:
@@ -311,6 +313,8 @@ function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $na
         'fork' => !empty($f['fork']), 'archived' => !empty($f['archived']),
         'release' => ['tag' => $latest['tag_name'] ?? '', 'name' => $latest['name'] ?? '', 'notes' => mb_substr((string)($latest['body'] ?? ''), 0, 3000),
             'assets' => array_map(fn($x) => ['name' => $x['name'], 'mb' => round((int)($x['size'] ?? 0) / 1048576, 1)], (array)($latest['assets'] ?? []))],
+        // What the launcher will actually download on each system (already picked; no need to flag other files).
+        'launcher_downloads' => ['windows' => $f['assets']['win'] ?? '', 'linux' => $f['assets']['linux'] ?? '', 'mac' => $f['assets']['mac'] ?? ''],
         'inside_the_download' => array_slice($names, 0, 400),
         'readme' => mb_substr($readme, 0, 24000),
         'our_guess' => ['name' => $a['name'], 'game' => $a['game'], 'origin' => $a['origin']],
