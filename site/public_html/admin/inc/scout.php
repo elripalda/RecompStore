@@ -129,8 +129,10 @@ function rs_scout_run(bool $fresh = true): array {
         }
         usort($todo, fn($a, $b) => strcmp((string)$b['found_at'], (string)$a['found_at']));
         $todo = array_slice($todo, 0, RS_SCOUT_LOOK);
-        $put = rs_db()->prepare('INSERT INTO pc_scout (repo, version, pick, kind, why, at) VALUES (?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE version = VALUES(version), pick = VALUES(pick), kind = VALUES(kind), why = VALUES(why), at = NOW(), auto_id = IF(VALUES(pick) = 1, auto_id, 0)');
+        // Statements are prepared each time: a Claude call or a draft can outlast the database's
+        // wait_timeout, and rs_db() then opens a new connection that an old statement doesn't use.
+        $putSql = 'INSERT INTO pc_scout (repo, version, pick, kind, why, at) VALUES (?, ?, ?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE version = VALUES(version), pick = VALUES(pick), kind = VALUES(kind), why = VALUES(why), at = NOW(), auto_id = IF(VALUES(pick) = 1, auto_id, 0)';
         foreach (array_chunk($todo, RS_SCOUT_BATCH) as $chunk) {
             $state('Claude is sorting the finds', $sum['looked'], count($todo));
             $j = rs_scout_judge($chunk);
@@ -138,30 +140,33 @@ function rs_scout_run(bool $fresh = true): array {
                 $k = strtolower((string)$f['key']);
                 if (!isset($j[$k])) continue;
                 [$pick, $kind, $game, $why] = $j[$k];
-                $put->execute([$f['key'], (string)($f['version'] ?? ''), $pick ? 1 : 0, $kind, $why]);
+                rs_db()->prepare($putSql)->execute([$f['key'], (string)($f['version'] ?? ''), $pick ? 1 : 0, $kind, $why]);
                 ++$sum['looked'];
                 if ($pick) ++$sum['picked'];
                 else $sum['passed'][] = ['key' => $f['key'], 'kind' => $kind, 'why' => $why];
             }
         }
-        // 3. Drafts for the picks, one after another (each downloads and scans its build).
+        // 3. Drafts for the picks, one after another (each downloads and scans its build). A draft
+        // still waiting to start (a run that stopped) is picked up again.
+        $drafted = [];
+        foreach (rs_db()->query("SELECT repo_key, status FROM pc_auto") as $r) $drafted[strtolower((string)$r['repo_key'])] = (string)$r['status'];
         $picks = [];
         foreach (rs_db()->query('SELECT repo FROM pc_scout WHERE pick = 1 AND auto_id = 0 ORDER BY at DESC') as $r) {
             $k = strtolower((string)$r['repo']);
-            if (!isset($drafted[$k])) $picks[] = (string)$r['repo'];
+            if (!isset($drafted[$k]) || $drafted[$k] === 'queued') $picks[] = (string)$r['repo'];
         }
         $found = [];
         foreach (rs_pc_found('new') as $f) $found[strtolower((string)$f['key'])] = $f;
-        $mark = rs_db()->prepare('UPDATE pc_scout SET auto_id = ? WHERE repo = ?');
+        $mark = fn(int $id, string $key) => rs_db()->prepare('UPDATE pc_scout SET auto_id = ? WHERE repo = ?')->execute([$id, $key]);
         $sum['waiting'] = max(0, count($picks) - RS_SCOUT_DRAFTS);
         $picks = array_slice($picks, 0, RS_SCOUT_DRAFTS);
         foreach ($picks as $i => $key) {
             $f = $found[strtolower($key)] ?? null;
-            if (!$f) { $mark->execute([-1, $key]); continue; } // no longer a new find (added or skipped by hand)
+            if (!$f) { $mark(-1, $key); continue; } // no longer a new find (added or skipped by hand)
             $state('Making drafts', $i, count($picks));
             try {
                 $id = rs_auto_start(rs_host_web((string)$f['host'], (string)$f['repo']), RS_SCOUT_WHO, false);
-                $mark->execute([$id, $key]);
+                $mark($id, $key);
                 rs_auto_run($id);
                 $sum['drafted'][] = $id;
             } catch (Throwable $e) { error_log('scout draft ' . $key . ': ' . $e->getMessage()); }
