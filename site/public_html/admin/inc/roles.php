@@ -38,7 +38,7 @@ const RS_PAGE_ACCESS = [
     'accounts.php' => ['manager', ''], 'players.php' => ['manager', ''], 'statcard.php' => ['manager', ''], 'live.php' => ['curator', ''], 'find.php' => ['curator', ''], 'pins.php' => ['curator', ''], 'mail.php' => ['manager', ''], 'email-asset.php' => ['manager', ''],
     // Owners: settings, the launcher's builds and updates, storage, the team
     'settings.php' => ['owner', ''], 'launcher.php' => ['owner', 'pc'], 'launcher-beta.php' => ['owner', 'pc'], 'launcher-upload.php' => ['owner', 'pc'],
-    'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''],
+    'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''], 'sponsors.php' => ['owner', ''],
 ];
 // Buttons on shared pages that only owners may press: page => actions.
 const RS_OWNER_ACTIONS = [

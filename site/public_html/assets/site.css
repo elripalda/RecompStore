@@ -2993,3 +2993,21 @@ a.pk-game:focus-visible{outline:2px solid #34F2E8;outline-offset:3px;border-radi
 @media (max-width:900px){.sub-sdk-cards,.sub-ach-how{grid-template-columns:minmax(0,1fr)}}
 .form .sub-plat-on{flex-direction:row;align-items:center;justify-content:space-between;font-weight:600}
 .form .sub-plat-os{flex-direction:row}
+
+/* (4.8) Snappier: shorter, smaller hover moves; no endless zooming pictures; quicker transitions.
+   Cards lift a little instead of growing, buttons don't swell, and motion stops for people who ask. */
+.tile:hover .tile-art,.tile:focus-visible .tile-art,.wide:hover .wide-art,.wide:focus-visible .wide-art,.pc-tile:hover .pc-poster,.pc-tile:focus-visible .pc-poster{transform:translateY(-3px)}
+.tile-art,.wide-art,.pc-poster{transition:transform .16s cubic-bezier(.2,.7,.3,1),box-shadow .16s ease}
+.tile:active .tile-art,.wide:active .wide-art{transform:scale(.985)}
+.btn:hover,.row-btn:hover{transform:none}
+.shot:hover img{transform:scale(1.015)}
+.pc-cat:hover::before{transform:scale(1.03)}
+.pc-media.yt:hover .pc-media-pic i{transform:none}
+.slide-art img{animation:none}
+.slide:hover .slide-art img{transform:scale(var(--z,1))}
+.pc-hero-pic{animation:none;transform:scale(1.04)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+/* Lighter on the graphics card: badges on every poster were each blurring what's behind them
+   (hundreds on a long list); they're already nearly solid, so the blur goes. Glass blurs less. */
+.rank,.pc-os,.pc-deck-b,.pc-life-b,.pc-count,.pc-cat-go,.play,.pc-media.yt .pc-media-pic i{-webkit-backdrop-filter:none;backdrop-filter:none}
+.glass{-webkit-backdrop-filter:blur(14px) saturate(140%);backdrop-filter:blur(14px) saturate(140%)}
