@@ -186,8 +186,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($t !== '') { $me = rs_prq_gh('GET', '/user'); if ($me['status'] !== 200) { rs_secret_put('prq_gh_token', ''); throw new RuntimeException('GitHub didn\'t accept that token (' . $me['status'] . ').'); } rs_set_setting('prq_gh_login', (string)$me['json']['login']); rs_flash('Saved. Pull requests will come from @' . $me['json']['login'] . '.'); }
                 else { rs_set_setting('prq_gh_login', ''); rs_flash('Token removed.'); }
             } elseif ($act === 'prq_key' && rs_is_owner()) {
-                $k = rs_prq_key_new();
-                rs_session_write(function () use ($k) { $_SESSION['prq_key_once'] = $k; });
+                // Kept encrypted on the server until the page shows it once (the login session could
+                // bring it back on a later page when two requests overlapped).
+                rs_secret_put('prq_key_once', rs_prq_key_new());
                 rs_flash('New key made. Copy it now: it\'s shown only once.');
             }
         } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
@@ -265,8 +266,9 @@ $prqWaiting = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 't
 $prqSent = rs_prq_list(['sent'], 8);
 $prqLogin = (string)rs_setting('prq_gh_login', '');
 $prqHasToken = rs_prq_token() !== '';
-$prqKeyOnce = (string)($_SESSION['prq_key_once'] ?? '');
-if ($prqKeyOnce !== '') rs_session_write(function () { unset($_SESSION['prq_key_once']); });
+$prqKeyOnce = rs_is_owner() ? rs_secret_get('prq_key_once') : '';
+if ($prqKeyOnce !== '') rs_secret_put('prq_key_once', '');
+if (!empty($_SESSION['prq_key_once'])) rs_session_write(function () { unset($_SESSION['prq_key_once']); }); // from before
 $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queued by hand'];
 ?>
 <section class="card prq-card" id="prq">

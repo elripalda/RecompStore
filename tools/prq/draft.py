@@ -171,7 +171,13 @@ THE SDK GUIDE:
 
 def ask(spec, p, ctx, fix=None):
     user = {"project": {k: p[k] for k in ("repo", "name", "game", "console", "page", "assets", "needs", "setup_required", "setup_steps", "our_profile")}, "github": ctx}
-    msgs = [{"role": "user", "content": "Draft RecompLauncher support for this project.\n\n" + json.dumps(user, ensure_ascii=False)}]
+    ask_more = ""
+    if p.get("pick") == "asked":
+        ask_more = ("\n\nThe team picked this one by hand, so draft it even if its setup is unusual (a Setup program, a build "
+                    "on the player's PC). Cover what you can verify, like saves, logs, folders and the start program when it's known, "
+                    "and put what you couldn't confirm in notes. Only skip it if it's archived, already has an open RecompLauncher "
+                    "pull request, or its README or CONTRIBUTING says no outside pull requests.")
+    msgs = [{"role": "user", "content": "Draft RecompLauncher support for this project." + ask_more + "\n\n" + json.dumps(user, ensure_ascii=False)}]
     if fix:
         msgs += [{"role": "assistant", "content": fix["prev"]},
                  {"role": "user", "content": "That recomplauncher.json doesn't pass the schema:\n" + fix["errors"] + "\nFix it and answer with the whole JSON object again."}]

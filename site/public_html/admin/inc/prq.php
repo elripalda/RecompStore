@@ -135,9 +135,13 @@ function rs_prq_queue(array $ids): int {
     foreach ($ids as $id) {
         $a = rs_pc_app((string)$id);
         if (!$a || (string)$a['repo'] === '' || rs_pc_host($a) !== '') continue;
-        $st = rs_db()->prepare("INSERT IGNORE INTO pc_prq (app_id, repo, pick, status, created, updated) VALUES (?, ?, 'asked', 'todo', NOW(), NOW())");
+        // (4.7) One the drafter skipped goes back in line when it's picked by hand.
+        $st = rs_db()->prepare("INSERT INTO pc_prq (app_id, repo, pick, status, created, updated) VALUES (?, ?, 'asked', 'todo', NOW(), NOW())
+            ON DUPLICATE KEY UPDATE pick = IF(status = 'skipped', 'asked', pick), json = IF(status = 'skipped', NULL, json), body = IF(status = 'skipped', NULL, body),
+            note = IF(status = 'skipped', NULL, note), error = IF(status = 'skipped', NULL, error), updated = IF(status = 'skipped', NOW(), updated),
+            status = IF(status = 'skipped', 'todo', status)");
         $st->execute([$a['id'], $a['repo']]);
-        $n += $st->rowCount();
+        $n += min(1, $st->rowCount());
     }
     return $n;
 }
