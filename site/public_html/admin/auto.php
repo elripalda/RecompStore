@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $rq = rs_req_get((int)($_POST['req'] ?? 0));
             if (!$rq) throw new RuntimeException('That request isn\'t there anymore.');
             if ($act === 'req_add') {
-                $jid = rs_auto_start((string)$rq['url'], rs_me_name());
+                $jid = rs_auto_start((string)$rq['url'], rs_me_name() . ' · request');
                 rs_req_mark((int)$rq['id'], 'added');
                 rs_flash('Working on it. Its draft is on Drafts.');
                 header('Location: auto.php#d-' . (int)$jid);

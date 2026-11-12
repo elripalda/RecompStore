@@ -36,6 +36,13 @@ try {
     }
     echo gmdate('c') . ' sdk checked ' . $s . ' of ' . count($todo) . ' in ' . round(microtime(true) - $t) . "s\n";
 } catch (Throwable $e) { echo gmdate('c') . ' sdk: ' . $e->getMessage() . "\n"; }
+// (4.8) Sent SDK pull requests that later conflict are rebuilt on the developer's newest code.
+try {
+    require_once 'admin/inc/sdk.php';
+    require_once 'admin/inc/prq.php';
+    $fx = rs_prq_fix_conflicts(60);
+    if ($fx['fixed'] || $fx['flagged']) echo gmdate('c') . ' sdk prs: looked at ' . $fx['looked'] . ', re-drafted ' . $fx['fixed'] . ', need a look ' . $fx['flagged'] . "\n";
+} catch (Throwable $e) { echo gmdate('c') . ' sdk prs: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
 // launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.

@@ -18,6 +18,13 @@ if (!function_exists('rs_sub_fix_key')) {
 $show = in_array($_GET['show'] ?? '', ['bug', 'submit', 'message', 'copyright', 'logs', 'source', 'done'], true) ? $_GET['show'] : '';
 require_once __DIR__ . '/inc/logs.php';
 rs_inbox_sig_column();
+rs_inbox_source_column(); // (4.8) whose crash, and the note in English
+// (4.8) A launcher log as a new GitHub issue, filled in for a person to look over and post.
+if (isset($_GET['ghissue'])) {
+    try { header('Location: ' . rs_log_issue_url((int)$_GET['ghissue'])); }
+    catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); header('Location: inbox.php?show=logs'); }
+    exit;
+}
 // (3.7) Submissions have their own page under Developers: submissions.php runs this same file.
 $SUBS = defined('RS_SUBS_PAGE');
 $self = $SUBS ? 'submissions.php' : 'inbox.php';
@@ -61,6 +68,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $action = $_POST['action'] ?? '';
     $db = rs_db();
+    // (4.8) A player's note in English, for the logs list (answered as JSON).
+    if ($action === 'translate') {
+        header('Content-Type: application/json; charset=utf-8');
+        @set_time_limit(90);
+        try { [$lang, $en] = rs_log_translate($id); echo json_encode(['ok' => true, 'lang' => $lang, 'en' => $en], JSON_UNESCAPED_UNICODE); }
+        catch (Throwable $e) { echo json_encode(['ok' => false, 'error' => $e->getMessage()]); }
+        exit;
+    }
     // (4.7) The picked PC submissions into Auto-add, run one after another in the background.
     if ($action === 'bulk_auto' && $SUBS) {
         $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_POST['ids'] ?? ''))), fn($i) => $i > 0))), 0, 60);
@@ -380,6 +395,9 @@ $cat = (string)($_GET['cat'] ?? '');
 if ($show === 'logs' && (array_key_exists($cat, RS_LOG_CATEGORIES) || $cat === 'none'))
     $where .= ' AND category = ' . rs_db()->quote($cat === 'none' ? '' : $cat);
 else $cat = '';
+// (4.8) RecompLauncher logs by whose crash: the launcher's own, or the recomp's.
+$src = in_array($_GET['src'] ?? '', array_keys(RS_LOG_SOURCES), true) ? (string)$_GET['src'] : '';
+if ($show === 'logs' && $src !== '') $where .= ' AND source = ' . rs_db()->quote($src); else $src = '';
 // (3.7) Newest or oldest first.
 $sort = ($_GET['sort'] ?? '') === 'old' ? 'old' : '';
 $rows = rs_db()->query("SELECT * FROM inbox $where ORDER BY created " . ($sort === 'old' ? 'ASC' : 'DESC') . ' LIMIT 300')->fetchAll();
@@ -413,7 +431,7 @@ $total = count($rows);
 $pages = max(1, (int)ceil($total / $perPage));
 $page = max(1, min($pages, (int)($_GET['page'] ?? 1)));
 $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
-$here = fn(array $over = []) => $self . '?' . http_build_query(array_filter(array_merge(['show' => $show, 'cat' => $cat, 'pf' => $pf, 'sort' => $sort], $over), fn($x) => $x !== '' && $x !== null && $x !== 1));
+$here = fn(array $over = []) => $self . '?' . http_build_query(array_filter(array_merge(['show' => $show, 'cat' => $cat, 'src' => $src, 'pf' => $pf, 'sort' => $sort], $over), fn($x) => $x !== '' && $x !== null && $x !== 1));
 // (3.1) Which store each one is for, on every message.
 $pfPill = function (array $r) use ($pfOf): string {
     $p = $pfOf($r);
@@ -559,6 +577,12 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
   <?php foreach (RS_LOG_CATEGORIES as $k => $v): ?><a href="inbox.php?show=logs&amp;cat=<?= h($k) ?>" <?= $cat === $k ? 'aria-current="page"' : '' ?>><?= h($v) ?></a><?php endforeach; ?>
   <a href="inbox.php?show=logs&amp;cat=none" <?= $cat === 'none' ? 'aria-current="page"' : '' ?>>No category</a>
 </nav>
+<?php if ($pf !== 'ps5'): ?>
+<nav class="chips" aria-label="Whose crash">
+  <a href="<?= h($here(['src' => '', 'page' => 1])) ?>" <?= $src === '' ? 'aria-current="page"' : '' ?>>Every log</a>
+  <?php foreach (RS_LOG_SOURCES as $k => $v): ?><a href="<?= h($here(['src' => $k, 'page' => 1])) ?>" <?= $src === $k ? 'aria-current="page"' : '' ?> title="<?= $k === 'launcher' ? 'RecompLauncher itself crashed or failed' : 'The recomp crashed or exited badly' ?>"><?= h($v) ?> crashes</a><?php endforeach; ?>
+</nav>
+<?php endif; ?>
 <form class="logs-all" method="get" action="log-zip.php">
   <input type="hidden" name="all" value="1">
   <label>Download every log for <select name="app"><option value="">all apps</option><?php foreach ($logApps as $aid => $n): ?><option value="<?= h((string)$aid) ?>"><?= h($names[$aid] ?? $aid) ?> (<?= (int)$n ?>)</option><?php endforeach; ?></select></label>
@@ -598,7 +622,7 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     <?php if ($r['kind'] === 'logs'): $fs = $files[(int)$r['id']] ?? []; ?>
     <header>
       <input type="checkbox" class="log-pick" value="<?= (int)$r['id'] ?>" aria-label="Pick this one">
-      <span class="tag cyan">Logs</span><?= $pfPill($r) ?>
+      <span class="tag cyan">Logs</span><?= $pfPill($r) ?><?php if (isset(RS_LOG_SOURCES[$r['source'] ?? ''])): ?><span class="tag src-<?= h($r['source']) ?>" title="<?= $r['source'] === 'launcher' ? 'RecompLauncher itself crashed or failed' : 'The recomp crashed or exited badly' ?>"><?= h(RS_LOG_SOURCES[$r['source']]) ?></span><?php endif; ?>
       <?php if (($r['feedback'] ?? '') !== ''): ?><span class="tag fb-<?= h($r['feedback']) ?>" title="Tester feedback<?= ($r['build'] ?? '') !== '' ? ' on ' . h($r['build']) : '' ?>">Feedback · <?= h(RS_VERDICTS[$r['feedback']] ?? 'Other') ?></span>
       <?php else: ?><span class="tag cat-<?= h($r['category'] ?? '') ?>"><?= h(RS_LOG_CATEGORIES[$r['category'] ?? ''] ?? 'No category') ?></span><?php endif; ?>
       <strong><?= h($nameOf($r)) ?></strong>
@@ -611,6 +635,13 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     <?php $rep = $reports[(int)$r['id']] ?? null; $pics = $pictures[(int)$r['id']] ?? []; ?>
     <?php if (isset($sigOf[(int)$r['id']])): ?><p class="log-sig"><code><?= h($sigOf[(int)$r['id']][1]) ?></code></p><?php endif; ?>
     <?php if (trim($r['body']) !== ''): ?><p class="body"><?= nl2br(h($r['body'])) ?></p><?php elseif (!$rep): ?><p class="body muted">No message, just the logs.</p><?php endif; ?>
+    <?php // (4.8) The note in English, and the launcher's own crashes as a GitHub issue.
+    $en = json_decode((string)($r['body_en'] ?? ''), true); $canTr = trim($r['body']) !== '' && !is_array($en); $isRl = ($r['source'] ?? '') === 'launcher'; ?>
+    <?php if (is_array($en) && ($en['lang'] ?? '') !== ''): ?><div class="log-en"><span class="kicker">In English · from <?= h((string)$en['lang']) ?></span><p class="body"><?= nl2br(h((string)$en['en'])) ?></p></div><?php endif; ?>
+    <?php if ($canTr || $isRl): ?><div class="log-acts">
+      <?php if ($canTr): ?><button type="button" class="btn small" data-translate="<?= (int)$r['id'] ?>">Translate to English</button><?php endif; ?>
+      <?php if ($isRl): ?><a class="btn small" href="inbox.php?ghissue=<?= (int)$r['id'] ?>" target="_blank" rel="noopener" title="Opens a new issue on RecompLauncher's GitHub with this report filled in (no email, user folders hidden). Look it over before posting.">Open a GitHub issue ↗</a><?php endif; ?>
+    </div><?php endif; ?>
     <?php if ($rep): ?>
     <div class="phone-report">
       <span class="kicker">Finished on their phone · <?= h(rs_date('M j, g:i a', strtotime($rep['finished']))) ?></span>
@@ -837,8 +868,28 @@ if ($rows) {
 .dec-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;margin:10px 0 12px}
 @media (max-width:820px){.dec-presets{grid-template-columns:1fr}}
 .dec-vt{margin:10px 0 0}
+/* (4.8) Whose crash, the note in English, and the launcher's crashes as GitHub issues. */
+.tag.src-launcher{background:rgba(255,95,95,.14);color:var(--bad)}.tag.src-game{background:rgba(160,120,255,.14);color:#b9a2ff}
+.log-en{margin:8px 0 0;padding:10px 12px;border-radius:10px;background:rgba(70,200,255,.07);border:1px solid rgba(70,200,255,.25)}.log-en .body{margin:4px 0 0}
+.log-acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
 </style>
 <script>
+// (4.8) Translate a player's note: shown under it, and kept for next time.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-translate]'); if (!b) return;
+  const csrf = document.querySelector('input[name=csrf]'); if (!csrf) return;
+  const fd = new FormData(); fd.append('csrf', csrf.value); fd.append('action', 'translate'); fd.append('id', b.dataset.translate);
+  b.disabled = true; const was = b.textContent; b.textContent = 'Translating…';
+  fetch('inbox.php', { method: 'POST', body: fd, credentials: 'same-origin' }).then((r) => r.json()).then((j) => {
+    if (!j.ok) { b.textContent = j.error || 'Couldn\'t translate it. Try again.'; setTimeout(() => { b.disabled = false; b.textContent = was; }, 5000); return; }
+    const box = document.createElement('div'); box.className = 'log-en';
+    const k = document.createElement('span'); k.className = 'kicker'; k.textContent = j.lang ? 'In English · from ' + j.lang : 'It was in English already';
+    const p = document.createElement('p'); p.className = 'body'; p.textContent = j.en;
+    box.append(k); if (j.lang) box.append(p);
+    const acts = b.closest('.log-acts'); acts.parentNode.insertBefore(box, acts); b.remove();
+    if (!acts.children.length) acts.remove();
+  }).catch(() => { b.disabled = false; b.textContent = was; });
+});
 // (3.6) Decline: the reasons you tick become the email, which stays yours to change before Send.
 document.querySelectorAll('[data-decline]').forEach((box) => {
   const f = box.querySelector('form'), body = f.querySelector('textarea[name=body]'), own = f.querySelector('[data-own]'), fix = f.querySelector('input[name=fix]');

@@ -35,6 +35,7 @@
   function fmt(n) { return Number(n || 0).toLocaleString(); }
   function label(r) {
     var s = STATE[r.state] || STATE.unknown;
+    if (r.state === 'pr' && r.mark && r.mark.kind === 'issue') return [/\/discussions\//.test(r.mark.url) ? 'Discussion open' : 'Issue open', 'blue'];
     if (r.state === 'pr' && r.pr) return r.pr === 'merged' ? ['Pull request merged', 'ok'] : (r.pr === 'closed' ? ['Pull request closed', 'warn'] : ['Pull request open', 'blue']);
     if (r.state === 'unknown' && r.waiting) return ['Not checked yet', ''];
     return s;
@@ -143,8 +144,9 @@
     var hasLauncherBadge = (r.badges || []).indexOf('launcher') !== -1;
     var main = '';
     if (r.state === 'ships') main = hasLauncherBadge ? '' : badgePrBtn(' primary');
-    else if (r.state === 'pr' && mk && mk.url) main = '<a class="btn primary" href="' + esc(mk.url) + '" target="_blank" rel="noopener">Open the pull request ↗</a>';
-    else if (r.state !== 'locked') main = promptBtn(' primary');
+    else if (r.state === 'pr' && mk && mk.url) main = '<a class="btn primary" href="' + esc(mk.url) + '" target="_blank" rel="noopener">Open the ' + (mk.kind === 'issue' ? (/\/discussions\//.test(mk.url) ? 'discussion' : 'issue') : 'pull request') + ' ↗</a>';
+    else if (r.state === 'locked') main = '<div class="sdk-doors" data-doors="' + esc(r.id) + '"><span class="muted small"><span class="sdk-spin" aria-hidden="true"></span> Checking whether it takes issues or discussions…</span></div>';
+    else main = promptBtn(' primary');
     var readmeTxt = r.badge ? '★ ' + badgeNames(r) + ' badge' : (r.link ? '☆ Links to us, no badge' : (r.badge === false ? 'No badge or link' : 'Not checked yet'));
     var ico = r.icon ? '<img src="' + esc(r.icon) + '" alt="" width="44" height="44">' : '<span class="sdk-ico big">' + esc(r.name.slice(0, 2)) + '</span>';
     // The buttons under the main one go two to a row; an odd last one takes the whole row.
@@ -163,11 +165,14 @@
       + '<div class="kv"><span>Downloads</span><span>' + fmt(r.dl) + ' · #' + r.rank + '</span></div>'
       + (mk ? '<div class="kv"><span>Marked</span><span>' + esc(mk.who) + ', ' + esc(mk.at) + (r.state === 'no' && mk.url ? ' · <a href="' + esc(mk.url) + '" target="_blank" rel="noopener">where ↗</a>' : '') + '</span></div>' : '')
       + '<div class="sdk-side-acts">' + main + more.join('') + '</div>';
+    if (r.state === 'locked') {
+      h += '<form class="sdk-issue-link" data-act="mark_issue"><label>Posted it? Paste its link<input name="url" required placeholder="https://github.com/' + esc(r.repo) + '/issues/…" spellcheck="false"></label><button class="btn">Save</button></form>';
+    }
     if (!mk && r.state !== 'ships') {
       h += '<details class="sdk-marks"><summary>Mark it</summary>'
         + '<form data-act="mark_pr"><label>A pull request is open<input name="url" required placeholder="https://github.com/' + esc(r.repo) + '/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>'
         + '<form data-act="mark_no"><label>The developer doesn\'t want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Mark</button></form>'
-        + '<form data-act="mark_locked"><p class="muted small">The repo takes no pull requests or issues, so nothing can be sent.</p><button class="btn">Mark: pull requests closed</button></form>'
+        + '<form data-act="mark_locked"><p class="muted small">The repo takes no pull requests. Marked, it then checks whether issues or discussions are open.</p><button class="btn">Mark: pull requests closed</button></form>'
         + '</details>';
     }
     return h;
@@ -176,6 +181,40 @@
     var r = byId[st.sel];
     if (!r) { side.innerHTML = '<h2>Pick a recomp</h2><p class="muted">Click a row to see where it stands and what to send its developer: the agent prompt, the badge, Check again and the marks.</p>'; return; }
     side.innerHTML = sideHtml(r);
+    if (r.state === 'locked') doors(r);
+  }
+
+  // (4.8) Pull requests closed: a ready message for an issue or a discussion, when the repo takes them.
+  var doorsSeen = {};
+  function issueText(r) {
+    var page = 'https://recomplauncher.com/game/' + encodeURIComponent(r.id);
+    return {
+      title: 'Support for RecompLauncher (one-click install and setup)',
+      body: 'Hi! I help run RecompLauncher (https://recomplauncher.com), a free launcher that installs and updates PC recomps. '
+        + r.name + ' is already listed there: ' + page + '\n\n'
+        + 'Pull requests are closed here, so I\'m asking in ' + '{where}' + ' instead: would you be open to adding a small recomplauncher.json file to your releases (or the repo)? '
+        + 'It tells the launcher how to start the game, where the game files go and which settings to show, so players get a one-click setup instead of following steps by hand.\n\n'
+        + 'How it works: https://recomplauncher.com/sdk\nThe file format: https://recomplauncher.com/schema/recomplauncher.json\n\n'
+        + 'If you\'d rather not, no problem at all, just let me know and we\'ll leave it. Thanks for making ' + (r.game || r.name) + ' playable on PC!'
+    };
+  }
+  function doors(r) {
+    var box = side.querySelector('[data-doors]'); if (!box) return;
+    var fill = function (d) {
+      if (!document.body.contains(box)) return;
+      var t = issueText(r), base = 'https://github.com/' + r.repo;
+      var b = [];
+      if (d && d.ok && d.issues) b.push('<a class="btn primary" target="_blank" rel="noopener" href="' + esc(base + '/issues/new?title=' + encodeURIComponent(t.title) + '&body=' + encodeURIComponent(t.body.replace('{where}', 'an issue'))) + '">Open an issue ↗</a>');
+      if (d && d.ok && d.discussions) b.push('<a class="btn' + (b.length ? '' : ' primary') + '" target="_blank" rel="noopener" href="' + esc(base + '/discussions/new?category=general&title=' + encodeURIComponent(t.title) + '&body=' + encodeURIComponent(t.body.replace('{where}', 'a discussion'))) + '">Start a discussion ↗</a>');
+      if (b.length) {
+        b.push('<button type="button" class="btn" data-copy-issue>Copy the message</button>');
+        if (b.length % 2) b[b.length - 1] = b[b.length - 1].replace('class="btn"', 'class="btn wide"');
+        box.innerHTML = '<p class="small muted">Its pull requests are closed, but it takes ' + (d.issues && d.discussions ? 'issues and discussions' : (d.issues ? 'issues' : 'discussions')) + '. The message is ready to post; change anything you like.</p><div class="sdk-doors-b">' + b.join('') + '</div>';
+      } else box.innerHTML = '<p class="small muted">' + (d && d.ok ? (d.archived ? 'The repo is archived: nothing can be posted.' : 'Issues and discussions are off too, so there\'s nowhere to ask on GitHub. Try the developer\'s Discord or socials.') : 'GitHub didn\'t answer. Try again in a minute.') + '</p>';
+    };
+    if (doorsSeen[r.id]) { fill(doorsSeen[r.id]); return; }
+    fetch('sdk-support.php?doors=' + encodeURIComponent(r.id), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.json(); }).then(function (d) { if (d.ok) doorsSeen[r.id] = d; fill(d); }).catch(function () { fill(null); });
   }
   function select(id) {
     st.sel = id;
@@ -293,6 +332,12 @@
     post({ action: 'recheck_all', ids: filtered ? shown.map(function (r) { return r.id; }).join(',') : '' }, this);
   });
   side.addEventListener('click', function (e) {
+    var cp = e.target.closest('[data-copy-issue]');
+    if (cp && st.sel) {
+      var t = issueText(byId[st.sel]);
+      navigator.clipboard.writeText(t.title + '\n\n' + t.body.replace('{where}', 'an issue')).then(function () { say('Copied the title and message.'); }, function () { say('Couldn\'t copy. Select the text by hand.', true); });
+      return;
+    }
     var b = e.target.closest('button[data-act]'); if (!b || !st.sel) return;
     post({ action: b.dataset.act, id: st.sel }, b);
   });

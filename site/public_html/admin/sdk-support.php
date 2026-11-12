@@ -69,6 +69,23 @@ if (isset($_GET['progress'])) {
     rs_sdk_json(['ok' => true, 'count' => $count, 'running' => $running, 'rows' => $changed, 'now' => rs_sdk_db_now()]);
 }
 
+// (4.8) Xarishark: a repo with pull requests closed may still take issues or discussions. Which of
+// the two are open, from GitHub (kept a day).
+if (isset($_GET['doors'])) {
+    $a = rs_pc_app((string)$_GET['doors']);
+    if (!$a || rs_pc_host($a) !== '' || (string)$a['repo'] === '') rs_sdk_json(['ok' => false]);
+    $k = 'sdkdoors:' . strtolower((string)$a['repo']);
+    $c = rs_kv_get($k);
+    if (!$c || $c['age'] > 86400) {
+        $r = rs_http(rs_gh_api() . '/repos/' . $a['repo'], ['github' => true, 'timeout' => 8, 'max' => 2000000]);
+        $j = $r['status'] === 200 ? json_decode((string)$r['body'], true) : null;
+        if (!is_array($j)) rs_sdk_json(['ok' => false]);
+        rs_kv_put($k, (string)json_encode(['issues' => !empty($j['has_issues']), 'discussions' => !empty($j['has_discussions']), 'archived' => !empty($j['archived'])]));
+        $c = rs_kv_get($k);
+    }
+    rs_sdk_json(['ok' => true] + (json_decode((string)$c['v'], true) ?: []));
+}
+
 // (4.7) The PR queue's live status while Draft now runs.
 if (isset($_GET['prq_poll'])) {
     rs_prq_tables();
@@ -95,6 +112,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_sdk_marks_save($m);
             rs_log('sdk', $id, $pr ? 'pull request: ' . $link : 'won\'t support' . ($link ? ': ' . $link : ''));
             $msg = $pr ? $a['name'] . ' marked: pull request open.' : $a['name'] . ' marked: won\'t support it.';
+        }
+    } elseif (($_POST['action'] ?? '') === 'mark_issue' && ($a = rs_pc_app($id))) {
+        // (4.8) The issue or discussion sent instead of a pull request.
+        [$link, $why] = rs_sdk_link($a, trim((string)($_POST['url'] ?? '')), false);
+        if ($link === null || str_contains((string)$link, '/pull/')) { $msg = $link === null ? $why : 'That\'s a pull request: use "A pull request is open" for it.'; $kind = 'err'; }
+        else {
+            $m = rs_sdk_marks();
+            $m[$id] = ['kind' => 'issue', 'url' => $link, 'note' => '', 'who' => rs_me_name(), 'at' => gmdate('Y-m-d')];
+            rs_sdk_marks_save($m);
+            $what = str_contains($link, '/discussions/') ? 'discussion' : 'issue';
+            rs_log('sdk', $id, $what . ' open: ' . $link);
+            $msg = $a['name'] . ' marked: ' . $what . ' open.';
         }
     } elseif (($_POST['action'] ?? '') === 'mark_locked' && ($a = rs_pc_app($id))) {
         // (4.6) Xarishark: the repo doesn't take pull requests or issues, so there's nothing to link to.
@@ -247,7 +276,7 @@ if ($tab === 'lookup' && mb_strlen($q) >= 2) {
         }
     }
 }
-$sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['Pull request open', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
+$sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['PR or issue open', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
 
 rs_head('SDK support', true, ['assets/sdk-support.css']);
 ?>
@@ -319,6 +348,7 @@ rs_head('SDK support', true, ['assets/sdk-support.css']);
 <details class="card sdk-how">
   <summary>How this page works</summary>
   <ul>
+    <li><b>Pull requests closed</b>: the side panel checks whether the repo still takes issues or discussions, and gives you a ready message for either. Paste the link back once it's posted and the recomp moves to <b>PR or issue open</b>.</li>
     <li><b>No file yet</b> (red) means the recomp's GitHub doesn't ship a <code>recomplauncher.json</code>. Open it, give your AI agent the <b>agent prompt</b>, and send the developer the pull request. The prompt also adds our badge, checks the project against the Recomp Standards and ends with a note inviting the developer to claim it.</li>
     <li><b>Ships its own file</b> (green) is done. If its README has no RecompLauncher badge, <b>Copy badge PR prompt</b> adds just that.</li>
     <li>The second pill is the README: <b>★ Badge</b> means it has one of our badges (the Verified developer one counts), <b>☆ Link only</b> means it only links to us. <b>No badge or link</b> marks the ones that ship the file (or got a merged pull request) but mention us nowhere.</li>
@@ -387,7 +417,8 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <?php endforeach; ?>
   <?php if ($prqSent): ?>
   <h3 class="prq-h3">Sent lately</h3>
-  <ul class="prq-sent"><?php foreach ($prqSent as $pq): ?><li><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$pq['repo']) ?></a><span class="muted small"><?= h((string)$pq['sent_at']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?></span></li><?php endforeach; ?></ul>
+  <ul class="prq-sent"><?php foreach ($prqSent as $pq): $fx = rs_prq_fix_state((int)$pq['id']); ?><li><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$pq['repo']) ?></a><span class="muted small"><?= h((string)$pq['sent_at']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?></span>
+    <?php if ($fx && ($fx['why'] ?? '') !== ''): ?><span class="small warn">Conflict, needs a look: <?= h((string)$fx['why']) ?></span><?php elseif ($fx): ?><span class="small ok">Re-drafted after a conflict<?= (int)$fx['n'] > 1 ? ' (' . (int)$fx['n'] . ' times)' : '' ?>, <?= h((string)$fx['at']) ?> UTC</span><?php endif; ?></li><?php endforeach; ?></ul>
   <?php endif; ?>
   <?php if (rs_is_owner()): ?>
   <details class="prq-setup"<?= !$prqHasToken || $prqKeyOnce !== '' ? ' open' : '' ?>><summary>Setup</summary>

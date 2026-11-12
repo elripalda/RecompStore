@@ -274,3 +274,95 @@ function rs_zip_send(string $zip, string $name): void {
     echo $zip;
     exit;
 }
+
+// ---- (4.8) Xarishark: whose crash, in English, and on GitHub ----------------------------------
+// Whose crash a RecompLauncher log is: 'launcher' (RecompLauncher itself) or 'game' (the recomp it
+// started). Newer launchers say so (source); older ones are told apart by what they sent. '' for the
+// PS5 store's logs. body_en keeps the player's note in English once it's been translated.
+function rs_inbox_source_column(): void {
+    static $done = false;
+    if ($done) return;
+    $db = rs_db();
+    if (rs_col_missing($db, 'inbox', 'source')) {
+        $db->exec("ALTER TABLE inbox ADD COLUMN source VARCHAR(10) NOT NULL DEFAULT ''");
+        $db->exec("UPDATE inbox SET source = 'launcher' WHERE kind = 'logs' AND app_id IN ('launcher', 'recomplauncher')");
+        $db->exec("UPDATE inbox SET source = 'game' WHERE kind = 'logs' AND source = '' AND body LIKE 'RecompLauncher % on %' AND app_id NOT IN ('launcher', 'recomplauncher', 'store')");
+    }
+    if (rs_col_missing($db, 'inbox', 'body_en')) $db->exec('ALTER TABLE inbox ADD COLUMN body_en TEXT NULL');
+    $done = true;
+}
+function rs_log_source_guess(string $app, string $body): string {
+    if (in_array($app, ['launcher', 'recomplauncher'], true)) return 'launcher';
+    if ($app !== '' && $app !== 'store' && preg_match('/^\s*RecompLauncher \S+ on (windows|linux|macos)\b/i', $body)) return 'game';
+    return '';
+}
+const RS_LOG_SOURCES = ['launcher' => 'Launcher', 'game' => 'Recomp'];
+
+// The player's note in English (Claude, with the Anthropic key from SDK support), kept once made.
+// [language, English text]; the language is '' when it was English already.
+function rs_log_translate(int $id): array {
+    rs_inbox_source_column();
+    $st = rs_db()->prepare("SELECT body, body_en FROM inbox WHERE id = ? AND kind = 'logs'");
+    $st->execute([$id]);
+    $r = $st->fetch();
+    if (!$r) throw new RuntimeException('That log isn\'t there anymore.');
+    if (($c = json_decode((string)($r['body_en'] ?? ''), true)) && isset($c['en'])) return [(string)$c['lang'], (string)$c['en']];
+    $body = trim((string)$r['body']);
+    if ($body === '') throw new RuntimeException('There\'s no note to translate.');
+    if (rs_secret_get('prq_ai_key') === '') throw new RuntimeException('Translating needs the Anthropic API key (SDK support, PR queue, Setup).');
+    require_once __DIR__ . '/autoadd.php';
+    $d = rs_ai_json(['model' => RS_AUTO_MODEL, 'max_tokens' => 2500, 'messages' => [['role' => 'user', 'content' =>
+        "A player sent this note with a crash report. Translate it into plain English. Keep technical words, game names, versions, error messages and file paths exactly as they are. If it is already English, return it unchanged and set lang to \"\".\n"
+        . "Answer only with JSON: {\"lang\": \"<the language's name in English, or empty>\", \"en\": \"<the English text>\"}\n\n" . mb_substr($body, 0, 4000)]]]);
+    $en = trim((string)($d['en'] ?? ''));
+    if ($en === '') throw new RuntimeException('Claude didn\'t send a translation back. Try again.');
+    $lang = mb_substr(trim((string)($d['lang'] ?? '')), 0, 40);
+    if (strcasecmp($lang, 'English') === 0) $lang = '';
+    rs_db()->prepare('UPDATE inbox SET body_en = ? WHERE id = ?')->execute([json_encode(['lang' => $lang, 'en' => $en], JSON_UNESCAPED_UNICODE), $id]);
+    return [$lang, $en];
+}
+
+// A new issue on RecompLauncher's GitHub with the report filled in, for a person to look over and post.
+// Nothing private goes in: no reply address, and user folders in paths become <user>.
+function rs_log_issue_url(int $id): string {
+    rs_inbox_source_column();
+    $db = rs_db();
+    $st = $db->prepare("SELECT * FROM inbox WHERE id = ? AND kind = 'logs'");
+    $st->execute([$id]);
+    $r = $st->fetch();
+    if (!$r) throw new RuntimeException('That log isn\'t there anymore.');
+    $clean = function (string $t): string {
+        $t = (string)preg_replace('/^.*(reply to|contact|e-?mail)\s*:.*$/mi', '', $t);
+        $t = (string)preg_replace('/[\w.+-]+@[\w-]+\.[\w.-]+/', '<email>', $t);
+        $t = (string)preg_replace('#([A-Za-z]:\\\\Users\\\\)[^\\\\/\s]+#i', '$1<user>', $t);
+        $t = (string)preg_replace('#(/(?:home|Users)/)[^/\s]+#', '$1<user>', $t);
+        return trim($t);
+    };
+    $body = (string)$r['body'];
+    $en = json_decode((string)($r['body_en'] ?? ''), true);
+    $note = is_array($en) && ($en['en'] ?? '') !== '' ? (string)$en['en'] : $body;
+    $first = '';
+    foreach (preg_split('/\r\n|\r|\n/', $note) ?: [] as $l) {
+        $l = trim($l);
+        if ($l === '' || preg_match('/^RecompLauncher \S+ on |^(Category|Game|Reply to|Feeling)\b/i', $l)) continue;
+        $first = $l;
+        break;
+    }
+    $ver = preg_match('/RecompLauncher (\S+) on (\w+) \(([^)]+)\)/', $body, $m) ? 'RecompLauncher ' . $m[1] . ' on ' . $m[2] . ' (' . $m[3] . ')' : '';
+    // The end of the launcher's own trail, else of the first file that came with it.
+    $files = $db->prepare('SELECT name, body FROM inbox_files WHERE inbox_id = ? ORDER BY (name = \'launcher-trail.txt\') DESC, id LIMIT 1');
+    $files->execute([$id]);
+    $f = $files->fetch();
+    $tail = '';
+    if ($f) {
+        $lines = array_slice(preg_split('/\r\n|\r|\n/', rtrim((string)$f['body'])) ?: [], -40);
+        $tail = $clean(implode("\n", $lines));
+        if (strlen($tail) > 3500) $tail = substr($tail, -3500);
+    }
+    $title = 'Crash: ' . ($first !== '' ? mb_substr($clean($first), 0, 70) : 'report from ' . rs_date('M j', strtotime((string)$r['created'])));
+    $md = "**What happened**\n\n" . ($clean($note) !== '' ? $clean($note) : '(no note)') . "\n\n"
+        . "**Version and system**\n\n" . ($ver !== '' ? $ver : 'Not given') . ((string)$r['app_id'] !== '' && !in_array((string)$r['app_id'], ['launcher', 'recomplauncher'], true) ? "\nGame: " . $r['app_id'] . ' ' . $r['version'] : '') . "\n\n"
+        . ($tail !== '' ? '**End of ' . $f['name'] . "**\n\n```\n" . $tail . "\n```\n\n" : '')
+        . '_From a crash report sent from the launcher (' . rs_date('M j, Y', strtotime((string)$r['created'])) . ')._';
+    return 'https://github.com/elripalda/RecompLauncher/issues/new?' . http_build_query(['title' => $title, 'body' => $md]);
+}

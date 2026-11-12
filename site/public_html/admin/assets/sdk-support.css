@@ -114,7 +114,7 @@
 .prq-note{background:rgba(var(--ink-rgb),.04);border-radius:8px;padding:10px 12px}
 .prq-links{margin:6px 0}
 .prq-h3{margin:18px 0 6px;font-size:13px}
-.prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13px}.prq-sent li{display:flex;justify-content:space-between;gap:10px}
+.prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13px}.prq-sent li{display:flex;justify-content:space-between;gap:4px 10px;flex-wrap:wrap}.prq-sent li .warn,.prq-sent li .ok{flex-basis:100%}.prq-sent .warn{color:var(--warn)}.prq-sent .ok{color:var(--ok)}
 .prq-setup{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.prq-setup summary{cursor:pointer;font-weight:600}
 .prq-setup-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:10px}
 .prq-setup-grid form{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);border-radius:9px}
@@ -132,3 +132,7 @@
 /* (4.8) Big screens: the list uses the room (the side panel keeps its size). */
 .adm-body:has(.sdk-wrap){max-width:2600px}.adm main:has(.sdk-wrap),main:has(.sdk-wrap){max-width:none}
 
+/* (4.8) Pull requests closed: the issue or discussion to post instead. */
+.sdk-doors{grid-column:1/-1}.sdk-doors p{margin:0 0 8px}
+.sdk-doors-b{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.sdk-doors-b .btn{grid-column:auto}.sdk-doors-b .btn.wide{grid-column:1/-1}
+.sdk-issue-link{display:flex;gap:8px;align-items:flex-end;margin-top:12px}.sdk-issue-link label{flex:1;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.sdk-issue-link input{margin:0}

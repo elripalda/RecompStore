@@ -4,6 +4,7 @@
 // They land in the admin's Inbox under Logs. Form POST in, JSON out.
 //   app, version (the game's, as installed), store (the store's version), message,
 //   install + token (a beta tester's console, when it has one), name[] + text[] (the files)
+// (4.8) From RecompLauncher also source ("launcher" or "game": whose crash it is) and game (its id).
 // (2.0) The answer also has report and url: a code for finishing the report on a phone (/r/<code>).
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
@@ -35,6 +36,11 @@ $category = isset($_POST['category']) ? (array_key_exists($s('category', 16), RS
 // (2.3.0) Tester feedback from a beta's page: works, crashes, slow or other, and the build it's about.
 $feedback = isset($_POST['feedback']) ? (array_key_exists($s('feedback', 16), RS_VERDICTS) ? $s('feedback', 16) : 'other') : '';
 $build = $feedback === '' ? '' : $s('build', 40);
+// (4.8) RecompLauncher says whose crash it is ("launcher" or "game"); older launchers are told apart by
+// what they sent. game is the recomp's id when the launcher's own report is about one.
+require_once dirname(__DIR__) . '/admin/inc/logs.php';
+$source = in_array($s('source', 10), ['launcher', 'game'], true) ? $s('source', 10) : rs_log_source_guess($app, $message);
+if ($app === '' && preg_match('/^[a-z0-9-]{1,32}$/', $s('game', 32))) $app = $s('game', 32);
 
 // The files: at most 10, each kept to its last 400 KB, 2 MB in all.
 $names = is_array($_POST['name'] ?? null) ? array_values($_POST['name']) : [];
@@ -85,10 +91,11 @@ try {
             rs_reply(429, ['ok' => false, 'error' => 'That\'s a lot of logs at once. Try again in an hour.']);
         }
         rs_inbox_feedback_columns();
+        rs_inbox_source_column();
         $db->beginTransaction();
-        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category, feedback, build)
-                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?, ?, ?)')
-           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'RecompStore ' . $store, $console, $version, $message, $ip, $category, $feedback, $build]);
+        $db->prepare('INSERT INTO inbox (kind, app_id, name, contact, repo, version, body, status, ip_hash, created, category, feedback, build, source)
+                      VALUES (\'logs\', ?, ?, ?, \'\', ?, ?, \'new\', ?, NOW(), ?, ?, ?, ?)')
+           ->execute([$app === '' ? 'store' : $app, $store === '' ? '' : 'RecompStore ' . $store, $console, $version, $message, $ip, $category, $feedback, $build, $source]);
         $id = (int)$db->lastInsertId();
         $put = $db->prepare('INSERT INTO inbox_files (inbox_id, name, size, body) VALUES (?, ?, ?, ?)');
         foreach ($files as $f) $put->execute([$id, $f['name'], strlen($f['body']), $f['body']]);

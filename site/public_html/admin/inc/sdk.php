@@ -84,7 +84,8 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
     $mk = $marks[$a['id']] ?? null;
     // A pull request that got merged and shipped: it's done, whatever the mark says.
     if (in_array($got, ['release', 'repo'], true)) $state = 'ships';
-    elseif ($mk) $state = in_array($mk['kind'], ['pr', 'locked'], true) ? $mk['kind'] : 'no';
+    // (4.8) An issue or discussion asking for it (the repo takes no pull requests) counts with the PRs.
+    elseif ($mk) $state = $mk['kind'] === 'issue' ? 'pr' : (in_array($mk['kind'], ['pr', 'locked'], true) ? $mk['kind'] : 'no');
     elseif ($got === 'none') $state = 'missing';
     else $state = 'unknown';
     $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;

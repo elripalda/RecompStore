@@ -329,3 +329,75 @@ function rs_prq_send(int $id): string {
     rs_log('sdk', $a['id'], 'pull request sent: ' . $url);
     return $url;
 }
+
+// (4.8) Xarishark: sent pull requests that later conflict (the developer edited the README after we
+// sent it) are rebuilt on their latest code, with the same two changes, so they stay one click to
+// merge. Run by the half-hourly job; each open PR is looked at every 6 hours at most. What it did is
+// kept per PR in kv_cache ('prqfix:<id>' => {at, n, why}) and shown in the PR queue.
+function rs_prq_fix_state(int $id): ?array {
+    $c = rs_kv_get('prqfix:' . $id);
+    return $c ? (json_decode((string)$c['v'], true) ?: null) : null;
+}
+function rs_prq_fix_conflicts(int $secs = 60): array {
+    rs_prq_tables();
+    $done = ['looked' => 0, 'fixed' => 0, 'flagged' => 0];
+    if (rs_prq_token() === '') return $done;
+    $t0 = microtime(true);
+    $rows = rs_db()->query("SELECT * FROM pc_prq WHERE status = 'sent' AND pr_url <> '' AND sent_at > NOW() - INTERVAL 120 DAY ORDER BY sent_at DESC")->fetchAll();
+    $login = '';
+    foreach ($rows as $q) {
+        if (microtime(true) - $t0 > $secs) break;
+        if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)$#', (string)$q['pr_url'], $m)) continue;
+        $id = (int)$q['id'];
+        if (($c = rs_kv_get('prqchk:' . $id)) && $c['age'] < 6 * 3600) continue;
+        rs_kv_put('prqchk:' . $id, '1');
+        ++$done['looked'];
+        try {
+            $pr = rs_prq_gh('GET', '/repos/' . $m[1] . '/pulls/' . $m[2]);
+            if ($pr['status'] !== 200) continue;
+            $p = (array)$pr['json'];
+            if (($p['state'] ?? '') !== 'open') continue;
+            // GitHub works out mergeable in the background: null means ask again next run.
+            if (($p['mergeable'] ?? null) !== false || ($p['mergeable_state'] ?? '') !== 'dirty') continue;
+            $why = rs_prq_rebuild($q, $p, $login);
+            $st = rs_prq_fix_state($id) ?: ['n' => 0];
+            rs_kv_put('prqfix:' . $id, (string)json_encode(['at' => gmdate('Y-m-d H:i'), 'n' => (int)$st['n'] + ($why === '' ? 1 : 0), 'why' => $why]));
+            if ($why === '') { ++$done['fixed']; rs_log('sdk', (string)$q['app_id'], 'pull request re-drafted after a conflict: ' . $q['pr_url']); }
+            else ++$done['flagged'];
+        } catch (Throwable $e) { /* next run */ }
+    }
+    return $done;
+}
+// One PR's branch made again from the developer's newest code: recomplauncher.json and the badge.
+// Returns '' when done, else why a person should look (nothing is pushed then).
+function rs_prq_rebuild(array $q, array $p, string &$login): string {
+    $a = rs_pc_app((string)$q['app_id']);
+    $json = json_decode((string)$q['json'], true);
+    if (!$a || !is_array($json)) return 'Its draft is gone, so it can\'t be rebuilt.';
+    $repo = (string)$q['repo'];
+    $base = (string)($p['base']['ref'] ?? '');
+    $forkName = (string)($p['head']['repo']['full_name'] ?? '');
+    $branch = (string)($p['head']['ref'] ?? '');
+    if ($base === '' || $forkName === '' || $branch === '') return 'GitHub didn\'t say where the pull request\'s branch is.';
+    if ($login === '') $login = (string)(rs_prq_gh('GET', '/user')['json']['login'] ?? '');
+    if (strcasecmp((string)($p['head']['repo']['owner']['login'] ?? ''), $login) !== 0) return 'It was sent from another account, so only that account can update it.';
+    // They added their own recomplauncher.json meanwhile: ours would replace theirs, so a person decides.
+    if (rs_prq_gh('GET', '/repos/' . $repo . '/contents/recomplauncher.json?ref=' . rawurlencode($base))['status'] === 200) return 'The developer added their own recomplauncher.json. Look at the pull request: it may not be needed any more.';
+    $head = rs_prq_gh_ok(rs_prq_gh('GET', '/repos/' . $repo . '/git/ref/heads/' . rawurlencode($base)), 'Reading its ' . $base . ' branch');
+    $sha = (string)$head['object']['sha'];
+    rs_prq_gh('POST', '/repos/' . $forkName . '/merge-upstream', ['branch' => $base]);
+    rs_prq_gh_ok(rs_prq_gh('PATCH', '/repos/' . $forkName . '/git/refs/heads/' . rawurlencode($branch), ['sha' => $sha, 'force' => true]), 'Moving the branch onto their newest code');
+    $file = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+    rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/recomplauncher.json', [
+        'message' => 'Add recomplauncher.json for RecompLauncher', 'content' => base64_encode($file), 'branch' => $branch,
+    ]), 'Adding recomplauncher.json');
+    $rd = rs_prq_gh('GET', '/repos/' . $forkName . '/readme?ref=' . rawurlencode($branch));
+    if ($rd['status'] === 200) {
+        $md = (string)base64_decode((string)($rd['json']['content'] ?? ''));
+        $new = rs_prq_readme_with_badge($md, rs_prq_badge($a['id']));
+        if ($new !== $md) rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode((string)$rd['json']['path'])), [
+            'message' => 'README: Get it on RecompLauncher badge', 'content' => base64_encode($new), 'branch' => $branch, 'sha' => (string)$rd['json']['sha'],
+        ]), 'Adding the badge');
+    }
+    return '';
+}

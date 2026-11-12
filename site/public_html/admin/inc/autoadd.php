@@ -207,6 +207,11 @@ function rs_auto_run(int $id): void {
                 throw new RuntimeException('Already on RecompLauncher as ' . $x['name'] . (!empty($x['hidden']) ? ' (hidden)' : '') . '.');
             }
             $a = rs_pc_add($job['link']);
+            // (4.8) Where it was found, kept on the listing: our own finds (the daily scout, a player's
+            // request, the admin) or a submission. Never another launcher's list.
+            $a['found'] = !empty($job['sub_id']) ? 'submission' : ((string)$job['who'] === (defined('RS_SCOUT_WHO') ? RS_SCOUT_WHO : 'Daily scout') ? 'scout' : (str_ends_with((string)$job['who'], '· request') ? 'request' : 'admin'));
+            $a['found_at'] = gmdate('Y-m-d');
+            rs_pc_save($a);
             rs_auto_set($id, ['app_id' => $a['id'], 'made' => 1]);
             rs_auto_step($id, 'add', 'ok', 'Hidden as ' . $a['id']);
         }
