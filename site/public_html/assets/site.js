@@ -1863,8 +1863,7 @@
       const grid = view.querySelector('[data-tm-people]');
       if (grid) {
         if (!people.length) { view.querySelector('[data-tm-people-sec]').hidden = true; return; }
-        // The "You?" tile fills whatever is left of the last row, so no row has a gap.
-        [4, 3, 2].forEach((k) => grid.style.setProperty('--fill' + k, k - (people.length % k)));
+        // The "You?" tile comes right after the last contributor, the same size as the rest.
         grid.innerHTML = people.map((p) => `<a class="tm-person" href="https://github.com/${encodeURIComponent(p.login)}" target="_blank" rel="noopener">${tmAv(p.login, p.avatar, true)}<span><b>${esc(p.login)}</b><small>${esc(tn(p.commits, '1 commit', '{n} commits'))}</small></span></a>`).join('')
           + `<a class="tm-person tm-you" href="${REPO}" target="_blank" rel="noopener"><span class="tm-av" aria-hidden="true">+</span><span><b>${t('You?')}</b><small>${t('Start on GitHub')}</small></span></a>`;
       }

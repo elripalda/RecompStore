@@ -3072,7 +3072,7 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 .tm-person b{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tm-person small{color:var(--muted);font-size:13.5px}
 .tm-person:hover{border-color:rgba(244,248,252,.4);color:var(--frost)}
-.tm-person.tm-you{grid-column:span var(--fill4,1);border-style:dashed;border-color:rgba(52,242,232,.45);background:rgba(52,242,232,.05)}
+.tm-person.tm-you{border-style:dashed;border-color:rgba(52,242,232,.45);background:rgba(52,242,232,.05)}
 .tm-person.tm-you .tm-av{background:transparent;color:var(--cyan);box-shadow:inset 0 0 0 1.5px rgba(52,242,232,.55);font-size:22px}
 .tm-help{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 .tm-help .help-card{padding:26px 24px;gap:10px}
@@ -3082,7 +3082,7 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 .tm-help .help-card span.tm-d{color:#d6deea;font-size:15.5px}
 .tm-help .help-card .tm-more{margin-top:auto;padding-top:8px;color:var(--cyan);font-weight:700;font-size:15px}
 .tm-kofi .tm-ic{background:rgba(255,94,120,.12);border-color:rgba(255,94,120,.4);color:#ff7d92}
-@media (max-width:1100px){.tm-people{grid-template-columns:repeat(3,minmax(0,1fr))}.tm-person.tm-you{grid-column:span var(--fill3,1)}.tm-help{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:1100px){.tm-people{grid-template-columns:repeat(3,minmax(0,1fr))}.tm-help{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:860px){.tm-team{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:760px){
   .tm-card{padding:22px}
@@ -3090,7 +3090,6 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
   .tm-name strong{font-size:25px}
   .tm-ids{grid-template-columns:minmax(0,1fr)}
   .tm-people{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .tm-person.tm-you{grid-column:span var(--fill2,1)}
   .tm-person{padding:10px;gap:10px}
   .tm-person .tm-av{--s:32px;font-size:13px}
   .tm-person b{white-space:normal;overflow-wrap:anywhere;font-size:14.5px;line-height:1.25}
