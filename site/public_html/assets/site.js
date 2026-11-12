@@ -7041,8 +7041,8 @@
     history.replaceState(history.state, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
   }
   const sidePicked = (() => { try { return localStorage.getItem('rs-side'); } catch (e) { return null; } })();
-  if (!LAUNCHER && location.pathname === '/' && !(location.hash.length > 1) && !/[?&]ps5\b/.test(location.search) && sidePicked !== 'ps5' && !/PlayStation/i.test(navigator.userAgent))
-    history.replaceState(history.state, '', '/pc' + location.search);
+  // (4.8) recompstore.com is RecompStore (PS5) again: it no longer opens on the PC store. RecompLauncher is recomplauncher.com.
+  void sidePicked;
   document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('[data-plat]'); if (a) { try { localStorage.setItem('rs-side', a.dataset.plat); } catch (er) {} } }, true);
   // (2.8) The PC store's header from the start on its pages, and its catalog on the way.
   if (LAUNCHER || /^\/pc(\/|$)/.test(location.pathname)) setPlatform('pc');
