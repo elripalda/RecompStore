@@ -268,7 +268,7 @@ rs_head('Developer accounts');
 <section class="card" id="requests">
   <h2>Waiting for you <?= $pending ? '<span class="count">' . count($pending) . '</span>' : '' ?></h2>
   <?php if (!$pending): ?><p class="muted">No requests right now.</p><?php endif; ?>
-  <?php foreach ($pending as $r): $apps = rs_dev_apps($r); ?>
+  <?php foreach ($pending as $r): $apps = array_merge(rs_dev_apps($r), array_map(fn($a) => ['name' => $a['name'] . ' (PC)'] + $a, rs_dev_pc_apps($r))); ?>
   <div class="dev-req">
     <?= $pic($r, 56) ?>
     <div class="dev-req-words">

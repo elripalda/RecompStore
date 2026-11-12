@@ -469,6 +469,12 @@ function rs_dev_approve(int $id, string $pick = ''): array {
     $devs = rs_developers();
     $slug = $acc['slug'] !== '' && isset($devs[$acc['slug']]) ? $acc['slug'] : '';
     if ($slug === '' && $pick !== '' && isset($devs[$pick])) $slug = $pick; // the admin chose their page
+    // (4.7) Their apps on their GitHub (PS5 and PC): a page one of them is already on is theirs.
+    $own = (string)rs_setting('own_dev', 'elripalda');
+    $psMine = rs_dev_apps($acc);
+    $pcMine = rs_dev_pc_apps($acc);
+    if ($slug === '') foreach ($pcMine as $a) { $s = (string)($a['dev'] ?? ''); if ($s !== '' && $s !== $own && isset($devs[$s])) { $slug = $s; break; } }
+    if ($slug === '') foreach ($psMine as $g) { $s = rs_dev_for($g, $devs); if ($s !== '' && $s !== $own) { $slug = $s; break; } }
     if ($slug === '') {
         $keys = [rs_dev_key((string)$acc['gh_login']), rs_dev_key((string)$acc['name'])];
         foreach ($devs as $s => $d) {
@@ -489,6 +495,10 @@ function rs_dev_approve(int $id, string $pick = ''): array {
     if (empty($d['links']['github']) && (string)$acc['gh_login'] !== '') $d['links']['github'] = 'https://github.com/' . $acc['gh_login'];
     rs_dev_save($d, isset($devs[$slug]) ? $slug : null);
     $db->prepare("UPDATE dev_accounts SET status = 'approved', slug = ?, decided = NOW() WHERE id = ?")->execute([$slug, $id]);
+    // (4.7) Their apps that aren't on any page yet go on theirs.
+    $devs = rs_developers();
+    foreach ($pcMine as $a) if ((string)($a['dev'] ?? '') === '') { $a['dev'] = $slug; rs_pc_save($a); }
+    foreach ($psMine as $g) if ((string)($g['dev'] ?? '') === '' && rs_dev_for($g, $devs) === '') { $g['dev'] = $slug; rs_save_game($g); }
     // (3.0) The Lounge so far isn't new to them.
     try { $db->prepare("UPDATE dev_accounts SET lounge_seen = (SELECT COALESCE(MAX(id), 0) FROM dev_messages WHERE channel = 'lounge') WHERE id = ? AND lounge_seen = 0")->execute([$id]); } catch (Throwable $e) { /* no messages yet */ }
     $acc['slug'] = $slug;
