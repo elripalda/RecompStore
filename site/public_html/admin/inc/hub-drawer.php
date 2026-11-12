@@ -72,6 +72,32 @@ $openFlags = array_values(array_filter(rs_hub_flags('open', 200), fn($f) => $f['
 $state = $job ? 'job-' . $job['status'] : ($r['status'] !== 'done' ? 'new' : (!empty($d['declined']) ? 'back' : (!empty($d['ps5_draft']) ? 'draft' : 'handled')));
 $by = $verified ? '<span class="sh-ver">' . HUB_IC['ver'] . '</span>' . h($dev !== '' ? $dev : (string)($d['account_name'] ?? '')) . ' · <b>Verified developer</b>'
     : ($d !== null ? h($dev !== '' ? $dev : 'No name given') . ($acc ? ' · Developer account ' . h(rs_dev_label($acc)) : ' · No developer account') : h(rs_hub_job_src($job) === 'Link' ? 'Added by ' . (string)$job['who'] : rs_hub_job_src($job)));
+$canMsg = $d !== null && ($acc || $email !== '');
+$devName = $dev !== '' ? $dev : ($acc ? rs_dev_label($acc) : 'them');
+$canMail = $email !== '' && rs_mail_ready();
+// (4.8) What VirusTotal flagged, file by file with its report, and the note to the developer about it.
+$vtFiles = []; $vtTag = '';
+$vtSec = function () use (&$vtFiles, $d, $canMail, $acc, $devName): void {
+    if (!array_filter($vtFiles, fn($f) => $f['hits'] > 0)) return;
+    usort($vtFiles, fn($x, $y) => $y['hits'] <=> $x['hits']);
+    $tell = []; ?>
+<section class="sh-d-sec">
+  <h3>VirusTotal <small>open a report to see what each engine said</small></h3>
+  <ol class="sh-steps sh-vt">
+    <?php foreach ($vtFiles as $f): $st = $f['state'] === 'skip' ? 'ok' : $f['state']; ?>
+    <li class="sh-s-<?= h($st) ?>"><span class="sh-s-i"><?= hub_step_icon($st) ?></span><span><b><?= h($f['name']) ?></b><small><?= h($f['state'] === 'run' ? 'Still checking' : ($f['state'] === 'skip' ? 'Too big to check' : ($f['hits'] ? 'Flagged by ' . $f['hits'] . ($f['engines'] ? ' of ' . $f['engines'] : '') . ($f['clam'] ? ' (ClamAV)' : ' engines') . ($f['by'] !== '' ? ': ' . $f['by'] : '') : 'Clean' . ($f['engines'] ? ' (0 of ' . $f['engines'] . ')' : '')))) ?></small></span>
+      <?php if ($f['link'] !== ''): ?><a class="btn small sh-vt-go" href="<?= h($f['link']) ?>" target="_blank" rel="noopener noreferrer">View report <?= HUB_IC['ext'] ?></a><?php endif; ?></li>
+    <?php endforeach; ?>
+  </ol>
+  <?php if ($d !== null):
+      if ($canMail) $tell[] = '<button type="button" data-open-panel="vt" data-via="email">Email ' . h($devName) . ' about it</button>';
+      if ($acc) $tell[] = '<button type="button" data-open-panel="vt" data-via="hub">Message them on their hub</button>';
+      if (!$tell) $tell[] = '<button type="button" data-open-panel="vt">Write it up to send them</button>'; ?>
+  <div class="sh-vt-acts"><?= implode('', $tell) ?></div>
+  <?php endif; ?>
+</section>
+<?php
+};
 ?>
 <button type="button" class="sh-close" data-close aria-label="Close"><?= HUB_IC['x'] ?></button>
 <div class="sh-d-hero" style="--h:<?= hub_hue($name) ?>"><?= $heroImg !== '' ? '<img src="' . h($heroImg) . '" alt="">' : '' ?>
@@ -111,6 +137,7 @@ if ($job):
   </ol>
   <?php if (trim((string)$job['notes']) !== ''): ?><div class="sh-d-notes"><b><?= $job['verdict'] === 'skip' ? 'Why Claude says not to list it' : 'Worth a look' ?></b><p><?= nl2br(h(trim((string)$job['notes']))) ?></p></div><?php endif; ?>
 </section>
+<?php $vtTag = (string)$job['tag']; $vtFiles = rs_hub_vt_files((string)$job['repo_key'], $vtTag); $vtSec(); ?>
 <?php if ($app && $job['status'] === 'review'): ?>
 <section class="sh-d-sec">
   <h3>Its page <small>what players will see; <?= rs_can_page('pc.php') ? '<a href="pc.php?edit=' . h(rawurlencode($app['id'])) . '#edit">edit it</a>' : 'flag anything that needs changing' ?></small></h3>
@@ -137,6 +164,7 @@ if ($job):
     <?php endforeach; ?>
   </ol>
 </section>
+<?php $vtTag = (string)($chk['latest']['tag'] ?? ''); $vtFiles = $repo !== '' ? rs_hub_vt_files(rs_repo_key($host, $repo), $vtTag) : []; $vtSec(); ?>
 <?php endif; ?>
 
 <?php
@@ -178,9 +206,7 @@ if ($d !== null):
 
 <?php
 // ---- The conversation --------------------------------------------------------------------------------
-$thread = rs_hub_thread($item, $d, $subId);
-$canMsg = $d !== null && ($acc || $email !== '');
-$devName = $dev !== '' ? $dev : ($acc ? rs_dev_label($acc) : 'them'); ?>
+$thread = rs_hub_thread($item, $d, $subId); ?>
 <section class="sh-d-sec">
   <h3>Conversation <small>team notes stay in the admin; messages go to the developer</small></h3>
   <div class="sh-thread">
@@ -244,6 +270,22 @@ if ($d !== null): ?>
   <label>Why<input name="reason" maxlength="200" required></label>
   <div class="sh-d-foot"><button class="primary">Mark done</button><button type="button" data-panel-close>Cancel</button></div>
 </form>
+<?php if (array_filter($vtFiles, fn($f) => $f['hits'] > 0)): ?>
+<form class="sh-panel" data-panel="vt" data-form="vt_tell" hidden>
+  <input type="hidden" name="item" value="<?= h($item) ?>">
+  <h3>Tell <?= h($devName) ?> what VirusTotal flagged</h3>
+  <p class="muted small">Each flagged file with its report link, and what they can do about it. Change anything you like.</p>
+  <label>Email subject<input name="subject" maxlength="200" value="<?= h('About your ' . $where . ' submission: ' . (string)($d['name'] ?? $name)) ?>"></label>
+  <label>Message<textarea name="body" rows="13" required data-vt-body><?= h(rs_hub_vt_note($vtFiles, $dev, (string)($d['name'] ?? $name), $where, $vtTag)) ?></textarea></label>
+  <?php if ($canMail || $acc): ?>
+  <div class="sh-vt-via">
+    <label class="check"><input type="checkbox" name="via_email" value="1"<?= $canMail ? ' checked' : ' disabled' ?>> Email it<?= $email !== '' ? ' to ' . h($email) : ' (they left no email address)' ?><?= $email !== '' && !rs_mail_ready() ? ' (the mailbox isn\'t set up)' : '' ?></label>
+    <label class="check"><input type="checkbox" name="via_hub" value="1"<?= $acc ? ' checked' : ' disabled' ?>> Send it to their developer hub<?= $acc ? '' : ' (no developer account)' ?></label>
+  </div>
+  <?php else: ?><p class="warn small">They left no email address and have no developer account, so copy it and send it another way (Discord, GitHub).</p><?php endif; ?>
+  <div class="sh-d-foot"><?php if ($canMail || $acc): ?><button class="primary">Send it</button><?php endif; ?><button type="button" data-copy-body>Copy</button><button type="button" data-panel-close>Cancel</button></div>
+</form>
+<?php endif; ?>
 <?php endif; ?>
 <form class="sh-panel" data-panel="flag" data-form="flag" hidden>
   <input type="hidden" name="item" value="<?= h($item) ?>">
@@ -267,7 +309,12 @@ if ($job) {
     echo '<button class="danger" data-act="remove" data-confirm="Click again to remove"' . ($live ? ' disabled title="Wait for it to finish"' : '') . '>Remove</button>';
     if ($d !== null) $more[] = '<button type="button" data-open-panel="changes">Ask for changes instead</button>';
 } elseif ($state === 'new') {
-    echo '<button class="primary" data-act="approve"' . (array_filter($chk['steps'], fn($x) => $x[0] === 'bad') ? ' data-confirm="Some checks are red. Click again to approve anyway"' : '') . '>' . ($pcSide ? 'Approve and check' : 'Approve') . '</button>';
+    // (4.8) No release yet: it can wait on RecompLauncher's Coming Soon instead (Approve moves to More).
+    $noRel = $pcSide && ($chk['steps']['files'][2] ?? '') === 'No release yet';
+    if ($noRel) {
+        echo '<button class="primary" data-act="soon" data-confirm="Click again to put it on Coming Soon">Add to Coming Soon</button>';
+        $more[] = '<button type="button" data-act="approve" data-confirm="There\'s no release. Click again to approve anyway">Approve and check anyway</button>';
+    } else echo '<button class="primary" data-act="approve"' . (array_filter($chk['steps'], fn($x) => $x[0] === 'bad') ? ' data-confirm="Some checks are red. Click again to approve anyway"' : '') . '>' . ($pcSide ? 'Approve and check' : 'Approve') . '</button>';
     echo '<button type="button" data-open-panel="changes">Ask for changes</button>' . $flagBtn . '<button type="button" class="danger" data-open-panel="decline">Decline</button>';
     $more[] = '<button type="button" data-open-panel="done">Mark done without an email</button>';
     $more[] = '<button type="button" data-act="move">Move to the ' . ($pcSide ? 'PS5' : 'PC') . ' board</button>';

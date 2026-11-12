@@ -179,3 +179,9 @@ img.sh-ico{background:#0f1216}
 @media (max-width:760px){.sh-board{grid-template-columns:1fr}.sh-head{flex-direction:column;align-items:stretch}.sh-rules,.sh-doc,.sh-found-top{grid-template-columns:1fr}.sh-steps.two{grid-template-columns:1fr}
   .sh-rowc{grid-template-columns:auto minmax(0,1fr)}.sh-rowc-acts{grid-column:1/-1;justify-content:flex-start}.sh-hrow{grid-template-columns:38px minmax(0,1fr) auto}.sh-hrow .sh-note{grid-column:2/-1}
   .sh-d-foot{flex-wrap:wrap}.sh-d-foot>button{flex:1 1 40%}.sh-add{margin-left:0}}
+/* (4.8) VirusTotal in the drawer: each file with its report, and the note to the developer */
+.sh-vt li{grid-template-columns:26px minmax(0,1fr) auto;align-items:center}
+.sh-vt-go{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.sh-vt-go svg{width:13px;height:13px}
+.sh-vt-acts{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;margin-top:10px}.sh-vt-acts button{justify-content:center}
+.sh-vt-via{display:flex;flex-direction:column;gap:6px}
+@media (max-width:760px){.sh-vt li{grid-template-columns:26px minmax(0,1fr)}.sh-vt-go{grid-column:2;justify-self:start}.sh-vt-acts{grid-auto-flow:row}}

@@ -171,7 +171,7 @@ function rs_hub_check(int $id, array $d, int $maxAge = 21600): array {
         [$rows, $v] = rs_vt_release(rs_repo_key($host, $repo), (string)$latest['tag_name']);
         $hits = $rows ? max(array_map(fn($r) => (int)$r['malicious'] + (int)$r['suspicious'], $rows)) : 0;
         if (!$rows || $v === 'grey') $steps['safe'] = ['run', 'VirusTotal is checking ' . (string)$latest['tag_name'] . ($pc ? '. ClamAV runs too when you approve' : '')];
-        elseif ($v === 'red') $steps['safe'] = ['bad', 'Flagged by VirusTotal (' . $hits . ' engines). Look at it on Security before anything else', 'Flagged by VirusTotal'];
+        elseif ($v === 'red') $steps['safe'] = ['bad', 'Flagged by VirusTotal (' . $hits . ' engines). Each file\'s report is below, under VirusTotal', 'Flagged by VirusTotal'];
         elseif ($v === 'yellow') $steps['safe'] = ['ok', 'VirusTotal: ' . $hits . ' minor flag' . ($hits === 1 ? '' : 's') . ' (common for unsigned programs)'];
         else $steps['safe'] = ['ok', 'VirusTotal: clean' . ($pc ? '. ClamAV runs too when you approve' : '')];
     } else $steps['safe'] = ['skip', $pc ? 'ClamAV and VirusTotal run when you approve' : 'Scanned when it\'s added'];
@@ -529,6 +529,86 @@ function rs_hub_ps5_apply(int $id, array $r, array $d): string {
     rs_log('submission-added', (string)$id, 'PS5 draft ' . $gid);
     return $gid;
 }
+// (4.8) A PC submission with no release yet, straight onto RecompLauncher's Coming Soon: its listing
+// (GitHub facts, art, what they sent), shown as Coming soon, and the catalog written at once. The
+// Coming soon watch tells the Dashboard when a release with files comes out. -> the listing.
+function rs_hub_soon_add(int $id, array $d): array {
+    if (($d['platform'] ?? '') !== 'pc') throw new RuntimeException('Coming Soon is on RecompLauncher, for PC submissions.');
+    $host = rs_host_norm((string)($d['host'] ?? ''));
+    $repo = (string)($d['repo'] ?? '');
+    if ($repo === '') throw new RuntimeException('It has no repo to list.');
+    $key = rs_repo_key($host, $repo);
+    foreach (rs_pc_apps() as $x) if (strcasecmp(rs_pc_key($x), $key) === 0) {
+        if (empty($x['soon'])) throw new RuntimeException('It\'s already on RecompLauncher, as ' . $x['name'] . '.');
+        if (!empty($x['hidden'])) { $x['hidden'] = false; rs_pc_save($x); rs_hub_soon_out(); }
+        return $x;
+    }
+    $a = rs_pc_add(rs_host_web($host, $repo));
+    foreach (['name' => 120, 'blurb' => 160, 'description' => 8000, 'needs' => 200, 'credits' => 1000] as $k => $max) {
+        $v = trim(str_replace("\r\n", "\n", (string)($d[$k] ?? '')));
+        if ($v !== '') $a[$k] = mb_substr($v, 0, $max);
+    }
+    if (trim((string)($d['author'] ?? '')) !== '') $a['author'] = mb_substr(trim((string)$d['author']), 0, 80);
+    if (isset(RS_PC_ORIGINS[$d['origin'] ?? ''])) $a['origin'] = (string)$d['origin'];
+    $as = is_array($d['assets'] ?? null) ? $d['assets'] : [];
+    if ($as) { $a['asset_win'] = (string)($as['win'] ?? ''); $a['asset_mac'] = (string)($as['mac'] ?? ''); $a['asset_linux'] = (string)($as['linux'] ?? ''); }
+    if (trim((string)($d['disc'] ?? '')) !== '' && stripos((string)$a['needs'], (string)$d['disc']) === false) $a['needs'] = mb_substr(rtrim((string)$a['needs'], '. ') . ' (' . trim((string)$d['disc']) . ')', 0, 200);
+    if (function_exists('rs_ai_from_submission')) $a = array_merge($a, rs_ai_from_submission($d, $a));
+    // Their own icon and backdrop when SteamGridDB had none.
+    $st = rs_db()->prepare("SELECT file, role FROM inbox_pictures WHERE inbox_id = ? AND role IN ('icon', 'hero') ORDER BY id");
+    $st->execute([$id]);
+    foreach ($st->fetchAll() as $p) {
+        if ((string)$a[$p['role']] !== '') continue;
+        $src = rs_report_dir() . '/' . basename((string)$p['file']);
+        if (is_file($src)) $a = array_merge($a, rs_pc_media('https://local/', (string)$p['role'], $a['id'], (string)file_get_contents($src)));
+    }
+    $a['soon'] = true;
+    $a['hidden'] = false;
+    $a['added'] = gmdate('Y-m-d');
+    rs_pc_save($a);
+    rs_hub_soon_out();
+    rs_log('pc', $a['id'], 'Coming soon, from submission ' . $id);
+    return $a;
+}
+// The catalog written now (no GitHub round), open launchers told, and the cached Coming soon pages dropped.
+function rs_hub_soon_out(): void {
+    rs_pc_write_catalog();
+    try { require_once __DIR__ . '/rlpush.php'; rl_push('catalog'); } catch (Throwable $e) { /* launchers look again soon */ }
+    $dir = dirname(RS_PUBLIC) . '/recompstore-private/page-cache';
+    foreach (['recomplauncher.com', 'www.recomplauncher.com', 'recompstore.com', 'www.recompstore.com'] as $hst) foreach (['p=pc-soon', 'p=soon'] as $qs) @unlink($dir . '/' . md5($hst . '|' . $qs) . '.html');
+}
+
+// (4.8) What VirusTotal (or ClamAV) said about each file of one release, for the drawer:
+// [['name', 'hits', 'engines', 'by', 'link', 'state' ok|warn|bad|run, 'clam']].
+function rs_hub_vt_files(string $repoKey, string $tag): array {
+    if ($repoKey === '' || $tag === '' || !function_exists('rs_vt_release')) return [];
+    [$rows] = rs_vt_release($repoKey, $tag);
+    $out = [];
+    foreach ($rows as $f) {
+        $hits = (int)$f['malicious'] + (int)$f['suspicious'];
+        $v = in_array($f['status'], ['big', 'error'], true) ? 'skip' : rs_vt_verdict($f);
+        $clam = (string)($f['scanner'] ?? 'vt') === 'clamav';
+        $out[] = ['name' => (string)$f['name'], 'hits' => $hits, 'engines' => (int)$f['engines'], 'by' => trim((string)$f['flagged_by']),
+            'link' => $clam ? '' : rs_vt_link($f), 'clam' => $clam,
+            'state' => ['red' => 'bad', 'yellow' => 'warn', 'green' => 'ok', 'grey' => 'run'][$v] ?? 'skip'];
+    }
+    return $out;
+}
+// The note to the developer about what was flagged, file by file with the report links (the same
+// wording as the old Submissions page's Virus scan reason).
+function rs_hub_vt_note(array $files, string $dev, string $name, string $where, string $tag): string {
+    $lines = [];
+    foreach ($files as $f) {
+        if ($f['hits'] < 1) continue;
+        $lines[] = '- ' . $f['name'] . ': flagged by ' . $f['hits'] . ($f['engines'] ? ' of ' . $f['engines'] : '') . ' ' . ($f['clam'] ? 'scans (ClamAV)' : 'engines')
+            . ($f['by'] !== '' ? ' (' . $f['by'] . ')' : '') . ($f['link'] !== '' ? "\n  " . $f['link'] : '');
+    }
+    return 'Hi' . ($dev !== '' ? ' ' . $dev : '') . ",\n\n"
+        . 'Thanks for sending ' . $name . '. Before it can go on ' . $where . ', there\'s one thing to sort out: VirusTotal flagged your release' . ($tag !== '' ? ' (' . $tag . ')' : '') . ', which is more than we currently allow:' . "\n\n"
+        . implode("\n", $lines) . "\n\n"
+        . 'These are often false positives, especially on unsigned programs. You can ask the vendors named above to recheck it (most have a false-positive form on their website), or change whatever is setting them off. Once the scan comes back clean, let us know and we\'ll get it on ' . $where . ' as soon as possible.' . "\n";
+}
+
 // The "you're live" email for a published PC submission: [to, subject, body] (to '' when they left no email).
 function rs_hub_live_mail(int $subId): ?array {
     $s = rs_hub_sub($subId);

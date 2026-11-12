@@ -172,10 +172,20 @@
       body.querySelectorAll('.sh-panel').forEach(function (p) { p.hidden = p.getAttribute('data-panel') !== name; });
       var more = op.closest('details'); if (more) more.open = false;
       var panel = body.querySelector('[data-panel="' + name + '"]');
+      // Email or hub message: the one asked for is ticked (both can still be).
+      var via = op.getAttribute('data-via');
+      if (panel && via) panel.querySelectorAll('input[name^="via_"]').forEach(function (cb) { if (!cb.disabled) cb.checked = cb.name === 'via_' + via; });
       if (panel) { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); var f = panel.querySelector('input:not([type=hidden]):not([disabled]), textarea'); if (f) setTimeout(function () { f.focus({ preventScroll: true }); }, 250); }
       return;
     }
     if (t.closest('[data-panel-close]')) { t.closest('.sh-panel').hidden = true; return; }
+    var cp = t.closest('[data-copy-body]');
+    if (cp) {
+      var cpf = cp.closest('form'), cps = cpf.querySelector('[name=subject]'), cpt = cpf.querySelector('textarea[name=body]');
+      var cpText = (cps && cps.value ? cps.value + '\n\n' : '') + cpt.value;
+      (navigator.clipboard ? navigator.clipboard.writeText(cpText) : Promise.reject()).then(function () { toast('Copied.'); }, function () { cpt.select(); toast('Press Ctrl+C to copy it.'); });
+      return;
+    }
     var chip = t.closest('[data-chip]');
     if (chip) {
       var form = chip.closest('form'), txt = chip.getAttribute('data-chip'), reason = form.querySelector('[name=reason]'), ta = form.querySelector('textarea[name=body]');

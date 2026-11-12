@@ -389,6 +389,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 else { $on = !rs_scout_on(); rs_kv_put('scout_on', $on ? '1' : '0'); $res['msg'] = $on ? 'The daily scout is on. It runs every day at 12 pm.' : 'The daily scout is off.'; }
                 break;
             }
+            case 'soon': {
+                [$id, $r, $d] = $needSub();
+                if ($r['status'] === 'done') throw new RuntimeException('That one was already handled.');
+                @set_time_limit(180);
+                $a = rs_hub_soon_add($id, $d);
+                $d['handled'] = ['reason' => 'Added to Coming Soon', 'at' => gmdate('c'), 'by' => rs_me_name()];
+                $d['soon_app'] = (string)$a['id'];
+                unset($d['declined']);
+                rs_hub_sub_save($id, $d, 'done');
+                rs_log('hub', 'soon', (string)$a['name']);
+                $res['msg'] = $a['name'] . ' is on Coming Soon now. When they put out a release with files, it shows on the Dashboard.';
+                $res['close'] = true;
+                break;
+            }
+            case 'vt_tell': {
+                [$title, , $subId] = $about($item);
+                if (!$subId || !($s = rs_hub_sub($subId))) throw new RuntimeException('There\'s no developer to write to on this one.');
+                [$r, $d] = $s;
+                $body = trim(str_replace("\r\n", "\n", (string)($_POST['body'] ?? '')));
+                $subject = mb_substr(trim((string)($_POST['subject'] ?? '')), 0, 200);
+                if (mb_strlen($body) < 10) throw new RuntimeException('Write the message first.');
+                $wantMail = !empty($_POST['via_email']); $wantHub = !empty($_POST['via_hub']);
+                if (!$wantMail && !$wantHub) throw new RuntimeException('Tick email, their hub, or both.');
+                $acc = !empty($d['account']) ? rs_dev_account((int)$d['account']) : null;
+                $to = rs_inbox_email($r, null);
+                $went = [];
+                if ($wantHub) {
+                    if (!$acc) throw new RuntimeException('They don\'t have a developer account, so it can only go by email.');
+                    rs_dev_msg_add('dm', (int)$acc['id'], true, $body);
+                    rs_log('developers', 'message', 'VirusTotal note to ' . rs_dev_label($acc) . ' about ' . $title);
+                    $went[] = 'their developer hub';
+                }
+                if ($wantMail) {
+                    if ($to === '') throw new RuntimeException('They didn\'t leave an email address' . ($went ? ', so it only went to their hub.' : '.'));
+                    if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up yet, so no email can go out' . ($went ? ' (it went to their hub).' : '.'));
+                    $mailOut($to, $subject !== '' ? $subject : 'About your RecompLauncher submission: ' . $title, $body, $subId);
+                    $went[] = $to;
+                }
+                $res['msg'] = 'Sent to ' . implode(' and ', $went) . '. Their answer shows here.';
+                $res['reload'] = false;
+                $res['refresh'] = true;
+                break;
+            }
             case 'live_send': {
                 [$id, $r, $d] = $needSub();
                 $to = rs_inbox_email($r, null);

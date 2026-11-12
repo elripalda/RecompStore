@@ -1130,6 +1130,12 @@ function rs_pattern_matches(string $pattern, string $name): bool {
 function rs_rel_pick(array $rels, array $pats = []): array {
     $list = array_values(array_filter($rels, fn($x) => is_array($x) && empty($x['draft'])));
     if (!$list) return [null, null];
+    // Newest by when it came out: GitHub lists by the tag's commit date, so a release made from an older
+    // commit can sit on top of newer builds (Excitebike: a source-only release above its "Latest" one).
+    $at = fn(array $x) => (int)strtotime((string)($x['published_at'] ?? $x['created_at'] ?? ''));
+    $ord = array_flip(array_keys($list));
+    uksort($list, fn($i, $j) => ($at($list[$j]) <=> $at($list[$i])) ?: ($ord[$i] <=> $ord[$j]));
+    $list = array_values($list);
     $main = null;
     foreach ($list as $x) if (empty($x['prerelease'])) { $main = $x; break; }
     $main ??= $list[0];
