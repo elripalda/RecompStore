@@ -1852,7 +1852,7 @@
         const n = team.length;
         box.style.setProperty('--cols', n <= 3 ? Math.max(1, n) : n % 3 === 0 ? 3 : 2);
         box.innerHTML = n ? team.map((p) => `<div class="glass tm-card">
-            <div class="tm-top">${tmAv(p.name, p.avatar)}<div class="tm-name"><strong dir="auto">${esc(p.name)}</strong>${p.github ? `<span class="tm-h">@${esc(p.github)}</span>` : ''}${p.title ? `<span class="tm-role">${esc(p.title)}</span>` : ''}</div></div>
+            <div class="tm-top">${tmAv(p.name, p.avatar)}<div class="tm-name"><strong dir="auto">${esc(p.name)}</strong>${p.github || p.commits ? `<span class="tm-h">${[p.github ? '@' + esc(p.github) : '', p.commits ? esc(tn(p.commits, '1 commit', '{n} commits')) : ''].filter(Boolean).join(' · ')}</span>` : ''}${p.title ? `<span class="tm-role">${esc(p.title)}</span>` : ''}</div></div>
             ${p.about ? `<p class="tm-does" dir="auto">${esc(p.about)}</p>` : ''}
             <div class="tm-ids">
               ${p.github ? `<a class="tm-id" href="https://github.com/${encodeURIComponent(p.github)}" target="_blank" rel="noopener">${TM_ICON.gh}<span><small>GitHub</small><b>${esc(p.github)}</b></span>${TM_ICON.go}</a>` : ''}
