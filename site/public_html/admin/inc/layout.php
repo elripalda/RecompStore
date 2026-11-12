@@ -63,6 +63,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $devWait = rs_dev_waiting() + $subNew + rs_dev_admin_unread();
     $vtNeed = function_exists('rs_vt_need_count') ? rs_vt_need_count() : 0;
     $cnt = fn(int $n) => $n ? ' <span class="count">' . $n . '</span>' : '';
+    // (4.7) Auto-add drafts waiting to be looked at (the daily scout's included).
+    $autoN = 0;
+    if (rs_can_page('auto.php')) { try { $autoN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_auto WHERE status = 'review'")->fetchColumn(); } catch (Throwable $e) { /* no table yet */ } }
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
     // it's the file in the address (and, for pc.php, the ?view=).
     $pcAt = fn(string $v) => fn() => $here === 'pc.php' && $view === $v;
@@ -75,7 +78,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'Stores' => [
             ['pc.php', 'PC · RecompLauncher', 'pc', [
-                ['pc.php', 'Recomps', $pcAt('')], ['auto.php', 'Auto-add', null], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
+                ['pc.php', 'Recomps', $pcAt('')], ['auto.php', 'Auto-add' . $cnt($autoN), null], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
                 ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['sdk-support.php', 'SDK support', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null],
                 ['launcher-beta.php', 'Launcher beta', null], ['launcher-stats.php', 'Launcher stats', null], ['launcher.php', 'Launcher', null]], 0],
             ['index.php', 'PS5 · RecompStore', 'ps5', [

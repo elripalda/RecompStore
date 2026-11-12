@@ -80,7 +80,7 @@ function rs_auto_step(int $id, string $key, string $state, string $note = ''): v
 
 // Start one: a draft row and the background run. -> the draft's id (an open one for the same repo
 // is reused instead of a second).
-function rs_auto_start(string $link, string $who): int {
+function rs_auto_start(string $link, string $who, bool $launch = true): int {
     rs_auto_tables();
     $l = rs_repo_from_link($link);
     if (!$l) throw new RuntimeException('Paste a GitHub, GitLab or SourceForge link, like github.com/owner/name.');
@@ -91,7 +91,7 @@ function rs_auto_start(string $link, string $who): int {
     rs_db()->prepare('INSERT INTO pc_auto (link, repo_key, who, steps, created, updated) VALUES (?, ?, ?, ?, NOW(), NOW())')
         ->execute([mb_substr(trim($link), 0, 400), $key, mb_substr($who, 0, 80), '{}']);
     $id = (int)rs_db()->lastInsertId();
-    rs_auto_launch($id);
+    if ($launch) rs_auto_launch($id);
     return $id;
 }
 // Run it again from the top (the listing it made is kept and filled in again).
@@ -323,6 +323,12 @@ function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $na
     $body = ['model' => RS_AUTO_MODEL, 'max_tokens' => 8000,
         'system' => [['type' => 'text', 'text' => RS_AUTO_SYSTEM . rs_auto_spec(), 'cache_control' => ['type' => 'ephemeral']]],
         'messages' => [['role' => 'user', 'content' => "Curate this project for RecompLauncher.\n\n" . json_encode($user, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]]];
+    return rs_ai_json($body);
+}
+
+// One call to Claude with the Anthropic key from SDK support; the JSON it answers with. Busy or overloaded
+// answers are tried again a few times.
+function rs_ai_json(array $body) {
     for ($try = 0; $try < 3; $try++) {
         $c = curl_init('https://api.anthropic.com/v1/messages');
         curl_setopt_array($c, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300, CURLOPT_CONNECTTIMEOUT => 20,
@@ -335,7 +341,7 @@ function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $na
             $j = json_decode($res, true) ?: [];
             $text = '';
             foreach ((array)($j['content'] ?? []) as $p) if (($p['type'] ?? '') === 'text') $text .= $p['text'];
-            if (preg_match('/\{.*\}/s', $text, $m) && is_array($d = json_decode($m[0], true))) return $d;
+            if (preg_match('/[\[{].*[\]}]/s', $text, $m) && is_array($d = json_decode($m[0], true))) return $d;
             throw new RuntimeException('Claude\'s answer wasn\'t the JSON asked for.');
         }
         if (in_array($code, [429, 500, 502, 503, 529], true)) { sleep(15 * ($try + 1)); continue; }
