@@ -6,6 +6,7 @@ declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 require_once __DIR__ . '/inc/rl_cloud.php';
+require_once __DIR__ . '/inc/adminlink.php';
 rs_require_login();
 rs_acct_tables();
 rs_rl_tables();
@@ -68,7 +69,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_rl_delete($acc, (string)($_POST['game'] ?? ''), (string)($_POST['v'] ?? ''));
                 rs_flash('Deleted that cloud save copy.');
                 break;
+            // (4.8) Merge with an admin login (owners only): the admin login takes this account's
+            // username and can be signed into with this account. See inc/adminlink.php.
+            case 'admin_merge':
+                $uid = (int)($_POST['admin'] ?? 0);
+                $was = (string)(rs_team_get($uid)['username'] ?? '');
+                $name = rs_al_merge($uid, $id);
+                rs_log('team', 'merged', $was . ' with the account ' . $who . ($was !== $name ? ' (now ' . $name . ')' : ''));
+                rs_flash(($was !== $name ? 'The admin login ' . $was . ' is now ' . $name . '. ' : 'Merged. ') . 'Sign in to the admin with this RecompLauncher account (Continue as ' . $name . ' on the login page, or its username or email and password). The admin password still works as a backup.');
+                break;
+            case 'admin_unmerge':
+                $adm = rs_al_admin_for($id, true);
+                if (!$adm) throw new RuntimeException('This account isn\'t merged with an admin login.');
+                rs_al_unmerge((int)$adm['id']);
+                rs_log('team', 'unmerged', $adm['username'] . ' from the account ' . $who);
+                rs_flash('Unmerged. ' . $adm['username'] . ' signs in with its own admin password again.');
+                break;
             case 'delete':
+                if (rs_al_admin_for($id, true)) throw new RuntimeException('This account is merged with an admin login. Unmerge it first.');
                 if (trim((string)($_POST['confirm'] ?? '')) !== 'DELETE') throw new RuntimeException('Type DELETE to delete the account.');
                 $GLOBALS['rs_admin_delete'] = true;
                 rs_acct_delete($acc);
@@ -153,6 +171,9 @@ if ($acc) {
         try { $ib = $db->prepare('SELECT id, kind, app_id, created FROM inbox WHERE contact = ? ORDER BY id DESC LIMIT 5'); $ib->execute([(string)$acc['email']]); $inbox = $ib->fetchAll(); } catch (Throwable $e) { /* no inbox */ }
     }
 }
+// (4.8) The admin login this account is merged with, and the ones it could be merged with.
+$admin = $acc ? rs_al_admin_for($sel, true) : null;
+$admins = $acc && !$admin && rs_is_owner() ? array_values(array_filter(rs_al_admins(), fn($u) => (int)$u['account_id'] <= 0)) : [];
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $hid = fn(string $act, int $id) => $csrf . '<input type="hidden" name="action" value="' . h($act) . '"><input type="hidden" name="id" value="' . $id . '">';
 $mb = fn(int $b) => $b <= 0 ? '0 MB' : ($b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, (int)round($b / 1024)) . ' KB');
@@ -223,6 +244,22 @@ rs_head('Players');
     <form method="post"><?= $hid('signout', $sel) ?><button>Sign out everywhere</button></form>
     <?php if ($acc['totp_on']): ?><form method="post" onsubmit="return confirm('Turn off two-step sign-in for <?= h(addslashes($name)) ?>?')"><?= $hid('twostep_off', $sel) ?><button>Turn off two-step</button></form><?php endif; ?>
   </div>
+
+  <h3 class="sub" style="margin:16px 0 4px;font-size:13px">Admin login</h3>
+  <?php if ($admin): ?>
+  <div class="kv"><span>Merged with</span><span style="flex:1"><b><?= h((string)$admin['username']) ?></b> · <?= h(RS_ROLES[$admin['role']] ?? (string)$admin['role']) ?><?= (int)$admin['active'] ? '' : ' · switched off' ?></span>
+    <?php if (rs_is_owner()): ?><form method="post" style="margin:0" onsubmit="return confirm('Unmerge <?= h(addslashes((string)$admin['username'])) ?> from this account? The admin login keeps its name and signs in with its own password again.')"><?= $hid('admin_unmerge', $sel) ?><button>Unmerge</button></form><?php endif; ?></div>
+  <p class="muted small">Signs in to the admin with this account. The admin login's own password still works as a backup.</p>
+  <?php elseif ($admins && $acc['username'] !== null): ?>
+  <form method="post" class="pl-merge" onsubmit="return confirm('Merge this account with the admin login you picked? The admin login takes the username <?= h(addslashes($name)) ?>.')">
+    <?= $hid('admin_merge', $sel) ?>
+    <select name="admin" aria-label="Admin login" required><option value="">Pick an admin login</option><?php foreach ($admins as $u): ?><option value="<?= (int)$u['id'] ?>"><?= h((string)$u['username']) ?> (<?= h(RS_ROLES[$u['role']] ?? (string)$u['role']) ?>)</option><?php endforeach; ?></select>
+    <button class="primary">Merge with admin login</button>
+  </form>
+  <p class="muted small">The admin login takes the username <b><?= h($name) ?></b>, signs in with this account, and shows this account's picture on the Team page.</p>
+  <?php else: ?>
+  <p class="muted small"><?= $acc['username'] === null ? 'Picks a username first, then it can be merged with an admin login.' : (rs_is_owner() ? 'Every admin login is merged already.' : 'Not merged with an admin login.') ?></p>
+  <?php endif; ?>
 
   <h3 class="sub" style="margin:16px 0 4px;font-size:13px">RecompLauncher PCs <span class="muted small"><?= count($devices) ?></span></h3>
   <?php if (!$devices): ?><p class="muted small">No PCs linked.</p><?php endif; ?>

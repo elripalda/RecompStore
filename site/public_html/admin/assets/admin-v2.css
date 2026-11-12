@@ -161,3 +161,12 @@ table{font-size:13px}
 :root:not([data-theme=light]) .ov-head .seg button.on{background:#323a45;border-color:#4a5462}
 :root[data-theme=oled] .side{border-right-color:#22262d}
 :root[data-theme=oled] .top{border-bottom-color:#22262d}
+/* (4.8) Players: merge an account with an admin login */
+.pl-merge{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;margin:6px 0 4px}
+.pl-merge select,.pl-merge button{width:100%;min-width:0;justify-content:center}
+.login-acct{display:flex;flex-direction:column;gap:10px;margin:0 0 18px;padding:0 0 18px;border-bottom:1px solid var(--line)}
+.login-acct .who{display:flex;align-items:center;gap:12px}
+.login-acct .who img,.login-acct .who .me-av{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none}
+.login-acct .who b{display:block}
+.login-acct button,.login-acct .btn{width:100%;justify-content:center}
+.pl-acts form:last-child:nth-child(odd){grid-column:1/-1} /* (4.8) an odd last button takes the whole row */

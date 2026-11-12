@@ -43,6 +43,7 @@ const RS_PAGE_ACCESS = [
 // Buttons on shared pages that only owners may press: page => actions.
 const RS_OWNER_ACTIONS = [
     'security.php' => ['key', 'forget', 'settings'],
+    'players.php' => ['admin_merge', 'admin_unmerge'], // (4.8) merging an admin login with a player account
     'status.php' => ['*'],
 ];
 

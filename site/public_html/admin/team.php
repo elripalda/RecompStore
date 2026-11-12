@@ -64,7 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $team = rs_team();
 // (4.8) What each one shows on recomplauncher.com/team.
 $pub = [];
-foreach (rs_db()->query('SELECT id, pub_show, pub_name, pub_title, pub_github, pub_discord, pub_about, pub_order FROM users') as $r) $pub[(int)$r['id']] = $r;
+require_once __DIR__ . '/inc/adminlink.php';
+rs_al_schema();
+foreach (rs_db()->query('SELECT id, pub_show, pub_name, pub_title, pub_github, pub_discord, pub_about, pub_order, account_id FROM users') as $r) $pub[(int)$r['id']] = $r;
 $once = $_SESSION['team_once'] ?? null;
 unset($_SESSION['team_once']);
 $meId = (int)$_SESSION['uid'];
@@ -146,6 +148,7 @@ Temporary password: <?= h($once['pw']) ?></pre>
         <?php foreach (explode(',', (string)$t['stores']) as $s): if (!isset(RS_STORES[$s])) continue; ?><span class="store-chip store-<?= h($s) ?>"><?= h(RS_STORES[$s]) ?></span><?php endforeach; ?>
         <?php if ((int)$t['twostep']): ?><span class="pill ok" title="Two-step login is on">2-step</span><?php endif; ?>
         <?php if (!empty($pub[$tid]['pub_show'])): ?><span class="pill ok" title="Shown on recomplauncher.com/team">On the website</span><?php endif; ?>
+        <?php $la = (int)($pub[$tid]['account_id'] ?? 0) > 0 ? rs_acct_get((int)$pub[$tid]['account_id']) : null; if ($la): ?><a class="pill" href="players.php?id=<?= (int)$la['id'] ?>" title="Merged with this RecompLauncher account: it signs in to the admin too">RecompLauncher: <?= h((string)($la['username'] ?? '#' . $la['id'])) ?></a><?php endif; ?>
         <?php if ((int)$t['must_change']): ?><span class="pill warn" title="Hasn't set their own password yet">Invited</span><?php endif; ?>
         <?php if ($off): ?><span class="pill">Switched off</span><?php endif; ?>
       </div>

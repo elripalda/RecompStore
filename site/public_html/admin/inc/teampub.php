@@ -28,18 +28,23 @@ function rs_tp_schema(): void {
 // The people shown on the website, in order.
 function rs_tp_members(): array {
     rs_tp_schema();
-    $rows = rs_db()->query("SELECT username, display_name, role, pub_name, pub_title, pub_github, pub_discord, pub_about FROM users
+    require_once __DIR__ . '/adminlink.php';
+    rs_al_schema();
+    $rows = rs_db()->query("SELECT username, display_name, role, pub_name, pub_title, pub_github, pub_discord, pub_about, account_id FROM users
         WHERE pub_show = 1 AND active = 1 ORDER BY pub_order, FIELD(role, 'owner', 'manager', 'curator', 'maker'), id")->fetchAll();
     $out = [];
     foreach ($rows as $r) {
         $gh = (string)$r['pub_github'];
+        // (4.8) Merged with a RecompLauncher account: that account's profile picture.
+        $acc = (int)($r['account_id'] ?? 0) > 0 ? rs_acct_get((int)$r['account_id']) : null;
+        $pic = $acc && empty($acc['banned']) ? rs_acct_avatar_url($acc) : '';
         $out[] = [
             'name' => (string)($r['pub_name'] ?: ($r['display_name'] ?: $r['username'])),
             'title' => (string)($r['pub_title'] ?: (RS_ROLES[$r['role']] ?? '')),
             'github' => $gh,
             'discord' => (string)$r['pub_discord'],
             'about' => (string)$r['pub_about'],
-            'avatar' => $gh !== '' ? 'https://github.com/' . rawurlencode($gh) . '.png?size=192' : '',
+            'avatar' => $pic !== '' ? $pic : ($gh !== '' ? 'https://github.com/' . rawurlencode($gh) . '.png?size=192' : ''),
         ];
     }
     return $out;
