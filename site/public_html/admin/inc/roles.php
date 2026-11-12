@@ -35,7 +35,7 @@ const RS_PAGE_ACCESS = [
     // Managers
     'inbox.php' => ['manager', ''], 'log.php' => ['manager', ''], 'log-file.php' => ['manager', ''], 'log-zip.php' => ['manager', ''],
     'analytics.php' => ['manager', ''], 'stats.php' => ['manager', ''], 'app-stats.php' => ['manager', ''], 'launcher-stats.php' => ['manager', 'pc'],
-    'accounts.php' => ['manager', ''], 'players.php' => ['manager', ''], 'live.php' => ['curator', ''], 'find.php' => ['curator', ''], 'pins.php' => ['curator', ''], 'mail.php' => ['manager', ''], 'email-asset.php' => ['manager', ''],
+    'accounts.php' => ['manager', ''], 'players.php' => ['manager', ''], 'statcard.php' => ['manager', ''], 'live.php' => ['curator', ''], 'find.php' => ['curator', ''], 'pins.php' => ['curator', ''], 'mail.php' => ['manager', ''], 'email-asset.php' => ['manager', ''],
     // Owners: settings, the launcher's builds and updates, storage, the team
     'settings.php' => ['owner', ''], 'launcher.php' => ['owner', 'pc'], 'launcher-beta.php' => ['owner', 'pc'], 'launcher-upload.php' => ['owner', 'pc'],
     'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''],

@@ -111,7 +111,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
             ['sdk-support.php', 'SDK support', 'dev', [], 0],
         ],
         'Insights' => [
-            ['analytics.php', 'Analytics', 'chart', [['analytics.php', 'Analytics', fn() => in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Server health', fn() => in_array($here, ['status.php', 'diag-db.php'], true)]], 0],
+            ['analytics.php', 'Analytics', 'chart', [['analytics.php', 'Analytics', fn() => in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Server health', fn() => in_array($here, ['status.php', 'diag-db.php'], true)], ['statcard.php', 'Stats card', null]], 0],
             ['log.php', 'Change log', 'log', [], 0],
         ],
         'Admin' => [
@@ -120,7 +120,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
     ];
     // Pages that live under another section's link.
-    $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
+    $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php', 'statcard.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
         'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['messages.php', 'community.php', 'docs.php'], 'index.php' => ['edit.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;

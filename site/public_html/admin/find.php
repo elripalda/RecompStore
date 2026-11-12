@@ -19,7 +19,7 @@ $pages = [['dashboard.php', 'Overview'], ['submissions.php', 'Submissions'], ['a
     ['pc.php?view=reports', 'Player reports'], ['titles.php', 'Versions'], ['boot.php', 'Boot profiles'], ['achievements.php', 'Achievements'], ['pc-banner.php', 'Banner'], ['ai.php', 'AI check'],
     ['index.php', 'PS5 games'], ['edit.php', 'Add a PS5 game'], ['discover.php', 'Discover'], ['collections.php', 'Collections'], ['beta.php', 'PS5 beta'], ['health.php', 'Found on GitHub (PS5)'],
     ['launcher.php', 'Launcher'], ['launcher-stats.php', 'Launcher live stats'], ['launcher-beta.php', 'Launcher beta'], ['sdk-support.php', 'SDK support'], ['analytics.php', 'Analytics'],
-    ['status.php', 'Server health'], ['log.php', 'Change log'], ['team.php', 'Team'], ['settings.php', 'Settings'], ['account.php', 'My account']];
+    ['status.php', 'Server health'], ['statcard.php', 'Stats card'], ['log.php', 'Change log'], ['team.php', 'Team'], ['settings.php', 'Settings'], ['account.php', 'My account']];
 $pg = [];
 foreach ($pages as [$href, $label]) if ($has($label) && rs_can_page($href)) $pg[] = ['href' => $href, 'label' => $label, 'note' => 'Page'];
 if ($pg) $out[] = ['title' => 'Pages', 'items' => array_slice($pg, 0, 5)];
