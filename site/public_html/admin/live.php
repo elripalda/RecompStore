@@ -33,13 +33,13 @@ if ($mgr) {
 }
 
 // Slower numbers, kept 5 minutes: 90 days a day at a time, the top games and the hardware.
-$c = rs_kv_get('ov_stats');
+$c = rs_kv_get('ov_stats2');
 $stats = $c && $c['age'] < 300 ? json_decode($c['v'], true) : null;
 if (!is_array($stats)) {
     $days = [];
     for ($i = 89; $i >= 0; $i--) $days[gmdate('Y-m-d', time() - $i * 86400)] = ['new' => 0, 'play' => 0, 'del' => 0];
     $fill = function (string $sql, string $k) use (&$days, $db, $safe) {
-        $safe(function () use (&$days, $db, $sql, $k) { foreach ($db->query($sql) as $r) if (isset($days[(string)$r[0]])) $days[(string)$r[0]][$k] = (int)$r[1]; });
+        $safe(function () use (&$days, $db, $sql, $k) { foreach ($db->query($sql)->fetchAll(PDO::FETCH_NUM) as $r) if (isset($days[(string)$r[0]])) $days[(string)$r[0]][$k] = (int)$r[1]; });
     };
     $fill('SELECT DATE(created) d, COUNT(*) FROM accounts WHERE created >= UTC_DATE() - INTERVAL 90 DAY GROUP BY d', 'new');
     $fill('SELECT day, COUNT(*) FROM lstat_days WHERE day >= UTC_DATE() - INTERVAL 90 DAY GROUP BY day', 'play');
@@ -54,7 +54,7 @@ if (!is_array($stats)) {
     $stats['gpus'] = $hw('gpu', 10);
     $stats['os'] = $hw('os', 4);
     $stats['versions'] = $hw('version', 5);
-    rs_kv_put('ov_stats', (string)json_encode($stats));
+    rs_kv_put('ov_stats2', (string)json_encode($stats));
 }
 if (!$mgr) unset($stats['days']);
 echo json_encode($out + $stats, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

@@ -155,7 +155,7 @@ if ($acc) {
 }
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $hid = fn(string $act, int $id) => $csrf . '<input type="hidden" name="action" value="' . h($act) . '"><input type="hidden" name="id" value="' . $id . '">';
-$mb = fn(int $b) => $b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, (int)round($b / 1024)) . ' KB';
+$mb = fn(int $b) => $b <= 0 ? '0 MB' : ($b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, (int)round($b / 1024)) . ' KB');
 
 rs_head('Players');
 ?>
