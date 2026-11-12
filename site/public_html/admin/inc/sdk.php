@@ -34,6 +34,32 @@ function rs_sdk_pr_state(array $a, string $url): string {
     return $st;
 }
 
+// (4.8) The page never asks GitHub while it's drawing: every pull request's last known state comes
+// from one query, and the stale ones are refreshed after the answer has gone (rs_sdk_pr_refresh).
+function rs_sdk_pr_cached(array $a, string $url): string {
+    if (!preg_match('#/pull/(\d+)$#', $url, $m)) return '';
+    if (!isset($GLOBALS['rs_sdk_pr_map'])) {
+        $GLOBALS['rs_sdk_pr_map'] = [];
+        try {
+            rs_cache_tables();
+            foreach (rs_db()->query("SELECT k, v, TIMESTAMPDIFF(SECOND, at, NOW()) AS age FROM kv_cache WHERE k LIKE 'sdkpr:%'") as $kr)
+                $GLOBALS['rs_sdk_pr_map'][(string)$kr['k']] = ['v' => (string)$kr['v'], 'age' => (int)$kr['age']];
+        } catch (Throwable $e) { rs_errlog('sdk pr states', $e); }
+    }
+    $k = 'sdkpr:' . $a['id'] . ':' . $m[1];
+    $c = $GLOBALS['rs_sdk_pr_map'][$k] ?? null;
+    if (!$c || $c['age'] >= 3600) $GLOBALS['rs_sdk_pr_stale'][$a['id']] = $url;
+    return $c ? $c['v'] : '';
+}
+// Asks GitHub about the stale ones, for up to $secs seconds. Run after the answer has gone.
+function rs_sdk_pr_refresh(array $stale, int $secs): void {
+    $t0 = microtime(true);
+    foreach ($stale as $id => $url) {
+        if (microtime(true) - $t0 > $secs) break;
+        if ($a = rs_pc_app((string)$id)) { try { rs_sdk_pr_state($a, (string)$url); } catch (Throwable $e) { /* next run */ } }
+    }
+}
+
 // Every listed recomp with a repo, most downloaded first.
 function rs_sdk_apps(): array {
     $apps = array_values(array_filter(rs_pc_apps(), fn($a) => empty($a['hidden']) && empty($a['soon']) && (string)$a['repo'] !== ''));
@@ -65,7 +91,7 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
     $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
     return ['a' => $a, 'rank' => $rank, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now,
         'kind' => in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console',
-        'pr' => $state === 'pr' ? rs_sdk_pr_state($a, (string)$mk['url']) : '',
+        'pr' => $state === 'pr' ? rs_sdk_pr_cached($a, (string)$mk['url']) : '',
         'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
         // Which badges (checks from before the list only knew the RecompLauncher one)
         'badges' => $r ? (array)($r['badges'] ?? (!empty($r['badge']) ? ['launcher'] : [])) : [],
@@ -80,8 +106,10 @@ function rs_sdk_bare(array $row): bool {
     $done = $row['state'] === 'ships' || ($row['state'] === 'pr' && $row['pr'] === 'merged');
     return $done && $row['badge'] === false && $row['link'] === false;
 }
-// Every row, the counts per status, and the ones due a check (most downloaded first).
+// Every row, the counts per status, the ones due a check (most downloaded first) and the pull
+// requests whose state is over an hour old.
 function rs_sdk_all(): array {
+    $GLOBALS['rs_sdk_pr_stale'] = [];
     $apps = rs_sdk_apps();
     $checked = rs_sdk_checks();
     $marks = rs_sdk_marks();
@@ -99,5 +127,5 @@ function rs_sdk_all(): array {
         if (rs_sdk_bare($row)) ++$count['bare'];
         if ($row['due']) { ++$count['todo']; $due[] = $a['id']; }
     }
-    return [$rows, $count, $due];
+    return [$rows, $count, $due, $GLOBALS['rs_sdk_pr_stale']];
 }

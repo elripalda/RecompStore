@@ -1,8 +1,10 @@
 <?php
 // (4.3) SDK support: every recomp on RecompLauncher and whether its own GitHub ships a
 // recomplauncher.json, so the team can send the developers that don't a pull request (or a nudge).
-// (4.6) Xarishark: one colored line instead of the four boxes, red/green status, a star for the
-// README badge, a live progress while checking, and Check again / marks without reloading the page.
+// (4.6) Xarishark: red/green status, a star for the README badge, a live progress while checking.
+// (4.8) Rebuilt to be quick: the rows go to the page as data and the browser draws 100 at a time,
+// with the picked recomp's actions on the side (like Players). Nothing waits on GitHub while the
+// page is drawn, and the PR queue and Look up are tabs of their own.
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
@@ -10,14 +12,15 @@ rs_require_login();
 require_once __DIR__ . '/inc/sdk.php'; // (4.6) the data helpers, shared with the PR queue's API
 require_once __DIR__ . '/inc/prq.php'; // (4.6) the PR queue
 
-// One background run at a time, after the answer has gone: the due ones for up to a minute. The
-// half-hourly job does the same; this only speeds it up while someone has the page open.
-function rs_sdk_kick(array $due): bool {
-    if (!$due) return false;
+// One background run at a time, after the answer has gone: the due checks for up to a minute, then
+// the pull requests whose state is over an hour old. The half-hourly job does the same; this only
+// speeds it up while someone has the page open.
+function rs_sdk_kick(array $due, array $stale = []): bool {
+    if (!$due && !$stale) return false;
     $run = rs_kv_get('sdk_scan_run');
     if ($run && $run['age'] <= 150) return true;
     rs_kv_put('sdk_scan_run', (string)time());
-    register_shutdown_function(function () use ($due) {
+    register_shutdown_function(function () use ($due, $stale) {
         if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
         ignore_user_abort(true);
         if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
@@ -28,72 +31,24 @@ function rs_sdk_kick(array $due): bool {
             if (microtime(true) - $t0 > 60) break;
             if (($a = rs_pc_app($id)) && rs_pc_sdk_due($a)) { try { rs_pc_sdk_check($a, true); } catch (Throwable $e) { /* next run */ } }
         }
+        rs_sdk_pr_refresh($stale, 30);
         rs_db()->exec("DELETE FROM kv_cache WHERE k = 'sdk_scan_run'");
     });
     return true;
 }
 
-const RS_SDK_NOW = [
-    'json' => ['Its file, in our catalog', 'The developer\'s recomplauncher.json is pasted into the catalog. Shipping it in the release keeps it up to date.'],
-    'profile' => ['Our setup profile', 'Easy Setup works from a profile we wrote. The developer\'s own file would be better.'],
-    'steps' => ['Setup steps only', 'Players follow written steps before the first play.'],
-    'none' => ['Nothing yet', 'Players set it up by hand.'],
-];
-const RS_SDK_STATE = ['ships' => ['Ships its own file', ' ok'], 'pr' => ['Pull request open', ' blue'], 'no' => ['Won\'t support it', ' warn'], 'locked' => ['Pull requests closed', ' violet'], 'missing' => ['No file yet', ' bad'], 'unknown' => ['Couldn\'t check yet', '']];
-
-// One recomp's table row (a <tbody>: the row and its ⋯ panel), for the page and for the live updates.
-function rs_sdk_row_html(array $row, string $csrf): string {
-    $a = $row['a']; $st = $row['state']; $mk = $row['m']; [$sl, $sc] = RS_SDK_STATE[$st];
-    if ($st === 'pr' && $row['pr'] !== '') { $sl = 'Pull request ' . ($row['pr'] === 'merged' ? 'merged' : ($row['pr'] === 'closed' ? 'closed' : 'open')); $sc = $row['pr'] === 'merged' ? ' ok' : ($row['pr'] === 'closed' ? ' warn' : ' blue'); }
-    if ($st === 'unknown' && $row['waiting']) $sl = 'Not checked yet';
-    [$nl, $nw] = RS_SDK_NOW[$row['now']];
-    $gh = rs_host_web(rs_pc_host($a), (string)$a['repo']);
-    $find = mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id']);
-    $id = h($a['id']);
-    $promptBtn = fn(string $cls) => '<button type="button" class="btn' . $cls . '" data-prompt-repo="' . h($a['repo']) . '" data-prompt-url="' . h($gh) . '" data-prompt-id="' . $id . '" data-prompt-game="' . h((string)($a['game'] ?: $a['name'])) . '">Copy agent prompt</button>';
-    $badgePrBtn = fn(string $cls) => '<button type="button" class="btn' . $cls . '" data-badgepr-repo="' . h($a['repo']) . '" data-badgepr-id="' . $id . '" data-badgepr-game="' . h($a['name']) . '">Copy badge PR prompt</button>';
-    $form = fn(string $action, string $label) => '<form method="post" data-sdk-ajax>' . $csrf . '<input type="hidden" name="action" value="' . $action . '"><input type="hidden" name="id" value="' . $id . '"><button class="btn">' . $label . '</button></form>';
-    ob_start(); ?>
-      <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-link="<?= !$row['badge'] && $row['link'] ? '1' : '0' ?>" data-bare="<?= rs_sdk_bare($row) ? '1' : '0' ?>" data-find="<?= h($find) ?>">
-        <tr>
-          <td class="c-pick"><input type="checkbox" class="sdk-pick" value="<?= $id ?>" aria-label="Pick <?= h($a['name']) ?>"></td>
-          <td class="c-rank"><?= (int)$row['rank'] ?></td>
-          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): $bn = implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $row['badges'])); ?><span class="sdk-star" title="Its README has the <?= h($bn) ?> badge" aria-label="Badge in README: <?= h($bn) ?>">★</span><?php elseif ($row['link']): ?><span class="sdk-star sdk-star-link" title="No badge, but its README links to us" aria-label="Link to us in README, no badge">☆</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
-          <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
-          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span><?php if (rs_sdk_bare($row)): ?><span class="sdk-bare small" title="Ask them to add the badge, or at least a link to its RecompLauncher page">No badge or link in its README</span><?php endif; ?></div></td>
-          <td class="c-act"><div class="sdk-btns">
-            <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-            <?php if ($st === 'ships'): ?><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn(' primary') ?>
-            <?php elseif ($st === 'pr' && (string)$mk['url'] !== ''): ?><a class="btn" href="<?= h((string)$mk['url']) ?>" target="_blank" rel="noopener">Pull request ↗</a>
-            <?php elseif ($st === 'locked'): ?>
-            <?php else: ?><?= $promptBtn(' primary') ?><?php endif; ?>
-            <button type="button" class="btn sdk-more" aria-expanded="false" aria-controls="m-<?= $id ?>" aria-label="More for <?= h($a['name']) ?>" title="Badge, Check again, marks">⋯</button>
-          </div></td>
-        </tr>
-        <tr class="sdk-extra" id="m-<?= $id ?>" hidden><td colspan="6"><div class="sdk-extra-in">
-          <div class="sdk-btns sdk-btns-l">
-            <?php if ($st !== 'ships'): ?><button type="button" class="btn" data-badge-id="<?= $id ?>">Copy badge</button><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn('') ?><?php endif; ?>
-            <?php if ($st === 'pr'): ?><?= $promptBtn('') ?><?php endif; ?>
-            <?= $form('recheck', 'Check again') ?>
-            <?php if ($mk): ?><?= $form('unmark', 'Clear the mark') ?><span class="muted small">Marked by <?= h((string)$mk['who']) ?> on <?= h((string)$mk['at']) ?><?= $st === 'no' && (string)$mk['url'] !== '' ? ' · <a href="' . h((string)$mk['url']) . '" target="_blank" rel="noopener">where they said so ↗</a>' : '' ?></span><?php endif; ?>
-          </div>
-          <?php if (!$mk && $st !== 'ships'): ?>
-          <div class="sdk-mark-forms">
-            <form method="post" class="sdk-mark-form" data-sdk-ajax><?= $csrf ?><input type="hidden" name="action" value="mark_pr"><input type="hidden" name="id" value="<?= $id ?>">
-              <label>A pull request is open<input name="url" required placeholder="https://github.com/<?= h($a['repo']) ?>/pull/…" spellcheck="false"></label><button class="btn">Save</button></form>
-            <form method="post" class="sdk-mark-form" data-sdk-ajax><?= $csrf ?><input type="hidden" name="action" value="mark_no"><input type="hidden" name="id" value="<?= $id ?>">
-              <label>The developer doesn't want it<input name="url" placeholder="Link where they said so (optional)" spellcheck="false"></label><button class="btn danger">Mark</button></form>
-            <form method="post" class="sdk-mark-form" data-sdk-ajax><?= $csrf ?><input type="hidden" name="action" value="mark_locked"><input type="hidden" name="id" value="<?= $id ?>">
-              <label>Pull requests are closed<span class="sdk-mark-note">The repo takes no pull requests or issues, so nothing can be sent.</span></label><button class="btn">Mark</button></form>
-          </div>
-          <?php endif; ?>
-        </div></td></tr>
-      </tbody>
-<?php
-    return (string)ob_get_clean();
+// One recomp as the page's data: just what the table and the side panel show.
+function rs_sdk_data(array $row): array {
+    $a = $row['a']; $mk = $row['m'];
+    return [
+        'id' => (string)$a['id'], 'name' => (string)$a['name'], 'game' => (string)($a['game'] ?: $a['name']), 'repo' => (string)$a['repo'],
+        'gh' => rs_host_web(rs_pc_host($a), (string)$a['repo']), 'icon' => (string)$a['icon'], 'dl' => (int)$a['downloads'], 'rank' => (int)$row['rank'],
+        'state' => $row['state'], 'pr' => (string)$row['pr'], 'waiting' => (bool)$row['waiting'], 'now' => $row['now'], 'kind' => $row['kind'],
+        'badge' => $row['badge'], 'badges' => array_values($row['badges']), 'link' => $row['link'], 'dlss' => (bool)$row['dlss'], 'bare' => rs_sdk_bare($row),
+        'mark' => $mk ? ['kind' => (string)$mk['kind'], 'url' => (string)$mk['url'], 'who' => (string)$mk['who'], 'at' => (string)$mk['at']] : null,
+        't' => (int)$row['t'],
+    ];
 }
-$csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
-$ajax = ($_POST['ajax'] ?? '') === '1';
 function rs_sdk_json(array $out): never {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
@@ -101,14 +56,15 @@ function rs_sdk_json(array $out): never {
     exit;
 }
 function rs_sdk_db_now(): int { return (int)rs_db()->query('SELECT UNIX_TIMESTAMP(NOW())')->fetchColumn(); }
+$ajax = ($_POST['ajax'] ?? '') === '1';
 
 // Live progress while checking: the counts, and the rows checked since the page last asked.
 if (isset($_GET['progress'])) {
-    [$rows, $count, $due] = rs_sdk_all();
+    [$rows, $count, $due, $stale] = rs_sdk_all();
     $since = (int)($_GET['since'] ?? 0);
     $changed = [];
-    if ($since > 0) foreach ($rows as $id => $row) if ($row['t'] >= $since && count($changed) < 150) $changed[$id] = rs_sdk_row_html($row, $csrf);
-    $running = rs_sdk_kick($due);
+    if ($since > 0) foreach ($rows as $row) if ($row['t'] >= $since && count($changed) < 300) $changed[] = rs_sdk_data($row);
+    $running = rs_sdk_kick($due, $stale);
     rs_sdk_json(['ok' => true, 'count' => $count, 'running' => $running, 'rows' => $changed, 'now' => rs_sdk_db_now()]);
 }
 
@@ -174,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         else $msg = 'Nothing to draft: already drafted or sent (see below), or not on GitHub.';
         $id = '';
         rs_flash($msg, $started || $n ? 'ok' : 'err');
-        header('Location: sdk-support.php#prq'); exit;
+        header('Location: sdk-support.php?tab=queue'); exit;
     } elseif (str_starts_with((string)($_POST['action'] ?? ''), 'prq_')) {
         // (4.6) The PR queue: save, send, skip, draft again; and (owner) the token and the drafter's key.
         $act = (string)$_POST['action'];
@@ -223,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_flash('New key made. Copy it now: it\'s shown only once.');
             }
         } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
-        header('Location: sdk-support.php' . ($qid ? '#q-' . $qid : '#prq')); exit;
+        header('Location: sdk-support.php?tab=queue' . ($qid ? '#q-' . $qid : '')); exit;
     } elseif (($_POST['action'] ?? '') === 'recheck_all') {
         // Everything becomes due, but keeps what it showed until its new check is in.
         rs_cache_tables();
@@ -232,18 +188,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = '';
     }
     if ($ajax) {
-        [$rows, $count, $due] = rs_sdk_all();
-        $running = rs_sdk_kick($due);
-        rs_sdk_json(['ok' => $kind === 'ok', 'msg' => $msg, 'id' => $id, 'row' => $id !== '' && isset($rows[$id]) ? rs_sdk_row_html($rows[$id], $csrf) : '', 'count' => $count, 'running' => $running, 'now' => rs_sdk_db_now()]);
+        [$rows, $count, $due, $stale] = rs_sdk_all();
+        $running = rs_sdk_kick($due, $stale);
+        rs_sdk_json(['ok' => $kind === 'ok', 'msg' => $msg, 'id' => $id, 'row' => $id !== '' && isset($rows[$id]) ? rs_sdk_data($rows[$id]) : null, 'count' => $count, 'running' => $running, 'now' => rs_sdk_db_now()]);
     }
     if ($msg !== '') rs_flash($msg, $kind);
-    header('Location: sdk-support.php' . ($id !== '' ? '#r-' . rawurlencode($id) : ''));
+    header('Location: sdk-support.php' . ($id !== '' ? '?id=' . rawurlencode($id) : ''));
     exit;
 }
 
-[$rows, $count, $due] = rs_sdk_all();
-rs_sdk_kick($due);
-$pageNow = rs_sdk_db_now();
+
+$tab = in_array($_GET['tab'] ?? '', ['queue', 'lookup'], true) ? (string)$_GET['tab'] : 'list';
+$csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
+rs_prq_tables();
+$draftN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'draft'")->fetchColumn();
+$listN = 0;
+
+if ($tab === 'list') {
+    [$rows, $count, $due, $stale] = rs_sdk_all();
+    rs_sdk_kick($due, $stale);
+    $listN = $count['all'];
+    $pageData = [
+        'rows' => array_map('rs_sdk_data', array_values($rows)), 'count' => $count, 'now' => rs_sdk_db_now(),
+        'csrf' => rs_csrf(), 'draftNow' => rs_prq_now_ready(), 'badgeNames' => RS_BADGE_NAMES,
+    ];
+}
 
 // Look up a GitHub repo that isn't on RecompLauncher (owner/name or a github.com link): its prompt
 // and badge still work, so a pull request can go out before it's listed. Listed ones point at the table.
@@ -251,7 +220,8 @@ $q = trim((string)($_GET['q'] ?? ''));
 $found = [];
 $outside = null;
 $parked = null;
-if (mb_strlen($q) >= 2) {
+if ($tab === 'lookup' && mb_strlen($q) >= 2) {
+    [$rows] = rs_sdk_all();
     $gm = [];
     $isRepo = (bool)preg_match('#^(?:https?://)?(?:www\.)?(?:github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $q, $gm);
     $ql = $isRepo ? mb_strtolower($gm[1] . '/' . $gm[2]) : mb_strtolower($q);
@@ -276,21 +246,88 @@ if (mb_strlen($q) >= 2) {
         }
     }
 }
-$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'unknown' => 'Not checked', 'badge' => 'Badge in README', 'link' => 'Link only', 'bare' => 'No badge or link'];
-$meter = ['ships' => 'ship their own file', 'missing' => 'no file yet', 'pr' => 'pull request open', 'no' => 'won\'t support it', 'locked' => 'pull requests closed', 'unknown' => 'not checked'];
+$sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['Pull request open', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
 
-rs_head('SDK support', true, ['assets/account.css']);
+rs_head('SDK support', true, ['assets/sdk-support.css']);
 ?>
-<section class="head-row">
+<section class="sdk-head">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Red ones don't yet, green ones do, and ★ means its README has one of our badges (Get it on RecompLauncher, Get it on RecompStore or Verified developer; hover the ★ to see which). ☆ means no badge but a link to us, and "No badge or link" lists the ones that got a pull request or ship the file but have neither. Each red one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the badge and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For green ones without the RecompLauncher badge, Copy badge PR prompt adds just that badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
+    <p class="muted">Which recomps ship a <code>recomplauncher.json</code> on their own GitHub. Each one without it is a pull request away from Easy Setup.</p>
   </div>
+  <?php if ($tab === 'list'): ?>
   <div class="sdk-head-act">
-    <span class="sdk-prog" id="sdk-prog" aria-live="polite"<?= $count['todo'] ? '' : ' hidden' ?>><span class="sdk-spin" aria-hidden="true"></span><span id="sdk-prog-t">Checking: <?= number_format($count['all'] - $count['todo']) ?> of <?= number_format($count['all']) ?> done</span></span>
-    <form method="post" class="actions" data-sdk-ajax id="sdk-all"><?= $csrf ?><input type="hidden" name="action" value="recheck_all"><input type="hidden" name="ids" value=""><button class="btn" id="sdk-all-b">Check them all again</button></form>
+    <span class="sdk-prog" id="sdk-prog" aria-live="polite"<?= $count['todo'] ? '' : ' hidden' ?>><span class="sdk-spin" aria-hidden="true"></span><span id="sdk-prog-t">Checking <?= number_format($count['all'] - $count['todo']) ?> of <?= number_format($count['all']) ?></span></span>
+    <button type="button" class="btn" id="sdk-all-b">Check all again</button>
   </div>
+  <?php endif; ?>
 </section>
+<nav class="sdk-tabs" aria-label="SDK support">
+  <a href="sdk-support.php"<?= $tab === 'list' ? ' class="on" aria-current="page"' : '' ?>>Recomps<?= $listN ? '<span>' . number_format($listN) . '</span>' : '' ?></a>
+  <a href="sdk-support.php?tab=queue"<?= $tab === 'queue' ? ' class="on" aria-current="page"' : '' ?>>PR queue<?= $draftN ? '<span class="hot">' . $draftN . '</span>' : '' ?></a>
+  <a href="sdk-support.php?tab=lookup"<?= $tab === 'lookup' ? ' class="on" aria-current="page"' : '' ?>>Look up a repo</a>
+</nav>
+<?php if ($tab === 'list'): ?>
+<div class="sdk-kpis" id="sdk-kpis" role="group" aria-label="Filter by status">
+  <?php foreach (['missing', 'ships', 'pr', 'no', 'locked', 'unknown'] as $k): ?>
+  <button type="button" class="sdk-kpi k-<?= $k ?>" data-state="<?= $k ?>" aria-pressed="false"><span><?= h($k === 'unknown' ? 'Not checked' : $sdkState[$k][0]) ?></span><strong data-n="<?= $k ?>"><?= number_format($count[$k]) ?></strong></button>
+  <?php endforeach; ?>
+</div>
+<div class="sdk-wrap">
+  <section class="card sdk-list">
+    <div class="sdk-tools">
+      <input type="search" id="sdk-find" placeholder="Search name, game or repo" spellcheck="false" autocomplete="off" aria-label="Search">
+      <select id="sdk-readme" aria-label="README"><option value="">Any README</option><option value="badge">★ Has our badge</option><option value="link">☆ Links to us only</option><option value="bare">No badge or link</option></select>
+      <select id="sdk-kind" aria-label="Type"><option value="">Every type</option><option value="console">Console recomps</option><option value="pc">PC games</option></select>
+      <select id="sdk-sort" aria-label="Sort"><option value="rank">Most downloaded</option><option value="name">Name</option><option value="state">Status</option></select>
+    </div>
+    <div class="sdk-sub">
+      <span class="muted" id="sdk-shown">Loading…</span>
+      <button type="button" class="linkish" id="sdk-clear" hidden>Clear filters</button>
+      <div class="sdk-picked" id="sdk-picked" hidden>
+        <strong id="sdk-picked-n">0 picked</strong>
+        <button type="button" class="btn" data-bulk="recheck">Check again</button>
+        <button type="button" class="btn primary" data-bulk="draft"><?= rs_prq_now_ready() ? 'Draft PRs now' : 'Queue for PR drafts' ?></button>
+        <button type="button" class="btn" data-bulk="clear">Clear</button>
+      </div>
+    </div>
+    <div class="sdk-scroll">
+      <table class="sdk-table" id="sdk-table">
+        <thead><tr>
+          <th class="c-pick"><input type="checkbox" id="sdk-pick-all" aria-label="Pick every recomp the filters show"></th>
+          <th class="c-rank">#</th>
+          <th>Recomp</th>
+          <th>Status</th>
+          <th class="c-num">Downloads</th>
+        </tr></thead>
+        <tbody id="sdk-body"><tr class="sdk-skel"><td colspan="5"><span class="sdk-spin" aria-hidden="true"></span> Loading recomps…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="sdk-pager" id="sdk-pager" hidden>
+      <button type="button" class="btn" data-page="-1" aria-label="Previous page">←</button>
+      <span id="sdk-page-t"></span>
+      <button type="button" class="btn" data-page="1" aria-label="Next page">→</button>
+    </div>
+  </section>
+  <aside class="card sdk-side" id="sdk-side" aria-label="Recomp" aria-live="polite">
+    <h2>Pick a recomp</h2>
+    <p class="muted">Click a row to see where it stands and what to send its developer: the agent prompt, the badge, Check again and the marks.</p>
+  </aside>
+</div>
+<details class="card sdk-how">
+  <summary>How this page works</summary>
+  <ul>
+    <li><b>No file yet</b> (red) means the recomp's GitHub doesn't ship a <code>recomplauncher.json</code>. Open it, give your AI agent the <b>agent prompt</b>, and send the developer the pull request. The prompt also adds our badge, checks the project against the Recomp Standards and ends with a note inviting the developer to claim it.</li>
+    <li><b>Ships its own file</b> (green) is done. If its README has no RecompLauncher badge, <b>Copy badge PR prompt</b> adds just that.</li>
+    <li>★ means the README has one of our badges, ☆ means it only links to us. <b>No badge or link</b> lists the ones that ship the file (or got a merged pull request) but mention us nowhere.</li>
+    <li>Pick rows with the boxes, then <b>Draft PRs now</b> to have the drafter write their pull requests. They show up under <b>PR queue</b>, and nothing is sent until you click Send there.</li>
+    <li>Every recomp is checked again on its own each week. <b>Check all again</b> (or Check again on the picked ones) does it now; the progress shows at the top.</li>
+  </ul>
+</details>
+<div class="sdk-toast" id="sdk-toast" role="status" aria-live="polite" hidden></div>
+<script type="application/json" id="sdk-data"><?= json_encode($pageData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+<?php endif; ?>
+<?php if ($tab === 'queue'): ?>
 <?php // (4.6) The PR queue
 $prqDrafts = rs_prq_list(['draft']);
 $prqWork = rs_prq_list(['todo', 'drafting'], 50); // (4.7) waiting, drafting now, or didn't draft
@@ -307,7 +344,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
 ?>
 <section class="card prq-card" id="prq">
   <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting' : '' ?> · <?= $prqNow ? 'Draft now, and daily at 7:23' : 'drafted daily at 7:23' ?><?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span></div>
-  <p class="muted small">Tick recomps in the table below and click <strong>Draft now</strong>: their <code>recomplauncher.json</code> and pull request are written in about a minute and show up here. Every day at 7:23 the drafter also picks a few with no file yet by itself (half just added, half popular console ports). Look each draft over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open". Nothing is sent until you click Send.</p>
+  <p class="muted small">Pick recomps on the <a href="sdk-support.php">Recomps</a> tab and click <strong>Draft PRs now</strong>: their <code>recomplauncher.json</code> and pull request are written in about a minute and show up here. Every day at 7:23 the drafter also picks a few with no file yet by itself (half just added, half popular console ports). Look each draft over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open". Nothing is sent until you click Send.</p>
   <?php if (!$prqHasAi && rs_is_owner()): ?><p class="warn small">Add the Anthropic API key in Setup below so Draft now works right away. Until then, picked recomps wait for the daily run.</p><?php endif; ?>
   <?php if ($prqWork): ?>
   <ul class="prq-work" id="prq-work">
@@ -372,67 +409,34 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   </details>
   <?php endif; ?>
 </section>
-<section class="card sdk-card">
-  <div class="sdk-meter" id="sdk-meter" role="img" aria-label="<?php foreach ($meter as $k => $l) echo number_format($count[$k]) . ' ' . $l . '. '; ?>">
-    <?php foreach ($meter as $k => $l): ?><span class="m-<?= $k ?>" data-m="<?= $k ?>" data-l="<?= h($l) ?>" style="flex-grow:<?= $count[$k] ?>" title="<?= number_format($count[$k]) . ' ' . h($l) ?>"></span><?php endforeach; ?>
-  </div>
-  <div class="sdk-bar">
-    <div class="sdk-chips" role="group" aria-label="Status">
-      <?php foreach ($chips as $k => $label): ?><button type="button" class="sdk-chip<?= $k === 'all' ? ' on' : '' ?>" data-sdk-state="<?= $k ?>" aria-pressed="<?= $k === 'all' ? 'true' : 'false' ?>"><?php if ($k === 'badge'): ?><span class="sdk-star" aria-hidden="true">★</span><?php elseif ($k === 'link'): ?><span class="sdk-star sdk-star-link" aria-hidden="true">☆</span><?php elseif ($k === 'bare'): ?><i class="dot m-no" aria-hidden="true"></i><?php elseif ($k !== 'all'): ?><i class="dot m-<?= $k ?>" aria-hidden="true"></i><?php endif; ?><?= h($label) ?><span class="n" data-n="<?= $k ?>"><?= number_format($count[$k]) ?></span></button><?php endforeach; ?>
-    </div>
-    <div class="sdk-tools">
-      <select id="sdk-kind" aria-label="Type"><option value="">Every type</option><option value="console">Console recomps</option><option value="pc">PC games</option></select>
-      <input type="search" id="sdk-find" placeholder="Filter by name, game or repo" spellcheck="false" autocomplete="off" aria-label="Filter">
-    </div>
-  </div>
-  <div class="sdk-shown-row">
-    <p class="muted small sdk-shown" id="sdk-shown">Showing <?= number_format($count['all']) ?> of <?= number_format($count['all']) ?></p>
-    <div class="sdk-picked" id="sdk-picked" hidden>
-      <span class="small" id="sdk-picked-n">0 picked</span>
-      <form method="post" data-sdk-ajax data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="recheck_ids"><input type="hidden" name="ids" value=""><button class="btn">Check picked again</button></form>
-      <form method="post" data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="prq_queue"><input type="hidden" name="ids" value=""><button class="btn primary" title="<?= rs_prq_now_ready() ? 'Writes their pull requests now, ready in about a minute. Nothing is sent.' : 'The daily drafts do these first' ?>"><?= rs_prq_now_ready() ? 'Draft now' : 'Queue for PR drafts' ?></button></form>
-      <button type="button" class="btn" id="sdk-pick-none">Clear</button>
-    </div>
-  </div>
-  <div class="sdk-scroll">
-    <table class="sdk-table" id="sdk-table" data-now="<?= $pageNow ?>" data-todo="<?= $count['todo'] ?>">
-      <thead><tr>
-        <th class="c-pick"><input type="checkbox" id="sdk-pick-all" aria-label="Pick every recomp shown" title="Pick every recomp shown (the filters apply)"></th>
-        <th class="c-rank"><button type="button" data-sdk-sort="rank" aria-sort="ascending">#</button></th>
-        <th><button type="button" data-sdk-sort="name">Recomp</button></th>
-        <th class="c-num"><button type="button" data-sdk-sort="dl">Downloads</button></th>
-        <th><button type="button" data-sdk-sort="state">Status</button></th>
-        <th class="c-act"><span class="sr-only">Actions</span></th>
-      </tr></thead>
-      <?php foreach ($rows as $row) echo rs_sdk_row_html($row, $csrf); ?>
-      <tbody id="sdk-none" hidden><tr><td colspan="6" class="sdk-empty"><span class="muted">Nothing matches.</span> <a class="btn" id="sdk-lookup" href="#lookup">Look it up on GitHub</a></td></tr></tbody>
-    </table>
-  </div>
-</section>
+<?php endif; ?>
+<?php if ($tab === 'lookup'): ?>
 <section class="card" id="lookup">
   <h2>Not on RecompLauncher yet?</h2>
-  <p class="muted small">For a recomp that isn't in the table above: paste its GitHub link or owner/name to get the agent prompt and badge, so a pull request can go out before it's listed. To list it, use Add it to the store (or Recomps, Found on GitHub). Ones already on RecompLauncher but hidden or Coming soon show here with a link to open them.</p>
-  <form method="get" class="sdk-search" action="sdk-support.php#lookup">
-    <input type="search" name="q" value="<?= h($q) ?>" placeholder="github.com/owner/name, or owner/name" spellcheck="false" autocomplete="off">
-    <button class="btn primary">Look up</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php">Clear</a><?php endif; ?>
+  <p class="muted small">Paste a GitHub link or owner/name to get its agent prompt and badge, so a pull request can go out before it's listed. Ones already listed point you to their row, and hidden or Coming soon ones link to their page. To list a new one, use Add it to the store.</p>
+  <form method="get" class="sdk-search" action="sdk-support.php">
+    <input type="hidden" name="tab" value="lookup">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="github.com/owner/name, or owner/name" spellcheck="false" autocomplete="off" autofocus>
+    <button class="btn primary">Look up</button><?php if ($q !== ''): ?> <a class="btn" href="sdk-support.php?tab=lookup">Clear</a><?php endif; ?>
   </form>
   <?php if ($q !== ''): ?>
-  <div class="sdk-list" style="margin-top:12px">
-  <?php foreach ($found as $f): $a = $f['a']; [$sl, $sc] = RS_SDK_STATE[$f['state']]; ?>
+  <div class="sdk-found">
+  <?php foreach ($found as $f): $a = $f['a']; [$sl, $sc] = $sdkState[$f['state']]; ?>
     <article class="sdk-row-s">
       <div class="sdk-name"><strong><?= h($a['name']) ?></strong><span class="muted small"><?= h($a['repo']) ?> · <?= number_format((int)$a['downloads']) ?> downloads</span></div>
-      <span class="pill<?= $sc ?>"><?= h($sl) ?></span>
-      <div class="sdk-btns"><a class="btn" href="#r-<?= h($a['id']) ?>" data-sdk-jump="<?= h($a['id']) ?>">Show it in the table</a></div>
+      <span class="pill <?= $sc ?>"><?= h($sl) ?></span>
+      <a class="btn" href="sdk-support.php?id=<?= h(rawurlencode($a['id'])) ?>">Open it</a>
     </article>
   <?php endforeach; ?>
   <?php if ($outside): ?>
     <article class="sdk-row-s">
       <div class="sdk-name"><strong><?= h($outside['repo']) ?></strong><span class="muted small"><?= !empty($outside['missing']) ? 'GitHub has no repo by that name.' : 'Not on RecompLauncher yet' . ($outside['about'] !== '' ? ' · ' . h(mb_strimwidth($outside['about'], 0, 90, '…')) : '') ?></span></div>
-      <span class="pill<?= !empty($outside['missing']) ? ' warn' : '' ?>"><?= !empty($outside['missing']) ? 'Not found' : 'Not listed' ?></span>
+      <span class="pill <?= !empty($outside['missing']) ? 'warn' : '' ?>"><?= !empty($outside['missing']) ? 'Not found' : 'Not listed' ?></span>
       <div class="sdk-btns">
         <?php if (empty($outside['missing'])): ?>
         <a class="btn" href="https://github.com/<?= h($outside['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a>
-        <button type="button" class="btn primary" data-prompt-repo="<?= h($outside['repo']) ?>" data-prompt-id="">Copy agent prompt</button> <button type="button" class="btn" data-badge-id="">Copy badge</button>
+        <button type="button" class="btn primary" data-prompt-repo="<?= h($outside['repo']) ?>" data-prompt-id="">Copy agent prompt</button>
+        <button type="button" class="btn" data-badge-id="">Copy badge</button>
         <?php if (rs_role_at_least('curator')): ?><a class="btn" href="pc.php#found">Add it to the store</a><?php endif; ?>
         <?php endif; ?>
       </div>
@@ -440,297 +444,17 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <?php endif; ?>
   <?php if ($parked): ?>
     <article class="sdk-row-s">
-      <div class="sdk-name"><strong><?= h($parked['name']) ?></strong><span class="muted small"><?= h($parked['repo']) ?> · on RecompLauncher, but <?= !empty($parked['hidden']) ? 'hidden' : 'still Coming soon' ?>, so it isn't in the table</span></div>
+      <div class="sdk-name"><strong><?= h($parked['name']) ?></strong><span class="muted small"><?= h($parked['repo']) ?> · listed, but <?= !empty($parked['hidden']) ? 'hidden' : 'still Coming soon' ?>, so it isn't in the table</span></div>
       <span class="pill"><?= !empty($parked['hidden']) ? 'Hidden' : 'Coming soon' ?></span>
-      <div class="sdk-btns"><a class="btn" href="pc.php?edit=<?= h(rawurlencode($parked['id'])) ?>">Open it</a></div>
+      <a class="btn" href="pc.php?edit=<?= h(rawurlencode($parked['id'])) ?>">Open it</a>
     </article>
   <?php endif; ?>
   <?php if (!$found && !$outside && !$parked): ?><p class="muted">Nothing matches "<?= h($q) ?>". Paste its GitHub link or owner/name.</p><?php endif; ?>
   </div>
   <?php endif; ?>
 </section>
-<div class="sdk-toast" id="sdk-toast" role="status" aria-live="polite" hidden></div>
-<style>
-.sdk-head-act{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.sdk-head-act form{margin:0}
-.sdk-prog{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font:600 14px Figtree,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap}
-.sdk-prog[hidden]{display:none}
-.sdk-spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(var(--ink-rgb),.2);border-top-color:var(--cyan-ink);animation:sdkspin .8s linear infinite}
-@keyframes sdkspin{to{transform:rotate(360deg)}}
-.sdk-meter{display:flex;height:10px;border-radius:999px;overflow:hidden;background:rgba(var(--ink-rgb),.08);margin:0 0 14px;gap:2px}
-.sdk-meter span{flex-basis:0;min-width:0;transition:flex-grow .6s ease}
-.m-ships{background:var(--ok)}.m-missing{background:var(--bad)}.m-pr{background:var(--blue)}.m-no{background:var(--warn)}.m-locked{background:var(--violet)}.m-unknown{background:rgba(var(--ink-rgb),.28)}
-.sdk-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin:0 0 10px}
-.sdk-chips{display:flex;flex-wrap:wrap;gap:8px}
-.sdk-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:999px;border:1px solid rgba(var(--ink-rgb),.16);background:rgba(var(--ink-rgb),.06);color:var(--frost);font:600 14px Figtree,sans-serif;cursor:pointer}
-.sdk-chip .n{opacity:.7;font-weight:700}
-.sdk-chip .dot{width:9px;height:9px;border-radius:50%;flex:none}
-.sdk-chip.on{background:var(--cyan);border-color:var(--cyan);color:var(--on-accent)}
-.sdk-chip.on .sdk-star{color:var(--on-accent)}
-.sdk-chip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.sdk-star{color:#f5b301;font-size:15px;line-height:1}
-.sdk-bare{display:block;color:var(--warn,#d98a00);font-weight:600;margin-top:2px}
-.sdk-tools{display:flex;gap:8px;align-items:center}
-.sdk-tools select,.sdk-tools input{height:40px;padding:0 12px;margin:0;box-sizing:border-box;font-size:14px;line-height:normal}
-.sdk-tools select{min-width:160px}
-.sdk-tools input{min-width:260px}
-.sdk-shown{margin:0 0 8px}
-.sdk-scroll{max-height:min(1360px,calc(100vh - 150px));overflow:auto;border:1px solid var(--line);border-radius:14px;overscroll-behavior:contain}
-.sdk-table{width:100%;border-collapse:separate;border-spacing:0;font-size:14.5px}
-.sdk-table thead th{position:sticky;top:0;z-index:2;background:var(--surface);text-align:left;padding:0;border-bottom:1px solid var(--line);white-space:nowrap}
-.sdk-table thead th button,.sdk-table thead th>span{display:block;width:100%;padding:10px 12px;background:none;border:0;color:var(--muted);font:600 13.5px Figtree,sans-serif;text-align:inherit;cursor:pointer}
-.sdk-table thead th button:hover{color:var(--frost)}
-.sdk-table thead th button[aria-sort]::after{content:" ↓";color:var(--cyan-ink)}
-.sdk-table thead th button[aria-sort=ascending]::after{content:" ↑"}
-.sdk-table td{padding:6px 12px;border-bottom:1px solid rgba(var(--ink-rgb),.06);vertical-align:middle}
-.sdk-item:hover>tr:first-child td{background:rgba(var(--ink-rgb),.03)}
-.sdk-table .c-rank{width:40px;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
-.sdk-table .c-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.sdk-table thead .c-num button{text-align:right}
-.sdk-table .c-act{width:1%;white-space:nowrap}
-.sdk-table .c-act .sdk-btns{flex-wrap:nowrap}
-.sdk-who{display:flex;gap:10px;align-items:center;min-width:0}
-.sdk-who img,.sdk-ico{width:32px;height:32px;border-radius:9px;object-fit:cover;flex:none}
-.sdk-ico{display:grid;place-items:center;background:rgba(var(--ink-rgb),.08);font:700 12px Sora,sans-serif}
-.sdk-name{display:flex;flex-direction:column;min-width:0}
-.sdk-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
-.sdk-title .sdk-star{margin-right:6px;vertical-align:1px}
-.sdk-name a{color:var(--frost);text-decoration:none}
-.sdk-name>.small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
-.sdk-st{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
-.sdk-st .pill{white-space:nowrap;margin-left:0}
-.sdk-st .small{white-space:nowrap;font-size:12.5px}
-.pill.bad{background:rgba(255,138,128,.16);color:var(--bad)}
-.pill.blue{background:rgba(143,193,255,.16);color:var(--blue)}
-.sdk-btns{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
-.sdk-btns-l{justify-content:flex-start}
-.sdk-btns form{margin:0}
-.sdk-btns .btn{min-height:32px;padding:5px 11px;font-size:13.5px}
-.sdk-more{min-width:38px;font-size:16px!important;letter-spacing:1px}
-.sdk-more[aria-expanded=true]{background:rgba(var(--ink-rgb),.12)}
-.sdk-extra td{background:rgba(var(--ink-rgb),.035)}
-.sdk-extra-in{display:flex;flex-direction:column;gap:10px;padding:6px 0}
-.sdk-empty{text-align:center;padding:24px 12px!important}
-.sdk-mark-forms{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
-.sdk-mark-note{display:flex;align-items:center;min-height:40px;color:var(--muted);font-size:13px;font-weight:400}
-.pill.violet{background:rgba(205,184,255,.16);color:var(--violet)}
-.sdk-mark-form{display:flex;gap:8px;align-items:flex-end}
-.sdk-mark-form label{flex:1;margin:0;font-size:14px}
-.btn.sdk-busy{opacity:.6;pointer-events:none}
-.sdk-search{display:flex;gap:8px;align-items:center}
-.sdk-search input{flex:1;min-width:0}
-.sdk-list{display:flex;flex-direction:column;gap:8px}
-.sdk-row-s{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:14px}
-.sdk-flash td{animation:sdkflash 1.6s ease-out}
-@keyframes sdkflash{from{background:rgba(52,242,232,.22)}to{background:transparent}}
-.sdk-toast{position:fixed;right:20px;bottom:20px;z-index:50;max-width:420px;padding:12px 16px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:14.5px}
-.sdk-toast[hidden]{display:none}
-.sdk-toast.err{border-color:var(--bad);color:var(--bad)}
-.c-pick{width:34px;text-align:center}.c-pick input{width:16px;height:16px;margin:0;cursor:pointer}
-.sdk-shown-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.sdk-picked{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sdk-picked form{margin:0}.sdk-picked[hidden]{display:none}
-.prq-card .an-head{margin-bottom:6px}
-.prq-item{border:1px solid var(--line);border-radius:12px;margin-top:10px}
-.prq-item summary{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;list-style:none}
-.prq-item summary::-webkit-details-marker{display:none}
-.prq-name{display:flex;flex-direction:column;flex:1;min-width:0}
-.prq-form{padding:0 14px 14px}
-.prq-grid{display:grid;grid-template-columns:1fr;gap:10px;margin:10px 0}
-.prq-grid label{display:flex;flex-direction:column;gap:6px}
-.prq-grid textarea{font-size:13.5px;line-height:1.45}
-.prq-btns{display:flex;gap:8px;flex-wrap:wrap}
-.prq-note{background:var(--surface-2,rgba(255,255,255,.04));border-radius:10px;padding:10px 12px}
-.prq-h3{margin:18px 0 6px;font-size:15px}
-.prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px}.prq-sent li{display:flex;justify-content:space-between;gap:10px}
-.prq-setup{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.prq-setup summary{cursor:pointer;font-weight:600}
-.prq-setup-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:10px}
-.prq-work{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px}
-.prq-w{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
-.prq-w.on{border-color:var(--blue)}.prq-w .prq-name{flex:1 1 220px;min-width:0}.prq-w-st{flex:1 1 220px}.prq-w-btns{display:flex;gap:8px;margin:0}
-.prq-setup-grid form{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--line);border-radius:12px}.prq-setup-grid form > .btn{margin-top:auto;align-self:flex-start}.prq-setup-grid label{display:flex;flex-direction:column;gap:6px}
-@media (max-width:980px){.prq-setup-grid{grid-template-columns:1fr}}
-
-.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media (prefers-reduced-motion:reduce){.sdk-spin{animation:none}.sdk-meter span{transition:none}}
-@media (max-width:860px){.sdk-tools{width:100%}.sdk-tools input{min-width:0;flex:1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-mark-forms{grid-template-columns:minmax(0,1fr)}.sdk-row-s{grid-template-columns:minmax(0,1fr)}.sdk-name>.small{max-width:200px}}
-</style>
-<script>
-(function () {
-  var table = document.getElementById('sdk-table');
-  if (!table) return;
-  var none = document.getElementById('sdk-none');
-  var shown = document.getElementById('sdk-shown');
-  var find = document.getElementById('sdk-find');
-  var kind = document.getElementById('sdk-kind');
-  var lookup = document.getElementById('sdk-lookup');
-  var prog = document.getElementById('sdk-prog'), progT = document.getElementById('sdk-prog-t'), spin = prog.querySelector('.sdk-spin');
-  var toast = document.getElementById('sdk-toast'), toastT = 0;
-  var order = {missing: 0, unknown: 1, pr: 2, locked: 3, no: 4, ships: 5};
-  var st = {state: 'all', kind: '', q: '', sort: 'rank', dir: 1};
-  var since = Number(table.dataset.now), polling = 0;
-  function items() { return Array.prototype.slice.call(table.querySelectorAll('tbody.sdk-item')); }
-  try { var saved = JSON.parse(sessionStorage.getItem('sdk-view') || 'null'); if (saved) { st.state = saved.state || 'all'; st.kind = saved.kind || ''; st.sort = saved.sort === 'now' ? 'rank' : (saved.sort || 'rank'); st.dir = saved.dir || 1; } } catch (e) {}
-  function save() { try { sessionStorage.setItem('sdk-view', JSON.stringify({state: st.state, kind: st.kind, sort: st.sort, dir: st.dir})); } catch (e) {} }
-  function fmt(n) { return Number(n).toLocaleString(); }
-  function apply() {
-    var n = 0, all = items(), q = st.q.toLowerCase().trim();
-    // A pasted GitHub link filters by its owner/name.
-    var m = q.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)/);
-    if (m) q = m[1].replace(/\.git$/, '');
-    all.forEach(function (it) {
-      var ok = (st.state === 'all' || it.dataset.state === st.state || (st.state === 'badge' && it.dataset.badge === '1') || (st.state === 'link' && it.dataset.link === '1') || (st.state === 'bare' && it.dataset.bare === '1')) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
-      it.hidden = !ok;
-      if (ok) n++;
-    });
-    none.hidden = n > 0;
-    if (lookup) { lookup.hidden = !st.q.trim(); lookup.href = 'sdk-support.php?q=' + encodeURIComponent(st.q.trim()) + '#lookup'; }
-    shown.textContent = 'Showing ' + fmt(n) + ' of ' + fmt(all.length);
-    // (4.6) With a filter on, "Check them all again" checks just the ones shown.
-    var allB = document.getElementById('sdk-all-b');
-    if (allB) allB.textContent = n < all.length ? 'Check the ' + fmt(n) + ' shown again' : 'Check them all again';
-    if (typeof picked === 'function') picked();
-    document.querySelectorAll('[data-sdk-state]').forEach(function (b) { var on = b.dataset.sdkState === st.state; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-    kind.value = st.kind;
-  }
-  function key(it) {
-    if (st.sort === 'name') return it.dataset.name;
-    if (st.sort === 'dl') return -Number(it.dataset.dl);
-    if (st.sort === 'state') return order[it.dataset.state] * 1e6 + Number(it.dataset.rank);
-    return Number(it.dataset.rank);
-  }
-  function sort() {
-    items().sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }).forEach(function (it) { table.insertBefore(it, none); });
-    table.querySelectorAll('[data-sdk-sort]').forEach(function (b) {
-      if (b.dataset.sdkSort === st.sort) b.setAttribute('aria-sort', st.dir === 1 ? 'ascending' : 'descending'); else b.removeAttribute('aria-sort');
-    });
-  }
-  // The counts, the colored line and the progress next to the button.
-  function counts(c) {
-    document.querySelectorAll('[data-n]').forEach(function (el) { if (c[el.dataset.n] !== undefined) el.textContent = fmt(c[el.dataset.n]); });
-    var label = [];
-    document.querySelectorAll('[data-m]').forEach(function (el) {
-      var t = fmt(c[el.dataset.m]) + ' ' + el.dataset.l;
-      el.style.flexGrow = c[el.dataset.m]; el.title = t; label.push(t);
-    });
-    document.getElementById('sdk-meter').setAttribute('aria-label', label.join('. '));
-    table.dataset.todo = c.todo;
-    if (c.todo > 0) { prog.hidden = false; spin.hidden = false; progT.textContent = 'Checking: ' + fmt(c.all - c.todo) + ' of ' + fmt(c.all) + ' done'; }
-    else if (!prog.hidden) { spin.hidden = true; progT.textContent = 'All ' + fmt(c.all) + ' checked'; setTimeout(function () { if (Number(table.dataset.todo) === 0) prog.hidden = true; }, 5000); }
-  }
-  // A row from the server takes the old one's place, keeping its ⋯ open if it was.
-  function put(id, html) {
-    var old = document.getElementById('r-' + id);
-    if (!old || !html) return;
-    var wasOpen = old.querySelector('.sdk-more[aria-expanded=true]');
-    var tmp = document.createElement('table'); tmp.innerHTML = html.trim();
-    var neu = tmp.querySelector('tbody'); if (!neu) return;
-    old.replaceWith(neu);
-    if (wasOpen) { var b = neu.querySelector('.sdk-more'), r = neu.querySelector('.sdk-extra'); if (b && r) { b.setAttribute('aria-expanded', 'true'); r.hidden = false; } }
-    neu.classList.add('sdk-flash'); setTimeout(function () { neu.classList.remove('sdk-flash'); }, 1700);
-  }
-  function say(msg, err) {
-    if (!msg) return;
-    toast.textContent = msg; toast.className = 'sdk-toast' + (err ? ' err' : ''); toast.hidden = false;
-    clearTimeout(toastT); toastT = setTimeout(function () { toast.hidden = true; }, err ? 7000 : 4000);
-  }
-  function poll() {
-    if (polling) return;
-    polling = setTimeout(function tick() {
-      fetch('sdk-support.php?progress=1&since=' + since, {credentials: 'same-origin', headers: {Accept: 'application/json'}})
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          var ids = Object.keys(j.rows || {});
-          ids.forEach(function (id) { put(id, j.rows[id]); });
-          if (ids.length) { if (st.sort === 'state') sort(); apply(); }
-          since = j.now - 1;
-          counts(j.count);
-          polling = j.count.todo > 0 ? setTimeout(tick, document.hidden ? 15000 : 5000) : 0;
-        })
-        .catch(function () { polling = setTimeout(tick, 15000); });
-    }, 4000);
-  }
-  // (4.6) Xarishark: pick rows (or every one shown), then Check picked again or queue them for PR drafts.
-  var pickAll = document.getElementById('sdk-pick-all'), pickBar = document.getElementById('sdk-picked'), pickN = document.getElementById('sdk-picked-n');
-  function pickedIds() { return Array.prototype.slice.call(table.querySelectorAll('.sdk-pick:checked')).map(function (c) { return c.value; }); }
-  function shownIds() { return items().filter(function (it) { return !it.hidden; }).map(function (it) { return it.dataset.id; }); }
-  function picked() {
-    if (!pickBar) return; // apply() runs before this part is set up
-    var ids = pickedIds(), vis = items().filter(function (it) { return !it.hidden; });
-    pickBar.hidden = !ids.length;
-    pickN.textContent = fmt(ids.length) + ' picked';
-    var visPicked = vis.filter(function (it) { var c = it.querySelector('.sdk-pick'); return c && c.checked; }).length;
-    pickAll.checked = vis.length > 0 && visPicked === vis.length;
-    pickAll.indeterminate = visPicked > 0 && visPicked < vis.length;
-  }
-  pickAll.addEventListener('change', function () {
-    items().forEach(function (it) { if (!it.hidden) { var c = it.querySelector('.sdk-pick'); if (c) c.checked = pickAll.checked; } });
-    picked();
-  });
-  table.addEventListener('change', function (e) { if (e.target.classList && e.target.classList.contains('sdk-pick')) picked(); });
-  document.getElementById('sdk-pick-none').addEventListener('click', function () { table.querySelectorAll('.sdk-pick:checked').forEach(function (c) { c.checked = false; }); picked(); });
-  // Fill in which ones before the form goes (this runs ahead of the no-reload sender below).
-  document.addEventListener('submit', function (e) {
-    var f = e.target;
-    if (f.matches && f.matches('[data-sdk-picks]')) f.ids.value = pickedIds().join(',');
-    if (f.id === 'sdk-all') { var sh = shownIds(); f.ids.value = sh.length < items().length ? sh.join(',') : ''; }
-  }, true);
-  // Check again, the marks and Check them all again, without reloading the page.
-  document.addEventListener('submit', function (e) {
-    var f = e.target.closest('form[data-sdk-ajax]');
-    if (!f || !window.fetch) return;
-    e.preventDefault();
-    var btn = f.querySelector('button'), was = btn.textContent;
-    var fd = new FormData(f); fd.append('ajax', '1');
-    btn.classList.add('sdk-busy'); btn.textContent = fd.get('action') === 'recheck' ? 'Checking…' : (fd.get('action') === 'recheck_all' ? 'Starting…' : 'Saving…');
-    fetch('sdk-support.php', {method: 'POST', body: fd, credentials: 'same-origin', headers: {Accept: 'application/json'}})
-      .then(function (r) { if (!r.ok) throw new Error(r.status === 400 ? 'This page expired. Reload it and try again.' : 'Something went wrong. Try again.'); return r.json(); })
-      .then(function (j) {
-        if (j.row) { put(j.id, j.row); if (st.sort === 'state') sort(); apply(); }
-        if (j.now) since = Math.min(since, j.now - 1);
-        counts(j.count);
-        say(j.msg, !j.ok);
-        if (j.count.todo > 0) poll();
-      })
-      .catch(function (err) { say(err.message, true); })
-      .then(function () { if (document.body.contains(btn)) { btn.classList.remove('sdk-busy'); btn.textContent = was; } });
-  });
-  document.querySelectorAll('[data-sdk-state]').forEach(function (b) { b.addEventListener('click', function () { st.state = b.dataset.sdkState; save(); apply(); }); });
-  kind.addEventListener('change', function () { st.kind = kind.value; save(); apply(); });
-  find.addEventListener('input', function () { st.q = find.value; apply(); });
-  find.addEventListener('keydown', function (e) { if (e.key === 'Escape' && find.value) { e.preventDefault(); find.value = ''; st.q = ''; apply(); } });
-  table.querySelectorAll('[data-sdk-sort]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var k = b.dataset.sdkSort;
-      if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = 1; }
-      save(); sort();
-    });
-  });
-  table.addEventListener('click', function (e) {
-    var b = e.target.closest('.sdk-more');
-    if (!b) return;
-    var row = document.getElementById(b.getAttribute('aria-controls'));
-    var open = b.getAttribute('aria-expanded') !== 'true';
-    b.setAttribute('aria-expanded', open ? 'true' : 'false');
-    row.hidden = !open;
-  });
-  // Show one row: clear the filters that hide it, open its ⋯, scroll it into view.
-  function jump(id) {
-    var it = document.getElementById('r-' + id);
-    if (!it) return;
-    if (it.hidden) { st.state = 'all'; st.kind = ''; st.q = ''; find.value = ''; apply(); }
-    var more = it.querySelector('.sdk-more'), row = it.querySelector('.sdk-extra');
-    if (more && row) { more.setAttribute('aria-expanded', 'true'); row.hidden = false; }
-    it.scrollIntoView({block: 'center'});
-    it.classList.add('sdk-flash');
-    setTimeout(function () { it.classList.remove('sdk-flash'); }, 1700);
-  }
-  document.addEventListener('click', function (e) { var a = e.target.closest('[data-sdk-jump]'); if (a) { e.preventDefault(); jump(a.dataset.sdkJump); } });
-  sort();
-  apply();
-  if (Number(table.dataset.todo) > 0) poll();
-  if (location.hash.indexOf('#r-') === 0) jump(decodeURIComponent(location.hash.slice(3)));
-})();
-</script>
+<?php endif; ?>
+<?php if ($tab === 'queue'): ?>
 <script>
 // (4.7) While Draft now runs: ask every few seconds, and reload once a draft is in.
 (function () {
@@ -739,9 +463,10 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   var t = setInterval(function () {
     if (++tries > 150) { clearInterval(t); return; }
     fetch('sdk-support.php?prq_poll=1', { cache: 'no-store', credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j && j.ok && j.drafting < start) { clearInterval(t); location.href = 'sdk-support.php#prq'; location.reload(); }
+      if (j && j.ok && j.drafting < start) { clearInterval(t); location.reload(); }
     }).catch(function () {});
   }, 4000);
 })();
 </script>
-<?php rs_foot(['assets/sdk-prompt.js']);
+<?php endif; ?>
+<?php rs_foot($tab === 'list' ? ['assets/sdk-prompt.js', 'assets/sdk-support.js'] : ($tab === 'lookup' ? ['assets/sdk-prompt.js'] : []));
