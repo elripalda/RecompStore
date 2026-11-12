@@ -125,9 +125,24 @@ function rs_health_check(array $g): array {
     // (2.6) A newer release with a zip under another name: most likely the file was renamed, which
     // is fixable here. A newer one with no zip or 7z at all (a PS4 build, a web portal, sources) is
     // something else, and players getting the newest PS5 build is right.
+    // (4.7) Not worth a warning: a test pre-release while players are on a full release, zips for other
+    // systems (Windows, Android, Linux, Mac, Switch, sources), and zips that hold another app (a repo
+    // with several apps, like ZiZc3/Hydroid).
+    $wantId = rs_zip_id($g) !== '' ? rs_zip_id($g) : (string)$g['id'];
     foreach ($list as $nr) {
         if ($nr === $r) break;
-        $zips = array_values(array_filter(array_map(fn($x) => (string)$x['name'], $nr['assets'] ?? []), fn($n) => preg_match('/\.(zip|7z)$/i', $n)));
+        if (!empty($nr['prerelease']) && empty($r['prerelease'])) continue;
+        $zips = [];
+        foreach ($nr['assets'] ?? [] as $x) {
+            $n = (string)$x['name'];
+            if (!preg_match('/\.(zip|7z)$/i', $n)) continue;
+            if (preg_match('/(windows|win64|win32|android|linux|macos|osx|(^|[-_. ])mac([-_. ]|$)|switch|(^|[-_. ])(source|sources|src)([-_. ]|$))/i', $n)) continue;
+            if (preg_match('/\.zip$/i', $n) && rs_gh_allowed((string)$x['browser_download_url'])) {
+                $in = rs_health_zip_ids((string)$x['browser_download_url'], (int)$x['size']);
+                if (is_array($in) && $in && !in_array($wantId, $in, true)) continue;
+            }
+            $zips[] = $n;
+        }
         if ($zips) {
             $warn('Its newest release (' . $nr['tag_name'] . ') has no ' . $asset . ' but has ' . implode(', ', array_slice($zips, 0, 3)) . ', so players get ' . $r['tag_name'] . '. Its zip name may have changed.');
             break;
