@@ -44,9 +44,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$row) throw new RuntimeException('That find isn\'t on the list anymore.');
             $id = rs_auto_start(rs_host_web((string)$row['host'], (string)$row['path']), rs_me_name());
             rs_flash('Working on it. Its draft is below.');
+        } elseif ($act === 'dismiss') {
+            rs_auto_dismiss($id);
+            rs_flash('Dismissed. It\'s still live on RecompLauncher.');
+        } elseif ($act === 'dismiss_all') {
+            $n = rs_auto_dismiss();
+            rs_flash($n . ' published ' . ($n === 1 ? 'draft' : 'drafts') . ' dismissed. They\'re still live on RecompLauncher.');
+            header('Location: auto.php');
+            exit;
         } elseif ($act === 'publish') {
             @set_time_limit(180);
-            rs_flash(rs_auto_publish($id) . ' is live on RecompLauncher.');
+            $job = rs_auto_get($id);
+            $name = rs_auto_publish($id);
+            // From a submission: it's marked done, and the "you're live" email waits on Submissions.
+            if (!empty($job['sub_id'])) {
+                rs_flash($name . ' is live on RecompLauncher. Your "you\'re live" email is ready below: look it over and press Send.');
+                header('Location: submissions.php?show=done&live=' . (int)$job['sub_id'] . '#m' . (int)$job['sub_id']);
+                exit;
+            }
+            rs_flash($name . ' is live on RecompLauncher.');
         } elseif ($act === 'again') {
             rs_auto_again($id);
             rs_flash('Running it again from the top.');
@@ -121,6 +137,9 @@ rs_head('Auto-add');
 <?php endif; ?>
 
 <?php if (!$jobs): ?><section class="card"><p class="muted">No drafts yet. Paste a link above.</p></section><?php endif; ?>
+<?php $pubN = count(array_filter($jobs, fn($j) => $j['status'] === 'published')); if ($pubN): ?>
+<form method="post" class="auto-dismiss-all"><?= $csrf ?><input type="hidden" name="action" value="dismiss_all"><span class="muted small"><?= $pubN ?> published <?= $pubN === 1 ? 'draft is' : 'drafts are' ?> still on the page.</span><button>Dismiss all published</button></form>
+<?php endif; ?>
 <div class="auto-list">
 <?php foreach ($jobs as $j):
     $a = $j['app_id'] !== '' ? rs_pc_app($j['app_id']) : null;
@@ -138,7 +157,7 @@ rs_head('Auto-add');
     <div class="auto-head">
       <?php if (!empty($a['icon'])): ?><img src="<?= h($a['icon']) ?>" alt="" width="44" height="44"><?php else: ?><span class="auto-ico"></span><?php endif; ?>
       <div class="auto-title"><strong><?= h($title) ?></strong>
-        <span class="muted small"><?= $j['repo_key'] !== '' ? '<a href="' . h(rs_host_web(str_starts_with($j['repo_key'], 'gitlab.com/') ? 'gitlab' : (str_starts_with($j['repo_key'], 'sourceforge.net/') ? 'sourceforge' : ''), preg_replace('#^(gitlab\.com|sourceforge\.net)/#', '', $j['repo_key']))) . '" target="_blank" rel="noopener">' . h($j['repo_key']) . ' ↗</a>' : h($j['link']) ?><?= $a && $a['game'] !== '' ? ' · ' . h($a['game']) : '' ?><?= $a ? ' · ' . h(RS_PC_ORIGINS[$a['origin']] ?? $a['origin']) : '' ?> · <?= h($j['who']) ?>, <?= h(rs_date('M j, g:i a', strtotime($j['created'] . ' UTC'))) ?></span></div>
+        <span class="muted small"><?= $j['repo_key'] !== '' ? '<a href="' . h(rs_host_web(str_starts_with($j['repo_key'], 'gitlab.com/') ? 'gitlab' : (str_starts_with($j['repo_key'], 'sourceforge.net/') ? 'sourceforge' : ''), preg_replace('#^(gitlab\.com|sourceforge\.net)/#', '', $j['repo_key']))) . '" target="_blank" rel="noopener">' . h($j['repo_key']) . ' ↗</a>' : h($j['link']) ?><?= $a && $a['game'] !== '' ? ' · ' . h($a['game']) : '' ?><?= $a ? ' · ' . h(RS_PC_ORIGINS[$a['origin']] ?? $a['origin']) : '' ?> · <?= h($j['who']) ?><?= !empty($j['sub_id']) ? ' · <a href="submissions.php#m' . (int)$j['sub_id'] . '">from a submission</a>' : '' ?>, <?= h(rs_date('M j, g:i a', strtotime($j['created'] . ' UTC'))) ?></span></div>
       <span class="pill<?= $j['status'] === 'review' ? ' cyan' : ($j['status'] === 'published' ? ' ok' : ($j['status'] === 'failed' || $stuck ? ' bad' : '')) ?>"><?php if ($live): ?><span class="sdk-spin" aria-hidden="true"></span> <?php endif; ?><?= h($st) ?></span>
       <?php
       // Claude's verdict is written before VirusTotal answers, so the live VirusTotal state wins:
@@ -165,6 +184,7 @@ rs_head('Auto-add');
       <?php endif; ?>
       <?php if ($a): ?><a class="btn" href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>#edit">Open its listing</a><?php endif; ?>
       <?php if ($j['status'] === 'published' && $a): ?><a class="btn" href="https://recomplauncher.com/game/<?= h(rawurlencode($a['id'])) ?>" target="_blank" rel="noopener">Its page ↗</a><?php endif; ?>
+      <?php if ($j['status'] === 'published'): ?><form method="post"><?= $csrf ?><input type="hidden" name="action" value="dismiss"><input type="hidden" name="id" value="<?= (int)$j['id'] ?>"><button>Dismiss</button></form><?php endif; ?>
       <?php if (!$live && $j['status'] !== 'published'): ?>
       <form method="post"><?= $csrf ?><input type="hidden" name="action" value="again"><input type="hidden" name="id" value="<?= (int)$j['id'] ?>"><button>Run again</button></form>
       <form method="post" onsubmit="return confirm('Remove this draft<?= (int)$j['made'] ? ' and the hidden listing it made' : '' ?>?')"><?= $csrf ?><input type="hidden" name="action" value="remove"><input type="hidden" name="id" value="<?= (int)$j['id'] ?>"><button class="danger">Remove</button></form>
@@ -186,6 +206,7 @@ rs_head('Auto-add');
 .scout-passed li .pill{margin:0}.scout-passed li form{margin:0}.scout-passed a{overflow-wrap:anywhere}
 .scout-why{margin:12px 0 0}
 @media (max-width:760px){.auto-top{grid-template-columns:1fr}.scout-passed li{grid-template-columns:1fr}}
+.auto-dismiss-all{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;padding:10px 14px;border:1px solid var(--line);border-radius:12px}
 .auto-form label{display:flex;flex-direction:column;gap:6px}
 .auto-form-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
 .auto-list{display:flex;flex-direction:column;gap:16px;margin-top:16px}

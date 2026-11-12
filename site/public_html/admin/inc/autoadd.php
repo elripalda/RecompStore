@@ -42,6 +42,8 @@ function rs_auto_tables(): void {
         updated DATETIME NOT NULL,
         KEY status (status)
     ) DEFAULT CHARSET=utf8mb4");
+    // (4.7) The submission a draft came from (Submissions, Send to Auto-add).
+    if (!rs_db()->query("SHOW COLUMNS FROM pc_auto LIKE 'sub_id'")->fetch()) rs_db()->exec('ALTER TABLE pc_auto ADD COLUMN sub_id INT NOT NULL DEFAULT 0');
     $done = true;
 }
 
@@ -57,7 +59,7 @@ function rs_auto_get(int $id): ?array {
 function rs_auto_list(int $limit = 60): array {
     rs_auto_tables();
     $out = [];
-    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status <> 'removed' ORDER BY id DESC LIMIT " . (int)$limit) as $r) {
+    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status NOT IN ('removed', 'dismissed') ORDER BY id DESC LIMIT " . (int)$limit) as $r) {
         $r['steps'] = json_decode((string)$r['steps'], true) ?: [];
         $out[] = $r;
     }
@@ -80,19 +82,37 @@ function rs_auto_step(int $id, string $key, string $state, string $note = ''): v
 
 // Start one: a draft row and the background run. -> the draft's id (an open one for the same repo
 // is reused instead of a second).
-function rs_auto_start(string $link, string $who, bool $launch = true): int {
+function rs_auto_start(string $link, string $who, bool $launch = true, int $subId = 0): int {
     rs_auto_tables();
     $l = rs_repo_from_link($link);
     if (!$l) throw new RuntimeException('Paste a GitHub, GitLab or SourceForge link, like github.com/owner/name.');
     $key = rs_repo_key($l['host'], $l['repo']);
     $st = rs_db()->prepare("SELECT id FROM pc_auto WHERE repo_key = ? AND status IN ('queued', 'running', 'review') ORDER BY id DESC LIMIT 1");
     $st->execute([$key]);
-    if ($had = (int)$st->fetchColumn()) return $had;
-    rs_db()->prepare('INSERT INTO pc_auto (link, repo_key, who, steps, created, updated) VALUES (?, ?, ?, ?, NOW(), NOW())')
-        ->execute([mb_substr(trim($link), 0, 400), $key, mb_substr($who, 0, 80), '{}']);
+    if ($had = (int)$st->fetchColumn()) {
+        if ($subId) rs_db()->prepare('UPDATE pc_auto SET sub_id = ? WHERE id = ?')->execute([$subId, $had]);
+        return $had;
+    }
+    rs_db()->prepare('INSERT INTO pc_auto (link, repo_key, who, sub_id, steps, created, updated) VALUES (?, ?, ?, ?, ?, NOW(), NOW())')
+        ->execute([mb_substr(trim($link), 0, 400), $key, mb_substr($who, 0, 80), $subId, '{}']);
     $id = (int)rs_db()->lastInsertId();
     if ($launch) rs_auto_launch($id);
     return $id;
+}
+// (4.7) A published draft off the page (its listing stays live). -> how many.
+function rs_auto_dismiss(int $id = 0): int {
+    rs_auto_tables();
+    $st = rs_db()->prepare("UPDATE pc_auto SET status = 'dismissed', updated = NOW() WHERE status = 'published'" . ($id ? ' AND id = ?' : ''));
+    $st->execute($id ? [$id] : []);
+    return $st->rowCount();
+}
+// (4.7) What the developer sent with a submission, for Claude and the listing. [] when none.
+function rs_auto_sub(array $job): array {
+    if (empty($job['sub_id'])) return [];
+    $st = rs_db()->prepare("SELECT data FROM inbox WHERE id = ? AND kind = 'submit'");
+    $st->execute([(int)$job['sub_id']]);
+    $d = json_decode((string)$st->fetchColumn(), true);
+    return is_array($d) ? $d : [];
 }
 // Run it again from the top (the listing it made is kept and filled in again).
 function rs_auto_again(int $id): void {
@@ -218,8 +238,13 @@ function rs_auto_run(int $id): void {
         } else {
             rs_auto_step($id, 'ai', 'run', 'Reading the README and the release');
             $rd = rs_pc_readme((string)$f['repo'], $host, 3600);
-            $d = rs_auto_ai($a, $f, $latest ?: [], (string)($rd['md'] ?? ''), $names);
+            $sub = rs_auto_sub($job);
+            $d = rs_auto_ai($a, $f, $latest ?: [], (string)($rd['md'] ?? ''), $names, $sub);
             $a = rs_auto_apply($a, $d);
+            // From a submission: the developer's own credits and links, which the README may not have.
+            if ($sub) {
+                if (trim((string)($sub['credits'] ?? '')) !== '' && trim((string)($a['credits'] ?? '')) === '') $a['credits'] = mb_substr(trim((string)$sub['credits']), 0, 1000);
+            }
             rs_pc_save($a);
             $concerns = array_merge($concerns, array_map('strval', (array)($d['concerns'] ?? [])));
             rs_auto_step($id, 'ai', in_array($d['verdict'] ?? '', ['check', 'skip'], true) ? 'warn' : 'ok', $a['name'] . ' · ' . $a['game'] . ' · ' . (RS_PC_ORIGINS[$a['origin']] ?? $a['origin']));
@@ -298,6 +323,7 @@ Rules:
 - setup_required: true only when players must do something by hand before the first play that the boot profile can\'t do; then setup_steps, short and in order, as a player would follow them in the launcher (Open Folder is the button that opens the install folder).
 - tags: up to 6, from: Widescreen, 60 FPS, High FPS, Mods, Online, Multiplayer, Controller, Ray Tracing, Upscaling, Ultrawide, HDR, Achievements.
 - boot: a recomplauncher.json for the catalog (format 1, start.program from the download\'s file list, and game, inputs, prepare, config and settings only where the README or files show how). null when there isn\'t enough to go on. Never invent arguments or config keys.
+- developer_submission (when there is one) is what the developer wrote when they sent the project in: use their facts and wording where they fit, and only fix obvious problems.
 - concerns: anything an admin must know before listing it: an emulator wrapped up as a "recomp", no playable build yet, game files in the download, a fork that only repackages another project, a project that says it\'s not ready. launcher_downloads is what the launcher will download on each system; only bring up other release files if one of those picks looks wrong. verdict: good (list it), check (look first), skip (don\'t list).
 - notes: one or two short lines for the admin.
 
@@ -307,7 +333,7 @@ Answer with one JSON object and nothing else:
 SDK guide:
 ';
 
-function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $names): array {
+function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $names, array $sub = []): array {
     $user = [
         'repo' => $f['repo'], 'description' => $f['description'] ?? '', 'stars' => $f['stars'] ?? 0, 'license' => $f['license'] ?? '', 'topics' => $f['topics'] ?? [],
         'fork' => !empty($f['fork']), 'archived' => !empty($f['archived']),
@@ -320,6 +346,12 @@ function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $na
         'our_guess' => ['name' => $a['name'], 'game' => $a['game'], 'origin' => $a['origin']],
         'origins' => RS_PC_ORIGINS, 'genres' => array_keys(RS_PC_GENRES),
     ];
+    if ($sub) {
+        $keep = [];
+        foreach (['name', 'author', 'blurb', 'description', 'needs', 'credits', 'console', 'origin', 'setup', 'setup_steps', 'features', 'notes', 'category'] as $k)
+            if (isset($sub[$k]) && $sub[$k] !== '' && $sub[$k] !== []) $keep[$k] = is_string($sub[$k]) ? mb_substr($sub[$k], 0, 4000) : $sub[$k];
+        $user['developer_submission'] = $keep;
+    }
     $body = ['model' => RS_AUTO_MODEL, 'max_tokens' => 8000,
         'system' => [['type' => 'text', 'text' => RS_AUTO_SYSTEM . rs_auto_spec(), 'cache_control' => ['type' => 'ephemeral']]],
         'messages' => [['role' => 'user', 'content' => "Curate this project for RecompLauncher.\n\n" . json_encode($user, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]]];
@@ -407,6 +439,10 @@ function rs_auto_publish(int $id): string {
     rs_pc_publish();
     rs_auto_set($id, ['status' => 'published']);
     rs_log('pc', $a['id'], 'Auto-add published');
+    if (!empty($job['sub_id'])) {
+        rs_db()->prepare("UPDATE inbox SET status = 'done' WHERE id = ?")->execute([(int)$job['sub_id']]);
+        rs_log('pc-live', $a['id'], 'from submission ' . (int)$job['sub_id'] . ' (Auto-add)');
+    }
     return $a['name'];
 }
 // Remove a draft; the hidden listing it made goes too (one that was already there stays).

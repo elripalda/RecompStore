@@ -114,6 +114,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . $self . '?show=' . urlencode($show) . '#m' . $id);
         exit;
     }
+    if ($action === 'to_auto') {
+        // (4.7) A PC submission into Auto-add: the full run starts at once (read, files, ClamAV,
+        // VirusTotal, Claude's page and boot profile with what the developer wrote, art, game info).
+        // Publish on Auto-add marks the submission done and opens its "you're live" email here.
+        try {
+            $st = $db->prepare("SELECT * FROM inbox WHERE id = ? AND kind = 'submit'");
+            $st->execute([$id]);
+            $r = $st->fetch();
+            $d = $r ? json_decode((string)($r['data'] ?? ''), true) : null;
+            if (!is_array($d) || ($d['platform'] ?? '') !== 'pc' || (string)($d['repo'] ?? '') === '') throw new RuntimeException('Only a PC submission with a repo can go to Auto-add.');
+            require_once __DIR__ . '/inc/pc.php';
+            if (is_file(__DIR__ . '/inc/vt.php')) require_once __DIR__ . '/inc/vt.php';
+            require_once __DIR__ . '/inc/autoadd.php';
+            $host = rs_host_norm((string)($d['host'] ?? ''));
+            $draft = rs_auto_start(rs_host_web($host, (string)$d['repo']), rs_me_name(), true, $id);
+            $db->prepare("UPDATE inbox SET status = 'read' WHERE id = ? AND status = 'new'")->execute([$id]);
+            rs_flash('Sent to Auto-add. It\'s running every check now; you can watch it here.');
+            header('Location: auto.php#d-' . $draft);
+            exit;
+        } catch (Throwable $e) {
+            rs_flash($e->getMessage(), 'err');
+        }
+        header('Location: ' . $self . '?show=' . urlencode($show) . '#m' . $id);
+        exit;
+    }
     if ($action === 'apply' || $action === 'apply_live') {
         // (2.1) A submission into the store: a hidden draft with everything the developer sent.
         try {
@@ -409,6 +434,11 @@ $replySubject = function (array $r) use ($names): string {
     };
 };
 $liveId = (int)($_GET['live'] ?? 0);
+// (4.7) Submissions already sent to Auto-add: [submission id => its draft].
+$autoBySub = [];
+try {
+    foreach (rs_db()->query("SELECT id, sub_id, status FROM pc_auto WHERE sub_id > 0 AND status NOT IN ('removed', 'dismissed') ORDER BY id") as $x) $autoBySub[(int)$x['sub_id']] = $x;
+} catch (Throwable $e) { /* Auto-add not used yet */ }
 // (3.6) Right after Approve and go live: the "you're live" email, written and ready to send.
 $liveMail = function (array $r): ?array {
     $d = json_decode((string)($r['data'] ?? ''), true);
@@ -712,6 +742,11 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     <div class="row-actions">
       <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>">
         <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done'): ?><?php if (($d['platform'] ?? '') === 'pc' && !empty($d['assets'])): ?><button name="action" value="apply_live" class="primary" onclick="return confirm('Put <?= h(addslashes((string)$d['name'])) ?> live on RecompLauncher now?')">Approve and go live</button><?php endif; ?><button name="action" value="apply"<?= ($d['platform'] ?? '') === 'pc' && !empty($d['assets']) ? '' : ' class="primary"' ?>><?= ($d['platform'] ?? '') === 'pc' ? 'Add to RecompLauncher, hidden' : 'Add to the store as a draft' ?></button><?php endif; ?>
+        <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done' && ($d['platform'] ?? '') === 'pc' && (string)($d['repo'] ?? '') !== ''):
+            $onAuto = $autoBySub[(int)$r['id']] ?? null; ?>
+          <?php if ($onAuto): ?><a class="btn" href="auto.php#d-<?= (int)$onAuto['id'] ?>">On Auto-add<?= $onAuto['status'] === 'review' ? ': ready to look at' : (in_array($onAuto['status'], ['queued', 'running'], true) ? ': running' : '') ?></a>
+          <?php else: ?><button name="action" value="to_auto" title="Runs every check and writes the listing, then waits on Auto-add for you to Publish">Send to Auto-add</button><?php endif; ?>
+        <?php endif; ?>
         <?php if ($r['kind'] === 'submit' && !empty($r['data']) && $r['status'] !== 'done'): ?><button name="action" value="<?= ($d['platform'] ?? '') === 'pc' ? 'to_ps5' : 'to_pc' ?>"><?= ($d['platform'] ?? '') === 'pc' ? 'Move to PS5' : 'Move to PC' ?></button><?php endif; ?>
         <?php if ($r['status'] === 'done'): ?><button name="action" value="new">Reopen</button>
         <?php else: ?><button name="action" value="done"<?= $r['kind'] === 'submit' && !empty($r['data']) ? '' : ' class="primary"' ?>>Mark done</button><?php endif; ?>
