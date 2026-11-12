@@ -186,7 +186,7 @@ try {
             rs_acct_try_add('rl-put', (string)$me['id']);
             $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
             if ($len <= 0) rs_rl_put_err(400, 'Nothing arrived.', $game);
-            if ($len > RS_RL_QUOTA) rs_rl_put_err(413, 'That save is bigger than your 150 MB of cloud space.', $game);
+            if ($len > RS_RL_QUOTA) rs_rl_put_err(413, 'That save is bigger than your ' . (int)(RS_RL_QUOTA / 1048576) . ' MB of cloud space.', $game);
             $tmp = tempnam(sys_get_temp_dir(), 'rls');
             $out = fopen($tmp, 'wb');
             $inp = fopen('php://input', 'rb');

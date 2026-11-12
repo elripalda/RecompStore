@@ -25,7 +25,7 @@ function rs_rl_launch_defaults(): array {
             . "Do I need my own copy of the games?\nYes. Recomps run your own copy of the game. RecompLauncher doesn't come with any game files.\n\n"
             . "I already have recomps installed. Do I start over?\nNo. Press Add games you have in your Library. It finds the recomps in your folders and in Steam, and they keep updating right where they are.\n\n"
             . "Where do my saves go?\nIn each game's own save folder, same as without the launcher. RecompLauncher also keeps a backup after every session.\n\n"
-            . "How do cloud saves work?\nSign in with your RecompStore account and turn cloud saves on for a game. Your newest saves go up after you play, and the next PC you play on gets them first. Each account has 150 MB.\n\n"
+            . "How do cloud saves work?\nSign in with your RecompStore account and turn cloud saves on for a game. Your newest saves go up after you play, and the next PC you play on gets them first. Each account has 300 MB.\n\n"
             . "Does it send anything about me?\nOnly if Share usage and diagnostics is on (Settings, General), and that same screen shows exactly what's sent. The privacy page has the rest.",
         'issues' => "Windows only for now. Linux and Mac are next.\nThe installer isn't signed yet, so Windows shows a warning the first time.",
         'bugs' => 'When a game crashes, RecompLauncher offers to send its log to us. Say yes, it helps a lot. For anything else, tell us in the Discord: which game, what happened, and what PC you have.',

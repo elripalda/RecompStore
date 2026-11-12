@@ -2,13 +2,13 @@
 // (3.1) RecompLauncher and accounts: signing a PC in with a short code, the list of PCs, and cloud
 // saves. Used by api/launcher.php (the launcher, and the account page) and activate.php (the page
 // that says yes to a code). Saves sit in recompstore-private/cloud-saves/<account uid>/<game>/,
-// the newest five per game, 150 MB per account.
+// the newest five per game, 300 MB per account.
 // (3.2) Also: "Get it on my PC" (a game sent from the website to a signed-in PC), betas of PC
 // recomps, "How did it run?" reports from the launcher, the launcher's usage and diagnostics, and
 // the launcher's own updates (launcher/version.json).
 declare(strict_types=1);
 
-const RS_RL_QUOTA = 150 * 1024 * 1024;
+const RS_RL_QUOTA = 300 * 1024 * 1024; // (4.8) doubled from 150 MB
 const RS_RL_KEEP = 5;
 require_once __DIR__ . '/b2.php';
 const RS_RL_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -295,7 +295,7 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
             $more[] = $r; $after -= (int)$r['size'];
         }
     }
-    if ($after > RS_RL_QUOTA) throw new RangeException('Your cloud saves are full (150 MB). Delete some on your account page at recomplauncher.com.');
+    if ($after > RS_RL_QUOTA) throw new RangeException('Your cloud saves are full (' . (int)(RS_RL_QUOTA / 1048576) . ' MB). Delete some on your account page at recomplauncher.com.');
     $v = bin2hex(random_bytes(8));
     // (4.7) Kept here first and answered at once; with B2 on, the copy goes up to B2 after the
     // launcher has its answer (rs_rl_b2_later). Before, the B2 upload ran first, and a slow one plus
