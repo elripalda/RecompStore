@@ -1,7 +1,7 @@
 /* (4.8) The admin, made practical: flat neutral surfaces, smaller type, tighter controls, a pinned
    column on the right and one search box. Loaded after admin.css, so every page picks it up. */
-:root:not([data-theme=light]){--midnight:#0b0d10;--page-a:#0b0d10;--page-b:#0b0d10;--frost:#e6e8eb;--soft:#c4cad2;--muted:#9aa3ae;--panel:#12151a;--surface:#14181e;--line:#242a33;--bg-rgb:11,13,16;--ink-rgb:230,232,235;--cyan:#34F2E8;--cyan-ink:#5ef5ec;--on-accent:#06121a}
-:root[data-theme=oled]{--midnight:#000;--page-a:#000;--page-b:#000;--panel:#0b0c0e;--surface:#0e0f12;--line:#1f2329;--bg-rgb:0,0,0}
+:root:not([data-theme=light]){--midnight:#0b0d10;--page-a:#0b0d10;--page-b:#0b0d10;--frost:#eceef1;--soft:#cdd2d8;--muted:#a6afba;--panel:#13161b;--surface:#171b21;--line:#2b313a;--bg-rgb:11,13,16;--ink-rgb:230,232,235;--cyan:#34F2E8;--cyan-ink:#5ef5ec;--on-accent:#06121a}
+:root[data-theme=oled]{--midnight:#000;--page-a:#000;--page-b:#000;--panel:#0d0e11;--surface:#131519;--line:#2c3139;--bg-rgb:0,0,0;--muted:#a9b1bc}
 :root[data-theme=light]{--panel:#fff;--surface:#fff;--line:#e3e7ec;--page-a:#f5f7fa;--page-b:#f5f7fa}
 body{font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page-a)}
 h1,h2,h3{font-family:Inter,system-ui,sans-serif;letter-spacing:-.01em}
@@ -11,7 +11,13 @@ h1{font-size:20px;font-weight:650}h2{font-size:15px;font-weight:650}
 .row .icon{width:52px;height:52px;border-radius:12px}
 label{font-size:13px;font-weight:600;gap:5px;margin:0 0 12px}
 input,select,textarea{border-radius:7px;padding:8px 10px;font-size:13.5px;background:rgba(var(--bg-rgb),.6)}
-button,.btn{font:600 13px Inter,system-ui,sans-serif;border-radius:7px;padding:7px 12px;min-height:34px;gap:6px;background:rgba(var(--ink-rgb),.06)}
+button,.btn{font:600 13px Inter,system-ui,sans-serif;border-radius:7px;padding:7px 12px;min-height:34px;gap:6px;background:#1c2128;border-color:#343b45;color:var(--frost)}
+button:hover,.btn:hover{background:#252b34;border-color:#46505c}
+:root[data-theme=light] button,:root[data-theme=light] .btn{background:#fff;border-color:#d5dbe2}
+:root[data-theme=light] button:hover,:root[data-theme=light] .btn:hover{background:#f0f3f6}
+button.primary,.btn.primary{background:var(--cyan);border-color:var(--cyan);color:var(--on-accent)}
+button:disabled{opacity:.5}
+.danger{color:#ff9b9b;border-color:rgba(255,122,122,.45)}
 .primary:hover{background:#7af7f0}
 .icon-btn{width:34px}
 .flash{border-radius:8px;padding:10px 14px}
@@ -41,8 +47,8 @@ table{font-size:13px}
 .crumbs{font-size:13.5px}
 .me-menu summary{padding:3px 6px 3px 3px;font-size:13px}
 .me-av{width:26px;height:26px;font:700 12px Inter,sans-serif}
-.adm-body{display:flex;align-items:flex-start;gap:20px;padding:0 20px 0 0}
-.adm main{flex:1;min-width:0;max-width:none;margin:0;padding:20px 0 80px 24px}
+.adm-body{display:flex;align-items:flex-start;gap:24px;padding:0 24px;max-width:1400px;margin:0 auto;box-sizing:border-box}
+.adm main{flex:1;min-width:0;max-width:1120px;margin:0;padding:20px 0 80px}
 .page-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:-4px 0 18px}
 .page-tabs a{padding:8px 12px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
 .page-tabs a:hover{color:var(--frost)}
@@ -74,8 +80,8 @@ table{font-size:13px}
 .pins .muted{font-size:12px}
 .pin-this{min-height:30px;padding:4px 10px;font-size:12.5px}
 .pin-this.on{color:var(--cyan-ink)}
-@media (max-width:1280px){.pins{display:none}.adm-body{padding-right:0}.adm main{padding-right:20px}}
-@media (max-width:1000px){.adm-main{margin-left:0}.find-box kbd{display:none}.adm main{padding-left:16px;padding-right:16px}}
+@media (max-width:1280px){.pins{display:none}}
+@media (max-width:1000px){.adm-main{margin-left:0}.find-box kbd{display:none}.adm-body{padding:0 16px}}
 
 /* Overview */
 .ov-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
@@ -141,3 +147,17 @@ table{font-size:13px}
 .pl-who{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 .pl-who .me-av{width:42px;height:42px;font-size:16px}
 @media (max-width:1100px){.pl-wrap{flex-direction:column}.pl-side{position:static;flex:auto;width:100%;max-height:none}}
+
+/* (4.8) Easier to see on OLED and dark: chips, counts, bars, rows, tasks. */
+:root:not([data-theme=light]) .side-link{color:#d6dae0;opacity:1}
+:root:not([data-theme=light]) .side-link .count{background:#2a313b}
+:root:not([data-theme=light]) .card{border-color:var(--line)}
+:root:not([data-theme=light]) .chip,:root:not([data-theme=light]) .clear-row a{border-color:#343b45;color:var(--soft)}
+:root:not([data-theme=light]) .ov-day i.c-del{background:#ff5c61}
+:root:not([data-theme=light]) .ov-bar{background:#262c35}
+:root:not([data-theme=light]) .task{border-color:var(--line);background:#15191f}
+:root:not([data-theme=light]) .pl-table td{border-color:#22272f}
+:root:not([data-theme=light]) .page-tabs a{color:#aab3be}
+:root:not([data-theme=light]) .ov-head .seg button.on{background:#323a45;border-color:#4a5462}
+:root[data-theme=oled] .side{border-right-color:#22262d}
+:root[data-theme=oled] .top{border-bottom-color:#22262d}
