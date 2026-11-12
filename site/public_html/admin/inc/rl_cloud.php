@@ -297,13 +297,14 @@ function rs_rl_put(array $a, string $game, string $file, string $hash, int $made
     }
     if ($after > RS_RL_QUOTA) throw new RangeException('Your cloud saves are full (150 MB). Delete some on your account page at recomplauncher.com.');
     $v = bin2hex(random_bytes(8));
-    if (rs_b2_on()) {
-        rs_b2_put(rs_rl_key($a, $game, $v), $file);
-    } else {
-        $dir = rs_rl_dir($a, $game);
-        if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
-        if (!rename($file, "$dir/$v.zip") && !copy($file, "$dir/$v.zip")) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
-    }
+    // (4.7) Kept here first and answered at once; with B2 on, the copy goes up to B2 after the
+    // launcher has its answer (rs_rl_b2_later). Before, the B2 upload ran first, and a slow one plus
+    // a slow player upload went past Cloudflare's 100 seconds (524), which the launcher took as the
+    // whole site being down.
+    $dir = rs_rl_dir($a, $game);
+    if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
+    if (!rename($file, "$dir/$v.zip") && !copy($file, "$dir/$v.zip")) throw new RuntimeException('Cloud saves can\'t be kept right now. Try again later.');
+    if (rs_b2_on()) rs_rl_b2_later($a, $game, $v);
     rs_db()->prepare('INSERT INTO cloud_saves (account_id, game, v, hash, size, made, device, played, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())')
         ->execute([$id, $game, $v, $hash, $size, $made, rs_rl_clean($device, 64), $played]);
     foreach ($drop as $old) rs_rl_delete($a, $game, $old['v']);
@@ -317,9 +318,62 @@ function rs_rl_file(array $a, string $game, string $v): ?string {
     $st = rs_db()->prepare('SELECT 1 FROM cloud_saves WHERE account_id = ? AND game = ? AND v = ?');
     $st->execute([(int)$a['id'], $game, $v]);
     if (!$st->fetchColumn()) return null;
-    if (rs_b2_on()) return 'b2:' . rs_rl_key($a, $game, $v);
     $f = rs_rl_dir($a, $game) . "/$v.zip";
-    return is_file($f) ? $f : null;
+    if (is_file($f)) return $f; // (4.7) still here (not up on B2 yet): sent from here
+    if (rs_b2_on()) return 'b2:' . rs_rl_key($a, $game, $v);
+    return null;
+}
+
+// (4.7) After the answer has gone: this copy up to B2, then the one kept here removed. One that
+// doesn't go up stays here (and is sent from here) and is tried again by a later upload's sweep.
+function rs_rl_b2_later(array $a, string $game, string $v): void {
+    static $queued = [];
+    $queued[] = [$a, $game, $v];
+    if (count($queued) > 1) return;
+    register_shutdown_function(function () use (&$queued) {
+        if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+        ignore_user_abort(true);
+        if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+        @set_time_limit(300);
+        foreach ($queued as [$a, $game, $v]) rs_rl_b2_push($a, $game, $v);
+        if (random_int(1, 20) === 1) rs_rl_b2_sweep(5);
+    });
+}
+function rs_rl_b2_push(array $a, string $game, string $v): bool {
+    $f = rs_rl_dir($a, $game) . "/$v.zip";
+    if (!is_file($f)) return true;
+    try {
+        rs_b2_put(rs_rl_key($a, $game, $v), $f);
+    } catch (Throwable $e) {
+        error_log('cloud save to B2 later: ' . $e->getMessage());
+        return false;
+    }
+    // Deleted meanwhile (a newer copy pushed it out): gone from B2 too.
+    $st = rs_db()->prepare('SELECT 1 FROM cloud_saves WHERE account_id = ? AND game = ? AND v = ?');
+    $st->execute([(int)$a['id'], $game, $v]);
+    if (!$st->fetchColumn()) { rs_b2_delete(rs_rl_key($a, $game, $v)); }
+    @unlink($f);
+    @rmdir(dirname($f));
+    return true;
+}
+// Copies still kept here more than 10 minutes after they arrived (their push failed): tried again.
+function rs_rl_b2_sweep(int $max): void {
+    $base = dirname(RS_PUBLIC) . '/recompstore-private/cloud-saves';
+    if (!is_dir($base)) return;
+    $n = 0;
+    foreach ((array)glob($base . '/*/*/*.zip') as $f) {
+        if ($n >= $max) break;
+        if (filemtime($f) > time() - 600) continue;
+        $v = basename($f, '.zip');
+        $game = basename(dirname($f));
+        $st = rs_db()->prepare('SELECT a.* FROM cloud_saves c JOIN accounts a ON a.id = c.account_id WHERE c.game = ? AND c.v = ? LIMIT 1');
+        $st->execute([$game, $v]);
+        $acc = $st->fetch();
+        if (!$acc) { @unlink($f); continue; }
+        if (rs_rl_dir($acc, $game) . "/$v.zip" !== $f) continue;
+        rs_rl_b2_push($acc, $game, $v);
+        ++$n;
+    }
 }
 
 function rs_rl_delete(array $a, string $game, string $v): void {
