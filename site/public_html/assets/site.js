@@ -3935,24 +3935,36 @@
     nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">${t('For developers')}</span>
       ${document.body.dataset.platform === 'pc' ? `<a href="/pc/sdk">${t('RecompLauncher SDK')}</a>` : ''}<a href="/developers">${t('Developer accounts')}</a><a href="/developers?signin=1">${t('Developer sign in')}</a></div>`);
   }
+  // (4.8) Whether it's open goes by its class, not by hidden: a tap while it was still sliding
+  // shut used to do nothing. And a link in it closes it at once, before the new page is drawn, so
+  // the page change never catches it half faded (that was the flicker on phones).
+  let drawerT = 0;
   function openDrawer() {
+    clearTimeout(drawerT);
     fillDrawer();
     drawer.hidden = false;
-    requestAnimationFrame(() => drawer.classList.add('open'));
+    void drawer.offsetWidth; // start the slide from the closed spot
+    drawer.classList.add('open');
     menuBtn.setAttribute('aria-expanded', 'true');
     document.body.classList.add('locked');
     const first = drawer.querySelector('a, button');
-    if (first) first.focus();
+    if (first) first.focus({ preventScroll: true });
   }
-  function closeDrawer() {
+  function closeDrawer(now) {
     if (drawer.hidden) return;
+    clearTimeout(drawerT);
     drawer.classList.remove('open');
     menuBtn.setAttribute('aria-expanded', 'false');
     document.body.classList.remove('locked');
-    setTimeout(() => { if (!drawer.classList.contains('open')) drawer.hidden = true; }, reduced ? 0 : 320);
+    if (now === true || reduced) { drawer.hidden = true; return; }
+    drawerT = setTimeout(() => { if (!drawer.classList.contains('open')) drawer.hidden = true; }, 320);
   }
-  menuBtn.addEventListener('click', () => (drawer.hidden ? openDrawer() : closeDrawer()));
-  drawer.addEventListener('click', (e) => { if (e.target === drawer || e.target.closest('[data-drawer-close], a')) closeDrawer(); });
+  menuBtn.addEventListener('click', () => (drawer.classList.contains('open') ? closeDrawer() : openDrawer()));
+  drawer.addEventListener('click', (e) => {
+    if (e.target.closest('a')) { closeDrawer(true); return; }
+    if (e.target === drawer || e.target.closest('[data-drawer-close]')) closeDrawer();
+  });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) { closeDrawer(); menuBtn.focus(); } });
 
   // Search: everything in the store, as you type.
   const searchQ = document.getElementById('search-q');
@@ -6972,7 +6984,8 @@
     };
     // The page changes with a quick crossfade where the browser can (the header stays put); else a
     // short slide in.
-    const smooth = drawn && !quiet && !reduced && typeof document.startViewTransition === 'function';
+    // (4.8) Not on phones and narrow windows: their browsers flicker through the cross-fade.
+    const smooth = drawn && !quiet && !reduced && innerWidth > 900 && typeof document.startViewTransition === 'function';
     drawn = true;
     if (smooth) { try { document.startViewTransition(draw); return; } catch (e) { /* draw it plainly */ } }
     draw();
