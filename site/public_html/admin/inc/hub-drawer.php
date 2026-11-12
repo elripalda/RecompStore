@@ -51,6 +51,7 @@ if ($subId > 0) {
     if ($d !== null && !rs_hub_store_ok(rs_hub_sub_store($d))) { $gone('That submission is for a store you don\'t work on.'); return; }
 }
 $item = $subId > 0 && $d !== null ? 'sub:' . $subId : 'job:' . (int)$job['id'];
+$email = $r ? rs_inbox_email($r, null) : ''; // a draft from a link or the scout has no submission
 $chk = ['steps' => []];
 $app = $job && $job['app_id'] !== '' ? rs_pc_app($job['app_id']) : null;
 $pcSide = $job !== null || ($d !== null && ($d['platform'] ?? '') === 'pc');
@@ -178,7 +179,7 @@ if ($d !== null):
 <?php
 // ---- The conversation --------------------------------------------------------------------------------
 $thread = rs_hub_thread($item, $d, $subId);
-$canMsg = $d !== null && ($acc || rs_inbox_email($r, null) !== '');
+$canMsg = $d !== null && ($acc || $email !== '');
 $devName = $dev !== '' ? $dev : ($acc ? rs_dev_label($acc) : 'them'); ?>
 <section class="sh-d-sec">
   <h3>Conversation <small>team notes stay in the admin; messages go to the developer</small></h3>
@@ -191,7 +192,7 @@ $devName = $dev !== '' ? $dev : ($acc ? rs_dev_label($acc) : 'them'); ?>
     <form class="sh-compose" data-compose>
       <input type="hidden" name="item" value="<?= h($item) ?>">
       <div class="sh-seg" role="group"><button type="button" class="on" data-mode="note">Note for the team</button><?php if ($canMsg): ?><button type="button" data-mode="message">Message <?= h($devName) ?></button><?php endif; ?></div>
-      <textarea name="body" rows="2" placeholder="Only the team sees notes" data-ph-note="Only the team sees notes" data-ph-message="<?= h($acc ? 'Goes to their developer hub' : 'Goes to ' . rs_inbox_email($r, null) . ' by email') ?>" required></textarea>
+      <textarea name="body" rows="2" placeholder="Only the team sees notes" data-ph-note="Only the team sees notes" data-ph-message="<?= h($acc ? 'Goes to their developer hub' : 'Goes to ' . $email . ' by email') ?>" required></textarea>
       <div class="sh-row"><?php if ($acc): ?><label class="check small" data-only="message" hidden><input type="checkbox" name="email" value="1" checked> Email them that it's there too</label><?php endif; ?><span class="grow"></span><button class="primary small" data-send>Save note</button></div>
     </form>
   </div>
@@ -222,7 +223,7 @@ if ($d !== null): ?>
   <label>What needs to change <span class="muted small">(a short line for the board)</span><input name="reason" maxlength="600" required></label>
   <label>Subject<input name="subject" maxlength="200" value="<?= h('About your ' . $where . ' submission: ' . (string)($d['name'] ?? '')) ?>"></label>
   <label>Message<textarea name="body" rows="9"><?= h($hello . 'Thanks for sending ' . (string)($d['name'] ?? 'it') . '. Before it can go on ' . $where . ', it needs a few changes:' . "\n\n- \n\nWhen that's done, send it again with the link below. Everything you sent is already filled in.\n") ?></textarea></label>
-  <p class="muted small"><?= rs_inbox_email($r, null) === '' ? 'They left no email address, so nothing goes out: let them know another way.' : (rs_mail_ready() ? 'Goes to ' . h(rs_inbox_email($r, null)) . ', with the fix link added under your message.' : 'The mailbox isn\'t set up, so nothing goes out: copy the message and send it yourself.') ?></p>
+  <p class="muted small"><?= $email === '' ? 'They left no email address, so nothing goes out: let them know another way.' : (rs_mail_ready() ? 'Goes to ' . h($email) . ', with the fix link added under your message.' : 'The mailbox isn\'t set up, so nothing goes out: copy the message and send it yourself.') ?></p>
   <div class="sh-d-foot"><button class="primary">Send it back to them</button><button type="button" data-panel-close>Cancel</button></div>
 </form>
 <form class="sh-panel" data-panel="decline" data-form="decline" hidden>
@@ -233,7 +234,7 @@ if ($d !== null): ?>
   <label>Why <span class="muted small">(a short line for Handled)</span><input name="reason" maxlength="600" required></label>
   <label>Subject<input name="subject" maxlength="200" value="<?= h('About your ' . $where . ' submission: ' . (string)($d['name'] ?? '')) ?>"></label>
   <label>Message<textarea name="body" rows="8"><?= h($hello . 'Thanks for sending ' . (string)($d['name'] ?? 'it') . '. We looked it over, and we can\'t list it on ' . $where . ':' . "\n\n- \n\nIf you think we got it wrong, just reply to this email.\n") ?></textarea></label>
-  <label class="check"><input type="checkbox" name="send" value="1"<?= rs_inbox_email($r, null) !== '' && rs_mail_ready() ? ' checked' : ' disabled' ?>> Email it to them<?= rs_inbox_email($r, null) === '' ? ' (they left no email address)' : '' ?></label>
+  <label class="check"><input type="checkbox" name="send" value="1"<?= $email !== '' && rs_mail_ready() ? ' checked' : ' disabled' ?>> Email it to them<?= $email === '' ? ' (they left no email address)' : '' ?></label>
   <div class="sh-d-foot"><button class="danger">Decline</button><button type="button" data-panel-close>Cancel</button></div>
 </form>
 <form class="sh-panel" data-panel="done" data-form="done" hidden>
