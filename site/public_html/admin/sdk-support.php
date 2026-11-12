@@ -274,22 +274,22 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <p class="muted small">Every day the drafter picks recomps with no file yet (half just added, half popular console ports, and anything you queued first) and drafts their <code>recomplauncher.json</code> and the pull request. Look each one over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open".</p>
   <?php if (!$prqHasToken && rs_is_owner()): ?><p class="warn small">Add the GitHub token below before sending: it's the account the pull requests come from.</p><?php endif; ?>
   <?php if (!$prqDrafts): ?><p class="muted">No drafts right now.</p><?php endif; ?>
-  <?php foreach ($prqDrafts as $q): $qa = rs_pc_app((string)$q['app_id']); if (!$qa) continue; ?>
-  <details class="prq-item" id="q-<?= (int)$q['id'] ?>"<?= (string)$q['error'] !== '' ? ' open' : '' ?>>
-    <summary><span class="prq-name"><strong><?= h($qa['name']) ?></strong><span class="muted small"><?= h($q['repo']) ?> · <?= number_format((int)$qa['downloads']) ?> downloads</span></span>
-      <?php if (isset($prqPick[$q['pick']])): ?><span class="pill"><?= h($prqPick[$q['pick']]) ?></span><?php endif; ?>
-      <?php if ((string)$q['error'] !== ''): ?><span class="pill bad">Didn't send</span><?php endif; ?></summary>
-    <form method="post" class="prq-form"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$q['id'] ?>">
-      <?php if ((string)$q['error'] !== ''): ?><p class="bad small"><?= h((string)$q['error']) ?></p><?php endif; ?>
-      <?php if (trim((string)$q['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$q['note'])) ?></p><?php endif; ?>
-      <div class="prq-links small"><a href="https://github.com/<?= h($q['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($q['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>
+  <?php foreach ($prqDrafts as $pq): $qa = rs_pc_app((string)$pq['app_id']); if (!$qa) continue; ?>
+  <details class="prq-item" id="q-<?= (int)$pq['id'] ?>"<?= (string)$pq['error'] !== '' ? ' open' : '' ?>>
+    <summary><span class="prq-name"><strong><?= h($qa['name']) ?></strong><span class="muted small"><?= h($pq['repo']) ?> · <?= number_format((int)$qa['downloads']) ?> downloads</span></span>
+      <?php if (isset($prqPick[$pq['pick']])): ?><span class="pill"><?= h($prqPick[$pq['pick']]) ?></span><?php endif; ?>
+      <?php if ((string)$pq['error'] !== ''): ?><span class="pill bad">Didn't send</span><?php endif; ?></summary>
+    <form method="post" class="prq-form"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$pq['id'] ?>">
+      <?php if ((string)$pq['error'] !== ''): ?><p class="bad small"><?= h((string)$pq['error']) ?></p><?php endif; ?>
+      <?php if (trim((string)$pq['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$pq['note'])) ?></p><?php endif; ?>
+      <div class="prq-links small"><a href="https://github.com/<?= h($pq['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($pq['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>
       <div class="prq-grid">
-        <label>Pull request title<input name="title" value="<?= h((string)$q['title']) ?>" maxlength="200"></label>
-        <label class="prq-span">Pull request description<textarea name="body" rows="14"><?= h((string)$q['body']) ?></textarea></label>
-        <label class="prq-span">recomplauncher.json<textarea name="json" rows="14" class="mono" spellcheck="false"><?= h((string)$q['json']) ?></textarea></label>
+        <label>Pull request title<input name="title" value="<?= h((string)$pq['title']) ?>" maxlength="200"></label>
+        <label class="prq-span">Pull request description<textarea name="body" rows="14"><?= h((string)$pq['body']) ?></textarea></label>
+        <label class="prq-span">recomplauncher.json<textarea name="json" rows="14" class="mono" spellcheck="false"><?= h((string)$pq['json']) ?></textarea></label>
       </div>
       <div class="prq-btns">
-        <button class="btn primary" name="action" value="prq_send" onclick="return confirm('Open this pull request on <?= h(addslashes((string)$q['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>>Send pull request</button>
+        <button class="btn primary" name="action" value="prq_send" onclick="return confirm('Open this pull request on <?= h(addslashes((string)$pq['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>>Send pull request</button>
         <button class="btn" name="action" value="prq_save">Save</button>
         <button class="btn" name="action" value="prq_redo" title="The next daily run drafts it again">Draft it again</button>
         <button class="btn danger" name="action" value="prq_skip">Skip</button>
@@ -299,7 +299,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <?php endforeach; ?>
   <?php if ($prqSent): ?>
   <h3 class="prq-h3">Sent lately</h3>
-  <ul class="prq-sent"><?php foreach ($prqSent as $q): ?><li><a href="<?= h((string)$q['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$q['repo']) ?></a><span class="muted small"><?= h((string)$q['sent_at']) ?><?= (string)$q['who'] !== '' ? ' · ' . h((string)$q['who']) : '' ?></span></li><?php endforeach; ?></ul>
+  <ul class="prq-sent"><?php foreach ($prqSent as $pq): ?><li><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$pq['repo']) ?></a><span class="muted small"><?= h((string)$pq['sent_at']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?></span></li><?php endforeach; ?></ul>
   <?php endif; ?>
   <?php if (rs_is_owner()): ?>
   <details class="prq-setup"<?= !$prqHasToken || $prqKeyOnce !== '' ? ' open' : '' ?>><summary>Setup</summary>
