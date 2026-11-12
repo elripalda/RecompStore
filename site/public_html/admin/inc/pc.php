@@ -678,8 +678,8 @@ function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false)
     try {
         $rd = rs_pc_readme($repo, rs_pc_host($a), $readmeNow ? 0 : 86400);
         $rs = (int)$rd['status'];
-        if ($rs === 200) { $out['badges'] = rs_pc_badge_kinds((string)$rd['md']); $out['badge'] = (bool)$out['badges']; }
-        elseif ($rs === 404) { $out['badge'] = false; $out['badges'] = []; }
+        if ($rs === 200) { $out['badges'] = rs_pc_badge_kinds((string)$rd['md']); $out['badge'] = (bool)$out['badges']; $out['link'] = rs_pc_readme_link((string)$rd['md']); }
+        elseif ($rs === 404) { $out['badge'] = false; $out['badges'] = []; $out['link'] = false; }
         elseif (!in_array($rs, [0, 429, 500, 502, 503, 504], true)) $out['badge'] = null; // can't be read: looked at, unknown
     } catch (Throwable $e) { /* next check */ }
     rs_kv_put($k, (string)json_encode($out));
@@ -696,6 +696,11 @@ function rs_pc_badge_kinds(string $md): array {
     if (preg_match('#recompstore\.com/assets/press/badge[^\s"\')]*\.(svg|png)|Get it on RecompStore#i', $md)) $k[] = 'store';
     if (preg_match('#recompstore\.com/assets/press/verified[^\s"\')]*\.(svg|png)|Verified developer on RecompStore|recompstore\.com/dev/[\w-]+#i', $md)) $k[] = 'dev';
     return $k;
+}
+// (4.6) Xarishark: a developer who doesn't want the badge should at least link to us. Any link to
+// RecompLauncher or RecompStore in the README (the badges link there too).
+function rs_pc_readme_link(string $md): bool {
+    return (bool)preg_match('#https?://(?:www\.)?(?:recomplauncher|recompstore)\.com#i', $md);
 }
 
 // (4.6) Due a check: never checked, older than a week, or checked before the README badge was looked at.

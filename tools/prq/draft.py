@@ -21,6 +21,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -201,6 +202,14 @@ def schema_errors(validator, doc):
     return "\n".join(f"- {'/'.join(map(str, e.path)) or '(top)'}: {e.message}" for e in errs[:15])
 
 
+def earlier_pr(repo):
+    """A pull request on the repo, open or closed, that mentions RecompLauncher (its link, or "")."""
+    q = urllib.parse.quote(f"repo:{repo} is:pr recomplauncher in:title,body")
+    j = gh(f"/search/issues?q={q}&per_page=5") or {}
+    items = j.get("items") or [] if isinstance(j, dict) else []
+    return items[0].get("html_url", "") if items else ""
+
+
 def body_text(p, what, d):
     lines = [f"Hi! This adds [RecompLauncher](https://recomplauncher.com) support, so players can install and update {p['name']} from the launcher. It's already listed at {p['page']}.", "",
              "**What's RecompLauncher?**", what, "",
@@ -213,7 +222,8 @@ def body_text(p, what, d):
         lines += ["", "**Things that would make your recomp better**"] + [f"- {x}" for x in better]
     lines += ["", "**For the developer**",
               "A free developer account at https://recompstore.com/hub (sign in with GitHub) lets you claim the recomp on RecompLauncher. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see stats and read player reports with their logs.",
-              "", "Feel free to change anything here, move or drop the badge, or close this if it's not for you. No hard feelings."]
+              "", "If you'd rather not have the badge, a plain link to its RecompLauncher page somewhere in the README works too.",
+              "", "Feel free to change anything here, or close this if it's not for you. No hard feelings."]
     return "\n".join(lines)
 
 
@@ -241,6 +251,12 @@ def main():
     done = 0
     for p in picks:
         try:
+            # Already had one (ours, Xarishark's or anyone's, open or closed): never a second.
+            had = earlier_pr(p["repo"])
+            if had:
+                site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": "It already has a RecompLauncher pull request: " + had})
+                print(f"skip {p['repo']}: already has {had}")
+                continue
             ctx = context(p)
             d, raw = ask(spec, p, ctx)
             if d.get("skip"):

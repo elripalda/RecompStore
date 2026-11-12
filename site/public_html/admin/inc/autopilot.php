@@ -221,6 +221,18 @@ function rs_sub_precheck(array $d, ?array $latest, int $relStatus): array {
         elseif ($by === $ghOwner) $items[] = ['ok', 'Sent from the owner\'s GitHub (@' . $by . ')'];
         else $items[] = ['warn', 'Sent by @' . $by . ', repo is under ' . $ghOwner . ' (one of their orgs?)'];
     }
+    // (4.6) Xarishark: our badge in its README, or if they'd rather not, at least a link to us.
+    if ($relStatus !== 404 && (string)($d['repo'] ?? '') !== '' && in_array($host, ['', 'gitlab'], true)) {
+        try {
+            $rd = rs_pc_readme((string)$d['repo'], $host, 86400);
+            if ((int)$rd['status'] === 200) {
+                $bk = rs_pc_badge_kinds((string)$rd['md']);
+                if ($bk) $items[] = ['ok', 'README has the ' . implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $bk)) . ' badge'];
+                elseif (rs_pc_readme_link((string)$rd['md'])) $items[] = ['ok', 'README links to us (no badge)'];
+                else $items[] = ['warn', 'No badge or link to us in its README'];
+            } elseif ((int)$rd['status'] === 404) $items[] = ['warn', 'No README, so no badge or link to us'];
+        } catch (Throwable $e) { /* shows next time */ }
+    }
     $kind = array_filter($items, fn($x) => $x[0] === 'bad') ? 'stop' : (array_filter($items, fn($x) => $x[0] === 'warn') ? 'check' : 'ready');
     return [$kind, $items];
 }

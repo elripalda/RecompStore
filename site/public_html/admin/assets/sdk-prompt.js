@@ -32,6 +32,7 @@
       '   - The code changes, listed separately, noting they only apply when the launcher passes the new arguments.',
       '   - "Things that would make your recomp better": from the report, one line each.',
       '   - "For the developer": the report\'s "Make it yours on RecompLauncher" part, two or three sentences, not a sales pitch.' + (id ? '' : ' Mention it can be listed on RecompLauncher once it has a release.'),
+      '   - End with: if they\'d rather not have the badge, a plain link to the RecompLauncher page somewhere in the README works too.',
       '7. No AI or Claude credit anywhere: no Co-Authored-By trailer, no "Generated with Claude Code" line, in the commits or the pull request.',
       '',
       'When you\'re done, give me the whole report, the pull request description and the branch name.'
@@ -55,7 +56,7 @@
       '   - the project is on RecompLauncher, so this adds the official badge linking to its page (include the link);',
       '   - a one-line note that nothing else changed;',
       '   - a short "What\'s RecompLauncher?" part with this paragraph, as written: ' + WHAT,
-      '   - an explicit note: "Feel free to move the badge anywhere in the README you prefer, or drop it entirely if you\'d rather not have it. No hard feelings."',
+      '   - an explicit note: "Feel free to move the badge anywhere in the README you prefer. If you\'d rather not have it, a plain link to the RecompLauncher page somewhere in the README works too. No hard feelings."',
       '   Do not add a Claude attribution line to the PR body either.',
       '7. Give me the PR link and the badge link you used. Clean up the scratchpad clone when done.',
       '',

@@ -69,8 +69,16 @@ function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
         'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
         // Which badges (checks from before the list only knew the RecompLauncher one)
         'badges' => $r ? (array)($r['badges'] ?? (!empty($r['badge']) ? ['launcher'] : [])) : [],
+        // (4.6) A link to us in the README (null: checked before links were looked at)
+        'link' => $r && array_key_exists('link', $r) ? (bool)$r['link'] : null,
         'dlss' => !empty($r['dlss']),
         'due' => !$r || $c['age'] >= 7 * 86400 || !array_key_exists('badge', $r)];
+}
+// (4.6) Xarishark: it got a pull request or ships the file, but the README has neither a badge nor a
+// link to us (only known once its README was checked for links).
+function rs_sdk_bare(array $row): bool {
+    $done = $row['state'] === 'ships' || ($row['state'] === 'pr' && $row['pr'] === 'merged');
+    return $done && $row['badge'] === false && $row['link'] === false;
 }
 // Every row, the counts per status, and the ones due a check (most downloaded first).
 function rs_sdk_all(): array {
@@ -78,7 +86,7 @@ function rs_sdk_all(): array {
     $checked = rs_sdk_checks();
     $marks = rs_sdk_marks();
     $rows = [];
-    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'todo' => 0];
+    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'link' => 0, 'bare' => 0, 'todo' => 0];
     $due = [];
     foreach ($apps as $i => $a) {
         $row = rs_sdk_row($a, $i + 1, $checked[$a['id']] ?? null, $marks);
@@ -87,6 +95,8 @@ function rs_sdk_all(): array {
         ++$count['all'];
         ++$count[$row['state']];
         if ($row['badge']) ++$count['badge'];
+        elseif ($row['link']) ++$count['link'];
+        if (rs_sdk_bare($row)) ++$count['bare'];
         if ($row['due']) { ++$count['todo']; $due[] = $a['id']; }
     }
     return [$rows, $count, $due];

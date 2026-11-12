@@ -54,13 +54,13 @@ function rs_sdk_row_html(array $row, string $csrf): string {
     $badgePrBtn = fn(string $cls) => '<button type="button" class="btn' . $cls . '" data-badgepr-repo="' . h($a['repo']) . '" data-badgepr-id="' . $id . '" data-badgepr-game="' . h($a['name']) . '">Copy badge PR prompt</button>';
     $form = fn(string $action, string $label) => '<form method="post" data-sdk-ajax>' . $csrf . '<input type="hidden" name="action" value="' . $action . '"><input type="hidden" name="id" value="' . $id . '"><button class="btn">' . $label . '</button></form>';
     ob_start(); ?>
-      <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-find="<?= h($find) ?>">
+      <tbody class="sdk-item" id="r-<?= $id ?>" data-id="<?= $id ?>" data-state="<?= $st ?>" data-kind="<?= $row['kind'] ?>" data-rank="<?= (int)$row['rank'] ?>" data-dl="<?= (int)$a['downloads'] ?>" data-name="<?= h(mb_strtolower((string)$a['name'])) ?>" data-badge="<?= $row['badge'] ? '1' : '0' ?>" data-link="<?= !$row['badge'] && $row['link'] ? '1' : '0' ?>" data-bare="<?= rs_sdk_bare($row) ? '1' : '0' ?>" data-find="<?= h($find) ?>">
         <tr>
           <td class="c-pick"><input type="checkbox" class="sdk-pick" value="<?= $id ?>" aria-label="Pick <?= h($a['name']) ?>"></td>
           <td class="c-rank"><?= (int)$row['rank'] ?></td>
-          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): $bn = implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $row['badges'])); ?><span class="sdk-star" title="Its README has the <?= h($bn) ?> badge" aria-label="Badge in README: <?= h($bn) ?>">★</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
+          <td><div class="sdk-who"><?php if ($a['icon']): ?><img src="<?= h($a['icon']) ?>" alt="" width="32" height="32" loading="lazy"><?php else: ?><span class="sdk-ico"><?= h(mb_substr($a['name'], 0, 2)) ?></span><?php endif; ?><div class="sdk-name"><span class="sdk-title"><?php if ($row['badge']): $bn = implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, $row['badges'])); ?><span class="sdk-star" title="Its README has the <?= h($bn) ?> badge" aria-label="Badge in README: <?= h($bn) ?>">★</span><?php elseif ($row['link']): ?><span class="sdk-star sdk-star-link" title="No badge, but its README links to us" aria-label="Link to us in README, no badge">☆</span><?php endif; ?><a href="pc.php?edit=<?= h(rawurlencode($a['id'])) ?>"><strong><?= h($a['name']) ?></strong></a></span><span class="muted small"><?= h($a['repo']) ?><?= $row['kind'] === 'pc' ? ' · PC game' : '' ?></span></div></div></td>
           <td class="c-num"><?= number_format((int)$a['downloads']) ?></td>
-          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span></div></td>
+          <td><div class="sdk-st"><span class="pill<?= $sc ?>"><?= h($sl) ?></span><span class="muted small" title="Easy Setup now: <?= h($nw) ?>"><?= h($nl) ?><?= $row['dlss'] ? ' · gets DLSS from the launcher' : '' ?></span><?php if (rs_sdk_bare($row)): ?><span class="sdk-bare small" title="Ask them to add the badge, or at least a link to its RecompLauncher page">No badge or link in its README</span><?php endif; ?></div></td>
           <td class="c-act"><div class="sdk-btns">
             <a class="btn" href="<?= h($gh) ?>" target="_blank" rel="noopener">GitHub ↗</a>
             <?php if ($st === 'ships'): ?><?= in_array('launcher', $row['badges'], true) ? '' : $badgePrBtn(' primary') ?>
@@ -119,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (($_POST['action'] ?? '') === 'recheck' && ($a = rs_pc_app($id))) {
         $r = rs_pc_sdk_check($a, true, true);
         $msg = $a['name'] . ($r['has'] === 'release' || $r['has'] === 'repo' ? ' ships its own recomplauncher.json.' : ($r['has'] === 'none' ? ' doesn\'t ship one yet.' : ': GitHub didn\'t answer. Try again in a minute.'))
-            . (array_key_exists('badge', $r) && $r['badge'] !== null ? ($r['badge'] ? ' Its README has the ' . implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, (array)($r['badges'] ?? []))) . ' badge.' : ' No badge in its README.') : '');
+            . (array_key_exists('badge', $r) && $r['badge'] !== null ? ($r['badge'] ? ' Its README has the ' . implode(', ', array_map(fn($b) => RS_BADGE_NAMES[$b] ?? $b, (array)($r['badges'] ?? []))) . ' badge.' : (!empty($r['link']) ? ' No badge, but its README links to us.' : ' No badge or link to us in its README.')) : '');
     } elseif (in_array($_POST['action'] ?? '', ['mark_pr', 'mark_no'], true) && ($a = rs_pc_app($id))) {
         $pr = $_POST['action'] === 'mark_pr';
         $url = trim((string)($_POST['url'] ?? ''));
@@ -244,7 +244,7 @@ if (mb_strlen($q) >= 2) {
         }
     }
 }
-$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'unknown' => 'Not checked', 'badge' => 'Badge in README'];
+$chips = ['all' => 'All', 'missing' => 'No file yet', 'ships' => 'Ships its own file', 'pr' => 'Pull request open', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'unknown' => 'Not checked', 'badge' => 'Badge in README', 'link' => 'Link only', 'bare' => 'No badge or link'];
 $meter = ['ships' => 'ship their own file', 'missing' => 'no file yet', 'pr' => 'pull request open', 'no' => 'won\'t support it', 'locked' => 'pull requests closed', 'unknown' => 'not checked'];
 
 rs_head('SDK support', true, ['assets/account.css']);
@@ -252,7 +252,7 @@ rs_head('SDK support', true, ['assets/account.css']);
 <section class="head-row">
   <div>
     <h1>SDK support</h1>
-    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Red ones don't yet, green ones do, and ★ means its README has one of our badges (Get it on RecompLauncher, Get it on RecompStore or Verified developer; hover the ★ to see which). Each red one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the badge and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For green ones without the RecompLauncher badge, Copy badge PR prompt adds just that badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
+    <p class="muted">Every recomp on RecompLauncher, and whether its own GitHub ships a <code>recomplauncher.json</code>. Red ones don't yet, green ones do, and ★ means its README has one of our badges (Get it on RecompLauncher, Get it on RecompStore or Verified developer; hover the ★ to see which). ☆ means no badge but a link to us, and "No badge or link" lists the ones that got a pull request or ship the file but have neither. Each red one is a pull request away from Easy Setup for everyone: open its GitHub, give your AI agent the prompt, and send the developer the result. The prompt also adds the badge and checks the project against the Recomp Standards (adding CHD and the other standard formats where it's a small change), and ends the pull request with a "For the developer" note inviting them to claim it. For green ones without the RecompLauncher badge, Copy badge PR prompt adds just that badge. The ⋯ button on a row has the badge code, Check again and the marks.</p>
   </div>
   <div class="sdk-head-act">
     <span class="sdk-prog" id="sdk-prog" aria-live="polite"<?= $count['todo'] ? '' : ' hidden' ?>><span class="sdk-spin" aria-hidden="true"></span><span id="sdk-prog-t">Checking: <?= number_format($count['all'] - $count['todo']) ?> of <?= number_format($count['all']) ?> done</span></span>
@@ -324,7 +324,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   </div>
   <div class="sdk-bar">
     <div class="sdk-chips" role="group" aria-label="Status">
-      <?php foreach ($chips as $k => $label): ?><button type="button" class="sdk-chip<?= $k === 'all' ? ' on' : '' ?>" data-sdk-state="<?= $k ?>" aria-pressed="<?= $k === 'all' ? 'true' : 'false' ?>"><?php if ($k === 'badge'): ?><span class="sdk-star" aria-hidden="true">★</span><?php elseif ($k !== 'all'): ?><i class="dot m-<?= $k ?>" aria-hidden="true"></i><?php endif; ?><?= h($label) ?><span class="n" data-n="<?= $k ?>"><?= number_format($count[$k]) ?></span></button><?php endforeach; ?>
+      <?php foreach ($chips as $k => $label): ?><button type="button" class="sdk-chip<?= $k === 'all' ? ' on' : '' ?>" data-sdk-state="<?= $k ?>" aria-pressed="<?= $k === 'all' ? 'true' : 'false' ?>"><?php if ($k === 'badge'): ?><span class="sdk-star" aria-hidden="true">★</span><?php elseif ($k === 'link'): ?><span class="sdk-star sdk-star-link" aria-hidden="true">☆</span><?php elseif ($k === 'bare'): ?><i class="dot m-no" aria-hidden="true"></i><?php elseif ($k !== 'all'): ?><i class="dot m-<?= $k ?>" aria-hidden="true"></i><?php endif; ?><?= h($label) ?><span class="n" data-n="<?= $k ?>"><?= number_format($count[$k]) ?></span></button><?php endforeach; ?>
     </div>
     <div class="sdk-tools">
       <select id="sdk-kind" aria-label="Type"><option value="">Every type</option><option value="console">Console recomps</option><option value="pc">PC games</option></select>
@@ -415,6 +415,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
 .sdk-chip.on .sdk-star{color:var(--on-accent)}
 .sdk-chip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .sdk-star{color:#f5b301;font-size:15px;line-height:1}
+.sdk-bare{display:block;color:var(--warn,#d98a00);font-weight:600;margin-top:2px}
 .sdk-tools{display:flex;gap:8px;align-items:center}
 .sdk-tools select,.sdk-tools input{height:40px;padding:0 12px;margin:0;box-sizing:border-box;font-size:14px;line-height:normal}
 .sdk-tools select{min-width:160px}
@@ -520,7 +521,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
     var m = q.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)/);
     if (m) q = m[1].replace(/\.git$/, '');
     all.forEach(function (it) {
-      var ok = (st.state === 'all' || it.dataset.state === st.state || (st.state === 'badge' && it.dataset.badge === '1')) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
+      var ok = (st.state === 'all' || it.dataset.state === st.state || (st.state === 'badge' && it.dataset.badge === '1') || (st.state === 'link' && it.dataset.link === '1') || (st.state === 'bare' && it.dataset.bare === '1')) && (!st.kind || it.dataset.kind === st.kind) && (!q || it.dataset.find.indexOf(q) !== -1);
       it.hidden = !ok;
       if (ok) n++;
     });

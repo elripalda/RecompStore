@@ -211,6 +211,10 @@ function rs_prq_send(int $id): string {
         // Someone already on it: an open PR that adds recomplauncher.json.
         $open = rs_prq_gh('GET', '/repos/' . $repo . '/pulls?state=open&per_page=50');
         foreach ((array)$open['json'] as $p) if (stripos((string)($p['title'] ?? '') . ' ' . (string)($p['body'] ?? ''), 'recomplauncher') !== false) throw new RuntimeException('There\'s already an open pull request for it: ' . $p['html_url']);
+        // (4.6) Xarishark sends some by hand: one that was already sent and closed or merged (by anyone)
+        // means no second one either.
+        $had = rs_prq_gh('GET', '/search/issues?per_page=5&q=' . rawurlencode('repo:' . $repo . ' is:pr recomplauncher in:title,body'));
+        if ($had['status'] === 200 && !empty($had['json']['items'][0]['html_url'])) throw new RuntimeException('It already had a RecompLauncher pull request: ' . $had['json']['items'][0]['html_url'] . '. Skip this one.');
         $head = rs_prq_gh_ok(rs_prq_gh('GET', '/repos/' . $repo . '/git/ref/heads/' . rawurlencode($base)), 'Reading its ' . $base . ' branch');
         $sha = (string)$head['object']['sha'];
         // The fork (GitHub hands back the existing one), then wait for it to be ready.
