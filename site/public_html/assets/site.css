@@ -1680,6 +1680,7 @@ body[data-platform=pc] .submit-btn .lbl-ps5{display:none}
 .hub-ai{margin-top:10px}
 .hub-ai summary{cursor:pointer}
 .hub-ai-form{margin-top:10px}
+.hub-ach-msgs{margin:4px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}.hub-ach-msgs[hidden]{display:none}.hub-ach-msgs .bad{color:var(--bad,#e5484d)}.hub-ach-msgs .warn{color:var(--warn,#d98a00)}
 @media (max-width:640px){.set-card{padding:20px}.set-row{gap:16px}.set-row .set-lang select{max-width:160px}}
 /* (2.9) The header's settings gear: language, and on RecompLauncher the AI switch. */
 .set-btn{width:44px;padding:0;justify-content:center}

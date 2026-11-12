@@ -53,7 +53,7 @@ function rs_dev_out(int $code, array $body): void {
 
 $post = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
 $in = $post ? (str_starts_with((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') ? $_POST
-    : (json_decode((string)file_get_contents('php://input', false, null, 0, 65536), true) ?: [])) : $_GET;
+    : (json_decode((string)file_get_contents('php://input', false, null, 0, 600000), true) ?: [])) : $_GET;
 $a = is_string($in['a'] ?? null) ? $in['a'] : (isset($_GET['code']) || isset($_GET['error']) ? 'back' : '');
 if ($post) {
     $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
@@ -514,6 +514,36 @@ try {
         rs_log('developers', 'move', rs_dev_label($acc) . ' asks to move PC ' . $id . ' to ' . $r['repo']);
         rs_dev_notify_admin($acc, 'asks to move ' . $p['name'] . ' from ' . $p['repo'] . ' to ' . $r['repo']);
         rs_dev_out(200, ['ok' => true, 'message' => 'Sent. We\'ll switch it over after a quick look, usually within a day. Its downloads stay as they are until then.']);
+    }
+    // (4.7) Recomp Achievements: the developer writes and keeps their own recomp's list (SDK format 1),
+    // checked the same way as the admin's editor. It goes live for testers at once if they say so, and a
+    // note lands in the Achievements review queue so the team can look it over.
+    if ($a === 'ach' || ($a === 'ach-save' && $post)) {
+        require_once dirname(__DIR__) . '/admin/inc/ach.php';
+        $id = (string)($in['app'] ?? '');
+        if (!in_array($id, $pcIds, true)) rs_dev_out(200, ['ok' => false, 'error' => 'That isn\'t one of your recomps.']);
+        $l = rs_ach_list($id);
+        if ($a === 'ach') {
+            $live = $l ? (int)$l['_live'] === 1 : false;
+            if ($l) unset($l['_live']);
+            $tpl = ['format' => 1, 'game' => $id, 'source' => 'events', 'console' => 'x360', 'versions' => '>=0.0.0',
+                'achievements' => [['id' => 1, 'title' => 'First Steps', 'description' => 'Finish the first level', 'points' => 5, 'type' => 'progression', 'event' => 'level_1_done'],
+                    ['id' => 2, 'title' => 'The End', 'description' => 'Beat the game', 'points' => 50, 'type' => 'win', 'event' => 'game_beaten']]];
+            rs_dev_out(200, ['ok' => true, 'has' => (bool)$l, 'live' => $live,
+                'list' => json_encode($l ?: $tpl, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'consoles' => RS_ACH_CONSOLES]);
+        }
+        if (rs_rate_over('devach', 30, 3600)) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of saves in an hour. Try again a bit later.']);
+        rs_rate_hit('devach');
+        [$errs, $warns, $clean] = rs_ach_check((string)($in['list'] ?? ''), $id);
+        if ($errs) rs_dev_out(200, ['ok' => false, 'error' => 'Not saved. Fix these first:', 'errors' => $errs, 'warnings' => $warns]);
+        $live = !empty($in['live']);
+        rs_ach_list_save($id, $clean, $live, 'dev · ' . rs_dev_label($acc));
+        $n = count((array)($clean['achievements'] ?? []));
+        $db->prepare('INSERT INTO ach_review (account_id, game, session, why, at) VALUES (0, ?, \'\', ?, UTC_TIMESTAMP())')
+           ->execute([$id, mb_substr('The developer (' . rs_dev_label($acc) . ') ' . ($l ? 'changed' : 'added') . ' the list: ' . $n . ' achievements, ' . $clean['source'] . ', ' . $clean['console'] . ($live ? ', live for testers' : ', not live yet') . '. Look it over.', 0, 200)]);
+        rs_log('developers', 'achievements', rs_dev_label($acc) . ($l ? ' changed' : ' added') . ' the achievement list for ' . $id . ' (' . $n . ')');
+        rs_dev_out(200, ['ok' => true, 'message' => ($live ? 'Saved. It\'s live for testers now.' : 'Saved. Tick "Live for testers" and save again when it\'s ready.') . ' We take a quick look at every list too.', 'warnings' => $warns, 'live' => $live]);
     }
     // (2.7.3) Verified developers change their own app pages straight away (you're emailed).
     if ($a === 'edit' && $post) {

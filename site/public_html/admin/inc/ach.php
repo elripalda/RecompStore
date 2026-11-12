@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 const RS_ACH_POINTS = [5, 10, 25, 50];
 const RS_ACH_SOURCES = ['memory', 'native', 'events'];
-const RS_ACH_CONSOLES = ['n64', 'snes', 'gb', 'gba', 'psx', 'ps2', 'xbox', 'x360', 'dc']; // (4.7) dc: Dreamcast (events lists; memory lists once the launcher reads its RAM)
+const RS_ACH_CONSOLES = ['n64', 'snes', 'gb', 'gba', 'psx', 'ps2', 'xbox', 'x360', 'dc', 'ps3']; // (4.7) dc: Dreamcast (events lists; memory lists once the launcher reads its RAM). ps3: native lists (the game's trophies) and events
 const RS_ACH_TYPES = ['progression', 'win', 'missable'];
 const RS_ACH_LB_FORMATS = ['score', 'time', 'frames', 'millisecs', 'seconds', 'minutes', 'value'];
 const RS_ACH_TICKET_KINDS = ['didnt_unlock' => 'Didn\'t unlock', 'too_early' => 'Unlocked by itself or too early', 'wrong_text' => 'Wrong name or description', 'other' => 'Something else'];
@@ -280,7 +280,7 @@ function rs_ach_check(string $json, string $game): array {
         if ($src !== 'native') {
             if (trim((string)($a['title'] ?? '')) === '') $e[] = "#$id needs a title.";
             if (!in_array($a['points'] ?? null, RS_ACH_POINTS, true)) $e[] = "#$id: points is 5, 10, 25 or 50.";
-        }
+        } elseif (isset($a['points']) && !in_array($a['points'], RS_ACH_POINTS, true)) $e[] = "#$id: points is 5, 10, 25 or 50.";
         if (isset($a['type']) && !in_array($a['type'], RS_ACH_TYPES, true)) $e[] = "#$id: type is progression, win or missable.";
         if ($src === 'memory' && trim((string)($a['trigger'] ?? '')) === '' && trim((string)($a['event'] ?? '')) === '') $e[] = "#$id needs a trigger.";
         if ($src === 'events' && trim((string)($a['event'] ?? '')) === '') $e[] = "#$id needs an event name.";
@@ -419,6 +419,7 @@ function rs_ach_native_online(array $a): bool {
 // for testers, and a note in the review queue so the admin can look it over. -> true when made.
 function rs_ach_auto_list(string $game, array $native, string $console, int $acct): bool {
     if (rs_ach_list($game) || rs_setting('ach_auto_lists', '1') !== '1') return false;
+    if ($console === 'ps3') return false; // (4.7) trophies have no gamerscore to set points from: the developer writes the list
     $seen = []; $keep = []; $online = [];
     foreach (array_slice($native, 0, 400) as $a) {
         if (!is_array($a)) continue;
@@ -567,7 +568,8 @@ function rs_ach_record(array $acct, array $s, array $unlocks): array {
         if ($src === 'native' && (($u['title'] ?? '') !== '' || $gs > 0))
             $meta->execute([$game, $id, mb_substr((string)($u['title'] ?? ''), 0, 120), mb_substr((string)($u['description'] ?? ''), 0, 300), $gs]);
         if ($src !== 'native' && !isset($byId[$id])) { $results[] = ['id' => $id, 'ranked' => false, 'reason' => 'unknown', 'new' => false]; continue; }
-        $points = $src === 'native' ? rs_ach_points_from_gs($gs ?: (int)rs_ach_native_gs($game, $id)) : (int)($byId[$id]['points'] ?? 0);
+        // (4.7) A native list can set each one's points itself (PS3 trophies have no gamerscore).
+        $points = $src === 'native' ? (in_array($byId[$id]['points'] ?? null, RS_ACH_POINTS, true) ? (int)$byId[$id]['points'] : rs_ach_points_from_gs($gs ?: (int)rs_ach_native_gs($game, $id))) : (int)($byId[$id]['points'] ?? 0);
 
         // The Ranked rules, first match wins.
         $why = '';

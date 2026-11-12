@@ -4808,6 +4808,39 @@
         <label>${t('A note for us')} <span class="opt">${t('optional')}</span><input name="message" maxlength="1000"></label>
         <div class="form-row"><button class="btn primary" type="submit">${t('Ask to switch')}</button><span class="status" role="status"></span></div>
       </form></details>`;
+    // (4.7) Recomp Achievements: their own recomp's list, checked like the team's editor. Loaded when opened.
+    const achHtml = (a) => `<details class="hub-ai hub-ach" data-ach="${esc(a.id)}"><summary>${t('Achievements')}</summary>
+      <form class="form hub-ai-form" data-ach-app="${esc(a.id)}" novalidate>
+        <p class="muted">${t('Write the achievement list for your recomp here. It follows the Recomp Achievements list format: the game\'s own achievements or trophies (source native), events your code fires (events), or rules on console memory (memory). Every save is checked, and we take a quick look at each list too.')} <a href="https://github.com/elripalda/RecompAchievements/blob/main/docs/SPEC.md" target="_blank" rel="noopener">${t('List format')} ↗</a></p>
+        <label>${t('List (JSON)')}<textarea name="list" rows="16" spellcheck="false" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${t('Loading…')}</textarea>
+          <small>${t('points: 5, 10, 25 or 50. type: progression and win make Beaten, missable warns players. "bonus": true counts for points but not for Mastered. Native lists can give each one its title and points; leave out any platinum-style trophy, since finishing the list earns Mastered.')}</small></label>
+        <label class="check"><input type="checkbox" name="live" value="1"> ${t('Live for testers')}</label>
+        <div class="form-row"><button class="btn primary" type="submit">${t('Check and save')}</button><span class="status" role="status"></span></div>
+        <ul class="hub-ach-msgs" hidden></ul>
+      </form></details>`;
+    const wireAch = (root) => root.querySelectorAll('details.hub-ach').forEach((d) => {
+      const f = d.querySelector('form'), st = f.querySelector('.status'), msgs = f.querySelector('.hub-ach-msgs');
+      const list = (items, cls) => items.map((x) => `<li class="${cls}">${esc(x)}</li>`).join('');
+      d.addEventListener('toggle', () => {
+        if (!d.open || d.dataset.loaded) return;
+        d.dataset.loaded = '1';
+        fetch('/api/dev.php?a=ach&app=' + encodeURIComponent(d.dataset.ach), { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => {
+          if (!j || !j.ok) { f.list.value = ''; say(st, j || { ok: false }); return; }
+          f.list.value = j.list; f.live.checked = !!j.live;
+          if (!j.has) { st.textContent = t('No list yet. This is an example to start from.'); st.className = 'status'; }
+        });
+      });
+      f.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const btn = f.querySelector('button[type=submit]');
+        btn.disabled = true; st.textContent = t('Checking…'); st.className = 'status';
+        call('ach-save', { app: f.dataset.achApp, list: f.list.value, live: f.live.checked }).then((res) => {
+          btn.disabled = false; say(st, res);
+          const all = list(res.errors || [], 'bad') + list(res.warnings || [], 'warn');
+          msgs.innerHTML = all; msgs.hidden = !all;
+        });
+      });
+    });
     const wirePics = (f) => f.querySelectorAll('.hub-pc-pics input[type=file]').forEach((inp) => inp.addEventListener('change', () => {
       const box = inp.closest('label').querySelector('.hub-pic-box');
       if (inp.files[0]) box.innerHTML = `<img src="${URL.createObjectURL(inp.files[0])}" alt="">`;
@@ -4832,11 +4865,13 @@
                 <div class="form-row"><button class="btn primary" type="submit">${data.canEdit ? t('Save changes') : t('Send for review')}</button><span class="status" role="status"></span></div>
               </form></details>
             ${aiForm(a, 'pc:' + a.id)}
+            ${achHtml(a)}
             ${pcMoveHtml(a)}
             </div>
           </section>`).join('')}</div>`
         : `<section class="glass card-pad"><p>${t('None of your GitHub repositories are on RecompLauncher yet.')}</p><a class="btn primary" href="/submit">${t('Submit an app')}</a></section>`;
       wireAi(pane(), (k) => list.find((x) => 'pc:' + x.id === k));
+      wireAch(pane());
       pane().querySelectorAll('[data-goto-reports]').forEach((b) => b.addEventListener('click', () => goTab('reports', b.dataset.gotoReports)));
       pane().querySelectorAll('form[data-pc]').forEach((f) => f.addEventListener('submit', (e) => {
         e.preventDefault();
