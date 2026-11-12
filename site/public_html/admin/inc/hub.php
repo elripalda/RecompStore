@@ -194,7 +194,7 @@ function rs_hub_check(int $id, array $d, bool $fresh = false): array {
     $ai = $pc && ($d['ai'] ?? '') === 'yes' ? '. Made with AI help (shown on its page)' : '';
     $badContact = !filter_var($contact, FILTER_VALIDATE_EMAIL);
     if ($miss) $steps['page'] = [$badContact ? 'bad' : 'warn', ucfirst(implode(', ', $miss)) . ($have ? '. ' . ucfirst(rs_hub_list($have)) . ' are in' : '') . $ai, $badContact ? 'No email to reach them' : ucfirst((string)preg_replace('/ \(.*$/', '', $miss[0]))];
-    else $steps['page'] = [$ai ? 'warn' : 'ok', ucfirst(rs_hub_list($have)) . ' and a description are in' . $ai, $ai ? 'Made with AI help' : ''];
+    else $steps['page'] = ['ok', ucfirst(rs_hub_list($have)) . ' and a description are in' . $ai]; // (AI help is shown on its page, not a reason to stop)
     // 6. PC: Easy Setup and the badge (both optional, never orange). PS5: its title ID.
     if ($pc) {
         $easy = ($d['rl_quick'] ?? '') === 'yes' && ($d['rl_settings'] ?? '') === 'yes';
