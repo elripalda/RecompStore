@@ -43,6 +43,7 @@ function rs_sdk_data(array $row): array {
     return [
         'id' => (string)$a['id'], 'name' => (string)$a['name'], 'game' => (string)($a['game'] ?: $a['name']), 'repo' => (string)$a['repo'],
         'gh' => rs_host_web(rs_pc_host($a), (string)$a['repo']), 'icon' => (string)$a['icon'], 'dl' => (int)$a['downloads'], 'rank' => (int)$row['rank'],
+        'origin' => (string)$a['origin'], // (4.8) the console it came from, for the console filter
         'state' => $row['state'], 'pr' => (string)$row['pr'], 'waiting' => (bool)$row['waiting'], 'now' => $row['now'], 'kind' => $row['kind'],
         'badge' => $row['badge'], 'badges' => array_values($row['badges']), 'link' => $row['link'], 'dlss' => (bool)$row['dlss'], 'bare' => rs_sdk_bare($row),
         'mark' => $mk ? ['kind' => (string)$mk['kind'], 'url' => (string)$mk['url'], 'who' => (string)$mk['who'], 'at' => (string)$mk['at']] : null,
@@ -210,7 +211,7 @@ if ($tab === 'list') {
     $listN = $count['all'];
     $pageData = [
         'rows' => array_map('rs_sdk_data', array_values($rows)), 'count' => $count, 'now' => rs_sdk_db_now(),
-        'csrf' => rs_csrf(), 'draftNow' => rs_prq_now_ready(), 'badgeNames' => RS_BADGE_NAMES,
+        'csrf' => rs_csrf(), 'draftNow' => rs_prq_now_ready(), 'badgeNames' => RS_BADGE_NAMES, 'origins' => RS_PC_ORIGINS,
     ];
 }
 
@@ -279,6 +280,7 @@ rs_head('SDK support', true, ['assets/sdk-support.css']);
       <input type="search" id="sdk-find" placeholder="Search name, game or repo" spellcheck="false" autocomplete="off" aria-label="Search">
       <select id="sdk-readme" aria-label="README"><option value="">Any README</option><option value="badge">★ Has our badge</option><option value="link">☆ Links to us only</option><option value="bare">No badge or link</option></select>
       <select id="sdk-kind" aria-label="Type"><option value="">Every type</option><option value="console">Console recomps</option><option value="pc">PC games</option></select>
+      <select id="sdk-console" aria-label="Console"><option value="">Every console</option></select>
       <select id="sdk-sort" aria-label="Sort"><option value="rank">Most downloaded</option><option value="name">Name</option><option value="state">Status</option></select>
     </div>
     <div class="sdk-sub">
@@ -319,7 +321,7 @@ rs_head('SDK support', true, ['assets/sdk-support.css']);
   <ul>
     <li><b>No file yet</b> (red) means the recomp's GitHub doesn't ship a <code>recomplauncher.json</code>. Open it, give your AI agent the <b>agent prompt</b>, and send the developer the pull request. The prompt also adds our badge, checks the project against the Recomp Standards and ends with a note inviting the developer to claim it.</li>
     <li><b>Ships its own file</b> (green) is done. If its README has no RecompLauncher badge, <b>Copy badge PR prompt</b> adds just that.</li>
-    <li>★ means the README has one of our badges, ☆ means it only links to us. <b>No badge or link</b> lists the ones that ship the file (or got a merged pull request) but mention us nowhere.</li>
+    <li>The second pill is the README: <b>★ Badge</b> means it has one of our badges (the Verified developer one counts), <b>☆ Link only</b> means it only links to us. <b>No badge or link</b> marks the ones that ship the file (or got a merged pull request) but mention us nowhere.</li>
     <li>Pick rows with the boxes, then <b>Draft PRs now</b> to have the drafter write their pull requests. They show up under <b>PR queue</b>, and nothing is sent until you click Send there.</li>
     <li>Every recomp is checked again on its own each week. <b>Check all again</b> (or Check again on the picked ones) does it now; the progress shows at the top.</li>
   </ul>

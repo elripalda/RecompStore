@@ -19,13 +19,13 @@
   var byId = {};
   var rows = D.rows;
   rows.forEach(function (r) { byId[r.id] = r; });
-  var st = { state: '', readme: '', kind: '', q: '', sort: 'rank', page: 1, sel: '' };
+  var st = { state: '', readme: '', kind: '', console: '', q: '', sort: 'rank', page: 1, sel: '' };
   var picked = {};
   var since = D.now;
   var shown = [];
 
   var $ = function (id) { return document.getElementById(id); };
-  var body = $('sdk-body'), side = $('sdk-side'), find = $('sdk-find'), readme = $('sdk-readme'), kind = $('sdk-kind'), sortSel = $('sdk-sort');
+  var body = $('sdk-body'), side = $('sdk-side'), find = $('sdk-find'), readme = $('sdk-readme'), kind = $('sdk-kind'), sortSel = $('sdk-sort'), consoleSel = $('sdk-console');
   var pager = $('sdk-pager'), pageT = $('sdk-page-t'), shownT = $('sdk-shown'), clearB = $('sdk-clear');
   var pickAll = $('sdk-pick-all'), pickBar = $('sdk-picked'), pickN = $('sdk-picked-n');
   var prog = $('sdk-prog'), progT = $('sdk-prog-t');
@@ -40,22 +40,35 @@
     return s;
   }
   function badgeNames(r) { return (r.badges || []).map(function (b) { return D.badgeNames[b] || b; }).join(', '); }
-  function star(r) {
-    if (r.badge) return '<span class="sdk-star" title="README has the ' + esc(badgeNames(r)) + ' badge">★</span>';
-    if (r.link) return '<span class="sdk-star soft" title="No badge, but its README links to us">☆</span>';
+  // (4.8) The README as its own pill beside the status: badge, link only, or neither on a done one.
+  function readmePill(r) {
+    if (r.badge) return '<span class="pill sdk-rd badge" title="README has the ' + esc(badgeNames(r)) + ' badge">★ Badge</span>';
+    if (r.link) return '<span class="pill sdk-rd link" title="No badge, but its README links to us">☆ Link only</span>';
+    if (r.bare) return '<span class="pill sdk-rd warn" title="Ask them to add the badge, or at least a link">No badge or link</span>';
     return '';
   }
+  // (4.8) The console filter: every console in the list, most recomps first.
+  (function () {
+    var n = {};
+    rows.forEach(function (r) { if (r.kind === 'console' && r.origin) n[r.origin] = (n[r.origin] || 0) + 1; });
+    Object.keys(n).sort(function (a, b) { return n[b] - n[a] || String(D.origins[a] || a).localeCompare(String(D.origins[b] || b)); }).forEach(function (o) {
+      var op = document.createElement('option');
+      op.value = o; op.textContent = (D.origins[o] || o) + ' (' + fmt(n[o]) + ')';
+      consoleSel.appendChild(op);
+    });
+  })();
 
   // ---- what the filters show ----
   try {
     var saved = JSON.parse(sessionStorage.getItem('sdk-view2') || 'null');
-    if (saved) { st.state = saved.state || ''; st.readme = saved.readme || ''; st.kind = saved.kind || ''; st.sort = saved.sort || 'rank'; }
+    if (saved) { st.state = saved.state || ''; st.readme = saved.readme || ''; st.kind = saved.kind || ''; st.console = saved.console || ''; st.sort = saved.sort || 'rank'; }
   } catch (e) { /* no saved view */ }
-  function save() { try { sessionStorage.setItem('sdk-view2', JSON.stringify({ state: st.state, readme: st.readme, kind: st.kind, sort: st.sort })); } catch (e) { /* fine */ } }
+  function save() { try { sessionStorage.setItem('sdk-view2', JSON.stringify({ state: st.state, readme: st.readme, kind: st.kind, console: st.console, sort: st.sort })); } catch (e) { /* fine */ } }
 
   function matches(r, q) {
     if (st.state && r.state !== st.state) return false;
     if (st.kind && r.kind !== st.kind) return false;
+    if (st.console && r.origin !== st.console) return false;
     if (st.readme === 'badge' && !r.badge) return false;
     if (st.readme === 'link' && (r.badge || !r.link)) return false;
     if (st.readme === 'bare' && !r.bare) return false;
@@ -90,8 +103,8 @@
     return '<tr data-id="' + esc(r.id) + '"' + on + '>'
       + '<td class="c-pick"><input type="checkbox" class="sdk-pick" value="' + esc(r.id) + '"' + (picked[r.id] ? ' checked' : '') + ' aria-label="Pick ' + esc(r.name) + '"></td>'
       + '<td class="c-rank">' + r.rank + '</td>'
-      + '<td><div class="sdk-who">' + ico + '<div class="sdk-name"><span class="sdk-title">' + star(r) + esc(r.name) + '</span><span class="muted small">' + esc(r.repo) + (r.kind === 'pc' ? ' · PC game' : '') + '</span></div></div></td>'
-      + '<td><span class="pill ' + l[1] + '">' + esc(l[0]) + '</span>' + (r.bare ? '<span class="sdk-bare" title="Ask them to add the badge, or at least a link">No badge or link</span>' : '') + '</td>'
+      + '<td><div class="sdk-who">' + ico + '<div class="sdk-name"><span class="sdk-title">' + esc(r.name) + '</span><span class="muted small">' + esc(r.repo) + (r.kind === 'pc' ? ' · PC game' : (D.origins[r.origin] ? ' · ' + esc(D.origins[r.origin]) : '')) + '</span></div></div></td>'
+      + '<td><div class="sdk-pills"><span class="pill ' + l[1] + '">' + esc(l[0]) + '</span>' + readmePill(r) + '</div></td>'
       + '<td class="c-num">' + fmt(r.dl) + '</td></tr>';
   }
   function draw() {
@@ -106,7 +119,7 @@
     pager.querySelector('[data-page="-1"]').disabled = st.page <= 1;
     pager.querySelector('[data-page="1"]').disabled = st.page >= pages;
     document.querySelectorAll('.sdk-kpi').forEach(function (b) { var on = b.dataset.state === st.state; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-    readme.value = st.readme; kind.value = st.kind; sortSel.value = st.sort;
+    readme.value = st.readme; kind.value = st.kind; consoleSel.value = st.console; sortSel.value = st.sort;
     $('sdk-all-b').textContent = filtered ? 'Check shown again' : 'Check all again';
     $('sdk-all-b').title = filtered ? 'Checks the ' + fmt(shown.length) + ' recomps the filters show' : '';
     drawPicked();
@@ -247,8 +260,9 @@
   find.addEventListener('keydown', function (e) { if (e.key === 'Escape' && find.value) { e.preventDefault(); find.value = ''; st.q = ''; refresh(); } });
   readme.addEventListener('change', function () { st.readme = readme.value; save(); refresh(); });
   kind.addEventListener('change', function () { st.kind = kind.value; save(); refresh(); });
+  consoleSel.addEventListener('change', function () { st.console = consoleSel.value; if (st.console && st.kind === 'pc') st.kind = ''; save(); refresh(); });
   sortSel.addEventListener('change', function () { st.sort = sortSel.value; save(); refresh(); });
-  clearB.addEventListener('click', function () { st.state = ''; st.readme = ''; st.kind = ''; st.q = ''; find.value = ''; save(); refresh(); });
+  clearB.addEventListener('click', function () { st.state = ''; st.readme = ''; st.kind = ''; st.console = ''; st.q = ''; find.value = ''; save(); refresh(); });
   pager.addEventListener('click', function (e) {
     var b = e.target.closest('[data-page]'); if (!b) return;
     st.page += Number(b.dataset.page); draw();
@@ -294,7 +308,7 @@
   var want = new URLSearchParams(location.search).get('id') || '';
   if (want && byId[want]) {
     // Opened from Look up or after an action: make sure its row is on screen.
-    st.state = ''; st.readme = ''; st.kind = ''; st.q = '';
+    st.state = ''; st.readme = ''; st.kind = ''; st.console = ''; st.q = '';
     compute();
     st.page = Math.floor(shown.indexOf(byId[want]) / PER) + 1;
     draw(); select(want);

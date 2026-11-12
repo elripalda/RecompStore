@@ -73,6 +73,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     // (4.7) Auto-add drafts waiting to be looked at (the daily scout's included).
     $autoN = 0;
     if (rs_can_page('auto.php')) { try { $autoN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_auto WHERE status = 'review'")->fetchColumn(); } catch (Throwable $e) { /* no table yet */ } }
+    // (4.8) Projects players asked for from RecompLauncher's Coming Soon page, not looked at yet.
+    $reqN = 0;
+    if (rs_can_page('auto.php')) { require_once __DIR__ . '/requests.php'; $reqN = rs_req_new_count(); }
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
     // it's the file in the address (and, for pc.php, the ?view=).
     $pcAt = fn(string $v) => fn() => $here === 'pc.php' && $view === $v;
@@ -89,7 +92,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'To do' => [
             ['submissions.php', 'Submissions', 'send', [], $subNew],
-            ['auto.php', 'Auto-add', 'bolt', [], $autoN],
+            ['auto.php', 'Auto-add', 'bolt', [['auto.php', 'Drafts' . $cnt($autoN), fn() => $here === 'auto.php' && $view !== 'requests'], ['auto.php?view=requests', 'Requests' . $cnt($reqN), fn() => $here === 'auto.php' && $view === 'requests']], $autoN + $reqN],
             ['dev-accounts.php', 'Developer requests', 'dev', [], $devReq],
             ['security.php', 'Security', 'shield', [], $vtNeed],
             ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
@@ -133,7 +136,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $me = rs_me();
     $first = mb_strtoupper(mb_substr(rs_me_name(), 0, 1));
     // (4.8) Counts by page, for the pinned column.
-    $GLOBALS['rs_nav_counts'] = ['submissions.php' => $subNew, 'auto.php' => $autoN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
+    $GLOBALS['rs_nav_counts'] = ['submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
     ?>
 <body class="adm">
 <input type="checkbox" id="side-open" class="side-check" hidden>

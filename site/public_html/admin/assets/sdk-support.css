@@ -27,7 +27,7 @@
 .sdk-wrap{display:flex;gap:14px;align-items:flex-start}
 .sdk-list{flex:1;min-width:0;padding:14px}
 .sdk-side{flex:0 0 330px;position:sticky;top:70px;max-height:calc(100vh - 90px);overflow:auto}
-.sdk-tools{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:8px;margin:0 0 10px}
+.sdk-tools{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:8px;margin:0 0 10px}
 .sdk-tools input,.sdk-tools select{margin:0;height:34px;padding:0 10px}
 .sdk-sub{display:flex;align-items:center;gap:12px;min-height:34px;margin:0 0 8px;font-size:12.5px}
 .sdk-picked{display:flex;align-items:center;gap:6px;margin-left:auto}
@@ -46,7 +46,9 @@
 .sdk-table .c-pick{width:34px;text-align:center;padding-right:0}
 .sdk-table .c-pick input{width:15px;height:15px;margin:0;cursor:pointer}
 .sdk-table .c-rank{width:58px;color:var(--muted);font-variant-numeric:tabular-nums}
-.sdk-table th:nth-child(4){width:190px}
+.sdk-table th:nth-child(4){width:290px}
+@media (max-width:1300px){.sdk-table th:nth-child(4){width:200px}}
+.sdk-table td:nth-child(4){white-space:normal}
 .sdk-table .c-num{width:96px;text-align:right;font-variant-numeric:tabular-nums}
 .sdk-skel td{text-align:center;padding:40px 10px!important;color:var(--muted);cursor:default}
 .sdk-who{display:flex;gap:10px;align-items:center;min-width:0}
@@ -56,9 +58,9 @@
 .sdk-name{display:flex;flex-direction:column;min-width:0;line-height:1.3}
 .sdk-name>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sdk-title{font-weight:600;color:var(--frost)}
-.sdk-star{color:#f5b301;margin-right:5px}
-.sdk-star.soft{color:#c9a54a}
-.sdk-bare{display:block;margin-top:2px;font-size:11.5px;font-weight:600;color:var(--warn)}
+.sdk-pills{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.sdk-pills .pill{margin:0}
+.pill.sdk-rd.badge{background:rgba(245,179,1,.14);color:#f5b301}
+.pill.sdk-rd.link{background:rgba(201,165,74,.12);color:#c9a54a}
 .sdk-table .pill{font-size:11.5px;padding:2px 8px}
 .pill.ok{background:rgba(159,240,198,.14);color:var(--ok)}
 .pill.bad{background:rgba(255,138,128,.15);color:var(--bad)}
@@ -124,5 +126,9 @@
 
 @media (max-width:1180px){.sdk-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:980px){.sdk-wrap{flex-direction:column}.sdk-side{position:static;flex:none;width:100%;max-height:none}.prq-setup-grid{grid-template-columns:1fr}.sdk-scroll{max-height:none}}
-@media (max-width:640px){.sdk-tools{grid-template-columns:repeat(3,minmax(0,1fr))}.sdk-tools input{grid-column:1/-1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-head{flex-direction:column;align-items:flex-start}.sdk-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.sdk-table th:nth-child(4){width:128px}.sdk-tools{grid-template-columns:repeat(2,minmax(0,1fr))}.sdk-tools input{grid-column:1/-1}.sdk-table .c-rank,.sdk-table .c-num{display:none}.sdk-head{flex-direction:column;align-items:flex-start}.sdk-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (prefers-reduced-motion:reduce){.sdk-spin{animation:none}}
+
+/* (4.8) Big screens: the list uses the room (the side panel keeps its size). */
+.adm-body:has(.sdk-wrap){max-width:2600px}.adm main:has(.sdk-wrap),main:has(.sdk-wrap){max-width:none}
+

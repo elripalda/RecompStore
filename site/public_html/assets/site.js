@@ -4242,7 +4242,8 @@
     if (dd && s.discord) { dd.href = s.discord; if (!dd.querySelector('svg')) dd.insertAdjacentHTML('afterbegin', SVG.discord); dd.hidden = false; }
     document.getElementById('foot-social').innerHTML = [
       s.discord ? `<a href="${esc(s.discord)}" target="_blank" rel="noopener" aria-label="Discord">${SVG.discord}</a>` : '',
-      '<a href="https://github.com/elripalda/RecompStore" target="_blank" rel="noopener" aria-label="GitHub">' + SVG.github + '</a>',
+      // (4.8) On recomplauncher.com it's RecompLauncher's own repo.
+      `<a href="https://github.com/elripalda/${LAUNCHER ? 'RecompLauncher' : 'RecompStore'}" target="_blank" rel="noopener" aria-label="GitHub">${SVG.github}</a>`,
       s.kofi ? `<a href="${esc(s.kofi)}" target="_blank" rel="noopener" aria-label="Ko-fi">${SVG.kofi}</a>` : '',
     ].join('');
   }

@@ -692,12 +692,13 @@ function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false)
 // (4.6) Which of our badges a README has: "launcher" (Get it on RecompLauncher), "store" (Get it on
 // RecompStore) and "dev" (Verified developer on RecompStore, which links to the developer's page, not
 // the app). Any of them counts as a badge in the SDK support table.
-const RS_BADGE_NAMES = ['launcher' => 'Get it on RecompLauncher', 'store' => 'Get it on RecompStore', 'dev' => 'Verified developer on RecompStore'];
+const RS_BADGE_NAMES = ['launcher' => 'Get it on RecompLauncher', 'store' => 'Get it on RecompStore', 'dev' => 'Verified developer'];
 function rs_pc_badge_kinds(string $md): array {
     $k = [];
     if (preg_match('#recomplauncher\.com/[^\s"\')]*badge[^\s"\')]*\.(svg|png)|Get it on RecompLauncher#i', $md)) $k[] = 'launcher';
     if (preg_match('#recompstore\.com/assets/press/badge[^\s"\')]*\.(svg|png)|Get it on RecompStore#i', $md)) $k[] = 'store';
-    if (preg_match('#recompstore\.com/assets/press/verified[^\s"\')]*\.(svg|png)|Verified developer on RecompStore|recompstore\.com/dev/[\w-]+#i', $md)) $k[] = 'dev';
+    // (4.8) Developer pages are on recomplauncher.com/dev/<name> too.
+    if (preg_match('#recomp(?:store|launcher)\.com/assets/press/(?:launcher/)?verified[^\s"\')]*\.(svg|png)|Verified developer on Recomp(?:Store|Launcher)|recomp(?:store|launcher)\.com/dev/[\w-]+#i', $md)) $k[] = 'dev';
     return $k;
 }
 // (4.6) Xarishark: a developer who doesn't want the badge should at least link to us. Any link to

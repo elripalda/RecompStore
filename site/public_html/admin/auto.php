@@ -8,6 +8,8 @@ require_once __DIR__ . '/inc/pc.php';
 if (is_file(__DIR__ . '/inc/vt.php')) require_once __DIR__ . '/inc/vt.php';
 require_once __DIR__ . '/inc/autoadd.php';
 require_once __DIR__ . '/inc/scout.php';
+require_once __DIR__ . '/inc/requests.php'; // (4.8) Request a Recomp
+$reqView = ($_GET['view'] ?? '') === 'requests';
 
 // The page's live check while runs are going: a fingerprint of every draft's state.
 if (isset($_GET['poll'])) {
@@ -71,8 +73,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'remove') {
             rs_auto_remove($id);
             rs_flash('Draft removed (and the hidden listing it made).');
+        } elseif (in_array($act, ['req_add', 'req_mark'], true)) {
+            // (4.8) A player's request: Auto-add it, or mark it handled.
+            $rq = rs_req_get((int)($_POST['req'] ?? 0));
+            if (!$rq) throw new RuntimeException('That request isn\'t there anymore.');
+            if ($act === 'req_add') {
+                $jid = rs_auto_start((string)$rq['url'], rs_me_name());
+                rs_req_mark((int)$rq['id'], 'added');
+                rs_flash('Working on it. Its draft is on Drafts.');
+                header('Location: auto.php#d-' . (int)$jid);
+                exit;
+            }
+            $to = (string)($_POST['to'] ?? '');
+            rs_req_mark((int)$rq['id'], $to);
+            rs_flash($to === 'new' ? 'Back on the list.' : 'Marked ' . strtolower(RS_REQ_STATUS[$to] ?? $to) . '.');
+            header('Location: auto.php?view=requests' . ($to === 'new' ? '&handled=1' : ''));
+            exit;
         }
-    } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
+    } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); if ($reqView || str_starts_with($act, 'req_')) { header('Location: auto.php?view=requests'); exit; } }
     header('Location: auto.php' . ($id ? '#d-' . $id : ''));
     exit;
 }
@@ -93,8 +111,76 @@ $scoutWhy = [];
 foreach (rs_scout_seen() as $k => $r) if ((int)$r['pick'] === 1) $scoutWhy[$k] = (string)$r['why'];
 if ($scoutRun) $working = true;
 
-rs_head('Auto-add');
+rs_head($reqView ? 'Requests' : 'Auto-add');
+if ($reqView):
+    // (4.8) Projects players asked for from RecompLauncher's Coming Soon page, most asked first.
+    $handled = !empty($_GET['handled']);
+    $reqs = rs_req_list($handled);
+    $newN = rs_req_new_count();
 ?>
+<section class="head-row">
+  <div>
+    <h1>Requests</h1>
+    <p class="muted">What players asked for with Request a Recomp on RecompLauncher's Coming Soon page. The same project asked for again adds to its count, so the most wanted are on top. Auto-add makes its draft on Drafts; Already listed and Decline mark it done. A declined project tells the next player who asks that it can't go on RecompLauncher.</p>
+  </div>
+</section>
+<nav class="req-tabs">
+  <a href="auto.php?view=requests"<?= !$handled ? ' class="on" aria-current="page"' : '' ?>>New<?= $newN ? ' <span>' . $newN . '</span>' : '' ?></a>
+  <a href="auto.php?view=requests&amp;handled=1"<?= $handled ? ' class="on" aria-current="page"' : '' ?>>Handled</a>
+</nav>
+<?php if (!$reqs): ?>
+<section class="card"><p class="muted"><?= $handled ? 'Nothing handled yet.' : 'No new requests. They show up here as players send them from Coming Soon.' ?></p></section>
+<?php else: ?>
+<section class="card req-card">
+  <table class="req-table">
+    <thead><tr><th class="req-n">Asks</th><th>Project</th><th>What players said</th><th><?= $handled ? 'Status' : 'Asked' ?></th><th class="req-act"></th></tr></thead>
+    <tbody>
+    <?php foreach ($reqs as $r):
+        $label = preg_replace('#^https?://(www\.)?#', '', (string)$r['url']);
+        $first = strtotime($r['created'] . ' UTC'); $last = strtotime($r['updated'] . ' UTC');
+    ?>
+      <tr>
+        <td class="req-n"><strong><?= (int)$r['asks'] ?></strong><?php if ($r['signed']): ?><span class="muted small"><?= (int)$r['signed'] ?> signed in</span><?php endif; ?></td>
+        <td class="req-url"><a href="<?= h((string)$r['url']) ?>" target="_blank" rel="noopener noreferrer" class="mono"><?= h($label) ?> ↗</a></td>
+        <td class="req-notes"><?php if (!$r['notes']): ?><span class="muted small">No notes</span><?php else: ?>
+          <?php foreach ($r['notes'] as $i => $n): ?><p class="small<?= $i ? ' req-more' : '' ?>"><?= h($n['note']) ?></p><?php endforeach; ?>
+        <?php endif; ?></td>
+        <td class="req-when small"><?php if ($handled): ?><span class="pill<?= $r['status'] === 'declined' ? ' bad' : ($r['status'] === 'added' ? ' ok' : '') ?>"><?= h(RS_REQ_STATUS[$r['status']] ?? $r['status']) ?></span><span class="muted"><?= h((string)$r['handled_by']) ?><?= $r['handled_at'] ? ', ' . h(rs_date('M j', strtotime($r['handled_at'] . ' UTC'))) : '' ?></span>
+          <?php else: ?><span><?= h(rs_date('M j, g:i a', $last)) ?></span><?php if ($last - $first > 60): ?><span class="muted">first <?= h(rs_date('M j', $first)) ?></span><?php endif; ?><?php endif; ?></td>
+        <td class="req-act">
+          <?php if ($handled): ?>
+          <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="new"><button>Back to New</button></form>
+          <?php else: ?>
+          <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_add"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><button class="primary">Auto-add</button></form>
+          <form method="post"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="listed"><button>Already listed</button></form>
+          <form method="post" onsubmit="return confirm('Decline <?= h(addslashes($label)) ?>? Players who ask for it later are told it can\'t go on RecompLauncher.')"><?= $csrf ?><input type="hidden" name="action" value="req_mark"><input type="hidden" name="req" value="<?= (int)$r['id'] ?>"><input type="hidden" name="to" value="declined"><button class="danger">Decline</button></form>
+          <?php endif; ?>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</section>
+<?php endif; ?>
+<style>
+.req-tabs{display:flex;gap:6px;margin:0 0 16px}
+.req-tabs a{padding:7px 14px;border-radius:99px;border:1px solid var(--line);color:inherit;text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:8px}
+.req-tabs a.on{background:rgba(var(--ink-rgb),.08);border-color:rgba(var(--ink-rgb),.2)}
+.req-tabs a span{font-size:12px;padding:1px 7px;border-radius:99px;background:var(--cyan-ink,#46c8ff);color:#04121c}
+.req-card{padding:0;overflow-x:auto}
+.req-table{width:100%;border-collapse:collapse}
+.req-table th,.req-table td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.req-table tr:last-child td{border-bottom:0}
+.req-table th{font-size:12px;color:var(--muted);font-weight:600}
+.req-n{width:80px}.req-n strong{display:block;font-size:20px;line-height:1.1}.req-n span{display:block;margin-top:2px}
+.req-url{width:30%}.req-url a{overflow-wrap:anywhere}
+.req-notes p{margin:0 0 6px;overflow-wrap:anywhere}.req-notes p:last-child{margin:0}.req-notes .req-more{color:var(--muted)}
+.req-when{width:140px}.req-when>span{display:block}.req-when .pill{margin:0 0 4px}
+.req-act{width:1%;white-space:nowrap}.req-act form{display:block;margin:0 0 6px}.req-act form:last-child{margin:0}.req-act button{width:100%}
+.pill.bad{background:rgba(255,95,95,.14);color:var(--bad)}
+@media (max-width:860px){.req-table thead{display:none}.req-table tr{display:grid;grid-template-columns:80px minmax(0,1fr);gap:4px 12px;padding:12px 14px;border-bottom:1px solid var(--line)}.req-table td{border:0;padding:0;width:auto}.req-table .req-notes,.req-table .req-when,.req-table .req-act{grid-column:2}.req-act{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.req-act form{margin:0}.req-act:has(form:only-child){grid-template-columns:1fr}}
+</style>
+<?php rs_foot(); exit; endif; ?>
 <section class="head-row">
   <div>
     <h1>Auto-add</h1>

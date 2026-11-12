@@ -15,6 +15,8 @@
 //        player hears back. -> {ok, id}
 //   GET  a=my-reports                  -> {reports[]}  the signed-in player's PC reports, with answers
 //   POST a=report-reply id text        -> {ok, replies[]}  the player answers the developer
+// (4.8) POST a=recomp-request install url note version -> {ok} or {ok:false, error}: Request a Recomp
+//        (RecompLauncher's Coming Soon page). X-RL-Token when signed in. See admin/inc/requests.php.
 // Signed in on the website, POSTs come from this site's own pages (Origin and the X-RS header).
 declare(strict_types=1);
 
@@ -164,6 +166,17 @@ try {
         if (empty($me['email_ok'])) rs_pc_out(422, ['ok' => false, 'error' => 'Confirm your email first. The link is in the email we sent you.']);
         try { rs_pc_notify_set((int)$me['id'], (string)$x['id'], !empty($in['on'])); } catch (RuntimeException $e) { rs_pc_out(422, ['ok' => false, 'error' => $e->getMessage()]); }
         rs_pc_out(200, ['ok' => true, 'on' => !empty($in['on'])]);
+    }
+    // (4.8) Request a Recomp, from RecompLauncher's Coming Soon page. The answer's error is shown to the
+    // player as it is.
+    if ($a === 'recomp-request' && $post) {
+        require_once dirname(__DIR__) . '/admin/inc/requests.php';
+        $install = $s('install', 64);
+        if (!preg_match('/^[A-Za-z0-9_-]{8,64}$/', $install)) rs_pc_out(400, ['ok' => false, 'error' => 'Update RecompLauncher and try again.']);
+        $me = rs_rl_device();
+        $why = rs_req_add($s('url', 400), $s('note', 500), $install, $s('version', 40), $me ? (int)$me[0]['id'] : null);
+        if ($why !== '') rs_pc_out(200, ['ok' => false, 'error' => $why]);
+        rs_pc_out(200, ['ok' => true]);
     }
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);
