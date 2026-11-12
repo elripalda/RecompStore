@@ -90,6 +90,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     // (3.7) Many at once: the ones picked, or a whole day.
+    // (4.8) Clearing out: handled logs, every log, or anything handled and older than 30 days.
+    if (!$SUBS && in_array($action, ['clear_logs_handled', 'clear_logs_all', 'clear_old'], true)) {
+        $where = ['clear_logs_handled' => "kind = 'logs' AND status IN ('read', 'done')", 'clear_logs_all' => "kind = 'logs'",
+            'clear_old' => "kind <> 'submit' AND status IN ('read', 'done') AND created < (NOW() - INTERVAL 30 DAY)"][$action];
+        $ids = array_map('intval', $db->query("SELECT id FROM inbox WHERE $where")->fetchAll(PDO::FETCH_COLUMN));
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $in = implode(',', $chunk);
+            try { foreach ($db->query("SELECT file FROM inbox_pictures WHERE inbox_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN) as $file) @unlink(rs_report_dir() . '/' . basename((string)$file)); } catch (Throwable $e) { /* no pictures */ }
+            foreach (['inbox_files', 'inbox_pictures', 'inbox_reports', 'report_codes'] as $t) { try { $db->exec("DELETE FROM $t WHERE inbox_id IN ($in)"); } catch (Throwable $e) { /* table not made yet */ } }
+            $db->exec("DELETE FROM inbox WHERE id IN ($in)");
+        }
+        if (count($ids) > 200) { try { $db->query('OPTIMIZE TABLE inbox_files')->fetchAll(); } catch (Throwable $e) { /* space comes back later */ } }
+        rs_log('inbox', 'cleared', $action . ': ' . count($ids));
+        rs_flash($ids ? 'Cleared ' . number_format(count($ids)) . ($action === 'clear_old' ? ' handled items older than 30 days.' : ' logs.') : 'Nothing to clear.');
+        header('Location: ' . $self . '?show=' . urlencode($show));
+        exit;
+    }
     if (in_array($action, ['bulk_done', 'bulk_new', 'bulk_delete'], true)) {
         $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_POST['ids'] ?? ''))), fn($i) => $i > 0))), 0, 2000);
         $back = (string)($_POST['back'] ?? '');
@@ -504,9 +521,16 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
     <p class="muted">Games, apps and recomps developers sent in for RecompStore and RecompLauncher.</p>
     <?php else: ?>
     <h1>Inbox</h1>
-    <p class="muted">Bug reports and messages from the website, and logs sent from the store and the launcher. Submissions are under Developers. Only the admin team sees these.</p>
+    <p class="muted">Bug reports and messages from the website, and logs sent from the store and the launcher.</p>
     <?php endif; ?>
   </div>
+  <?php if (!$SUBS): $cl = rs_db()->query("SELECT SUM(kind = 'logs' AND status IN ('read', 'done')), SUM(kind = 'logs'), SUM(kind <> 'submit' AND status IN ('read', 'done') AND created < (NOW() - INTERVAL 30 DAY)) FROM inbox")->fetch(PDO::FETCH_NUM); ?>
+  <form method="post" class="actions" style="margin:0"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>">
+    <button name="action" value="clear_logs_handled"<?= (int)$cl[0] ? '' : ' disabled' ?> onclick="return confirm('Delete the <?= number_format((int)$cl[0]) ?> logs you already opened or marked done?')">Clear handled logs (<?= number_format((int)$cl[0]) ?>)</button>
+    <button name="action" value="clear_old"<?= (int)$cl[2] ? '' : ' disabled' ?> onclick="return confirm('Delete everything handled that\'s older than 30 days?')">Clear handled, older than 30 days (<?= number_format((int)$cl[2]) ?>)</button>
+    <button name="action" value="clear_logs_all" class="danger"<?= (int)$cl[1] ? '' : ' disabled' ?> onclick="return confirm('Delete ALL <?= number_format((int)$cl[1]) ?> logs, new ones too? This can\'t be undone.')">Clear all logs (<?= number_format((int)$cl[1]) ?>)</button>
+  </form>
+  <?php endif; ?>
 </section>
 <nav class="tabs">
   <?php $tab = function (string $k, string $label) use ($show, $counts, $self) { return '<a href="' . $self . '?show=' . $k . '"' . ($show === $k ? ' aria-current="page"' : '') . '>' . $label . (!empty($counts[$k]) ? ' <span class="count">' . (int)$counts[$k] . '</span>' : '') . '</a>'; }; ?>

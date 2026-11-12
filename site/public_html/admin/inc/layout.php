@@ -23,6 +23,12 @@ function rs_icon(string $n): string {
         'ext' => '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
         'menu' => '<path d="M4 7h16M4 12h16M4 17h16"/>',
         'user' => '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.2-4 4.3-6 8-6s6.8 2 8 6"/>',
+        'bolt' => '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+        'send' => '<path d="M4 12l16-8-6 16-3-7z"/>',
+        'rocket' => '<path d="M14 4c3 0 6 3 6 6l-7 7-6-6z"/><path d="M7 11l-3 1 2 2M13 17l-1 3-2-2M15 9h.01"/>',
+        'search' => '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+        'pin' => '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
+        'x' => '<path d="M6 6l12 12M18 6L6 18"/>',
     ][$n] ?? '';
     return '<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . $p . '</svg>';
 }
@@ -42,8 +48,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
 <title><?= h($title) ?> · RecompStore admin</title>
 <link rel="icon" href="/assets/logo-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(RS_ADMIN . '/assets/admin.css') ?>">
+<link rel="stylesheet" href="assets/admin-v2.css?v=<?= (int)@filemtime(RS_ADMIN . '/assets/admin-v2.css') ?>">
 <?php foreach ($css as $c): ?><link rel="stylesheet" href="<?= h($c) ?>?v=<?= (int)@filemtime(RS_ADMIN . '/' . $c) ?>">
 <?php endforeach; ?>
 </head>
@@ -60,7 +67,6 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $view = (string)($_GET['view'] ?? '');
     $inboxNew = rs_inbox_new_count();
     $subNew = rs_inbox_new_count(true);
-    $devWait = rs_dev_waiting() + $subNew + rs_dev_admin_unread();
     $vtNeed = function_exists('rs_vt_need_count') ? rs_vt_need_count() : 0;
     $cnt = fn(int $n) => $n ? ' <span class="count">' . $n . '</span>' : '';
     // (4.7) Auto-add drafts waiting to be looked at (the daily scout's included).
@@ -72,48 +78,60 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     // Title ID clashes: a red count beside the PS5 store's Found on GitHub.
     $radar = rs_can_page('health.php') && function_exists('rs_radar_count') ? rs_radar_count() : 0;
     $red = fn(int $n) => $n ? ' <span class="count red" title="Title ID ' . ($n === 1 ? 'clash' : 'clashes') . '">' . $n . '</span>' : '';
+    // (4.8) Sections by job: what's waiting first, then people, the stores, the launcher, numbers and
+    // admin. A section with several pages shows them as tabs across the top of the page.
+    $devReq = rs_dev_waiting();
+    $devUnread = rs_dev_admin_unread();
     $sections = [
-        'Overview' => [
-            ['dashboard.php', 'Dashboard', 'home', [], 0],
+        'Home' => [
+            ['dashboard.php', 'Overview', 'home', [], 0],
+        ],
+        'To do' => [
+            ['submissions.php', 'Submissions', 'send', [], $subNew],
+            ['auto.php', 'Auto-add', 'bolt', [], $autoN],
+            ['dev-accounts.php', 'Developer requests', 'dev', [], $devReq],
+            ['security.php', 'Security', 'shield', [], $vtNeed],
+            ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
+        ],
+        'People' => [
+            ['players.php', 'Players', 'players', [['players.php', 'Players', null], ['accounts.php', 'Sign-in & moderation', null], ['mail.php', 'Mail', null]], 0],
+            ['developers.php', 'Developers', 'team', [['developers.php', 'Developer pages', null], ['messages.php', 'Messages' . $cnt($devUnread), null], ['community.php', 'Discord & notes', null], ['docs.php', 'Docs', null]], $devUnread],
         ],
         'Stores' => [
-            ['pc.php', 'PC · RecompLauncher', 'pc', [
-                ['pc.php', 'Recomps', $pcAt('')], ['auto.php', 'Auto-add' . $cnt($autoN), null], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
-                ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['sdk-support.php', 'SDK support', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null],
-                ['launcher-beta.php', 'Launcher beta', null], ['launcher-stats.php', 'Launcher stats', null], ['launcher.php', 'Launcher', null]], 0],
-            ['index.php', 'PS5 · RecompStore', 'ps5', [
+            ['pc.php', 'PC recomps', 'pc', [
+                ['pc.php', 'Recomps', $pcAt('')], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
+                ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null]], 0],
+            ['index.php', 'PS5 games', 'ps5', [
                 ['index.php', 'Games', fn() => in_array($here, ['index.php', 'edit.php'], true)], ['discover.php', 'Discover', null], ['collections.php', 'Collections', null],
                 ['beta.php', 'Beta', fn() => in_array($here, ['beta.php', 'beta-upload.php'], true)], ['feedback.php', 'Feedback', null], ['import.php', 'Import', null],
                 ['health.php', 'Found on GitHub' . $red($radar), null], ['icons.php', 'Icons', null]], $radar],
         ],
-        'Curation' => [
-            ['developers.php', 'Developers', 'dev', [
-                ['developers.php', 'Developer pages', null], ['submissions.php', 'Submissions' . $cnt($subNew), null], ['dev-accounts.php', 'Accounts', null],
-                ['messages.php', 'Messages' . $cnt(rs_dev_admin_unread()), null], ['community.php', 'Discord & notes', null], ['docs.php', 'Docs', null]], $devWait],
-            ['security.php', 'Security', 'shield', [], $vtNeed],
-        ],
-        'Support' => [
-            ['inbox.php', 'Inbox', 'inbox', [], $inboxNew],
-            ['accounts.php', 'Players', 'players', [['accounts.php', 'Accounts', null], ['mail.php', 'Mail', null]], 0],
+        'Launcher' => [
+            ['launcher.php', 'Launcher', 'rocket', [['launcher.php', 'Overview', fn() => in_array($here, ['launcher.php', 'launcher-upload.php'], true)], ['launcher-stats.php', 'Live stats', null], ['launcher-beta.php', 'Beta', null]], 0],
+            ['sdk-support.php', 'SDK support', 'dev', [], 0],
         ],
         'Insights' => [
-            ['analytics.php', 'Analytics', 'chart', [], 0],
+            ['analytics.php', 'Analytics', 'chart', [['analytics.php', 'Analytics', fn() => in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Server health', fn() => in_array($here, ['status.php', 'diag-db.php'], true)]], 0],
             ['log.php', 'Change log', 'log', [], 0],
-            ['status.php', 'Status', 'pulse', [], 0],
         ],
         'Admin' => [
             ['team.php', 'Team', 'team', [], 0],
             ['settings.php', 'Settings', 'gear', [], 0],
         ],
     ];
-    $also = ['analytics.php' => ['stats.php', 'app-stats.php'], 'status.php' => ['diag-db.php'], 'security.php' => [], 'inbox.php' => []];
+    // Pages that live under another section's link.
+    $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
+        'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['messages.php', 'community.php', 'docs.php'], 'index.php' => ['edit.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;
         return $m ? (bool)$m() : $here === basename((string)strtok($href, '?'));
     };
     $crumb = ['', $title];
+    $tabs = [];
     $me = rs_me();
     $first = mb_strtoupper(mb_substr(rs_me_name(), 0, 1));
+    // (4.8) Counts by page, for the pinned column.
+    $GLOBALS['rs_nav_counts'] = ['submissions.php' => $subNew, 'auto.php' => $autoN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
     ?>
 <body class="adm">
 <input type="checkbox" id="side-open" class="side-check" hidden>
@@ -129,19 +147,16 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
           $kids = array_values(array_filter($pages, fn($pg) => rs_can_page($pg[0])));
           $on = $here === basename($href) || in_array($here, $also[$href] ?? [], true);
           foreach ($kids as $pg) if ($isOn($pg)) { $on = true; $crumb = [strip_tags($label), trim(strip_tags(preg_replace('#<span class="count.*?</span>#', '', $pg[1])))]; }
+          if ($on && count($kids) > 1) $tabs = array_map(fn($pg) => [$pg[0], $pg[1], $isOn($pg)], $kids);
           if ($on && $crumb[0] === '') $crumb = [$group, strip_tags($label)]; ?>
-      <a class="side-link<?= $on ? ' on' : '' ?>" href="<?= h($href) ?>"<?= $on && !$kids ? ' aria-current="page"' : '' ?>><?= rs_icon($icon) ?><span><?= h($label) ?></span><?= $n ? '<span class="count' . ($href === 'index.php' ? ' red' : '') . '">' . $n . '</span>' : '' ?></a>
-      <?php if ($on && count($kids) > 1): ?>
-      <div class="side-kids">
-        <?php foreach ($kids as $pg): $k = $isOn($pg); ?><a href="<?= h($pg[0]) ?>"<?= $k ? ' class="on" aria-current="page"' : '' ?>><?= $pg[1] ?></a><?php endforeach; ?>
-      </div>
-      <?php endif; ?>
+      <a class="side-link<?= $on ? ' on' : '' ?>" href="<?= h($href) ?>"<?= $on ? ' aria-current="page"' : '' ?>><?= rs_icon($icon) ?><span><?= h($label) ?></span><?= $n ? '<span class="count' . ($href === 'index.php' || $href === 'security.php' ? ' red' : '') . '">' . $n . '</span>' : '' ?></a>
       <?php endforeach; ?>
     </div>
   <?php endforeach; ?>
   </nav>
   <div class="side-foot">
-    <a class="side-link" href="https://recomplauncher.com/" target="_blank" rel="noopener"><?= rs_icon('ext') ?><span>View site</span></a>
+    <a class="side-link" href="https://recomplauncher.com/" target="_blank" rel="noopener"><?= rs_icon('ext') ?><span>RecompLauncher site</span></a>
+    <a class="side-link" href="https://recompstore.com/" target="_blank" rel="noopener"><?= rs_icon('ext') ?><span>RecompStore site</span></a>
   </div>
 </aside>
 <label for="side-open" class="side-scrim" aria-hidden="true"></label>
@@ -149,8 +164,14 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
 <header class="top">
   <label for="side-open" class="side-toggle" title="Menu"><?= rs_icon('menu') ?><span class="sr">Menu</span></label>
   <div class="crumbs"><?php if ($crumb[0] !== '' && $crumb[0] !== $crumb[1]): ?><span><?= h($crumb[0]) ?></span><i aria-hidden="true">/</i><?php endif; ?><strong><?= h($crumb[1]) ?></strong></div>
+  <div class="find-box" data-find>
+    <?= rs_icon('search') ?>
+    <input type="search" placeholder="Search players, emails, recomps, PS5 games…" aria-label="Search the admin" autocomplete="off" spellcheck="false">
+    <kbd>Ctrl K</kbd>
+    <div class="find-pop" hidden></div>
+  </div>
   <span class="grow"></span>
-  <a class="top-site" href="https://recomplauncher.com/" target="_blank" rel="noopener"><?= rs_icon('ext') ?><span>View site</span></a>
+  <button type="button" class="pin-this" data-pin-this data-href="<?= h(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) . (($_SERVER['QUERY_STRING'] ?? '') !== '' && isset($_GET['view']) ? '?view=' . rawurlencode((string)$_GET['view']) : '')) ?>" data-label="<?= h($crumb[1]) ?>"><?= rs_icon('pin') ?><span>Pin</span></button>
   <details class="me-menu">
     <summary><span class="me-av" aria-hidden="true"><?= h($first) ?></span><span class="me-name"><?= h(rs_me_name()) ?></span><span class="role-chip role-<?= h((string)($me['role'] ?? '')) ?>"><?= h(RS_ROLES[$me['role'] ?? ''] ?? '') ?></span></summary>
     <div class="me-pop">
@@ -165,7 +186,9 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     </div>
   </details>
 </header>
+<div class="adm-body">
 <main>
+<?php if ($tabs): ?><nav class="page-tabs" aria-label="<?= h($crumb[0]) ?>"><?php foreach ($tabs as [$th, $tl, $ton]): ?><a href="<?= h($th) ?>"<?= $ton ? ' class="on" aria-current="page"' : '' ?>><?= $tl ?></a><?php endforeach; ?></nav><?php endif; ?>
 <?php if ($flash): ?><div class="flash <?= h($flash['kind']) ?>"><?= h($flash['msg']) ?></div><?php endif; ?>
 <?php
 // (2.9) A site in maintenance mode says so on every admin page, so it's never left down by accident.
@@ -186,5 +209,36 @@ function rs_foot(array $scripts = []): void {
     if (basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'settings.php') $scripts[] = 'assets/settings-nav.js';
     // Each file's own date: a browser never keeps an old copy after an update.
     foreach ($scripts as $s) echo '<script src="' . h($s) . '?v=' . (int)@filemtime(RS_ADMIN . '/' . $s) . '"></script>' . "\n";
-    echo "</main>\n" . (empty($GLOBALS['rs_head_bare']) ? "</div>\n" : '') . "</body>\n</html>\n";
+    if (!empty($GLOBALS['rs_head_bare'])) { echo "</main>\n</body>\n</html>\n"; return; }
+    echo "</main>\n";
+    // (4.8) The pinned column: the pages this login keeps at hand, with what's waiting on each.
+    $counts = (array)($GLOBALS['rs_nav_counts'] ?? []);
+    $pins = rs_pins();
+    echo '<aside class="pins" aria-label="Pinned pages"><div class="pins-head"><strong>Pinned</strong></div>';
+    foreach ($pins as $p) {
+        $n = (int)($counts[basename((string)strtok($p['href'], '?'))] ?? 0);
+        echo '<div class="pin-row"><a class="pin" href="' . h($p['href']) . '">' . h($p['label']) . ($n ? '<span class="count">' . $n . '</span>' : '') . '</a>'
+            . '<button type="button" class="pin-x" data-unpin="' . h($p['href']) . '" aria-label="Unpin ' . h($p['label']) . '" title="Unpin">' . rs_icon('x') . '</button></div>';
+    }
+    if (!$pins) echo '<p class="muted">Nothing pinned. Press Pin at the top of any page to keep it here.</p>';
+    echo '</aside>' . "\n</div>\n</div>\n";
+    echo '<script>window.RS_ADM=' . json_encode(['csrf' => rs_csrf(), 'pins' => array_column($pins, 'href')]) . ';</script>' . "\n";
+    echo '<script src="assets/admin-v2.js?v=' . (int)@filemtime(RS_ADMIN . '/assets/admin-v2.js') . '"></script>' . "\n";
+    echo "</body>\n</html>\n";
+}
+
+// (4.8) This login's pinned pages: [['href' => .., 'label' => ..], ...]. New logins start with the
+// pages people reach for most (the ones their role can open).
+function rs_pins(): array {
+    $uid = (int)($_SESSION['uid'] ?? (rs_me()['id'] ?? 0));
+    $raw = rs_setting('pins_' . $uid, '');
+    $list = $raw !== '' ? json_decode((string)$raw, true) : [['href' => 'submissions.php', 'label' => 'Submissions'], ['href' => 'auto.php', 'label' => 'Auto-add'],
+        ['href' => 'sdk-support.php', 'label' => 'SDK support'], ['href' => 'inbox.php?show=logs', 'label' => 'Player logs'], ['href' => 'players.php', 'label' => 'Find a player']];
+    $out = [];
+    foreach ((array)$list as $p) {
+        $href = (string)($p['href'] ?? '');
+        if (!preg_match('#^[a-z0-9-]+\.php(\?[A-Za-z0-9=&_.%-]*)?$#', $href) || !rs_can_page($href)) continue;
+        $out[] = ['href' => $href, 'label' => mb_substr((string)($p['label'] ?? $href), 0, 40)];
+    }
+    return array_slice($out, 0, 14);
 }

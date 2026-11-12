@@ -6,6 +6,15 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/layout.php';
 rs_require_login();
 rs_log_table();
+// (4.8) Owners can clear out old entries (logins and changes older than 90 days).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'clear_old' && rs_is_owner()) {
+    rs_check_csrf();
+    $n = rs_db()->exec('DELETE FROM admin_log WHERE at < (NOW() - INTERVAL 90 DAY)');
+    rs_log('settings', 'change log', 'cleared ' . (int)$n . ' older than 90 days');
+    rs_flash('Cleared ' . number_format((int)$n) . ' entries older than 90 days.');
+    header('Location: log.php');
+    exit;
+}
 
 $only = (string)($_GET['only'] ?? '');
 $kinds = ['' => 'Everything', 'login' => 'Logins', 'login-failed' => 'Failed logins', 'publish' => 'Publish', 'signed' => 'Signed', 'change' => 'Changes', 'settings' => 'Settings', 'signer' => 'Signer', 'two-step' => 'Two-step login'];
@@ -18,7 +27,7 @@ $fails = (int)rs_db()->query("SELECT COUNT(*) FROM admin_log WHERE action = 'log
 
 rs_head('Change log');
 ?>
-<section class="head-row"><div><h1>Change log</h1><p class="muted">The last 500 entries. Addresses are kept only as a code, so the same code means the same address.</p></div><a class="btn" href="settings.php">Settings</a></section>
+<section class="head-row"><div><h1>Change log</h1><p class="muted">The last 500 entries. Addresses are kept only as a code, so the same code means the same address.</p></div><?php if (rs_is_owner()): ?><form method="post" style="margin:0" onsubmit="return confirm('Delete change log entries older than 90 days?')"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><button name="action" value="clear_old">Clear older than 90 days</button></form><?php endif; ?></section>
 <?php if ($fails >= 5): ?><div class="flash err"><?= $fails ?> failed logins in the last day. If that wasn't you, turn on two-step login in Settings.</div><?php endif; ?>
 <section class="card">
   <div class="chips" role="tablist" aria-label="Show">

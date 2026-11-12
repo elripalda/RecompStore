@@ -244,7 +244,7 @@ function rs_require_login(): void {
 // (4.6) PHP holds a login's session locked for as long as one of its pages runs, so one slow page (the
 // SDK tab asking GitHub, a big save) made every other admin page wait in line behind it. Pages that
 // only read the session let it go as soon as the login is checked; the few that write to it keep it.
-const RS_SESSION_WRITERS = ['settings.php', 'account.php', 'login.php', 'logout.php', 'setup.php', 'team.php', 'beta.php', 'launcher-beta.php', 'dashboard.php'];
+const RS_SESSION_WRITERS = ['settings.php', 'account.php', 'login.php', 'logout.php', 'setup.php', 'team.php', 'beta.php', 'launcher-beta.php'];
 function rs_session_release(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) return;
     if (in_array(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')), RS_SESSION_WRITERS, true)) return;

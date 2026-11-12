@@ -531,7 +531,17 @@ function rs_acct_delete(array $a): void {
     // (3.1) RecompLauncher: its signed-in PCs and cloud saves go too.
     if (is_file(__DIR__ . '/rl_cloud.php')) { require_once __DIR__ . '/rl_cloud.php'; rs_rl_forget($a); }
     $db->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
-    rs_acct_cookie(RS_ACCT_COOKIE, '', 0);
+    rs_acct_deleted_count();
+    if (PHP_SAPI !== 'cli' && !headers_sent() && empty($GLOBALS['rs_admin_delete'])) rs_acct_cookie(RS_ACCT_COOKIE, '', 0);
+}
+
+// (4.8) Accounts deleted, counted by day (UTC) for the admin's Overview.
+function rs_acct_deleted_count(int $n = 1): void {
+    try {
+        $db = rs_db();
+        $db->exec('CREATE TABLE IF NOT EXISTS acct_deleted_days (day DATE PRIMARY KEY, n INT NOT NULL DEFAULT 0)');
+        $db->prepare('INSERT INTO acct_deleted_days (day, n) VALUES (UTC_DATE(), ?) ON DUPLICATE KEY UPDATE n = n + VALUES(n)')->execute([$n]);
+    } catch (Throwable $e) { /* counting is best-effort */ }
 }
 
 function rs_acct_export(array $a): array {
