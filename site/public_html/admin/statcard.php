@@ -72,7 +72,7 @@ rs_head('Stats card');
     <h2 style="margin-top:14px">Look</h2>
     <label>Brand<select data-brand><option value="RecompLauncher">RecompLauncher</option><option value="RecompStore">RecompStore</option><option value="both">RecompLauncher + RecompStore</option></select></label>
     <label>Size<select data-size><option value="1200x675">Landscape (1200 × 675)</option><option value="1080x1080">Square (1080 × 1080)</option><option value="1080x1350">Portrait (1080 × 1350)</option></select></label>
-    <label>Colors<select data-theme><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label>Colors<select data-colors><option value="dark">Dark</option><option value="light">Light</option></select></label>
     <label>Headline<input data-title value="By the numbers" maxlength="60"></label>
     <label>Line under it<input data-sub value="" maxlength="90" placeholder="The date span goes here if you leave it empty"></label>
     <div class="actions"><button class="primary" type="button" data-save>Save as PNG</button><button type="button" data-copy>Copy picture</button></div>
@@ -86,8 +86,8 @@ rs_head('Stats card');
 .sc-checks{display:flex;flex-direction:column;gap:2px}
 .sc-checks label.check{margin:0;font-weight:500;font-size:13px;gap:8px}
 .sc-checks input[type=checkbox]{width:16px;height:16px}
-.seg-row{display:flex;gap:4px;flex-wrap:wrap}
-.seg-row button{min-height:30px;padding:4px 10px;font-size:12.5px}
+.seg-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.seg-row button{min-height:30px;padding:4px 2px;font-size:12px;justify-content:center;white-space:nowrap}
 .seg-row button.on{background:var(--cyan);color:var(--on-accent);border-color:var(--cyan)}
 .sc-preview{flex:1;min-width:300px;position:sticky;top:70px}
 .sc-preview canvas{width:100%;height:auto;border-radius:10px;border:1px solid var(--line);display:block}
@@ -115,7 +115,7 @@ rs_head('Stats card');
   };
   var round = function (x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); };
   function draw() {
-    var sz = q('[data-size]').value.split('x'), W = +sz[0], H = +sz[1], dark = q('[data-theme]').value === 'dark';
+    var sz = q('[data-size]').value.split('x'), W = +sz[0], H = +sz[1], dark = q('[data-colors]').value === 'dark';
     cv.width = W; cv.height = H;
     var bg = dark ? '#0b0d10' : '#f6f8fb', fg = dark ? '#f2f4f6' : '#0f1a2a', mu = dark ? '#9aa3ae' : '#5b6778', panel = dark ? '#14181e' : '#ffffff', line = dark ? '#262c35' : '#e2e7ee', acc = dark ? '#34F2E8' : '#06757E';
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
@@ -177,7 +177,7 @@ rs_head('Stats card');
   document.querySelectorAll('[data-days] button').forEach(function (b) {
     b.addEventListener('click', function () { days = +b.getAttribute('data-v'); document.querySelectorAll('[data-days] button').forEach(function (x) { x.classList.toggle('on', x === b); }); load(); });
   });
-  document.querySelectorAll('[data-metrics] input, [data-brand], [data-size], [data-theme]').forEach(function (el) { el.addEventListener('change', draw); });
+  document.querySelectorAll('[data-metrics] input, [data-brand], [data-size], [data-colors]').forEach(function (el) { el.addEventListener('change', draw); });
   document.querySelectorAll('[data-title], [data-sub]').forEach(function (el) { el.addEventListener('input', draw); });
   q('[data-save]').addEventListener('click', function () {
     var a = document.createElement('a');
