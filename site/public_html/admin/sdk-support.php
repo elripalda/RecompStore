@@ -112,6 +112,13 @@ if (isset($_GET['progress'])) {
     rs_sdk_json(['ok' => true, 'count' => $count, 'running' => $running, 'rows' => $changed, 'now' => rs_sdk_db_now()]);
 }
 
+// (4.7) The PR queue's live status while Draft now runs.
+if (isset($_GET['prq_poll'])) {
+    rs_prq_tables();
+    $c = rs_db()->query("SELECT SUM(status = 'drafting' AND updated >= NOW() - INTERVAL " . RS_PRQ_STUCK . " SECOND) d, SUM(status = 'draft') r, SUM(status = 'todo') w FROM pc_prq")->fetch();
+    rs_sdk_json(['ok' => true, 'drafting' => (int)$c['d'], 'drafts' => (int)$c['r'], 'waiting' => (int)$c['w']]);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $id = (string)($_POST['id'] ?? '');
@@ -158,9 +165,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (($_POST['action'] ?? '') === 'prq_queue') {
         $ids = array_filter(array_map('trim', explode(',', (string)($_POST['ids'] ?? ''))));
         $n = rs_prq_queue($ids);
-        $msg = $n ? $n . ' queued: the next daily drafts do them first.' : 'Nothing new to queue (already in the queue, or not on GitHub).';
+        // (4.7) Draft now: straight away on this server when the Anthropic key is saved.
+        $started = 0; $why = '';
+        if (rs_prq_now_ready()) { try { $started = rs_prq_run($ids); } catch (Throwable $e) { $why = $e->getMessage(); } }
+        if ($started) $msg = 'Drafting ' . $started . ' now. ' . ($started === 1 ? 'It shows' : 'They show') . ' up below in about a minute' . ($started > 2 ? ' or two' : '') . '.';
+        elseif ($why !== '') $msg = $why;
+        elseif ($n) $msg = $n . ' queued for tomorrow\'s drafts. Add the Anthropic API key in Setup to draft right away.';
+        else $msg = 'Nothing to draft: already drafted or sent (see below), or not on GitHub.';
         $id = '';
-        rs_flash($msg, $n ? 'ok' : 'err');
+        rs_flash($msg, $started || $n ? 'ok' : 'err');
         header('Location: sdk-support.php#prq'); exit;
     } elseif (str_starts_with((string)($_POST['action'] ?? ''), 'prq_')) {
         // (4.6) The PR queue: save, send, skip, draft again; and (owner) the token and the drafter's key.
@@ -177,9 +190,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($act === 'prq_skip') {
                 rs_db()->prepare("UPDATE pc_prq SET status = 'skipped', updated = NOW() WHERE id = ?")->execute([$qid]);
                 rs_flash('Skipped. It won\'t be drafted again.');
-            } elseif ($act === 'prq_redo') {
-                rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
-                rs_flash('Back in line: the next daily run drafts it again.');
+            } elseif ($act === 'prq_redo' || $act === 'prq_now') {
+                // Draft again (a draft), or Draft now (one waiting): on this server at once when it can.
+                if ($act === 'prq_redo') rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
+                $row = rs_prq_get($qid);
+                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it now. It shows up below in about a minute.');
+                else rs_flash(rs_prq_now_ready() ? 'It\'s already being drafted.' : 'Back in line: the next daily run drafts it. Add the Anthropic API key in Setup to draft right away.');
+                $qid = 0;
+            } elseif ($act === 'prq_forget') {
+                rs_db()->prepare("DELETE FROM pc_prq WHERE id = ? AND status = 'todo'")->execute([$qid]);
+                rs_flash('Taken out of the queue.');
+                $qid = 0;
+            } elseif ($act === 'prq_ai' && rs_is_owner()) {
+                $k = trim((string)($_POST['ai_key'] ?? ''));
+                if ($k !== '') {
+                    $c = curl_init('https://api.anthropic.com/v1/models?limit=1');
+                    curl_setopt_array($c, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15, CURLOPT_HTTPHEADER => ['x-api-key: ' . $k, 'anthropic-version: 2023-06-01']]);
+                    curl_exec($c); $code = (int)curl_getinfo($c, CURLINFO_HTTP_CODE); curl_close($c);
+                    if ($code !== 200) throw new RuntimeException('Anthropic didn\'t accept that key (' . ($code ?: 'no answer') . ').');
+                }
+                rs_secret_put('prq_ai_key', $k);
+                rs_flash($k !== '' ? 'Saved. Draft now works right away.' : 'Anthropic key removed. Drafts wait for the daily run.');
             } elseif ($act === 'prq_token' && rs_is_owner()) {
                 $t = trim((string)($_POST['token'] ?? ''));
                 rs_secret_put('prq_gh_token', $t);
@@ -262,7 +293,10 @@ rs_head('SDK support', true, ['assets/account.css']);
 </section>
 <?php // (4.6) The PR queue
 $prqDrafts = rs_prq_list(['draft']);
-$prqWaiting = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'todo'")->fetchColumn();
+$prqWork = rs_prq_list(['todo', 'drafting'], 50); // (4.7) waiting, drafting now, or didn't draft
+$prqWaiting = count(array_filter($prqWork, fn($r) => $r['status'] === 'todo'));
+$prqNow = rs_prq_now_ready();
+$prqHasAi = rs_secret_get('prq_ai_key') !== '';
 $prqSent = rs_prq_list(['sent'], 8);
 $prqLogin = (string)rs_setting('prq_gh_login', '');
 $prqHasToken = rs_prq_token() !== '';
@@ -272,8 +306,21 @@ if (!empty($_SESSION['prq_key_once'])) rs_session_write(function () { unset($_SE
 $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queued by hand'];
 ?>
 <section class="card prq-card" id="prq">
-  <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting for the next drafts' : '' ?> · drafted daily<?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span></div>
-  <p class="muted small">Every day the drafter picks recomps with no file yet (half just added, half popular console ports, and anything you queued first) and drafts their <code>recomplauncher.json</code> and the pull request. Look each one over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open".</p>
+  <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting' : '' ?> · <?= $prqNow ? 'Draft now, and daily at 7:23' : 'drafted daily at 7:23' ?><?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span></div>
+  <p class="muted small">Tick recomps in the table below and click <strong>Draft now</strong>: their <code>recomplauncher.json</code> and pull request are written in about a minute and show up here. Every day at 7:23 the drafter also picks a few with no file yet by itself (half just added, half popular console ports). Look each draft over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open". Nothing is sent until you click Send.</p>
+  <?php if (!$prqHasAi && rs_is_owner()): ?><p class="warn small">Add the Anthropic API key in Setup below so Draft now works right away. Until then, picked recomps wait for the daily run.</p><?php endif; ?>
+  <?php if ($prqWork): ?>
+  <ul class="prq-work" id="prq-work">
+  <?php foreach ($prqWork as $w): $wa = rs_pc_app((string)$w['app_id']); $stuck = $w['status'] === 'drafting' && strtotime((string)$w['updated'] . ' UTC') < time() - RS_PRQ_STUCK; $drafting = $w['status'] === 'drafting' && !$stuck; ?>
+    <li class="prq-w<?= $drafting ? ' on' : '' ?>"<?= $drafting ? ' data-drafting' : '' ?>>
+      <?php if ($drafting): ?><span class="sdk-spin" aria-hidden="true"></span><?php endif; ?>
+      <span class="prq-name"><strong><?= h($wa['name'] ?? $w['app_id']) ?></strong><span class="muted small"><?= h($w['repo']) ?></span></span>
+      <span class="prq-w-st small"><?= $drafting ? 'Drafting now…' : ($stuck ? '<span class="bad">Didn\'t finish. Try again.</span>' : ((string)$w['error'] !== '' ? '<span class="bad">Didn\'t draft: ' . h((string)$w['error']) . '</span>' : 'Waiting for ' . ($prqNow ? 'Draft now' : 'the daily run'))) ?></span>
+      <?php if (!$drafting): ?><form method="post" class="prq-w-btns"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$w['id'] ?>"><?php if ($prqNow): ?><button class="btn primary" name="action" value="prq_now">Draft now</button><?php endif; ?><?php if ($w['status'] === 'todo'): ?><button class="btn" name="action" value="prq_forget">Remove</button><?php endif; ?></form><?php endif; ?>
+    </li>
+  <?php endforeach; ?>
+  </ul>
+  <?php endif; ?>
   <?php if (!$prqHasToken && rs_is_owner()): ?><p class="warn small">Add the GitHub token below before sending: it's the account the pull requests come from.</p><?php endif; ?>
   <?php if (!$prqDrafts): ?><p class="muted">No drafts right now.</p><?php endif; ?>
   <?php foreach ($prqDrafts as $pq): $qa = rs_pc_app((string)$pq['app_id']); if (!$qa) continue; ?>
@@ -293,7 +340,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
       <div class="prq-btns">
         <button class="btn primary" name="action" value="prq_send" onclick="return confirm('Open this pull request on <?= h(addslashes((string)$pq['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>>Send pull request</button>
         <button class="btn" name="action" value="prq_save">Save</button>
-        <button class="btn" name="action" value="prq_redo" title="The next daily run drafts it again">Draft it again</button>
+        <button class="btn" name="action" value="prq_redo" title="<?= $prqNow ? 'Writes it again from scratch, right away' : 'The next daily run drafts it again' ?>">Draft it again</button>
         <button class="btn danger" name="action" value="prq_skip">Skip</button>
       </div>
     </form>
@@ -311,6 +358,11 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
           <input type="password" name="token" autocomplete="off" placeholder="<?= $prqHasToken ? 'Paste a new one to replace it, or leave empty and save to remove it' : 'A fine-grained or classic token with public_repo' ?>"></label>
         <small class="muted">Make it on github.com → Settings → Developer settings → Personal access tokens, signed in as the account the pull requests should come from. A classic token needs the <code>public_repo</code> scope. It's kept encrypted on the server.</small>
         <button class="btn">Save token</button></form>
+      <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_ai">
+        <label>Anthropic API key for Draft now <span class="muted small"><?= $prqHasAi ? 'saved' : 'not set' ?></span>
+          <input type="password" name="ai_key" autocomplete="off" placeholder="<?= $prqHasAi ? 'Paste a new one to replace it, or leave empty and save to remove it' : 'sk-ant-…' ?>"></label>
+        <small class="muted">Make one on console.anthropic.com → API Keys. Draft now runs the drafter on this server with it, so drafts are ready in about a minute. It's kept encrypted on the server.</small>
+        <button class="btn">Save key</button></form>
       <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_key">
         <label>Drafter key <span class="muted small"><?= (string)rs_setting('prq_key_hash', '') !== '' ? 'set' : 'not set' ?></span></label>
         <?php if ($prqKeyOnce !== ''): ?><input readonly class="mono" value="<?= h($prqKeyOnce) ?>" onclick="this.select()"><small class="warn">Copy it now into the RecompStore repo on GitHub as the secret <code>RS_PRQ_KEY</code> (Settings → Secrets and variables → Actions). It isn't shown again.</small>
@@ -338,7 +390,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
     <div class="sdk-picked" id="sdk-picked" hidden>
       <span class="small" id="sdk-picked-n">0 picked</span>
       <form method="post" data-sdk-ajax data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="recheck_ids"><input type="hidden" name="ids" value=""><button class="btn">Check picked again</button></form>
-      <form method="post" data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="prq_queue"><input type="hidden" name="ids" value=""><button class="btn primary" title="The daily drafts do these first">Queue for PR drafts</button></form>
+      <form method="post" data-sdk-picks><?= $csrf ?><input type="hidden" name="action" value="prq_queue"><input type="hidden" name="ids" value=""><button class="btn primary" title="<?= rs_prq_now_ready() ? 'Writes their pull requests now, ready in about a minute. Nothing is sent.' : 'The daily drafts do these first' ?>"><?= rs_prq_now_ready() ? 'Draft now' : 'Queue for PR drafts' ?></button></form>
       <button type="button" class="btn" id="sdk-pick-none">Clear</button>
     </div>
   </div>
@@ -491,9 +543,12 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
 .prq-h3{margin:18px 0 6px;font-size:15px}
 .prq-sent{list-style:none;margin:0;padding:0;display:grid;gap:6px}.prq-sent li{display:flex;justify-content:space-between;gap:10px}
 .prq-setup{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.prq-setup summary{cursor:pointer;font-weight:600}
-.prq-setup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:10px}
+.prq-setup-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:10px}
+.prq-work{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px}
+.prq-w{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
+.prq-w.on{border-color:var(--blue)}.prq-w .prq-name{flex:1 1 220px;min-width:0}.prq-w-st{flex:1 1 220px}.prq-w-btns{display:flex;gap:8px;margin:0}
 .prq-setup-grid form{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--line);border-radius:12px}.prq-setup-grid form > .btn{margin-top:auto;align-self:flex-start}.prq-setup-grid label{display:flex;flex-direction:column;gap:6px}
-@media (max-width:820px){.prq-setup-grid{grid-template-columns:1fr}}
+@media (max-width:980px){.prq-setup-grid{grid-template-columns:1fr}}
 
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (prefers-reduced-motion:reduce){.sdk-spin{animation:none}.sdk-meter span{transition:none}}
@@ -674,6 +729,19 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   apply();
   if (Number(table.dataset.todo) > 0) poll();
   if (location.hash.indexOf('#r-') === 0) jump(decodeURIComponent(location.hash.slice(3)));
+})();
+</script>
+<script>
+// (4.7) While Draft now runs: ask every few seconds, and reload once a draft is in.
+(function () {
+  if (!document.querySelector('[data-drafting]')) return;
+  var start = document.querySelectorAll('[data-drafting]').length, tries = 0;
+  var t = setInterval(function () {
+    if (++tries > 150) { clearInterval(t); return; }
+    fetch('sdk-support.php?prq_poll=1', { cache: 'no-store', credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.ok && j.drafting < start) { clearInterval(t); location.href = 'sdk-support.php#prq'; location.reload(); }
+    }).catch(function () {});
+  }, 4000);
 })();
 </script>
 <?php rs_foot(['assets/sdk-prompt.js']);

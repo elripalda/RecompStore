@@ -53,8 +53,68 @@ function rs_prq_key_new(): string {
     return $k;
 }
 function rs_prq_key_ok(string $k): bool {
+    if ($k === '') return false;
     $h = (string)rs_setting('prq_key_hash', '');
-    return $h !== '' && $k !== '' && hash_equals($h, hash('sha256', $k));
+    if ($h !== '' && hash_equals($h, hash('sha256', $k))) return true;
+    // (4.7) Draft now: the run on this server carries its own key, good for an hour.
+    $run = json_decode((string)rs_setting('prq_run_keys', '[]'), true) ?: [];
+    foreach ($run as $r) if (is_array($r) && (int)($r['until'] ?? 0) > time() && hash_equals((string)$r['h'], hash('sha256', $k))) return true;
+    return false;
+}
+
+// ---- (4.7) Draft now: the same drafter (tools/prq/draft.py), run on this server straight away ------
+// Needs an Anthropic API key saved on SDK support (Setup). Rows show "Drafting" while it runs; one that
+// doesn't come back within 10 minutes shows as stuck and can be drafted again.
+const RS_PRQ_STUCK = 600;
+function rs_prq_script(): string { return dirname(RS_PUBLIC) . '/recompstore-private/prq/draft.py'; }
+function rs_prq_now_ready(): bool { return rs_secret_get('prq_ai_key') !== '' && is_file(rs_prq_script()); }
+function rs_prq_run(array $appIds): int {
+    rs_prq_tables();
+    if (!rs_prq_now_ready()) throw new RuntimeException('Add the Anthropic API key in Setup first.');
+    $db = rs_db();
+    $ids = [];
+    foreach (array_slice(array_values(array_unique($appIds)), 0, 20) as $id) {
+        $st = $db->prepare("UPDATE pc_prq SET status = 'drafting', error = NULL, updated = NOW() WHERE app_id = ? AND (status = 'todo' OR (status = 'drafting' AND updated < NOW() - INTERVAL " . RS_PRQ_STUCK . " SECOND))");
+        $st->execute([(string)$id]);
+        if ($st->rowCount()) $ids[] = (string)$id;
+    }
+    if (!$ids) return 0;
+    $key = 'prqrun_' . bin2hex(random_bytes(20));
+    $run = array_values(array_filter(json_decode((string)rs_setting('prq_run_keys', '[]'), true) ?: [], fn($r) => is_array($r) && (int)($r['until'] ?? 0) > time()));
+    $run[] = ['h' => hash('sha256', $key), 'until' => time() + 3600];
+    rs_set_setting('prq_run_keys', json_encode(array_slice($run, -20)));
+    $dir = dirname(rs_prq_script());
+    $env = ['PATH' => '/usr/local/bin:/usr/bin:/bin', 'HOME' => $dir, 'LANG' => 'C.UTF-8', 'RS_SITE' => rtrim((string)rs_setting('site_url', 'https://recompstore.com'), '/'), 'RS_PRQ_KEY' => $key,
+        'ANTHROPIC_API_KEY' => rs_secret_get('prq_ai_key'), 'GITHUB_TOKEN' => rs_prq_token(), 'PRQ_IDS' => implode(',', $ids), 'PRQ_COUNT' => (string)count($ids)];
+    // The shell starts it in the background and returns at once; the run goes on after the page has answered.
+    $p = proc_open('setsid python3 -I ' . escapeshellarg(rs_prq_script()) . ' >> ' . escapeshellarg($dir . '/run.log') . ' 2>&1 &',
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, $dir, $env);
+    if (!is_resource($p)) {
+        $db->prepare("UPDATE pc_prq SET status = 'todo', error = 'The drafter didn\'t start on the server.' WHERE app_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ')')->execute($ids);
+        throw new RuntimeException('The drafter didn\'t start on the server.');
+    }
+    proc_close($p);
+    rs_log('sdk', 'prq', 'Draft now: ' . implode(', ', $ids));
+    return count($ids);
+}
+// A pick the drafter couldn't finish: back to waiting, with why.
+function rs_prq_fail(string $appId, string $why): void {
+    rs_prq_tables();
+    rs_db()->prepare("UPDATE pc_prq SET status = 'todo', error = ?, updated = NOW() WHERE app_id = ? AND status = 'drafting'")
+        ->execute([mb_substr($why !== '' ? $why : 'Something went wrong while drafting.', 0, 300), $appId]);
+}
+// Draft now's picks: the rows it marked Drafting.
+function rs_prq_by_ids(array $appIds): array {
+    rs_prq_tables();
+    $res = [];
+    foreach (array_slice($appIds, 0, 20) as $id) {
+        $st = rs_db()->prepare("SELECT pick FROM pc_prq WHERE app_id = ? AND status = 'drafting'");
+        $st->execute([(string)$id]);
+        $pick = $st->fetchColumn();
+        if ($pick === false || !($a = rs_pc_app((string)$id))) continue;
+        $res[] = rs_prq_pick_row($a, (string)$pick ?: 'asked');
+    }
+    return $res;
 }
 function rs_prq_token(): string { return rs_secret_get('prq_gh_token'); }
 
@@ -80,17 +140,20 @@ function rs_prq_targets(int $n): array {
     $res = [];
     foreach ($out as $id => $pick) {
         $a = $rows[$id]['a'] ?? rs_pc_app($id);
-        if (!$a) continue;
+        if ($a) $res[] = rs_prq_pick_row($a, $pick);
+    }
+    return $res;
+}
+// What the drafter gets for one recomp.
+function rs_prq_pick_row(array $a, string $pick): array {
         $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
-        $res[] = [
+        return [
             'id' => $a['id'], 'pick' => $pick, 'repo' => (string)$a['repo'], 'name' => (string)$a['name'], 'game' => (string)$a['game'],
             'console' => (string)$a['origin'], 'page' => 'https://recomplauncher.com/game/' . $a['id'],
             'assets' => array_filter(['win' => (string)($a['asset_win'] ?? ''), 'linux' => (string)($a['asset_linux'] ?? ''), 'mac' => (string)($a['asset_mac'] ?? '')]),
             'needs' => (string)($a['needs'] ?? ''), 'setup_required' => !empty($a['setup_required']), 'setup_steps' => (string)($a['setup_steps'] ?? ''),
             'our_profile' => is_array($boot) ? $boot : null, 'downloads' => (int)$a['downloads'],
         ];
-    }
-    return $res;
 }
 
 // A draft from the Action. A recomp that got a PR or a mark meanwhile is left alone.

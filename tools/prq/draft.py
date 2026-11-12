@@ -31,6 +31,7 @@ AKEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GHT = os.environ.get("GITHUB_TOKEN", "")
 COUNT = int(os.environ.get("PRQ_COUNT", "8") or 8)
 MODEL = os.environ.get("PRQ_MODEL", "claude-sonnet-5-5")
+IDS = os.environ.get("PRQ_IDS", "")  # Draft now on SDK support: just these recomps
 SPEC_URL = "https://recomplauncher.com/sdk-files/recomplauncher-agent.md"
 SCHEMA_URL = "https://recomplauncher.com/schema/recomplauncher.json"
 UA = "RecompStore-PR-Drafter"
@@ -70,7 +71,7 @@ def gh(path, accept="application/vnd.github+json"):
 
 
 def site(method, a, data=None):
-    st, b = http(f"{SITE}/api/prq.php?a={a}" + (f"&n={COUNT}" if a == "todo" else ""), data=data,
+    st, b = http(f"{SITE}/api/prq.php?a={a}" + (f"&n={COUNT}" + (f"&ids={urllib.parse.quote(IDS)}" if IDS else "") if a == "todo" else ""), data=data,
                  headers={"X-PRQ-Key": KEY, "Accept": "application/json"}, method=method, timeout=60)
     try:
         return st, json.loads(b)
@@ -245,6 +246,8 @@ def main():
         return
     st, spec = http(SPEC_URL, timeout=60)
     if st != 200 or len(spec) < 2000:
+        for p in picks:
+            site("POST", "fail", {"id": p["id"], "error": "Couldn't read the SDK guide. Try again in a minute."})
         sys.exit("Couldn't read the SDK guide.")
     validator = None
     try:
@@ -286,6 +289,7 @@ def main():
             done += 1 if r.get("ok") else 0
         except Exception as e:
             print(f"error {p['repo']}: {e}")
+            site("POST", "fail", {"id": p["id"], "error": str(e)[:300]})
     print(f"{done} drafts saved")
 
 
