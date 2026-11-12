@@ -21,14 +21,24 @@ if (!rs_gl_path_ok($repo)) {
 }
 $gf = rs_gl_disk_file($repo);
 $gage = is_file($gf) ? time() - (int)filemtime($gf) : PHP_INT_MAX;
-if ($gage < 1800) {
+// (4.8) Like gh.php: a copy that says "nothing yet" counts for two minutes; ?fresh=1 asks again after 30 seconds.
+$fresh = !empty($_GET['fresh']);
+$copyOk = function () use ($gf, $gage, $fresh): bool {
+    if ($fresh) return $gage < 30;
+    if ($gage < 120) return true;
+    $list = json_decode((string)@file_get_contents($gf), true);
+    if (!is_array($list) || !$list) return false;
+    foreach ($list as $x) if (is_array($x) && empty($x['draft'])) return (bool)array_filter((array)($x['assets'] ?? []));
+    return false;
+};
+if ($gage < 1800 && $copyOk()) {
     header('Cache-Control: public, max-age=120');
     header('X-RS-Cache-Age: ' . $gage);
     readfile($gf);
     exit;
 }
 try {
-    $r = rs_gl_releases($repo);
+    $r = rs_gl_releases($repo, $fresh ? 30 : ($gage < 1800 ? RS_REL_EMPTY_AGE : 900));
 } catch (Throwable $e) {
     rs_errlog('gl', $e);
     if (is_file($gf)) {

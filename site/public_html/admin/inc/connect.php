@@ -817,7 +817,10 @@ function rs_gl_project(string $path, int $maxAge = 3600): ?array {
 // Releases on any host. -> [status, body, stale, age]
 function rs_host_releases(?string $host, string $repo, int $maxAge = 900): array {
     $h = rs_host_norm($host);
-    return $h === 'gitlab' ? rs_gl_releases($repo, $maxAge) : ($h === 'sourceforge' ? rs_sf_releases($repo, $maxAge) : rs_gh_releases($repo, $maxAge));
+    $get = fn(int $age) => $h === 'gitlab' ? rs_gl_releases($repo, $age) : ($h === 'sourceforge' ? rs_sf_releases($repo, $age) : rs_gh_releases($repo, $age));
+    $r = $get($maxAge);
+    if ($maxAge > RS_REL_EMPTY_AGE && empty($r['stale']) && (int)($r['age'] ?? 0) > RS_REL_EMPTY_AGE && rs_rel_looks_empty($r)) $r = $get(RS_REL_EMPTY_AGE);
+    return $r;
 }
 
 // ---- (4.3) SourceForge ----------------------------------------------------------------------------
@@ -1114,9 +1117,45 @@ function rs_asset_pattern(string $name, string $tag): string {
     return $name;
 }
 
+// (4.8) Upper and lower case count the same, as RecompLauncher matches them (assets.rs wild()):
+// "*windows*" finds "Game-Windows-x64.zip".
 function rs_pattern_matches(string $pattern, string $name): bool {
-    $re = '/^' . str_replace(['\*', '\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/';
+    $re = '/^' . str_replace(['\*', '\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/iu';
     return (bool)preg_match($re, $name);
+}
+
+// (4.8) The release a project's files are looked for in, the way RecompLauncher picks it: the newest that
+// isn't a draft or a pre-release, else the newest that isn't a draft. -> [that release, another release
+// that has the named files when that one doesn't (the launcher installs it until the newest has them)].
+function rs_rel_pick(array $rels, array $pats = []): array {
+    $list = array_values(array_filter($rels, fn($x) => is_array($x) && empty($x['draft'])));
+    if (!$list) return [null, null];
+    $main = null;
+    foreach ($list as $x) if (empty($x['prerelease'])) { $main = $x; break; }
+    $main ??= $list[0];
+    $pats = array_values(array_filter(array_map('strval', $pats), fn($p) => trim($p) !== ''));
+    if (!$pats) return [$main, null];
+    $has = function (array $x) use ($pats): bool {
+        foreach ($pats as $p) { $ok = false; foreach ((array)($x['assets'] ?? []) as $f) if (rs_pattern_matches($p, (string)($f['name'] ?? ''))) { $ok = true; break; } if (!$ok) return false; }
+        return true;
+    };
+    if ($has($main)) return [$main, null];
+    foreach ($list as $x) if ($x !== $main && $has($x)) return [$main, $x];
+    return [$main, null];
+}
+
+// (4.8) A release list that says "no release yet", or whose newest release has no files, is read again
+// after two minutes instead of the usual wait: developers often publish a release first and upload the
+// files a few minutes later (Shinobi PS2 Recomp, Wario's Woods).
+const RS_REL_EMPTY_AGE = 120;
+function rs_rel_looks_empty(array $r): bool {
+    $st = (int)($r['status'] ?? 0);
+    if ($st === 404) return true;
+    if ($st !== 200) return false;
+    $list = json_decode((string)($r['body'] ?? ''), true);
+    if (!is_array($list) || !$list) return true;
+    foreach ($list as $x) if (is_array($x) && empty($x['draft'])) return !array_filter((array)($x['assets'] ?? []));
+    return true;
 }
 
 function rs_media_gh(string $bytes, string $key): ?string {

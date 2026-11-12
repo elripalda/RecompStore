@@ -127,7 +127,7 @@ if ($job):
 </section>
 <?php endif; ?>
 <?php elseif (in_array($state, ['new', 'back'], true)):
-    $chk = rs_hub_check($subId, $d, !empty($_GET['fresh'])); ?>
+    $chk = rs_hub_check($subId, $d, !empty($_GET['fresh']) ? 30 : 900); // opened: the release as it is now ?>
 <section class="sh-d-sec">
   <h3>How to approve <small><?= $state === 'new' ? 'checked for you; look over anything orange or red' : 'as it stands now' ?> · <button type="button" class="linkish" data-recheck>check again</button></small></h3>
   <ol class="sh-steps">

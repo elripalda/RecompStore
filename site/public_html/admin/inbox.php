@@ -664,8 +664,9 @@ rs_head($SUBS ? 'Submissions' : 'Inbox', true, ['assets/inbox.css', 'assets/vt.c
       $rels = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
       // (4.8) ...when it matches. A copy that says "no release yet" or "that file isn't in it" is looked at
       // again after 15 minutes: a release put out after our last look (Wario's Woods) showed as missing.
-      if (rs_sub_rel_stale($d, $rel, $rels)) { $rel = rs_host_releases($sHost, (string)$d['repo'], 900); $rels = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []; }
-      $latest = is_array($rels) && $rels ? $rels[0] : null; ?>
+      if (rs_sub_rel_stale($d, $rel, $rels)) { $rel = rs_host_releases($sHost, (string)$d['repo'], 180); $rels = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []; }
+      [$relMain, $relAlt] = is_array($rels) ? rs_rel_pick($rels, ($d['platform'] ?? '') === 'pc' ? array_values((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')])) : [null, null];
+      $latest = $relAlt ?? $relMain; // (4.8) the release the launcher would use ?>
     <header>
       <input type="checkbox" class="log-pick" value="<?= (int)$r['id'] ?>" aria-label="Pick this one">
       <span class="tag cyan">Submission · <?= h(['games' => 'Game port', 'emulators' => 'Emulator', 'apps' => 'App', 'tools' => 'Tool'][$d['category']] ?? 'App') ?></span>

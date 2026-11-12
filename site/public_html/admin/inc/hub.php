@@ -119,7 +119,7 @@ function rs_hub_pics(array $ids): array {
 // -> ['steps' => [key => [state ok|warn|bad|run|skip, note]], 'note' => [state, short text], 'latest' => [tag, when, names],
 //     'rel' => status, 'at' => time]. Kept in kv_cache as hubchk:<id> for the board.
 
-function rs_hub_check(int $id, array $d, bool $fresh = false): array {
+function rs_hub_check(int $id, array $d, int $maxAge = 21600): array {
     $pc = ($d['platform'] ?? '') === 'pc';
     $host = rs_host_norm((string)($d['host'] ?? ''));
     $repo = (string)($d['repo'] ?? '');
@@ -137,27 +137,33 @@ function rs_hub_check(int $id, array $d, bool $fresh = false): array {
         else $steps['own'] = ['warn', 'Sent by @' . $by . ', but the repo is under ' . $ghOwner . '. One of their organizations? Check they\'re part of it', 'Repo is under another account'];
     }
     // 2. Builds are there.
-    $rel = $repo !== '' && rs_host_repo_ok($host, $repo) ? rs_host_releases($host, $repo, $fresh ? 900 : 7 * 86400) : ['status' => 0, 'body' => ''];
+    $rel = $repo !== '' && rs_host_repo_ok($host, $repo) ? rs_host_releases($host, $repo, $maxAge) : ['status' => 0, 'body' => ''];
     $rels = (int)$rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
-    if (rs_sub_rel_stale($d, $rel, $rels)) { $rel = rs_host_releases($host, $repo, 900); $rels = (int)$rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []; }
-    $latest = is_array($rels) && $rels ? $rels[0] : null;
-    $names = $latest ? array_map(fn($x) => (string)$x['name'], (array)($latest['assets'] ?? [])) : [];
+    if (rs_sub_rel_stale($d, $rel, $rels)) { $rel = rs_host_releases($host, $repo, 180); $rels = (int)$rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []; }
     $pats = $pc ? array_filter((array)($d['assets'] ?? [])) : array_filter([(string)($d['asset'] ?? '')]);
-    if ((int)$rel['status'] === 404) $steps['files'] = ['bad', $hn . ' can\'t find the ' . ($host === 'gitlab' ? 'project' : 'repo') . '. It\'s private or the link is wrong'];
-    elseif (!$latest) $steps['files'] = (int)$rel['status'] === 200 ? ['bad', 'No release to download yet', 'No release yet'] : ['run', $hn . ' didn\'t answer. Checked again in a few minutes'];
+    // (4.8) The release RecompLauncher would use (newest full release), or an older one that has their files.
+    [$main, $alt] = is_array($rels) ? rs_rel_pick($rels, $pats) : [null, null];
+    $latest = $alt ?? $main;
+    $names = $latest ? array_map(fn($x) => (string)$x['name'], (array)($latest['assets'] ?? [])) : [];
+    $sysOf = fn(array $keys) => array_map(fn($k) => ['win' => 'Windows', 'mac' => 'macOS', 'linux' => 'Linux'][$k] ?? $k, $keys);
+    if ((int)$rel['status'] === 404) $steps['files'] = ['bad', $hn . ' can\'t find the ' . ($host === 'gitlab' ? 'project' : 'repo') . '. It\'s private or the link is wrong', 'Repo not found'];
+    elseif (!$main) $steps['files'] = (int)$rel['status'] === 200 ? ['bad', 'No release to download yet', 'No release yet'] : ['run', $hn . ' didn\'t answer. Checked again in a few minutes'];
     else {
-        $miss = array_filter($pats, fn($p) => !array_filter($names, fn($n) => rs_pattern_matches((string)$p, $n)));
-        $tag = (string)$latest['tag_name'];
-        $when = !empty($latest['published_at']) ? ', released ' . rs_hub_ago_long((int)strtotime((string)$latest['published_at'])) : '';
-        if (!$pats) $steps['files'] = ['warn', 'They didn\'t say which release files to use. Newest is ' . $tag . $when];
+        $tag = (string)$main['tag_name'];
+        $when = !empty($main['published_at']) ? ', released ' . rs_hub_ago_long((int)strtotime((string)$main['published_at'])) : '';
+        $mainNames = array_map(fn($x) => (string)$x['name'], (array)($main['assets'] ?? []));
+        $miss = array_filter($pats, fn($p) => !array_filter($mainNames, fn($n) => rs_pattern_matches((string)$p, $n)));
+        $has = $mainNames ? ' It has: ' . mb_strimwidth(implode(', ', array_slice($mainNames, 0, 6)), 0, 220, '…') : ' It has no files yet';
+        if (!$pats) $steps['files'] = ['warn', 'They didn\'t say which release files to use. Newest is ' . $tag . $when . '.' . $has, 'No release files named'];
+        elseif ($miss && $alt) $steps['files'] = ['warn', 'Their files are in ' . (string)$alt['tag_name'] . ', not in ' . $tag . ' yet. RecompLauncher installs ' . (string)$alt['tag_name'] . ' until ' . $tag . ' has them', 'Files only in an older release'];
         elseif ($miss) {
-            $sys = $pc ? array_map(fn($k) => ['win' => 'Windows', 'mac' => 'macOS', 'linux' => 'Linux'][$k] ?? $k, array_keys(array_intersect($pats, $miss))) : [];
-            $steps['files'] = ['bad', ($sys ? implode(' and ', $sys) . ' file' . (count($sys) > 1 ? 's' : '') : 'The file they named') . ' not in the newest release (' . $tag . ')', 'Files not in the newest release'];
+            $sys = $pc ? $sysOf(array_keys(array_intersect($pats, $miss))) : [];
+            $steps['files'] = ['bad', ($sys ? implode(' and ', $sys) . ' file' . (count($sys) > 1 ? 's' : '') . ' (' . implode(', ', array_intersect_key($pats, array_flip(array_keys(array_intersect($pats, $miss))))) . ')' : 'The file they named') . ' not in ' . $tag . '.' . $has, 'Files not in the newest release'];
         } else {
-            $sys = $pc ? array_map(fn($k) => ['win' => 'Windows', 'mac' => 'macOS', 'linux' => 'Linux'][$k] ?? $k, array_keys($pats)) : [];
+            $sys = $pc ? $sysOf(array_keys($pats)) : [];
             $steps['files'] = ['ok', ($pc ? rs_hub_list($sys) . ' ' . (count($sys) === 1 ? 'file' : 'files') : 'Its file') . ' in ' . $tag . $when];
         }
-        if (!empty($latest['prerelease']) && $steps['files'][0] === 'ok') $steps['files'] = ['warn', $tag . ' is a pre-release' . $when . '. Fine if it\'s their only release', 'Pre-release only'];
+        if (!empty($main['prerelease']) && $steps['files'][0] === 'ok') $steps['files'] = ['warn', $tag . ' is a pre-release' . $when . '. Fine if it\'s their only release', 'Pre-release only'];
     }
     // 3. Safe to download.
     if (!$latest) $steps['safe'] = ['skip', 'Nothing to scan until there\'s a release'];

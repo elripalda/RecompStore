@@ -1015,7 +1015,7 @@
   }
 
   // A zip name with * (any run of characters) or ? (any one), as the store matches it.
-  const nameMatches = (pattern, name) => new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$').test(name);
+  const nameMatches = (pattern, name) => new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i').test(name);
 
   // For a GitHub source, point the download straight at the zip on the newest release that
   // has it (as the store does), and show that release's version.
@@ -1373,10 +1373,10 @@
       });
     };
     form.title_id.addEventListener('change', () => checkTid(form.title_id.value));
-    const lookup = (repo) => {
+    const lookup = (repo, fresh) => {
       if (!dev || !repo) return;
       // (3.6) A PC recomp: its release is read for the systems it runs on, not for a PS5 build.
-      if (platNow() === 'pc') { if (!/gitlab\.com\//i.test(repo)) form.repo.value = 'https://github.com/' + String(repo).replace(/^https?:\/\/(www\.)?github\.com\//i, ''); readRelease(); return; }
+      if (platNow() === 'pc') { if (!/gitlab\.com\//i.test(repo)) form.repo.value = 'https://github.com/' + String(repo).replace(/^https?:\/\/(www\.)?github\.com\//i, ''); readRelease(fresh); return; }
       const st = repoBox.querySelector('.status') || status;
       st.textContent = t('Reading its latest release…'); st.className = 'status';
       devGet('lookup', '&repo=' + encodeURIComponent(repo)).then((j) => {
@@ -1544,7 +1544,7 @@
     form.querySelector('[data-sx-look]').addEventListener('click', () => {
       if (!parseRepo(fv('repo'))) { status.textContent = t('Add the GitHub or GitLab project.'); status.className = 'status bad'; F('repo').focus(); return; }
       relRepo = '';
-      if (dev && !/gitlab\.com\//i.test(fv('repo'))) lookup(fv('repo')); else readRelease();
+      if (dev && !/gitlab\.com\//i.test(fv('repo'))) lookup(fv('repo'), true); else readRelease(true);
     });
     // Step 2: the prompt, and whether recomplauncher.json is in the project yet.
     const sxRes = form.querySelector('[data-sx-res]'), sxCheckBtn = form.querySelector('[data-sx-check]');
@@ -1654,14 +1654,15 @@
       form.querySelector('[data-rl-future]').hidden = !(!form.querySelector('input[name="rl_quick"][value="yes"]').checked && form.querySelector('input[name="rl_quick"]:checked') && form.querySelector('input[name="rl_settings"][value="no"]').checked);
       form.querySelector('[data-setup-steps]').hidden = !form.querySelector('input[name="rl_quick"][value="setup"]').checked;
     };
-    const readRelease = () => {
+    // (4.8) fresh: Look it up asks GitHub again (a release whose files were uploaded a minute ago).
+    const readRelease = (fresh) => {
       const pr = platNow() === 'pc' ? parseRepo(form.repo.value) : null;
       if (!pr) return;
       const repo = pr.repo, host = pr.host, key = (host ? host + ':' : '') + repo;
-      if (key === relRepo) return;
+      if (key === relRepo && fresh !== true) return;
       relRepo = key;
       relBox.textContent = t('Reading its latest release…'); relBox.className = 'sub-rel';
-      Promise.all([fetch(relApi(repo, host)).then((r) => r.json()).catch(() => null), pcLoad().catch(() => null)]).then(([rels, cat]) => {
+      Promise.all([fetch(relApi(repo, host) + (fresh === true ? '&fresh=1' : ''), fresh === true ? { cache: 'no-store' } : {}).then((r) => r.json()).catch(() => null), pcLoad().catch(() => null)]).then(([rels, cat]) => {
         if (relRepo !== key) return;
         const listed = cat && (cat.all || cat.apps || []).find((a) => String(a.repo).toLowerCase() === repo.toLowerCase() && (a.host || '') === host);
         const rel = Array.isArray(rels) ? (rels.find((r) => !r.draft && !r.prerelease) || rels.find((r) => !r.draft)) : null;
