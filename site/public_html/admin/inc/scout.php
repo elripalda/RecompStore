@@ -153,7 +153,8 @@ function rs_scout_run(bool $fresh = true): array {
         $picks = [];
         foreach (rs_db()->query('SELECT repo FROM pc_scout WHERE pick = 1 AND auto_id = 0 ORDER BY at DESC') as $r) {
             $k = strtolower((string)$r['repo']);
-            if (!isset($drafted[$k]) || $drafted[$k] === 'queued') $picks[] = (string)$r['repo'];
+            if (!isset($drafted[$k])) $picks[] = (string)$r['repo'];
+            elseif ($drafted[$k] === 'queued') array_unshift($picks, (string)$r['repo']); // a stopped one first
         }
         $found = [];
         foreach (rs_pc_found('new') as $f) $found[strtolower((string)$f['key'])] = $f;
@@ -167,7 +168,7 @@ function rs_scout_run(bool $fresh = true): array {
             try {
                 $id = rs_auto_start(rs_host_web((string)$f['host'], (string)$f['repo']), RS_SCOUT_WHO, false);
                 $mark($id, $key);
-                rs_auto_run($id);
+                if ((rs_auto_get($id)['status'] ?? '') === 'queued') rs_auto_run($id); // not one already done
                 $sum['drafted'][] = $id;
             } catch (Throwable $e) { error_log('scout draft ' . $key . ': ' . $e->getMessage()); }
         }
