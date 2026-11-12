@@ -381,6 +381,8 @@ function rs_auto_vt(array $job): array {
     if ($job['repo_key'] === '' || $job['tag'] === '' || !function_exists('rs_vt_release')) return ['skip', ''];
     [$rows, $v] = rs_vt_release($job['repo_key'], $job['tag']);
     if (!$rows) return [($job['steps']['vt']['s'] ?? '') === 'skip' ? 'skip' : 'run', 'In line'];
+    $clamOnly = !array_filter($rows, fn($r) => (string)($r['scanner'] ?? 'vt') !== 'clamav');
+    if ($v === 'green' && $clamOnly) return ['warn', 'Only ClamAV checked it (clean); VirusTotal hasn\'t yet. Run again to send it to VirusTotal'];
     $flag = implode(' · ', array_filter(array_map(fn($r) => (string)$r['flagged_by'], $rows)));
     $eng = max(array_map(fn($r) => (int)$r['engines'], $rows));
     $hits = max(array_map(fn($r) => (int)$r['malicious'] + (int)$r['suspicious'], $rows));

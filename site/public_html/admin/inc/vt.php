@@ -208,16 +208,20 @@ function rs_vt_add(string $repo, string $tag, array $asset, string $source, stri
     $sha = '';
     if (preg_match('/^sha256:([0-9a-f]{64})$/i', (string)($asset['digest'] ?? ''), $m)) $sha = strtolower($m[1]);
     $db = rs_db();
-    $st = $db->prepare('SELECT id, prio, source FROM vt_files WHERE repo = ? AND tag = ? AND name = ?');
+    $st = $db->prepare('SELECT id, prio, source, status, scanner FROM vt_files WHERE repo = ? AND tag = ? AND name = ?');
     $st->execute([$repo, $tag, $name]);
     if ($row = $st->fetch()) {
         if ($prio < (int)$row['prio']) $db->prepare('UPDATE vt_files SET prio = ?, source = ?, ref = ?, updated = NOW() WHERE id = ?')->execute([$prio, $source, $ref, $row['id']]);
+        // (4.7) A find checked at low priority got ClamAV only (new to VirusTotal). Asked for again at a
+        // priority that gets VirusTotal (Auto-add, a submission), it's checked again there.
+        if ($prio < 3 && (string)$row['status'] === 'done' && (string)($row['scanner'] ?? '') === 'clamav')
+            $db->prepare("UPDATE vt_files SET status = 'new', engines = 0, malicious = 0, suspicious = 0, flagged_by = '', err = '', tries = 0, next_at = NULL, updated = NOW() WHERE id = ?")->execute([$row['id']]);
         return;
     }
     // The same file checked before (another tag, another listing): its answer is copied.
     $done = null;
     if ($sha !== '') {
-        $q = $db->prepare("SELECT * FROM vt_files WHERE sha256 = ? AND status = 'done' ORDER BY updated DESC LIMIT 1");
+        $q = $db->prepare("SELECT * FROM vt_files WHERE sha256 = ? AND status = 'done'" . ($prio < 3 ? " AND scanner <> 'clamav'" : '') . ' ORDER BY updated DESC LIMIT 1');
         $q->execute([$sha]);
         $done = $q->fetch() ?: null;
     }
