@@ -304,9 +304,16 @@ function rs_watch_dupes_find(array $targets, array $parents): array {
         if (!isset($pairs[$k])) $pairs[$k] = [$a, $b, $why];
     };
     foreach ($by as $ids) for ($i = 1; $i < count($ids); $i++) $add($ids[0], $ids[$i], 'Both point at the same repo.');
+    // A fork is only the same thing when it's the same game: many recomps start as a fork of another
+    // one's engine (SpartanPort from Bloodborne PC) and are their own project.
+    $norm = fn(string $x): string => (string)preg_replace('/[^a-z0-9]/', '', strtolower($x));
     foreach ($pc as $t) {
         $p = strtolower((string)($parents[$t['id']] ?? ''));
-        if ($p !== '' && !empty($by[$p])) $add($by[$p][0], $t['id'], 'Its repo is a fork of the other one\'s.');
+        if ($p === '' || empty($by[$p])) continue;
+        $x = rs_pc_app($by[$p][0]); $y = rs_pc_app($t['id']);
+        if (!$x || !$y) continue;
+        $gx = $norm((string)$x['game']) ?: $norm((string)$x['name']); $gy = $norm((string)$y['game']) ?: $norm((string)$y['name']);
+        if ($gx !== '' && $gx === $gy) $add($by[$p][0], $t['id'], 'Its repo is a fork of the other one\'s, for the same game.');
     }
     foreach ($byName as $list) {
         if (count($list) < 2) continue;
@@ -404,8 +411,7 @@ function rs_watch_scan(?callable $say = null): array {
         }
     }
     // (4.8) Listings that look like the same thing twice (PC). Parents not asked this run stay as saved.
-    foreach (rs_db()->query("SELECT app_id, parent FROM repo_watch WHERE store = 'pc' AND parent <> ''")->fetchAll() as $r) $parents[$r['app_id']] = $parents[$r['app_id']] ?? (string)$r['parent'];
-    rs_kv_put('watch_dupes', (string)json_encode(rs_watch_dupes_find($targets, $parents), JSON_UNESCAPED_SLASHES));
+    rs_watch_dupes_refresh($targets, $parents);
     $sum = ['at' => time(), 'took' => (int)round(microtime(true) - $t0), 'checked' => count($targets), 'ok' => $n['ok'], 'flag' => $n['flag'], 'unk' => $n['unk'],
         'auth' => $auth, 'err' => $batchErr, 'new' => $new, 'followed' => $followed,
         'pc' => count(array_filter($targets, fn($t) => $t['store'] === 'pc')), 'ps5' => count(array_filter($targets, fn($t) => $t['store'] === 'ps5'))];
@@ -618,6 +624,15 @@ function rs_watch_ack(string $item): string {
 }
 
 // ---- (4.8) Duplicates ---------------------------------------------------------------------------------
+
+// The pairs worked out again from what's saved (each listing's repo and the repo it was forked from).
+function rs_watch_dupes_refresh(?array $targets = null, array $parents = []): int {
+    $targets = $targets ?? rs_watch_targets();
+    foreach (rs_db()->query("SELECT app_id, parent FROM repo_watch WHERE store = 'pc' AND parent <> ''")->fetchAll() as $r) $parents[$r['app_id']] = $parents[$r['app_id']] ?? (string)$r['parent'];
+    $pairs = rs_watch_dupes_find($targets, $parents);
+    rs_kv_put('watch_dupes', (string)json_encode($pairs, JSON_UNESCAPED_SLASHES));
+    return count($pairs);
+}
 
 // The pairs from the last run, with their listings: [[a, b, why, key]] (a, b listings). Gone or hidden
 // ones drop out.
