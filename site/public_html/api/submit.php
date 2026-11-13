@@ -53,6 +53,8 @@ if (($_GET['a'] ?? '') === 'sdk-check') {
     if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/(.+)$#i', $in, $gm)) { $host = 'gitlab'; $in = preg_replace('#/-(/.*)?$#', '', $gm[1]); }
     $repo = trim((string)preg_replace(['#^(?:https?://)?(?:www\.)?github\.com/#i', '#[?\#].*$#', '#\.git$#i'], '', $in), '/');
     $ok = $host === 'gitlab' ? (bool)preg_match('#^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}){1,5}$#', $repo) : rs_repo_ok($repo);
+    // (4.9) A project on a Forgejo server we read (Longshot's git.magicbean.dev): the same check.
+    if (!$ok && ($fl = rs_repo_from_link(trim((string)($_GET['repo'] ?? '')))) && $fl['host'] === 'forgejo') { $host = 'forgejo'; $repo = $fl['repo']; $ok = true; }
     if (!$ok) rs_sub_out(200, ['ok' => false, 'error' => 'Add your project\'s link on the first step.']);
     if (rs_rate_over('sdkprobe', 20, 600)) rs_sub_out(200, ['ok' => false, 'error' => 'That\'s a lot of checks. Wait a few minutes and try again.']);
     rs_rate_hit('sdkprobe');

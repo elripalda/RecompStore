@@ -588,19 +588,35 @@ function rs_dc_suggest_forum_setup(): string {
 // Looked for in its repo (top folder) and at the top of its Windows release zip. Kept a week.
 // -> ['has' => 'release'|'repo'|'none'|'unknown', 'at' => time]
 // $readmeNow: read the README from GitHub now (Check again); otherwise its copy from the last day.
+// (4.9) A developer's own recomplauncher.json at the top of their project, on any host we read: GitHub,
+// GitLab or a Forgejo server (Longshot). -> [status 200|404|other, text]. SourceForge has no repo files.
+function rs_sdk_repo_file(string $host, string $repo): array {
+    $host = rs_host_norm($host);
+    if ($repo === '' || $host === 'sourceforge') return [0, ''];
+    if ($host === 'gitlab') {
+        $r = rs_http(rs_gl_api() . '/projects/' . rawurlencode($repo) . '/repository/files/recomplauncher.json/raw?ref=HEAD', ['gitlab' => true, 'timeout' => 8, 'max' => 400000]);
+        return [(int)$r['status'], $r['status'] === 200 ? (string)$r['body'] : ''];
+    }
+    if ($host === 'forgejo') {
+        if (!rs_fj_path_ok($repo)) return [0, ''];
+        $r = rs_http(rs_fj_api($repo) . '/raw/recomplauncher.json', ['timeout' => 8, 'max' => 400000]);
+        return [(int)$r['status'], $r['status'] === 200 ? (string)$r['body'] : ''];
+    }
+    $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
+    if ($r['status'] !== 200) return [(int)$r['status'], ''];
+    $j = json_decode((string)$r['body'], true);
+    return [200, is_array($j) && isset($j['content']) ? (string)base64_decode((string)$j['content']) : ''];
+}
+
 function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false): array {
     $k = 'sdk:' . $a['id'];
     if (!$fresh && ($c = rs_kv_get($k)) && $c['age'] < 7 * 86400 && is_array($x = json_decode($c['v'], true))) return $x;
     $out = ['has' => 'unknown', 'at' => time()];
     $repo = (string)$a['repo'];
-    if (rs_pc_host($a) === '' && $repo !== '') {
-        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
-        if ($r['status'] === 200) {
-            $out['has'] = 'repo';
-            $j = json_decode((string)$r['body'], true);
-            if (is_array($j) && isset($j['content'])) $out += rs_pc_sdk_keys((string)base64_decode((string)$j['content']));
-        }
-        elseif ($r['status'] === 404) $out['has'] = 'none';
+    if ($repo !== '') {
+        [$st, $txt] = rs_sdk_repo_file(rs_pc_host($a), $repo);
+        if ($st === 200) { $out['has'] = 'repo'; $out += rs_pc_sdk_keys($txt); }
+        elseif ($st === 404) $out['has'] = 'none';
     }
     if ($out['has'] !== 'repo') {
         try {
@@ -646,18 +662,13 @@ function rs_pc_sdk_probe(string $repo, string $host, string $pat): array {
         $k = rs_pc_sdk_keys($txt);
         $keys = (array)($k['keys'] ?? []);
         $out['easy'] = !empty($k['easy']);
-        $out['settings'] = in_array('settings', $keys, true) || in_array('config', $keys, true);
+        $out['settings'] = !empty($k['settings']);
         $out['dumps'] = !empty($k['dumps']);
         $out['bad'] = !$keys; // there, but not JSON we can read
     };
-    if ($host === '') {
-        $r = rs_http(rs_gh_api() . '/repos/' . $repo . '/contents/recomplauncher.json', ['github' => true, 'timeout' => 8, 'max' => 400000]);
-        if ($r['status'] === 200) {
-            $out['has'] = 'repo';
-            $j = json_decode((string)$r['body'], true);
-            $read(is_array($j) && isset($j['content']) ? (string)base64_decode((string)$j['content']) : '');
-        } elseif ($r['status'] === 404) $out['has'] = 'none';
-    }
+    [$st, $txt] = rs_sdk_repo_file($host, $repo);
+    if ($st === 200) { $out['has'] = 'repo'; $read($txt); }
+    elseif ($st === 404) $out['has'] = 'none';
     $rel = rs_host_releases($host, $repo, 60);
     $list = $rel['status'] === 200 ? rs_rel_sorted(json_decode((string)$rel['body'], true) ?: []) : [];
     $x = null;
@@ -733,7 +744,9 @@ function rs_pc_sdk_keys(string $json): array {
     if (!is_array($j)) return [];
     $dlss = false; // (4.6) it asks the launcher for NVIDIA's DLSS file
     foreach ((array)($j['inputs'] ?? []) as $in) if (is_array($in) && ($in['shared'] ?? '') === 'nvidia.dlss') $dlss = true;
-    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps']), 'dlss' => $dlss, 'easy' => rs_sdk_easy($j)];
+    // (4.9) Settings in the launcher: what it shows is the "settings" list ("config" alone only says where the file is).
+    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps']), 'dlss' => $dlss, 'easy' => rs_sdk_easy($j),
+        'settings' => is_array($j['settings'] ?? null) && $j['settings'] !== []];
 }
 
 // (4.3) The catalog's "support" list per recomp: which launcher features it has, and who made each
@@ -766,7 +779,7 @@ function rs_pc_support(array $a): array {
     // (4.9) Checks from before 'easy' was kept: the old game + start test until the weekly check refreshes them.
     if (array_key_exists('easy', $sdk) ? !empty($sdk['easy']) : ($dev('game') && $dev('start'))) $out['easy_setup'] = 'dev';
     elseif ($full ? rs_sdk_easy($b) : in_array((string)($files['how'] ?? ''), RS_BOOT_EASY, true)) $out['easy_setup'] = 'launcher';
-    if ($dev('settings')) $out['settings'] = 'dev';
+    if (array_key_exists('settings', $sdk) ? !empty($sdk['settings']) : $dev('settings')) $out['settings'] = 'dev';
     elseif ($full ? !empty($b['settings']) : !empty($b['settings']['settings'])) $out['settings'] = 'launcher';
     if ($dev('prepare')) $out['prepare'] = 'dev';
     if (!empty($sdk['dumps'])) $out['verified'] = 'dev';
