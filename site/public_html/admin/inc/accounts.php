@@ -72,8 +72,8 @@ function rs_acct_tables(): void {
         KEY look (kind, k, at)
     ) CHARACTER SET utf8mb4');
     if (rs_col_missing($db, 'accounts', 'avatar')) $db->exec("ALTER TABLE accounts ADD COLUMN avatar VARCHAR(120) NULL");
-    // Email sign-ups that never confirmed: gone after 7 days (their username is free again).
-    if (random_int(1, 40) === 1) $db->exec("DELETE FROM accounts WHERE email_ok = 0 AND pass_hash IS NOT NULL AND google_sub IS NULL AND discord_id IS NULL AND github_id IS NULL AND created < (UTC_TIMESTAMP() - INTERVAL 7 DAY)");
+    // (4.9) Unconfirmed email sign-ups are no longer removed after 7 days: since 3.9 they're signed in
+    // and used straight away (saves, linked PCs), so an unconfirmed email is just that.
     $done = true;
 }
 
