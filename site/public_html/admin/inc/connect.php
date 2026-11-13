@@ -411,9 +411,15 @@ function rs_cache_tables(): void {
     $done = true;
 }
 
+// (4.8) A cache key that fits the 220-character column: a long one (a long game name in a search)
+// keeps its start and gets a hash of the whole, so it stays unique.
+function rs_cache_key(string $k): string {
+    return mb_strlen($k) <= 220 ? $k : mb_substr($k, 0, 180) . '#' . md5($k);
+}
 // A cached value and its age in seconds, or null.
 function rs_kv_get(string $k): ?array {
     rs_cache_tables();
+    $k = rs_cache_key($k);
     $st = rs_db()->prepare('SELECT v, TIMESTAMPDIFF(SECOND, at, NOW()) AS age FROM kv_cache WHERE k = ?');
     $st->execute([$k]);
     $r = $st->fetch();
@@ -422,6 +428,7 @@ function rs_kv_get(string $k): ?array {
 
 function rs_kv_put(string $k, string $v): void {
     rs_cache_tables();
+    $k = rs_cache_key($k);
     rs_db()->prepare('INSERT INTO kv_cache (k, v, at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE v = VALUES(v), at = NOW()')->execute([$k, $v]);
 }
 
@@ -437,7 +444,7 @@ function rs_repo_ok(string $repo): bool {
 function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, string $via = 'github'): array {
     rs_cache_tables();
     $db = rs_db();
-    $k = strtolower($key);
+    $k = rs_cache_key(strtolower($key));
     $st = $db->prepare('SELECT status, body, TIMESTAMPDIFF(SECOND, fetched, NOW()) AS age FROM gh_cache WHERE k = ?');
     $st->execute([$k]);
     $have = $st->fetch() ?: null;
