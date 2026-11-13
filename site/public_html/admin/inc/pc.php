@@ -1469,6 +1469,10 @@ function rs_pc_catalog(): array {
     // (4.3) Entries only newer launchers can read go in "apps_min": [{min, apps}], which older ones
     // don't look at. Cloudflare keeps one copy of the catalog for everyone, so it can't be picked by
     // the launcher's version. A SourceForge recomp needs Beta 27 (Beta 26 takes it for a GitHub repo).
+    // (3.0) Games with more than one version, and art one version lends another. (4.9) Worked out before
+    // the newer-launcher entries are split off, so a Forgejo or SourceForge version joins its game's group
+    // too (an older launcher just doesn't find that one and shows the rest).
+    $titles = rs_title_catalog($apps);
     $newer = [];
     $apps = array_values(array_filter($apps, function ($e) use (&$newer) {
         if (($e['host'] ?? '') === 'sourceforge') { $newer['0.90.0-beta.27'][] = $e; return false; }
@@ -1482,8 +1486,6 @@ function rs_pc_catalog(): array {
     $devs = [];
     foreach (rs_developers() as $slug => $d) if (array_filter($apps, fn($x) => ($x['dev'] ?? '') === $slug))
         $devs[] = ['slug' => $slug, 'name' => (string)$d['name'], 'verified' => !empty($d['verified']), 'avatar' => (string)($d['avatar'] ?? '') !== '' ? rs_abs((string)$d['avatar']) : ''];
-    // (3.0) Games with more than one version, and art one version lends another.
-    $titles = rs_title_catalog($apps);
     // (4.7) The Home banner: a list per system (fixed picks and slots that fill themselves), merged for launchers.
     $bn = rs_pc_banner_resolve($apps);
     $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $bn['merged'],
