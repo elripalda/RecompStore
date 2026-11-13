@@ -298,8 +298,12 @@ function rs_watch_dupes_find(array $targets, array $parents): array {
         if ($t['host'] === '' && strlen(explode('/', $t['repo'])[1]) >= 6) $byName[strtolower(explode('/', $t['repo'])[1])][] = $t;
     }
     $pairs = [];
-    $add = function (string $a, string $b, string $why) use (&$pairs) {
+    // (4.8) Listings grouped as versions of one game (the Versions page) are meant to be separate.
+    $title = [];
+    try { foreach (rs_titles() as $tt) foreach ((array)$tt['pc'] as $pid) $title[(string)$pid] = (string)$tt['id']; } catch (Throwable $e) { /* no versions yet */ }
+    $add = function (string $a, string $b, string $why) use (&$pairs, $title) {
         if ($a === $b) return;
+        if (isset($title[$a], $title[$b]) && $title[$a] === $title[$b]) return;
         $k = min($a, $b) . '|' . max($a, $b);
         if (!isset($pairs[$k])) $pairs[$k] = [$a, $b, $why];
     };
