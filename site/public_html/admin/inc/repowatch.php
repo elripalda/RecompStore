@@ -48,6 +48,10 @@ function rs_watch_tables(): void {
         why VARCHAR(600) NOT NULL DEFAULT \'\',
         KEY at (at)
     ) CHARACTER SET utf8mb4');
+    // (4.8) The repo it was forked from (duplicates), and its most active forks with releases, noted
+    // while it's up so a deleted repo has somewhere to go.
+    if (rs_col_missing($db, 'repo_watch', 'forks'))
+        $db->exec("ALTER TABLE repo_watch ADD COLUMN parent VARCHAR(200) NOT NULL DEFAULT '', ADD COLUMN forks TEXT NULL, ADD COLUMN forks_at DATETIME NULL");
     $done = true;
 }
 
@@ -56,7 +60,7 @@ function rs_watch_gh_web(): string { $e = getenv('RS_GH_WEB'); return rtrim(is_s
 function rs_watch_sf_base(): string { $e = getenv('RS_SF_BASE'); return rtrim(is_string($e) && $e !== '' ? $e : 'https://sourceforge.net', '/'); }
 
 function rs_watch_level(string $state): string { return RS_WATCH_STATES[$state][0] ?? ''; }
-function rs_watch_label(string $state): string { return RS_WATCH_STATES[$state][1] ?? ($state === 'ok' ? 'Up' : 'Not checked'); }
+function rs_watch_label(string $state): string { return RS_WATCH_STATES[$state][1] ?? ['ok' => 'Up', 'fixed' => 'Followed rename'][$state] ?? 'Not checked'; }
 
 // One target from a PC recomp or a PS5 listing, or null when there's nothing to watch.
 function rs_watch_target_pc(array $a): ?array {
@@ -88,11 +92,13 @@ function rs_watch_targets(): array {
 // Up to 50 GitHub repos in one question. -> [lowercase repo => facts, or null when GitHub couldn't show
 // it], or ['_err' => why] when the whole question failed. Facts: name (as GitHub has it now), disabled,
 // private, locked, lock, releases.
-function rs_watch_gh_batch(array $repos): array {
+// (4.8) $forksFor: the repos (lowercase) whose forks are asked for this time too.
+function rs_watch_gh_batch(array $repos, array $forksFor = []): array {
     $q = 'query{';
     foreach (array_values($repos) as $i => $r) {
         [$o, $n] = explode('/', $r, 2);
-        $q .= 'r' . $i . ':repository(owner:' . json_encode($o) . ',name:' . json_encode($n) . '){nameWithOwner isDisabled isPrivate isLocked lockReason releases(first:1){totalCount}}';
+        $q .= 'r' . $i . ':repository(owner:' . json_encode($o) . ',name:' . json_encode($n) . '){nameWithOwner isDisabled isPrivate isLocked lockReason releases(first:1){totalCount} parent{nameWithOwner}'
+            . (isset($forksFor[strtolower($r)]) ? ' forks(first:6,orderBy:{field:STARGAZERS,direction:DESC}){nodes{nameWithOwner stargazerCount pushedAt releases(first:1){totalCount}}}' : '') . '}';
     }
     $q .= '}';
     $res = rs_http(rs_gh_api() . '/graphql', ['github' => true, 'post' => (string)json_encode(['query' => $q]), 'headers' => ['Content-Type: application/json'], 'timeout' => 45, 'max' => 4 << 20]);
@@ -103,9 +109,17 @@ function rs_watch_gh_batch(array $repos): array {
     $out = [];
     foreach (array_values($repos) as $i => $r) {
         $x = $j['data']['r' . $i] ?? null;
+        $forks = null;
+        if (is_array($x) && is_array($x['forks']['nodes'] ?? null)) {
+            $forks = [];
+            foreach ($x['forks']['nodes'] as $fk) if (is_array($fk) && (int)($fk['releases']['totalCount'] ?? 0) > 0)
+                $forks[] = ['repo' => (string)$fk['nameWithOwner'], 'stars' => (int)($fk['stargazerCount'] ?? 0), 'pushed' => substr((string)($fk['pushedAt'] ?? ''), 0, 10), 'via' => 'fork'];
+            $forks = array_slice($forks, 0, 3);
+        }
         $out[strtolower($r)] = is_array($x) ? [
             'name' => (string)($x['nameWithOwner'] ?? ''), 'disabled' => !empty($x['isDisabled']), 'private' => !empty($x['isPrivate']),
             'locked' => !empty($x['isLocked']), 'lock' => (string)($x['lockReason'] ?? ''), 'releases' => (int)($x['releases']['totalCount'] ?? 0),
+            'parent' => (string)($x['parent']['nameWithOwner'] ?? ''), 'forks' => $forks,
         ] : null;
     }
     return $out;
@@ -141,7 +155,7 @@ function rs_watch_gh_one(string $repo): array|null {
     $list = $rel['status'] === 200 ? json_decode($rel['body'], true) : null;
     if (!is_array($list)) return null;
     return ['name' => (string)($j['full_name'] ?? ''), 'disabled' => !empty($j['disabled']), 'private' => !empty($j['private']),
-        'locked' => false, 'lock' => '', 'releases' => count($list)];
+        'locked' => false, 'lock' => '', 'releases' => count($list), 'parent' => (string)($j['parent']['full_name'] ?? ''), 'forks' => null];
 }
 
 // What GitHub's facts mean for one listing. -> [state, why, link]
@@ -191,15 +205,16 @@ function rs_watch_sf_one(array $t): ?array {
 
 // Every target checked. -> [index => [state, why, link] | null (couldn't tell)], and whether GitHub
 // turned the token down.
-function rs_watch_check_all(array $targets, ?callable $say = null): array {
+function rs_watch_check_all(array $targets, ?callable $say = null, array $forksFor = []): array {
     $res = array_fill_keys(array_keys($targets), null);
+    $extra = []; // index => ['parent' => ..., 'forks' => list|null]
     $byRepo = [];
     foreach ($targets as $i => $t) if ($t['host'] === '') $byRepo[strtolower($t['repo'])][] = $i;
     $facts = [];
     $auth = false; $batchErr = '';
     $keys = array_keys($byRepo);
     foreach (array_chunk($keys, RS_WATCH_BATCH) as $n => $chunk) {
-        $b = rs_watch_gh_batch(array_map(fn($k) => $targets[$byRepo[$k][0]]['repo'], $chunk));
+        $b = rs_watch_gh_batch(array_map(fn($k) => $targets[$byRepo[$k][0]]['repo'], $chunk), $forksFor);
         if (isset($b['_err'])) {
             if ($b['_err'] === 'auth') $auth = true; else $batchErr = (string)$b['_err'];
             foreach ($chunk as $k) $facts[$k] = false; // asked one by one below
@@ -219,13 +234,87 @@ function rs_watch_check_all(array $targets, ?callable $say = null): array {
             if (isset($one['answer'])) { foreach ($idx as $i) $res[$i] = $one['answer']; continue; }
             $f = $one;
         }
-        foreach ($idx as $i) $res[$i] = rs_watch_gh_state($targets[$i], $f);
+        foreach ($idx as $i) { $res[$i] = rs_watch_gh_state($targets[$i], $f); $extra[$i] = ['parent' => (string)($f['parent'] ?? ''), 'forks' => $f['forks'] ?? null]; }
     }
     foreach ($targets as $i => $t) {
         if ($t['host'] === 'gitlab') $res[$i] = rs_watch_gl_one($t);
         elseif ($t['host'] === 'sourceforge') $res[$i] = rs_watch_sf_one($t);
     }
-    return [$res, $auth, $batchErr];
+    return [$res, $auth, $batchErr, $extra];
+}
+
+// (4.8) Copies of a deleted repo on GitHub: same name, another owner, with releases (forks outlive the
+// repo they came from). For a repo that was already gone before its forks could be noted. -> forks list.
+function rs_watch_find_copies(string $repo): array {
+    [$owner, $name] = explode('/', $repo, 2);
+    $r = rs_http(rs_gh_api() . '/search/repositories?q=' . rawurlencode($name . ' in:name fork:true') . '&sort=stars&per_page=15', ['github' => true, 'timeout' => 20, 'max' => 4 << 20]);
+    $j = $r['status'] === 200 ? json_decode($r['body'], true) : null;
+    $cands = [];
+    foreach (is_array($j['items'] ?? null) ? $j['items'] : [] as $it) {
+        $full = (string)($it['full_name'] ?? '');
+        if (!rs_repo_ok($full) || strcasecmp(explode('/', $full)[0], $owner) === 0) continue;
+        if (strcasecmp(explode('/', $full)[1], $name) !== 0) continue; // the same name only
+        $cands[$full] = ['repo' => $full, 'stars' => (int)($it['stargazers_count'] ?? 0), 'pushed' => substr((string)($it['pushed_at'] ?? ''), 0, 10), 'via' => 'search'];
+        if (count($cands) >= 6) break;
+    }
+    if (!$cands) return [];
+    // Only ones with releases: there has to be something to download.
+    $b = rs_watch_gh_batch(array_keys($cands));
+    if (isset($b['_err'])) return [];
+    $out = [];
+    foreach ($cands as $full => $c) if (is_array($b[strtolower($full)] ?? null) && $b[strtolower($full)]['releases'] > 0 && !$b[strtolower($full)]['disabled'] && !$b[strtolower($full)]['private']) $out[] = $c;
+    return array_slice($out, 0, 3);
+}
+
+// (4.8) A PC listing follows its repo's rename by the same owner (owner/old -> owner/new): the same
+// project and the same files, so its checked downloads move with it and nothing is held again.
+function rs_watch_follow_rename(array $t, string $to): bool {
+    if ($t['store'] !== 'pc' || $t['host'] !== '' || !rs_repo_ok($to)) return false;
+    if (strcasecmp(explode('/', $t['repo'])[0], explode('/', $to)[0]) !== 0) return false;
+    $a = rs_pc_app($t['id']);
+    if (!$a || strcasecmp((string)$a['repo'], $t['repo']) !== 0) return false;
+    foreach (rs_pc_apps() as $x) if ($x['id'] !== $a['id'] && rs_pc_host($x) === '' && strcasecmp((string)$x['repo'], $to) === 0) return false; // another listing has it: a duplicate, for you to decide
+    $db = rs_db();
+    if (function_exists('rs_vt_tables')) {
+        rs_vt_tables();
+        $db->prepare('UPDATE vt_files SET repo = ?, url = REPLACE(url, ?, ?) WHERE repo = ?')->execute([$to, '/' . $t['repo'] . '/', '/' . $to . '/', $t['repo']]);
+    }
+    $a['repo'] = $to;
+    $a['gh_at'] = 0; // read again on the next refresh
+    rs_pc_save($a);
+    if (empty($a['hidden'])) { try { rs_pc_publish_one($a['id']); } catch (Throwable $e) { /* goes out with the next publish */ } }
+    rs_log('watch', 'pc:' . $a['id'], 'followed the rename: ' . $t['repo'] . ' -> ' . $to);
+    return true;
+}
+
+// (4.8) PC listings that look like the same thing twice: the same repo, one a fork of the other's
+// repo, or the same repo name under another owner. Pairs marked "not the same" stay off. -> pairs
+// [a, b, why] (ids), a the one that's been listed longer.
+function rs_watch_dupes_find(array $targets, array $parents): array {
+    $pc = array_values(array_filter($targets, fn($t) => $t['store'] === 'pc'));
+    $by = []; $byName = [];
+    foreach ($pc as $t) {
+        $by[strtolower(rs_repo_key($t['host'], $t['repo']))][] = $t['id'];
+        if ($t['host'] === '' && strlen(explode('/', $t['repo'])[1]) >= 6) $byName[strtolower(explode('/', $t['repo'])[1])][] = $t;
+    }
+    $pairs = [];
+    $add = function (string $a, string $b, string $why) use (&$pairs) {
+        if ($a === $b) return;
+        $k = min($a, $b) . '|' . max($a, $b);
+        if (!isset($pairs[$k])) $pairs[$k] = [$a, $b, $why];
+    };
+    foreach ($by as $ids) for ($i = 1; $i < count($ids); $i++) $add($ids[0], $ids[$i], 'Both point at the same repo.');
+    foreach ($pc as $t) {
+        $p = strtolower((string)($parents[$t['id']] ?? ''));
+        if ($p !== '' && !empty($by[$p])) $add($by[$p][0], $t['id'], 'Its repo is a fork of the other one\'s.');
+    }
+    foreach ($byName as $list) {
+        if (count($list) < 2) continue;
+        for ($i = 1; $i < count($list); $i++) if (strcasecmp(explode('/', $list[0]['repo'])[0], explode('/', $list[$i]['repo'])[0]) !== 0) $add($list[0]['id'], $list[$i]['id'], 'Same repo name under another account (a mirror or a copy?).');
+    }
+    $out = [];
+    foreach ($pairs as $k => $p) if (!rs_kv_get('dupe_ok:' . $k)) $out[] = $p;
+    return $out;
 }
 
 // ---- Keeping the answers ----------------------------------------------------------------------------
@@ -239,7 +328,7 @@ function rs_watch_row(string $store, string $id): ?array {
 
 // One listing's answer. $r null: it couldn't be told this time (what was known stays). -> the state
 // when it changed to one that needs a look, else ''.
-function rs_watch_save(array $t, ?array $r, string $err = ''): string {
+function rs_watch_save(array $t, ?array $r, string $err = '', array $extra = []): string {
     $db = rs_db();
     $old = rs_watch_row($t['store'], $t['id']);
     if ($r === null) {
@@ -253,6 +342,8 @@ function rs_watch_save(array $t, ?array $r, string $err = ''): string {
         ON DUPLICATE KEY UPDATE repo = VALUES(repo), state = VALUES(state), why = VALUES(why), link = VALUES(link), checked = NOW(), err = \'\',
         since = IF(?, NOW(), since), ok_at = IF(VALUES(state) = \'ok\', NOW(), ok_at), ack = IF(?, \'\', ack)')
         ->execute([$t['store'], $t['id'], mb_substr($t['repo'], 0, 200), $state, mb_substr($why, 0, 600), mb_substr($link, 0, 400), $state === 'ok' ? gmdate('Y-m-d H:i:s') : null, $changed ? 1 : 0, $changed ? 1 : 0]);
+    if (array_key_exists('parent', $extra)) $db->prepare('UPDATE repo_watch SET parent = ? WHERE store = ? AND app_id = ?')->execute([mb_substr((string)$extra['parent'], 0, 200), $t['store'], $t['id']]);
+    if (is_array($extra['forks'] ?? null)) $db->prepare('UPDATE repo_watch SET forks = ?, forks_at = NOW() WHERE store = ? AND app_id = ?')->execute([json_encode($extra['forks'], JSON_UNESCAPED_SLASHES), $t['store'], $t['id']]);
     // Changes go in the log (not a first look that found it fine).
     if ($changed && (($old && $old['state'] !== 'unk') || $state !== 'ok'))
         $db->prepare('INSERT INTO repo_watch_log (at, store, app_id, name, repo, state, why) VALUES (NOW(), ?, ?, ?, ?, ?, ?)')
@@ -266,13 +357,34 @@ function rs_watch_scan(?callable $say = null): array {
     $t0 = microtime(true);
     $targets = rs_watch_targets();
     if ($say) $say('Watching ' . count($targets) . ' listings');
-    [$res, $auth, $batchErr] = rs_watch_check_all($targets, $say);
+    // (4.8) Forks are noted once a week per repo, a share of them each run.
+    $fresh = [];
+    foreach (rs_db()->query('SELECT store, app_id FROM repo_watch WHERE forks_at > NOW() - INTERVAL 7 DAY')->fetchAll() as $r) $fresh[$r['store'] . '|' . $r['app_id']] = true;
+    $forksFor = [];
+    foreach ($targets as $t) if ($t['host'] === '' && !isset($fresh[$t['store'] . '|' . $t['id']]) && count($forksFor) < 300) $forksFor[strtolower($t['repo'])] = true;
+    [$res, $auth, $batchErr, $extra] = rs_watch_check_all($targets, $say, $forksFor);
+    // (4.8) Renames by the same owner are followed at once (PC); the rest wait for you.
+    $followed = [];
+    foreach ($targets as $i => $t) {
+        if (($res[$i][0] ?? '') !== 'moved' || !rs_watch_follow_rename($t, (string)$res[$i][2])) continue;
+        $old = $t['repo'];
+        $targets[$i]['repo'] = (string)$res[$i][2];
+        $res[$i] = ['ok', '', ''];
+        $followed[] = $targets[$i]['name'];
+        rs_db()->prepare('INSERT INTO repo_watch_log (at, store, app_id, name, repo, state, why) VALUES (NOW(), ?, ?, ?, ?, \'fixed\', ?)')
+            ->execute([$t['store'], $t['id'], mb_substr($t['name'], 0, 160), mb_substr($targets[$i]['repo'], 0, 200), 'Renamed from ' . $old . '. The listing follows it now.']);
+        // Its row moves with it, so the save below sees nothing new (the log line above says what happened).
+        rs_db()->prepare('UPDATE repo_watch SET repo = ?, state = \'ok\', why = \'\', link = \'\', since = NOW(), ok_at = NOW(), ack = \'\' WHERE store = ? AND app_id = ?')
+            ->execute([mb_substr($targets[$i]['repo'], 0, 200), $t['store'], $t['id']]);
+    }
     $new = []; $n = ['ok' => 0, 'flag' => 0, 'unk' => 0];
     $keep = [];
+    $parents = [];
     foreach ($targets as $i => $t) {
         $keep[$t['store'] . '|' . $t['id']] = true;
+        if (($extra[$i]['parent'] ?? '') !== '') $parents[$t['id']] = $extra[$i]['parent'];
         $err = $auth ? 'GitHub turned the site\'s token down' : $batchErr;
-        $ch = rs_watch_save($t, $res[$i], $err);
+        $ch = rs_watch_save($t, $res[$i], $err, $extra[$i] ?? []);
         if ($ch !== '') $new[] = ['store' => $t['store'], 'id' => $t['id'], 'name' => $t['name'], 'state' => $ch];
         if ($res[$i] === null) ++$n['unk'];
         elseif (rs_watch_level($res[$i][0]) !== '') ++$n['flag'];
@@ -282,11 +394,24 @@ function rs_watch_scan(?callable $say = null): array {
     foreach (rs_db()->query('SELECT store, app_id FROM repo_watch')->fetchAll() as $r)
         if (!isset($keep[$r['store'] . '|' . $r['app_id']])) rs_db()->prepare('DELETE FROM repo_watch WHERE store = ? AND app_id = ?')->execute([$r['store'], $r['app_id']]);
     rs_db()->exec('DELETE FROM repo_watch_log WHERE at < NOW() - INTERVAL 180 DAY');
+    // (4.8) Deleted repos with no forks noted: GitHub is searched for copies (a few a run, weekly each).
+    if (!$auth) {
+        $looked = 0;
+        foreach (rs_db()->query("SELECT store, app_id, repo FROM repo_watch WHERE state = 'gone' AND repo LIKE '%/%' AND repo NOT LIKE 'gitlab.com/%' AND repo NOT LIKE 'sourceforge.net/%' AND (forks IS NULL OR forks = '[]') AND (forks_at IS NULL OR forks_at < NOW() - INTERVAL 7 DAY)")->fetchAll() as $r) {
+            if ($looked++ >= 15 || !rs_repo_ok((string)$r['repo'])) break;
+            $c = rs_watch_find_copies((string)$r['repo']);
+            rs_db()->prepare('UPDATE repo_watch SET forks = ?, forks_at = NOW() WHERE store = ? AND app_id = ?')->execute([json_encode($c, JSON_UNESCAPED_SLASHES), $r['store'], $r['app_id']]);
+        }
+    }
+    // (4.8) Listings that look like the same thing twice (PC). Parents not asked this run stay as saved.
+    foreach (rs_db()->query("SELECT app_id, parent FROM repo_watch WHERE store = 'pc' AND parent <> ''")->fetchAll() as $r) $parents[$r['app_id']] = $parents[$r['app_id']] ?? (string)$r['parent'];
+    rs_kv_put('watch_dupes', (string)json_encode(rs_watch_dupes_find($targets, $parents), JSON_UNESCAPED_SLASHES));
     $sum = ['at' => time(), 'took' => (int)round(microtime(true) - $t0), 'checked' => count($targets), 'ok' => $n['ok'], 'flag' => $n['flag'], 'unk' => $n['unk'],
-        'auth' => $auth, 'err' => $batchErr, 'new' => $new,
+        'auth' => $auth, 'err' => $batchErr, 'new' => $new, 'followed' => $followed,
         'pc' => count(array_filter($targets, fn($t) => $t['store'] === 'pc')), 'ps5' => count(array_filter($targets, fn($t) => $t['store'] === 'ps5'))];
     rs_kv_put('watch_last', (string)json_encode($sum, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     if ($new) rs_log('watch', 'scan', count($new) . ' new: ' . implode(', ', array_map(fn($x) => $x['name'] . ' (' . rs_watch_label($x['state']) . ')', array_slice($new, 0, 8))));
+    if ($followed) rs_log('watch', 'renames', 'followed ' . count($followed) . ': ' . implode(', ', array_slice($followed, 0, 8)));
     return $sum;
 }
 
@@ -345,7 +470,10 @@ function rs_watch_flags(array $stores, bool $acked = false): array {
         $out[] = ['store' => (string)$r['store'], 'id' => (string)$r['app_id'], 'name' => (string)$x['name'], 'icon' => (string)($x['icon'] ?? ''),
             'repo' => (string)$r['repo'], 'host' => $r['store'] === 'pc' ? rs_pc_host($x) : '', 'state' => (string)$r['state'],
             'level' => rs_watch_level((string)$r['state']), 'label' => rs_watch_label((string)$r['state']), 'why' => (string)$r['why'], 'link' => (string)$r['link'],
-            'since' => (string)$r['since'], 'checked' => (string)$r['checked'], 'acked' => $isAcked, 'hidden' => !empty($x['hidden']), 'hid' => (string)($x['watch_hid'] ?? '') !== ''];
+            'since' => (string)$r['since'], 'checked' => (string)$r['checked'], 'acked' => $isAcked, 'hidden' => !empty($x['hidden']), 'hid' => (string)($x['watch_hid'] ?? '') !== '',
+            // (4.8) Where a deleted repo could go: its forks noted while it was up, or copies found since.
+            // Never offered for a takedown.
+            'homes' => (string)$r['state'] === 'gone' ? (json_decode((string)($r['forks'] ?? ''), true) ?: []) : []];
     }
     usort($out, fn($a, $b) => [$a['level'] === 'bad' ? 0 : 1, -strtotime($a['since'] ?: '2000-01-01')] <=> [$b['level'] === 'bad' ? 0 : 1, -strtotime($b['since'] ?: '2000-01-01')]);
     return $out;
@@ -402,8 +530,13 @@ function rs_watch_check_one(string $store, string $id): ?array {
     $x = $store === 'pc' ? rs_pc_app($id) : rs_game($id);
     $t = $x ? ($store === 'pc' ? rs_watch_target_pc($x) : rs_watch_target_ps5($x)) : null;
     if (!$t) { rs_db()->prepare('DELETE FROM repo_watch WHERE store = ? AND app_id = ?')->execute([$store, $id]); return null; }
-    [$res] = rs_watch_check_all([$t]);
-    rs_watch_save($t, $res[0], $res[0] === null ? 'No clear answer' : '');
+    [$res, , , $extra] = rs_watch_check_all([$t], null, $t['host'] === '' ? [strtolower($t['repo']) => true] : []);
+    rs_watch_save($t, $res[0], $res[0] === null ? 'No clear answer' : '', $extra[0] ?? []);
+    if (($res[0][0] ?? '') === 'gone') {
+        $row = rs_watch_row($store, $id);
+        if ($row && in_array((string)($row['forks'] ?? ''), ['', '[]'], true) && $t['host'] === '')
+            rs_db()->prepare('UPDATE repo_watch SET forks = ?, forks_at = NOW() WHERE store = ? AND app_id = ?')->execute([json_encode(rs_watch_find_copies($t['repo']), JSON_UNESCAPED_SLASHES), $store, $id]);
+    }
     return rs_watch_row($store, $id);
 }
 
@@ -482,4 +615,38 @@ function rs_watch_ack(string $item): string {
     rs_db()->prepare('UPDATE repo_watch SET ack = state WHERE store = ? AND app_id = ?')->execute([$store, $id]);
     rs_log('watch', $store . ':' . $id, 'marked fine');
     return 'Okay. ' . $x['name'] . ' stays off the list unless something else changes.';
+}
+
+// ---- (4.8) Duplicates ---------------------------------------------------------------------------------
+
+// The pairs from the last run, with their listings: [[a, b, why, key]] (a, b listings). Gone or hidden
+// ones drop out.
+function rs_watch_dupes(): array {
+    $c = rs_kv_get('watch_dupes');
+    $out = [];
+    foreach ((array)json_decode($c['v'] ?? '[]', true) as $p) {
+        if (!is_array($p) || count($p) < 3) continue;
+        $a = rs_pc_app((string)$p[0]); $b = rs_pc_app((string)$p[1]);
+        if (!$a || !$b || !empty($a['hidden']) || !empty($b['hidden'])) continue;
+        $k = min($a['id'], $b['id']) . '|' . max($a['id'], $b['id']);
+        if (rs_kv_get('dupe_ok:' . $k)) continue;
+        $out[] = [$a, $b, (string)$p[2], $k];
+    }
+    return $out;
+}
+// One kept, the other hidden and moved over to it (players who have it are moved by the launcher). -> message.
+function rs_watch_merge(string $keep, string $drop): string {
+    $k = rs_pc_app($keep); $d = rs_pc_app($drop);
+    if (!$k || !$d || $k['id'] === $d['id']) throw new RuntimeException('One of those listings is gone.');
+    $d['hidden'] = true;
+    $d['replaced_by'] = $k['id'];
+    rs_pc_save($d);
+    rs_watch_pc_out();
+    rs_log('watch', 'merge', $d['id'] . ' -> ' . $k['id']);
+    return $d['name'] . ' is hidden and points players to ' . $k['name'] . ' now.';
+}
+function rs_watch_dupe_ok(string $a, string $b): string {
+    if (!rs_pc_app($a) || !rs_pc_app($b)) throw new RuntimeException('One of those listings is gone.');
+    rs_kv_put('dupe_ok:' . min($a, $b) . '|' . max($a, $b), '1');
+    return 'Okay, they stay separate.';
 }

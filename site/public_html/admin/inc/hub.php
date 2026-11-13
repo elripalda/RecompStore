@@ -554,11 +554,7 @@ function rs_hub_publish_good(): array {
         if ($col !== 'ready' || $note[0] !== 'ok' || rs_auto_vt($j)[0] === 'bad') continue;
         $a = rs_pc_app((string)$j['app_id']);
         if (!$a) continue;
-        $a['hidden'] = false;
-        $a['live_at'] = $a['live_at'] ?? gmdate('c');
-        rs_pc_save($a);
-        rs_auto_set((int)$j['id'], ['status' => 'published']);
-        rs_log('pc', $a['id'], 'Auto-add published (with the others that looked good)');
+        rs_hub_job_live($j, $a, 'Auto-add published (with the others that looked good)');
         $names[] = (string)$a['name'];
     }
     if ($names) {
@@ -567,6 +563,53 @@ function rs_hub_publish_good(): array {
         rs_log('hub', 'publish-good', count($names) . ' drafts');
     }
     return $names;
+}
+// One draft's listing shown and the draft marked published (the catalog is published by the caller).
+// (4.8) live_at: when it went live, for New arrivals and What's new. A listing's default is '', so
+// "?? now" never set it.
+function rs_hub_job_live(array $j, array $a, string $why): void {
+    $a['hidden'] = false;
+    if ((string)($a['live_at'] ?? '') === '') $a['live_at'] = gmdate('Y-m-d\TH:i:s\Z');
+    rs_pc_save($a);
+    rs_auto_set((int)$j['id'], ['status' => 'published']);
+    rs_log('pc', $a['id'], $why);
+    if (!empty($j['sub_id'])) {
+        rs_db()->prepare("UPDATE inbox SET status = 'done' WHERE id = ?")->execute([(int)$j['sub_id']]);
+        rs_log('pc-live', $a['id'], 'from submission ' . (int)$j['sub_id'] . ' (Auto-add)');
+    }
+}
+// (4.8) Bulk select on the board: several drafts published, run again or removed at once.
+// -> [done names, skipped [name => why]]
+function rs_hub_bulk(string $do, array $ids): array {
+    $done = []; $skip = [];
+    $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', $ids)))), 0, 300);
+    foreach ($ids as $id) {
+        $j = rs_auto_get($id);
+        if (!$j) continue;
+        $j['steps'] = is_array($j['steps']) ? $j['steps'] : (json_decode((string)$j['steps'], true) ?: []);
+        $a = (string)$j['app_id'] !== '' ? rs_pc_app((string)$j['app_id']) : null;
+        $name = (string)($a['name'] ?? rs_hub_job_path((string)$j['repo_key']));
+        $running = in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) > time() - RS_AUTO_STUCK;
+        if ($do === 'publish') {
+            if ($j['status'] !== 'review') { $skip[$name] = 'not ready yet'; continue; }
+            if (rs_auto_vt($j)[0] === 'bad') { $skip[$name] = 'VirusTotal flagged it'; continue; }
+            if (!$a) { $skip[$name] = 'its listing is gone'; continue; }
+            rs_hub_job_live($j, $a, 'Auto-add published (bulk)');
+        } elseif ($do === 'again') {
+            if ($running) { $skip[$name] = 'still running'; continue; }
+            rs_auto_again($id);
+        } elseif ($do === 'remove') {
+            if ($running) { $skip[$name] = 'still running'; continue; }
+            rs_auto_remove($id);
+        } else throw new RuntimeException('That isn\'t something the board can do to several at once.');
+        $done[] = $name;
+    }
+    if ($do === 'publish' && $done) {
+        rs_pc_publish();
+        try { rs_sub_close_live(); } catch (Throwable $e) { /* closed when the board opens */ }
+    }
+    if ($done) rs_log('hub', 'bulk-' . $do, count($done) . ': ' . mb_substr(implode(', ', $done), 0, 400));
+    return [$done, $skip];
 }
 
 // (4.8) A PC submission with no release yet, straight onto RecompLauncher's Coming Soon: its listing

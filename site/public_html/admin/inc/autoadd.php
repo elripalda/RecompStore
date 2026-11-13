@@ -484,7 +484,8 @@ function rs_auto_publish(int $id): string {
     $a = rs_pc_app($job['app_id']);
     if (!$a) throw new RuntimeException('Its listing is gone.');
     $a['hidden'] = false;
-    $a['live_at'] = $a['live_at'] ?? gmdate('c');
+    // (4.8) A listing's live_at defaults to '', so "?? now" never set it.
+    if ((string)($a['live_at'] ?? '') === '') $a['live_at'] = gmdate('Y-m-d\TH:i:s\Z');
     rs_pc_save($a);
     rs_pc_publish();
     rs_auto_set($id, ['status' => 'published']);

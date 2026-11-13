@@ -100,6 +100,7 @@ function hub_watch_row(array $f, bool $tagStore = false): string {
         . '<a class="sh-link" href="' . h($web) . '" target="_blank" rel="noopener noreferrer">' . h(rs_repo_key($f['host'], $f['repo'])) . ' ' . HUB_IC['ext'] . '</a>'
         . '<p>' . h($f['why']) . ($f['state'] === 'dmca' && $f['link'] !== '' ? ' <a href="' . h($f['link']) . '" target="_blank" rel="noopener noreferrer">Read the notice</a>' : '') . '</p>'
         . '<small class="muted">' . ($since ? 'Since ' . h(rs_date('M j, g:i a', $since)) . ' · ' : '') . 'checked ' . h(rs_hub_ago_long(rs_hub_ts($f['checked']))) . '</small>'
+        . ($f['homes'] ? '<div class="sh-whomes"><span>Possible new home' . (count($f['homes']) > 1 ? 's' : '') . ':</span>' . implode('', array_map(fn($x) => '<button type="button" class="small" data-act="watch_move" data-to="' . h($x['repo']) . '" title="' . h(($x['via'] === 'fork' ? 'A fork noted while the repo was up' : 'A copy with the same name') . ($x['pushed'] !== '' ? ', last updated ' . $x['pushed'] : '') . '. Check it\'s the same project first.') . '">' . h($x['repo']) . ($x['stars'] ? ' · ★' . (int)$x['stars'] : '') . '</button>', $f['homes'])) . '</div>' : '')
         . '<form class="sh-row sh-wmove" data-form="watch_move" hidden><input type="hidden" name="item" value="w:' . h($f['store']) . ':' . h($f['id']) . '">'
         . '<input name="to" class="mono" placeholder="' . ($f['store'] === 'pc' ? 'github.com/owner/name, gitlab.com/group/project or sourceforge.net/projects/name' : 'github.com/owner/name') . '" required>'
         . '<button class="primary">Point it there</button><button type="button" data-watch-move>Cancel</button></form></div>'
@@ -505,6 +506,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['close'] = true;
                 break;
             }
+            // (4.8) Bulk select: several drafts at once.
+            case 'bulk': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('Auto-add drafts are for the PC store.');
+                $do = (string)($_POST['do'] ?? '');
+                $ids = [];
+                foreach (explode(',', (string)($_POST['items'] ?? '')) as $it) if (preg_match('/^job:(\d+)$/', trim($it), $m)) $ids[] = (int)$m[1];
+                if (!$ids) throw new RuntimeException('Pick some drafts first.');
+                @set_time_limit(600);
+                ignore_user_abort(true);
+                [$doneN, $skipN] = rs_hub_bulk($do, $ids);
+                $verb = ['publish' => 'live on RecompLauncher', 'again' => 'running again', 'remove' => 'removed'][$do] ?? 'done';
+                $res['msg'] = ($doneN ? count($doneN) . ' ' . $verb . '.' : 'Nothing changed.')
+                    . ($skipN ? ' Skipped ' . count($skipN) . ': ' . implode('; ', array_map(fn($n, $w) => $n . ' (' . $w . ')', array_slice(array_keys($skipN), 0, 4), array_slice(array_values($skipN), 0, 4))) . (count($skipN) > 4 ? ' and more' : '') . '.' : '');
+                $res['ok'] = (bool)$doneN || !$skipN;
+                $res['bulk'] = true;
+                break;
+            }
             // (4.8) Repo watch
             case 'watch_hide':
             case 'watch_unhide':
@@ -525,6 +543,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $res['reload'] = false;
                 $res['watch'] = hub_watch_strip($store);
+                break;
+            }
+            case 'watch_merge':
+            case 'watch_dupe_ok': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('Duplicates are checked on the PC store.');
+                if (!preg_match('/^dupe:([A-Za-z0-9_.-]{1,64})\|([A-Za-z0-9_.-]{1,64})$/', $item, $m)) throw new RuntimeException('That pair isn\'t on the list anymore.');
+                if ($act === 'watch_dupe_ok') $res['msg'] = rs_watch_dupe_ok($m[1], $m[2]);
+                else {
+                    $keep = (string)($_POST['to'] ?? '');
+                    if (!in_array($keep, [$m[1], $m[2]], true)) throw new RuntimeException('Pick which one to keep.');
+                    $res['msg'] = rs_watch_merge($keep, $keep === $m[1] ? $m[2] : $m[1]);
+                }
                 break;
             }
             case 'watch_scan': {
@@ -572,7 +602,7 @@ rs_head('Submissions', true, ['assets/hub.css']);
   <div class="sh-tools">
     <div class="sh-search"><input type="search" placeholder="Find a recomp, developer or repo" aria-label="Find on the board" data-find></div>
     <div class="sh-filt" role="group" aria-label="Show"><button type="button" class="on" data-filt="all">Everything</button><button type="button" data-filt="ver"><?= HUB_IC['ver'] ?>Verified developers</button><button type="button" data-filt="look">Needs a look</button><button type="button" data-filt="flag">Flagged</button></div>
-    <?php if ($store === 'pc'): ?><button type="button" class="sh-add" data-open-add><?= HUB_IC['plus'] ?>Check a link</button><?php endif; ?>
+    <?php if ($store === 'pc'): ?><div class="sh-tools-r"><button type="button" class="sh-selbtn" data-select-toggle><?= HUB_IC['check'] ?>Select</button><button type="button" class="sh-add" data-open-add><?= HUB_IC['plus'] ?>Check a link</button></div><?php endif; ?>
   </div>
   <?php if ($store === 'pc'): ?><form class="sh-addbox card" data-addbox hidden>
     <label>Links to check <span class="muted small">GitHub, GitLab or SourceForge, one per line. Each one is checked like a submission and lands on Checking.</span>
@@ -610,11 +640,19 @@ rs_head('Submissions', true, ['assets/hub.css']);
   <div class="sh-wlist"><?php foreach ($wHid as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>
   <?php if ($wFine): ?><h2 class="sh-h2">Marked fine <span class="count"><?= count($wFine) ?></span></h2>
   <div class="sh-wlist"><?php foreach ($wFine as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>
+  <?php $wDup = in_array('pc', $wStores, true) ? rs_watch_dupes() : []; if ($wDup): ?><h2 class="sh-h2">Possible duplicates <span class="count"><?= count($wDup) ?></span></h2>
+  <div class="sh-wlist"><?php foreach ($wDup as [$da, $db, $dwhy, $dk]): ?>
+    <article class="sh-wdup" data-item="dupe:<?= h($da['id']) ?>|<?= h($db['id']) ?>">
+      <div class="sh-wdup-pair"><?php foreach ([$da, $db] as $dx): ?><div class="sh-wdup-one"><?= hub_tile((string)$dx['name'], (string)$dx['icon']) ?><div><b><?= h((string)$dx['name']) ?></b><a class="sh-link" href="<?= h(rs_host_web(rs_pc_host($dx), (string)$dx['repo'])) ?>" target="_blank" rel="noopener noreferrer"><?= h(rs_pc_key($dx)) ?> <?= HUB_IC['ext'] ?></a><small class="muted"><?= number_format((int)$dx['downloads']) ?> downloads · ★<?= (int)$dx['stars'] ?><?= (string)$dx['version'] !== '' ? ' · ' . h((string)$dx['version']) : '' ?></small></div></div><?php endforeach; ?></div>
+      <p class="muted"><?= h($dwhy) ?> Keeping one hides the other, and the launcher moves players who have it over.</p>
+      <div class="sh-rowc-acts"><button type="button" class="small" data-act="watch_merge" data-to="<?= h($da['id']) ?>" data-confirm="Click again to keep it">Keep <?= h(mb_strimwidth((string)$da['name'], 0, 22, '…')) ?></button><button type="button" class="small" data-act="watch_merge" data-to="<?= h($db['id']) ?>" data-confirm="Click again to keep it">Keep <?= h(mb_strimwidth((string)$db['name'], 0, 22, '…')) ?></button><button type="button" class="small" data-act="watch_dupe_ok">Not the same</button><a class="btn small" href="pc.php?edit=<?= rawurlencode((string)$da['id']) ?>">Open in PC recomps</a></div>
+    </article>
+  <?php endforeach; ?></div><?php endif; ?>
   <h2 class="sh-h2">What changed</h2>
   <?php if (!$wLog): ?><section class="card sh-none"><p class="muted">Nothing yet. Every time a repo goes down or comes back, it's listed here.</p></section>
   <?php else: ?><div class="sh-wlog card"><?php foreach ($wLog as $r): $lv = rs_watch_level((string)$r['state']); ?>
     <div class="sh-wlog-r"><span class="muted"><?= h(rs_date('M j, g:i a', rs_hub_ts((string)$r['at']))) ?></span><b><?= h((string)$r['name']) ?><?= $wTag ? ' <span class="sh-src">' . h(RS_STORES[$r['store']] ?? $r['store']) . '</span>' : '' ?></b>
-      <span class="sh-wpill sh-<?= $lv !== '' ? h($lv) : 'ok' ?>"><?= h($lv !== '' ? rs_watch_label((string)$r['state']) : 'Up again') ?></span><span class="mono muted"><?= h((string)$r['repo']) ?></span></div>
+      <span class="sh-wpill sh-<?= $lv !== '' ? h($lv) : 'ok' ?>"><?= h($lv !== '' || $r['state'] === 'fixed' ? rs_watch_label((string)$r['state']) : 'Up again') ?></span><span class="mono muted"><?= h((string)$r['repo']) ?></span></div>
   <?php endforeach; ?></div><?php endif; ?>
 <?php elseif ($tab === 'requests'):
     $handled = !empty($_GET['handled']);
@@ -726,6 +764,11 @@ rs_head('Submissions', true, ['assets/hub.css']);
   </div>
   <?php endif; ?>
 <?php else: require __DIR__ . '/inc/hub-guide.php'; endif; ?>
+</div>
+<div class="sh-selbar" data-selbar hidden role="region" aria-label="Selected drafts">
+  <b data-seln>0 selected</b>
+  <button type="button" class="small linkish" data-select-col="ready">All in Ready</button>
+  <span class="sh-selbar-acts"><button type="button" class="primary" data-bulk="publish" data-confirm="Click again to publish">Publish</button><button type="button" data-bulk="again">Run again</button><button type="button" class="sh-w-hide" data-bulk="remove" data-confirm="Click again to remove">Remove</button><button type="button" data-select-toggle>Done</button></span>
 </div>
 <div class="sh-scrim" data-scrim hidden></div>
 <aside class="sh-drawer" data-drawer hidden aria-label="Details"><div data-drawer-body></div></aside>

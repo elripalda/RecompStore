@@ -9,6 +9,22 @@
   var scrim = document.querySelector('[data-scrim]'), toastEl = document.querySelector('[data-toast]');
   var boardEl = root.querySelector('[data-board]');
   var openKey = null, toastT = null, filt = 'all', q = '';
+  // (4.8) Bulk select: drafts picked on the board (kept across the board's quiet refreshes).
+  var selecting = false, picked = {};
+  var selbar = document.querySelector('[data-selbar]');
+  function selDraw() {
+    if (!boardEl) return;
+    var n = 0;
+    boardEl.querySelectorAll('.sh-card[data-item^="job:"]').forEach(function (c) {
+      var on = !!picked[c.getAttribute('data-item')];
+      c.classList.toggle('picked', on);
+      c.setAttribute('aria-pressed', selecting ? String(on) : 'false');
+    });
+    Object.keys(picked).forEach(function (k) { if (boardEl.querySelector('.sh-card[data-item="' + k + '"]')) n++; else delete picked[k]; });
+    root.classList.toggle('selecting', selecting);
+    if (selbar) { selbar.hidden = !selecting; selbar.querySelector('[data-seln]').textContent = n + ' selected'; selbar.querySelectorAll('[data-bulk]').forEach(function (b) { b.disabled = !n; }); }
+  }
+  function selToggle(on) { selecting = on; if (!on) picked = {}; if (on && openKey) close(); selDraw(); }
   var base = 'hub.php?store=' + encodeURIComponent(store);
 
   function toast(msg, err) {
@@ -75,7 +91,7 @@
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
   }
   scrim.addEventListener('click', close);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && openKey) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && openKey) close(); else if (e.key === 'Escape' && selecting) selToggle(false); });
 
   // ---- The board ----
   function applyFilter() {
@@ -91,7 +107,7 @@
     if (!boardEl) return Promise.resolve();
     return fetch(base + '&board=1', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
       boardEl.innerHTML = j.html;
-      applyFilter(); markOn(); pre();
+      applyFilter(); markOn(); pre(); selDraw();
       document.querySelectorAll('.sh-store a').forEach(function (a) {
         var s = (a.getAttribute('href').match(/store=(\w+)/) || [])[1], n = j.counts ? j.counts[s] : 0, c = a.querySelector('.count');
         if (n && !c) { c = document.createElement('span'); c.className = 'count'; a.appendChild(document.createTextNode(' ')); a.appendChild(c); }
@@ -158,7 +174,22 @@
   function busy(el, on) { el.querySelectorAll('button').forEach(function (b) { if (on) { b.dataset.wasDisabled = b.disabled ? '1' : ''; b.disabled = true; } else if (!b.dataset.wasDisabled) b.disabled = false; }); }
   document.addEventListener('click', function (e) {
     var t = e.target;
+    if (t.closest('[data-select-toggle]')) { selToggle(!selecting); return; }
+    var selCol = t.closest('[data-select-col]');
+    if (selCol && boardEl) { boardEl.querySelectorAll('.sh-col-' + selCol.getAttribute('data-select-col') + ' .sh-card[data-item^="job:"]').forEach(function (c) { if (!c.hidden) picked[c.getAttribute('data-item')] = true; }); selDraw(); return; }
+    var bulk = t.closest('[data-bulk]');
+    if (bulk && !bulk.disabled) {
+      if (confirmFirst(bulk)) return;
+      bulk.removeAttribute('data-confirming');
+      var bfd = new FormData();
+      bfd.append('action', 'bulk'); bfd.append('do', bulk.getAttribute('data-bulk')); bfd.append('items', Object.keys(picked).join(','));
+      busy(selbar, true);
+      send(bfd).then(function (j) { busy(selbar, false); if (j.ok) picked = {}; done(j); selDraw(); });
+      return;
+    }
     var card = t.closest('.sh-card[data-item], .sh-hrow[data-item]');
+    if (card && selecting && card.matches('.sh-card[data-item^="job:"]')) { var k = card.getAttribute('data-item'); if (picked[k]) delete picked[k]; else picked[k] = true; selDraw(); return; }
+    if (card && selecting) { toast('Only drafts can be picked. Submissions are handled one by one.'); return; }
     if (card) { open(card.getAttribute('data-item')); return; }
     var oi = t.closest('[data-open-item]');
     if (oi) {
