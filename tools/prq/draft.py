@@ -234,7 +234,7 @@ def ask(spec, p, ctx, fix=None):
     if fix:
         msgs += [{"role": "assistant", "content": fix["prev"]},
                  {"role": "user", "content": "That recomplauncher.json doesn't pass the schema:\n" + fix["errors"] + "\nFix it and answer with the whole JSON object again."}]
-    body = {"model": MODEL, "max_tokens": 6000,
+    body = {"model": MODEL, "max_tokens": 16000,
             "system": [{"type": "text", "text": SYSTEM + spec, "cache_control": {"type": "ephemeral"}}],
             "messages": msgs}
     for attempt in range(3):
