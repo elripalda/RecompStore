@@ -90,6 +90,8 @@ function rs_pc_listed(string $id): ?array {
     // (4.1) The catalog as opcache's cached array, not decoded again on every request (admin/inc/catcache.php).
     $cat = rs_json_cached(RS_PC_CATALOG);
     foreach ((array)($cat['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
+    // (4.9) Ones only newer launchers get (a Forgejo project like Longshot) are on the website too.
+    foreach ((array)($cat['apps_min'] ?? []) as $g) foreach ((array)($g['apps'] ?? []) as $a) if (($a['id'] ?? '') === $id) return $a;
     return null;
 }
 
@@ -229,6 +231,7 @@ try {
     if ($a === 'readme' && !$post) {
         $rh = rs_host_norm((string)($app['host'] ?? '')); // (3.9) GitHub or GitLab
         $r = rs_pc_readme((string)$app['repo'], $rh);
+        if ($rh === 'forgejo') rs_pc_out(404, ['ok' => false, 'error' => 'The README is on its page on ' . strtok((string)$app['repo'], '/') . '.']); // (4.9)
         if ($r['status'] !== 200) rs_pc_out($r['status'] === 404 ? 404 : 503, ['ok' => false, 'error' => $r['status'] === 404 ? 'No README on its ' . rs_host_name($rh) . '.' : rs_host_name($rh) . ' didn\'t answer. Try again in a moment.']);
         rs_pc_out(200, ['ok' => true, 'md' => $r['md'], 'raw' => $r['raw'], 'blob' => $r['blob'], 'url' => $r['url']], 600);
     }
