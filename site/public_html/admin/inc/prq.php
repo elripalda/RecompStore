@@ -362,6 +362,10 @@ function rs_prq_update(int $id, bool $here = false): string {
         if (strcasecmp((string)($p['head']['repo']['owner']['login'] ?? ''), $login) !== 0) throw new RuntimeException('It was sent from another account (@' . ($p['head']['repo']['owner']['login'] ?? '?') . '), so only that account can update it.');
         $forkName = (string)$p['head']['repo']['full_name'];
         $branch = (string)$p['head']['ref'];
+        // The developer has their own file now: ours would replace it, so a person decides.
+        $baseRef = (string)($p['base']['ref'] ?? '');
+        if ($baseRef !== '' && rs_prq_gh('GET', '/repos/' . $m[1] . '/contents/recomplauncher.json?ref=' . rawurlencode($baseRef))['status'] === 200)
+            throw new RuntimeException('The developer has their own recomplauncher.json now, so this pull request may not be needed. Look at it on GitHub, then choose Keep it as it was.');
         $file = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
         $have = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/recomplauncher.json?ref=' . rawurlencode($branch));
         $old = $have['status'] === 200 ? (string)base64_decode((string)($have['json']['content'] ?? '')) : '';

@@ -100,16 +100,16 @@ def zip_listing(url, size):
 # (4.9) Where a project reads its command line and its paths, so the draft can use the options it
 # already has (whatever they're called) for the game's location, saves and starting straight in.
 SRC_EXT = (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rs", ".py", ".cs", ".go", ".zig", ".java", ".kt", ".js", ".ts", ".lua")
-HINT_NAME = re.compile(r"(^|/)(main|app|args?|argv|cli|cmd|command.?line|options?|launch(er)?|config|settings|paths?|program|entry|platform|window)[^/]*$", re.I)
+HINT_NAME = re.compile(r"(^|/)[^/]*(main|app|args?|argv|cli|cmd|command.?line|options?|launch|config|settings|paths?|program|entry|platform|window|startup|boot)[^/]*$", re.I)
 SKIP_DIR = re.compile(r"(^|/)(third_?party|extern(al)?|vendor|deps|submodules?|tests?|docs?|tools?/)", re.I)
 OPT_LINE = re.compile(r"""(["'](-{1,2}|/)[A-Za-z][\w-]{1,30}["']|\bargv\b|\bargc\b|getopt|cxxopts|CLI11|clap::|argparse|add_argument|parse_args|env::args|GetCommandLine|CommandLineToArgv|FULLSCREEN|borderless|fullscreen|windowed|save_?dir|saves?_?(path|folder)|user_?(dir|folder|path)|game_?(path|dir)|rom_?path|iso_?path|romfs|data_?path)""", re.I)
 
 
 def cli_hints(repo, branch, paths):
     cands = [p for p in paths if p.lower().endswith(SRC_EXT) and HINT_NAME.search(p) and not SKIP_DIR.search(p)]
-    cands.sort(key=lambda p: (0 if re.search(r"(^|/)main\.", p, re.I) else 1, p.count("/"), len(p)))
+    cands.sort(key=lambda p: (0 if re.search(r"(^|/)(main|program)\.", p, re.I) else 1 if re.search(r"launch|arg|cli|option", p.rsplit("/", 1)[-1], re.I) else 2, p.count("/"), len(p)))
     out, total = [], 0
-    for path in cands[:10]:
+    for path in cands[:12]:
         raw = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
         if not raw:
             continue
