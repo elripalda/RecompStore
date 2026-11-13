@@ -25,3 +25,19 @@ for ($n = 0; $n < 500; $n++) {
     $touch();
     try { rs_auto_run($next); } catch (Throwable $e) { error_log('auto-run ' . $next . ': ' . $e->getMessage()); }
 }
+// (4.8) Then one run (whichever gets the pump lock) keeps VirusTotal's line moving while drafts are
+// waiting on it: the line otherwise moves only when someone loads a page, so a big batch overnight sat
+// at "VirusTotal checking" with most of the day's allowance unused. Stops when nothing urgent is left,
+// the day's allowance is used up, or after about three hours.
+if (function_exists('rs_vt_run') && rs_vt_on()) {
+    $pump = fopen(sys_get_temp_dir() . '/rs-vt-pump.lock', 'c');
+    if ($pump && flock($pump, LOCK_EX | LOCK_NB)) {
+        $end = time() + 3 * 3600;
+        while (time() < $end && rs_vt_day_ok()) {
+            $left = (int)rs_db()->query("SELECT COUNT(*) FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND prio <= 2")->fetchColumn();
+            if (!$left && !(int)rs_db()->query("SELECT COUNT(*) FROM pc_auto WHERE status IN ('queued', 'running')")->fetchColumn()) break;
+            if (rs_vt_run(55) === 0) sleep(15);
+        }
+        flock($pump, LOCK_UN);
+    }
+}
