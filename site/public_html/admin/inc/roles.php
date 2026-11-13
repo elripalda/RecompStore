@@ -41,7 +41,7 @@ const RS_PAGE_ACCESS = [
     'accounts.php' => ['manager', ''], 'players.php' => ['manager', ''], 'statcard.php' => ['manager', ''], 'live.php' => ['curator', ''], 'find.php' => ['curator', ''], 'pins.php' => ['curator', ''], 'mail.php' => ['manager', ''], 'email-asset.php' => ['manager', ''], 'roadmap.php' => ['manager', ''],
     // Owners: settings, the launcher's builds and updates, storage, the team
     'settings.php' => ['owner', ''], 'launcher.php' => ['owner', 'pc'], 'launcher-beta.php' => ['owner', 'pc'], 'launcher-upload.php' => ['owner', 'pc'],
-    'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''], 'sponsors.php' => ['owner', ''],
+    'diag-db.php' => ['owner', ''], 'team.php' => ['owner', ''], 'sponsors.php' => ['owner', ''], 'instant-gaming.php' => ['owner', ''],
 ];
 // (4.8) Roles that don't climb the ladder above: only these pages (and each page's store still counts).
 const RS_ROLE_PAGES = [

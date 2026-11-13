@@ -141,7 +141,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         'Insights' => [
             ['analytics.php', 'Analytics', 'chart', [['analytics.php', 'Analytics', fn() => in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Server health', fn() => in_array($here, ['status.php', 'diag-db.php'], true)], ['statcard.php', 'Stats card', null]], 0],
             ['log.php', 'Change log', 'log', [], 0],
-            ['sponsors.php', 'Sponsors', 'dollar', [], 0],
+            ['sponsors.php', 'Sponsors', 'dollar', [['sponsors.php', 'Spots', null], ['instant-gaming.php', 'Instant Gaming', null]], 0],
         ],
         'Admin' => [
             ['team.php', 'Team', 'team', [], 0],
@@ -150,7 +150,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     ];
     // Pages that live under another section's link.
     $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php', 'statcard.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
-        'settings.php' => ['digest.php'], 'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
+        'settings.php' => ['digest.php'], 'sponsors.php' => ['instant-gaming.php'], 'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
         'hub.php' => ['dev-accounts.php', 'messages.php', 'security.php', 'submissions.php', 'auto.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;

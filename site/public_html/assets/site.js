@@ -3794,6 +3794,7 @@
       const vs = view.querySelector('[data-versions]');
       if (vs) ps5CountsLoad().then(() => { const v2 = view.querySelector('[data-versions]'); if (v2) v2.outerHTML = versionsHTML('pc', a.id); });
     });
+    pcIG(a, view);
     // (4.3) Open in RecompLauncher: its recomplauncher:// link. If the browser never leaves the page
     // (the launcher isn't installed, or is too old for links), a line offers to get it.
     view.querySelectorAll('[data-rl-open]').forEach((b) => b.addEventListener('click', () => {
@@ -3815,6 +3816,63 @@
         if (hit) { b.href = hit.browser_download_url; b.title = hit.name; }
       });
     }).catch(() => { /* the button still opens its releases */ });
+  }
+
+  // (4.8) Instant Gaming: where to buy the original game, on the recomps linked on Sponsors > Instant
+  // Gaming. Visitors get one of the versions being tested and keep it (rl-ig: the round and the version),
+  // and a card counts one view when it's half on screen. ?igpeek=a shows version a even while it's off:
+  // a preview from the admin, not counted.
+  let igData = null, igMine = null;
+  const igSeen = new Set();
+  const igLoad = () => igData || (igData = fetch('/api/ig.php', { credentials: 'omit' }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  const igPick = (d) => {
+    const vs = d.v || [];
+    if (!vs.length) return null;
+    let saved = igMine;
+    try { saved = JSON.parse(localStorage.getItem('rl-ig') || 'null') || igMine; } catch (e) { /* this visit only */ }
+    if (saved && saved.r === d.round) { const kept = vs.find((x) => x.id === saved.v); if (kept) return kept; }
+    const total = vs.reduce((s, x) => s + (x.share || 0), 0) || 1;
+    let roll = Math.random() * total, got = vs[vs.length - 1];
+    for (const x of vs) { roll -= x.share || 0; if (roll < 0) { got = x; break; } }
+    igMine = { r: d.round, v: got.id };
+    try { localStorage.setItem('rl-ig', JSON.stringify(igMine)); } catch (e) { /* this visit only */ }
+    return got;
+  };
+  function pcIG(a, view) {
+    const peek = new URLSearchParams(location.search).get('igpeek');
+    igLoad().then((d) => {
+      if (!d || !view.isConnected || !view.querySelector('.pc-game')) return;
+      const l = (d.l || {})[a.id];
+      if (!l) return;
+      const v = peek ? (d.all || []).find((x) => x.id === peek) : d.on && !l.off ? igPick(d) : null;
+      if (!v) return;
+      const href = `/api/ig.php?go=${encodeURIComponent(a.id)}&v=${v.id}${peek ? '&peek=1' : ''}`;
+      const price = l.price ? `<span class="ig-price">${l.pct ? `<span class="ig-off">−${l.pct}%</span><s>${esc(l.old)}</s>` : ''}<b>${esc(l.price)}</b></span>` : '';
+      const btn = `<span class="ig-buy">${l.price ? t('Buy') : t('See price')}<span aria-hidden="true">↗</span></span>`;
+      const sub = [l.p, 'Instant Gaming'].filter(Boolean).map(esc).join(' · ');
+      const logo = '<img class="ig-logo" src="/assets/ig.svg" alt="" width="20" height="22">';
+      const wide = v.place === 'wide';
+      const cls = `ig ${wide ? 'ig-wide' : 'ig-card'}${v.btn === 'orange' ? ' ig-hot' : ''}`;
+      const html = wide
+        ? `<a class="${cls}" href="${href}" target="_blank" rel="sponsored noopener"><span class="ig-mark">${logo}</span><span class="ig-words"><b dir="auto">${esc(l.t)}</b><small>${sub} · ${t('Affiliate link')}</small></span>${price}${btn}</a>`
+        : `<a class="${cls}" href="${href}" target="_blank" rel="sponsored noopener"><span class="ig-top">${logo}<span class="ig-words"><b dir="auto">${esc(l.t)}</b><small>${sub}</small></span></span><span class="ig-bot"><small class="ig-aff">${t('Affiliate link')}</small><span class="ig-end">${price}${btn}</span></span></a>`;
+      view.querySelectorAll('.ig').forEach((x) => x.remove());
+      const side = view.querySelector('.pc-side'), panel = side && side.querySelector(':scope > .panel'), tabs = view.querySelector('.pc-tabs');
+      if (wide && tabs) tabs.insertAdjacentHTML('beforebegin', html);
+      else if (v.place === 'side-top' && side && !matchMedia('(max-width:760px)').matches) side.insertAdjacentHTML('afterbegin', html);
+      else if (panel) panel.insertAdjacentHTML('afterend', html);
+      else return;
+      if (peek) return;
+      const el = view.querySelector('.ig'), key = a.id + '|' + v.id;
+      const send = () => {
+        if (igSeen.has(key)) return;
+        igSeen.add(key);
+        fetch(`/api/ig.php?e=view&id=${encodeURIComponent(a.id)}&v=${v.id}&r=${d.round}`, { method: 'POST', credentials: 'omit', keepalive: true }).catch(() => { /* counting is best-effort */ });
+      };
+      if (!('IntersectionObserver' in window)) { send(); return; }
+      const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); send(); } }, { threshold: 0.5 });
+      io.observe(el);
+    });
   }
 
   // (2.8) Player feedback: how it runs for people, on what, and a few words.
