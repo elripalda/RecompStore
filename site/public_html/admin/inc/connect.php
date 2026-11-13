@@ -618,7 +618,8 @@ function rs_repo_from_link(string $s, string $bare = ''): ?array {
     }
     if (rs_host_norm($bare) === 'sourceforge' && !preg_match('#[/.:]#', trim($s, '/ '))) { $p = strtolower(trim($s, '/ ')); return rs_sf_name_ok($p) ? ['host' => 'sourceforge', 'repo' => $p] : null; }
     // (4.9) A Forgejo server on the list (Settings): https://server/owner/name/... -> "server/owner/name".
-    if (preg_match('#^(?:https?://)?([a-z0-9.-]+\.[a-z]{2,})/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $s, $m) && in_array(strtolower($m[1]), rs_fj_hosts(), true)) {
+    if (preg_match('#^(?:https?://)?([a-z0-9.-]+\.[a-z]{2,})/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $s, $m)
+        && !preg_match('/(^|\.)(github\.com|gitlab\.com|sourceforge\.net)$/i', $m[1]) && rs_fj_detect($m[1])) {
         $p = strtolower($m[1]) . '/' . $m[2] . '/' . $m[3];
         return rs_fj_path_ok($p) ? ['host' => 'forgejo', 'repo' => $p] : null;
     }
@@ -629,6 +630,8 @@ function rs_repo_from_link(string $s, string $bare = ''): ?array {
         return rs_gl_path_ok($p) ? ['host' => 'gitlab', 'repo' => $p] : null;
     }
     $gh = (bool)preg_match('#^(?:https?://)?(?:www\.)?github\.com/#i', $s);
+    // A full link to some other website that isn't a Forgejo/Gitea server: not a project we can read.
+    if (!$gh && rs_host_norm($bare) !== 'gitlab' && preg_match('#^(?:https?://)?[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}/#i', $s) && !preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/#i', $s)) return null;
     if (!$gh && rs_host_norm($bare) === 'gitlab') {
         $p = preg_replace('#\.git$#i', '', trim($s, '/ '));
         return rs_gl_path_ok($p) ? ['host' => 'gitlab', 'repo' => $p] : null;
@@ -850,8 +853,35 @@ function rs_host_releases(?string $host, string $repo, int $maxAge = 900): array
 // releases in GitHub's own shape. Only servers on the list are read (Settings, "forgejo_hosts"), and
 // nothing of ours, no token, is ever sent to them.
 const RS_FJ_HOSTS = 'git.magicbean.dev, codeberg.org';
+// The servers we read: the list in Settings, plus every one recognized from a pasted link (rs_fj_detect).
 function rs_fj_hosts(): array {
-    return array_values(array_filter(array_map(fn($h) => strtolower(trim($h)), explode(',', (string)rs_setting('forgejo_hosts', RS_FJ_HOSTS)))));
+    $all = explode(',', (string)rs_setting('forgejo_hosts', RS_FJ_HOSTS) . ',' . (string)rs_setting('forgejo_seen', ''));
+    return array_values(array_unique(array_filter(array_map(fn($h) => strtolower(trim($h)), $all))));
+}
+// (4.9) Xarishark: a pasted link to any server is recognized by asking it, not by its name. Forgejo (and
+// Gitea) answer /api/v1/version with {"version": ...}. Public https servers only (never one on a private
+// network); the answer is kept a day either way, and a server that answers joins the list for good.
+function rs_fj_detect(string $host): bool {
+    $host = strtolower(trim($host));
+    if (!preg_match('/^(?=.{4,100}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/', $host)) return false;
+    if (in_array($host, rs_fj_hosts(), true)) return true;
+    if (preg_match('/(^|\.)(github\.com|gitlab\.com|sourceforge\.net|githubusercontent\.com|recompstore\.com|recomplauncher\.com)$/', $host)) return false;
+    $k = 'fjdet:' . $host;
+    if (function_exists('rs_kv_get') && ($c = rs_kv_get($k)) && $c['age'] < 86400) return $c['v'] === '1';
+    $ips = @gethostbynamel($host) ?: [];
+    $public = $ips && !array_filter($ips, fn($ip) => !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE));
+    $ok = false;
+    if ($public) {
+        $r = rs_http('https://' . $host . '/api/v1/version', ['timeout' => 6, 'max' => 20000, 'headers' => ['Accept: application/json']]);
+        $j = $r['status'] === 200 ? json_decode((string)$r['body'], true) : null;
+        $ok = is_array($j) && is_string($j['version'] ?? null) && $j['version'] !== '';
+    }
+    if (function_exists('rs_kv_put')) rs_kv_put($k, $ok ? '1' : '0');
+    if ($ok) {
+        $seen = array_filter(array_map('trim', explode(',', (string)rs_setting('forgejo_seen', ''))));
+        if (!in_array($host, $seen, true)) { $seen[] = $host; rs_set_setting('forgejo_seen', implode(', ', $seen)); }
+    }
+    return $ok;
 }
 function rs_fj_path_ok(string $p): bool {
     if (strlen($p) > 150 || str_contains($p, '..')) return false;
