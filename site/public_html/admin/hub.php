@@ -681,7 +681,7 @@ rs_head('Submissions', true, ['assets/hub.css']);
   </section>
   <?php if (in_array('pc', $wStores, true)): ?><section class="card sh-wscan sh-wgone">
     <p><b>Removed-game page<?= $wGoneOn ? ' · on' : ' · off' ?></b><br><span class="muted">When someone opens the link of a recomp that was taken off, they see what happened and others like it instead of "That page isn't here". A listing that moved sends them to its new page.</span></p>
-    <div class="sh-row"><?php if ($wGoneEx !== ''): ?><a class="btn small" href="https://recomplauncher.com/game/<?= rawurlencode($wGoneEx) ?>?preview=gone" target="_blank" rel="noopener">Preview it</a><?php endif; ?><?php if (rs_hub_can_manage()): ?><button type="button" data-act="gone_page"<?= $wGoneOn ? '' : ' class="primary"' ?>><?= $wGoneOn ? 'Turn it off' : 'Turn it on' ?></button><?php endif; ?></div>
+    <div class="sh-row"><?php if ($wGoneEx !== ''): ?><a class="btn small" href="https://recomplauncher.com/game/<?= rawurlencode($wGoneEx) ?>?peek=gone" target="_blank" rel="noopener">Preview it</a><?php endif; ?><?php if (rs_hub_can_manage()): ?><button type="button" data-act="gone_page"<?= $wGoneOn ? '' : ' class="primary"' ?>><?= $wGoneOn ? 'Turn it off' : 'Turn it on' ?></button><?php endif; ?></div>
   </section><?php endif; ?>
   </div>
   <h2 class="sh-h2">Need a look <span class="count"><?= count($wNeed) ?></span></h2>

@@ -3546,17 +3546,18 @@
 
   // (4.8) A recomp that isn't on RecompLauncher anymore: its art and name, what happened in a few words,
   // its new page when another listing took over, and others like it, instead of a dead end. On once the
-  // admin turns it on (the catalog's gonePage); ?preview=gone shows it before that.
+  // admin turns it on (the catalog's gonePage); ?peek=gone shows it before that (a "preview" parameter
+  // is taken off the address before it reaches the site).
   function pcGone(id) {
     const plain = () => { pcTitle = 'RecompLauncher'; view.innerHTML = `<article class="page"><h1>${t('That page isn\'t here.')}</h1><p><a href="/pc">${t('Back to all PC recomps')}</a></p></article>`; };
-    if (!(pcCat && pcCat.gonePage) && !/[?&]preview=gone\b/.test(location.search)) { plain(); return; }
+    if (!(pcCat && pcCat.gonePage) && !/[?&]peek=gone\b/.test(location.search)) { plain(); return; }
     const here = current();
     view.innerHTML = `<p class="muted pc-loading">${t('Loading…')}</p>`;
     fetch('/api/pc.php?a=gone&id=' + encodeURIComponent(id)).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((j) => {
       if (current() !== here) return;
       const g = j && j.gone;
       if (!g) { plain(); return; }
-      if (g.to && pcById(g.to)) { location.replace((LAUNCHER ? '' : '/pc') + '/game/' + encodeURIComponent(g.to) + (location.search.includes('preview=gone') ? '?moved=' + encodeURIComponent(g.id) : '')); return; }
+      if (g.to && pcById(g.to)) { location.replace((LAUNCHER ? '' : '/pc') + '/game/' + encodeURIComponent(g.to) + (location.search.includes('peek=gone') ? '?moved=' + encodeURIComponent(g.id) : '')); return; }
       pcTitle = `${g.name} · RecompLauncher`;
       document.title = pcTitle;
       if (g.hero) setBackdrop({ hero: g.hero });
