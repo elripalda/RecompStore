@@ -226,7 +226,7 @@ rs_head('Players');
       <p class="muted"><?= number_format($waveLeft) ?> <?= $waveLeft === 1 ? 'account is' : 'accounts are' ?> waiting for one. They go out newest first, a wave at a time, once the mail line is clear. New sign-ups get theirs right away, ahead of the waves.</p>
     </div>
     <?php if ($wave['cursor']): ?>
-    <p class="pl-wave-state"><b><?= number_format((int)$wave['sent']) ?></b> sent in <?= (int)$wave['waves'] ?> <?= (int)$wave['waves'] === 1 ? 'wave' : 'waves' ?><?php
+    <p class="pl-wave-state"><b><?= number_format((int)$wave['sent']) ?></b> handed to the mail line in <?= (int)$wave['waves'] ?> <?= (int)$wave['waves'] === 1 ? 'wave' : 'waves' ?><?php
       if ($wave['done']) echo ' · everyone has one now';
       elseif (!$wave['on']) echo ' · paused';
       elseif ($waveRoom <= 0) echo ' · today\'s limit is used up, the next wave goes when there\'s room';
@@ -242,7 +242,7 @@ rs_head('Players');
         <?php else: ?><button class="primary" name="action" value="wave_start"><?= $wave['cursor'] && !$wave['done'] ? 'Start again' : 'Start sending' ?></button><?php if ($wave['cursor']): ?><button name="action" value="wave_save">Save</button><?php endif; ?><?php endif; ?>
       </div>
     </form>
-    <p class="muted small">The daily limit counts every email the line sent in the last 24 hours (confirmations, resets, submissions), so waves only use what's left: <?= number_format($waveRoom) ?> today. Brevo's free plan allows 300 a day; raise it once you're on Amazon SES.</p>
+    <p class="muted small">The daily limit counts every email the line sent in the last 24 hours (confirmations, resets, submissions), so waves only use what's left: <?= number_format($waveRoom) ?> right now. Set it to fit what's left on the sending service's plan.</p>
   </section>
   <?php endif; ?>
   <div class="card" style="padding:0;overflow-x:auto">
