@@ -66,7 +66,9 @@ function rs_mailq_send_one(int $id): bool {
 }
 
 // A few from the front of the line. Called after page views; only one at a time runs.
-function rs_mailq_run(int $max = 6): int {
+// (4.9) Through Amazon SES (14 a second allowed) 15 go per run; otherwise 6, as before.
+function rs_mailq_run(int $max = 0): int {
+    if ($max <= 0) $max = function_exists('rs_relay_on') && rs_relay_on() && str_ends_with((string)rs_setting('relay_host', ''), '.amazonaws.com') ? 15 : 6;
     rs_mailq_tables();
     if (rs_mailq_paused()) return 0;
     $last = (int)rs_setting('mailq_ran_at', '0');
