@@ -3272,3 +3272,6 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
   .ig-wide .ig-buy{padding:0 11px}
 }
 @media (prefers-reduced-motion:reduce){.ig,.ig-buy,.ig-buy span{transition:none}}
+/* (4.9) Account page: send the confirmation link again */
+.acct-resend{background:none;border:0;padding:0;margin-left:4px;font:inherit;color:var(--cyan);text-decoration:underline;cursor:pointer}
+.acct-resend:disabled{opacity:.5;cursor:default}

@@ -26,6 +26,29 @@ $self = function (array $over = []) use ($q, $f, $p, $sel): string {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
+    // (4.9) Confirmation emails in waves (see rs_acct_wave in inc/accounts.php).
+    if (in_array($act, ['wave_start', 'wave_save', 'wave_pause'], true)) {
+        try {
+            $w = rs_acct_wave();
+            foreach (['size' => [10, 1000], 'gap' => [5, 1440], 'cap' => [10, 100000]] as $k => [$lo, $hi]) if (isset($_POST[$k])) $w[$k] = max($lo, min($hi, (int)$_POST[$k]));
+            if ($act === 'wave_start') {
+                if (!rs_mail_ready()) throw new RuntimeException('Set up sending on the Mail page first.');
+                if (!$w['cursor'] || $w['done']) { $w['cursor'] = (int)$db->query('SELECT COALESCE(MAX(id), 0) + 1 FROM accounts')->fetchColumn(); $w['sent'] = 0; $w['waves'] = 0; $w['start'] = time(); $w['done'] = false; }
+                $w['on'] = true;
+                $w['last'] = 0;
+                rs_flash('Started. The first wave goes out with the next emails, newest accounts first.');
+            } elseif ($act === 'wave_pause') {
+                $w['on'] = false;
+                rs_flash('Paused. Start again to pick up where it stopped.');
+            } else rs_flash('Saved.');
+            rs_acct_wave_save($w);
+            rs_log('player', 'confirmation waves', $act . ' (' . $w['size'] . ' per wave, every ' . $w['gap'] . ' min, ' . $w['cap'] . ' a day)');
+        } catch (Throwable $e) {
+            rs_flash($e->getMessage(), 'err');
+        }
+        header('Location: ' . $self(['f' => 'unverified', 'id' => '']));
+        exit;
+    }
     $id = (int)($_POST['id'] ?? 0);
     $acc = rs_acct_get($id);
     $back = $self(['id' => $id]);
@@ -174,6 +197,13 @@ if ($acc) {
 // (4.8) The admin login this account is merged with, and the ones it could be merged with.
 $admin = $acc ? rs_al_admin_for($sel, true) : null;
 $admins = $acc && !$admin && rs_is_owner() ? array_values(array_filter(rs_al_admins(), fn($u) => (int)$u['account_id'] <= 0)) : [];
+// (4.9) Confirmation waves, shown with the Not verified list.
+if ($f === 'unverified') {
+    $wave = rs_acct_wave();
+    $waveLeft = $wave['cursor'] ? rs_acct_wave_left($wave) : (int)$db->query('SELECT COUNT(*) FROM accounts WHERE email_ok = 0 AND email IS NOT NULL AND banned = 0 AND ' . RS_ACCT_WAVE_FRESH)->fetchColumn();
+    $waveRoom = rs_acct_wave_room($wave);
+    $waveNext = max(0, (int)$wave['last'] + (int)$wave['gap'] * 60 - time());
+}
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $hid = fn(string $act, int $id) => $csrf . '<input type="hidden" name="action" value="' . h($act) . '"><input type="hidden" name="id" value="' . $id . '">';
 $mb = fn(int $b) => $b <= 0 ? '0 MB' : ($b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, (int)round($b / 1024)) . ' KB');
@@ -189,6 +219,32 @@ rs_head('Players');
     <a class="btn chip<?= $f === $k ? ' on' : '' ?>" href="<?= h($self(['f' => $k, 'p' => '', 'id' => ''])) ?>"><?= h($n) ?></a>
     <?php endforeach; ?>
   </div>
+  <?php if ($f === 'unverified'): ?>
+  <section class="card pl-wave">
+    <div class="pl-wave-head">
+      <h2>Confirmation emails <?= $wave['on'] ? '<span class="pill ok">Sending</span>' : ($wave['done'] ? '<span class="pill ok">Done</span>' : ($wave['cursor'] ? '<span class="pill warn">Paused</span>' : '')) ?></h2>
+      <p class="muted"><?= number_format($waveLeft) ?> <?= $waveLeft === 1 ? 'account is' : 'accounts are' ?> waiting for one. They go out newest first, a wave at a time, once the mail line is clear. New sign-ups get theirs right away, ahead of the waves.</p>
+    </div>
+    <?php if ($wave['cursor']): ?>
+    <p class="pl-wave-state"><b><?= number_format((int)$wave['sent']) ?></b> sent in <?= (int)$wave['waves'] ?> <?= (int)$wave['waves'] === 1 ? 'wave' : 'waves' ?><?php
+      if ($wave['done']) echo ' · everyone has one now';
+      elseif (!$wave['on']) echo ' · paused';
+      elseif ($waveRoom <= 0) echo ' · today\'s limit is used up, the next wave goes when there\'s room';
+      elseif ($waveNext > 0) echo ' · next wave in about ' . max(1, (int)ceil($waveNext / 60)) . ' min';
+      else echo ' · next wave as soon as the line is clear'; ?>.</p>
+    <?php endif; ?>
+    <form method="post" class="pl-wave-form"><?= $csrf ?>
+      <label>Per wave<input type="number" name="size" min="10" max="1000" value="<?= max(10, min(1000, (int)$wave['size'])) ?>"></label>
+      <label>Minutes apart<input type="number" name="gap" min="5" max="1440" value="<?= max(5, min(1440, (int)$wave['gap'])) ?>"></label>
+      <label>Daily limit<input type="number" name="cap" min="10" max="100000" value="<?= max(10, min(100000, (int)$wave['cap'])) ?>"></label>
+      <div class="pl-wave-acts">
+        <?php if ($wave['on']): ?><button name="action" value="wave_save">Save</button><button name="action" value="wave_pause">Pause</button>
+        <?php else: ?><button class="primary" name="action" value="wave_start"><?= $wave['cursor'] && !$wave['done'] ? 'Start again' : 'Start sending' ?></button><?php if ($wave['cursor']): ?><button name="action" value="wave_save">Save</button><?php endif; ?><?php endif; ?>
+      </div>
+    </form>
+    <p class="muted small">The daily limit counts every email the line sent in the last 24 hours (confirmations, resets, submissions), so waves only use what's left: <?= number_format($waveRoom) ?> today. Brevo's free plan allows 300 a day; raise it once you're on Amazon SES.</p>
+  </section>
+  <?php endif; ?>
   <div class="card" style="padding:0;overflow-x:auto">
     <?php if (!$rows): ?><p class="muted" style="padding:16px"><?= $q !== '' ? 'Nobody matches “' . h($q) . '”.' : 'No accounts here.' ?></p><?php else: ?>
     <table class="pl-table">

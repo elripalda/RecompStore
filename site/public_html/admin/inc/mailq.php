@@ -84,6 +84,8 @@ function rs_mailq_run(int $max = 6): int {
         }
         // Sent ones are kept two weeks for the admin's numbers.
         if (random_int(1, 50) === 1) $db->exec('DELETE FROM mail_queue WHERE sent_at IS NOT NULL AND sent_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 14 DAY)');
+        // (4.9) With the line clear, the next wave of confirmation emails, if one is due.
+        if (function_exists('rs_acct_wave_tick')) { try { rs_acct_wave_tick(); } catch (Throwable $e) { error_log('acct wave: ' . $e->getMessage()); } }
     } finally {
         $db->query("SELECT RELEASE_LOCK('rs_mailq')");
     }

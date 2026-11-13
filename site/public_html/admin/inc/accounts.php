@@ -358,14 +358,68 @@ function rs_acct_token_use(string $raw, string $kind, bool $keep = false): ?arra
 
 // ---- Email --------------------------------------------------------------------------------------
 
-function rs_acct_mail_confirm(array $a): void {
+// $prio, $now: see rs_mailq_add. $host: the site the link and name are for (recompstore.com or
+// recomplauncher.com); '' = the site this request is on.
+function rs_acct_mail_confirm(array $a, int $prio = 1, bool $now = true, string $host = ''): void {
     if (!rs_mail_ready() || $a['email'] === null) return;
     $t = rs_acct_token_new((int)$a['id'], 'confirm', 60 * 48, (string)$a['email_lc']);
-    $link = rs_acct_site() . '/api/account.php?a=confirm&t=' . $t;
-    $brand = rs_acct_brand();
+    $h = in_array($host, RS_ACCT_HOSTS, true) ? $host : '';
+    $link = ($h !== '' ? 'https://' . $h : rs_acct_site()) . '/api/account.php?a=confirm&t=' . $t;
+    $brand = $h !== '' ? ($h === 'recomplauncher.com' ? 'RecompLauncher' : 'RecompStore') : rs_acct_brand();
     rs_mailq_add((string)$a['email'], 'Confirm your ' . $brand . ' account',
         "Hi " . ($a['username'] ?: 'there') . ",\n\nConfirm your email for $brand with this link:\n$link\n\nIt works for 48 hours. If you didn't make an account, ignore this email and nothing happens.",
-        ['kind' => 'confirm', 'brand' => $brand], 1, true);
+        ['kind' => 'confirm', 'brand' => $brand], $prio, $now);
+}
+
+// ---- (4.9) Confirmation emails for accounts that never got one, a wave at a time ---------------
+// From 3.9 to 4.9 sign-ups got no confirmation email. These go out newest first: a wave of `size`
+// once the mail line is clear, at most every `gap` minutes, and only while the line has sent fewer
+// than `cap` emails in the last 24 hours (the sending service's daily allowance). `cursor`: the next
+// wave takes accounts below this id. New sign-ups get theirs straight away, ahead of the waves.
+// Not someone whose link went out in the last 48 hours (at sign-up, or a "send it again").
+const RS_ACCT_WAVE_FRESH = "id NOT IN (SELECT account_id FROM account_tokens WHERE kind = 'confirm' AND expires > UTC_TIMESTAMP())";
+function rs_acct_wave(): array {
+    $d = ['on' => false, 'size' => 100, 'gap' => 60, 'cap' => 250, 'cursor' => 0, 'sent' => 0, 'waves' => 0, 'last' => 0, 'start' => 0, 'done' => false];
+    $c = json_decode((string)rs_setting('acct_wave', ''), true);
+    return is_array($c) ? array_merge($d, array_intersect_key($c, $d)) : $d;
+}
+function rs_acct_wave_save(array $w): void { rs_set_setting('acct_wave', json_encode($w)); }
+// Room left today: the cap minus everything the line sent in the last 24 hours.
+function rs_acct_wave_room(array $w): int {
+    rs_mailq_tables();
+    $n = (int)rs_db()->query("SELECT COUNT(*) FROM mail_queue WHERE sent_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) AND sent_at > '1971-01-01'")->fetchColumn();
+    return max(0, (int)$w['cap'] - $n);
+}
+// Still waiting for their email, below the cursor.
+function rs_acct_wave_left(array $w): int {
+    $st = rs_db()->prepare('SELECT COUNT(*) FROM accounts WHERE email_ok = 0 AND email IS NOT NULL AND banned = 0 AND id < ? AND ' . RS_ACCT_WAVE_FRESH);
+    $st->execute([(int)$w['cursor']]);
+    return (int)$st->fetchColumn();
+}
+// Called after the mail line has run (rs_mailq_run): the next wave, when it's due.
+function rs_acct_wave_tick(): void {
+    $w = rs_acct_wave();
+    if (!$w['on'] || time() - (int)$w['last'] < (int)$w['gap'] * 60 || !rs_mail_ready()) return;
+    $db = rs_db();
+    if ((int)$db->query('SELECT COUNT(*) FROM mail_queue WHERE sent_at IS NULL')->fetchColumn() > 0) return; // the line isn't clear yet
+    $room = rs_acct_wave_room($w);
+    if ($room <= 0) return;
+    $st = $db->prepare('SELECT * FROM accounts WHERE email_ok = 0 AND email IS NOT NULL AND banned = 0 AND id < ? AND ' . RS_ACCT_WAVE_FRESH . ' ORDER BY id DESC LIMIT ' . max(1, min((int)$w['size'], $room)));
+    $st->execute([(int)$w['cursor']]);
+    $rows = $st->fetchAll();
+    if (!$rows) { $w['on'] = false; $w['done'] = true; rs_acct_wave_save($w); return; }
+    // Each one's link and name are for the site they were last signed in on (RecompLauncher if unknown).
+    $ids = implode(',', array_map(fn($r) => (int)$r['id'], $rows));
+    $host = [];
+    foreach ($db->query("SELECT account_id, host FROM account_sessions WHERE account_id IN ($ids) ORDER BY last_seen") as $s) $host[(int)$s['account_id']] = preg_replace('/^www\./', '', strtolower((string)$s['host']));
+    foreach ($rows as $a) {
+        try { rs_acct_mail_confirm($a, 3, false, $host[(int)$a['id']] ?? 'recomplauncher.com'); } catch (Throwable $e) { error_log('acct wave: ' . $e->getMessage()); }
+    }
+    $w['cursor'] = (int)end($rows)['id'];
+    $w['sent'] += count($rows);
+    $w['waves']++;
+    $w['last'] = time();
+    rs_acct_wave_save($w);
 }
 
 function rs_acct_mail_reset(array $a): void {

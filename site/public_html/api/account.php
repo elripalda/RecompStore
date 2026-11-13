@@ -182,8 +182,9 @@ try {
         rs_acct_try_add('signup', $ip);
         $acc = rs_acct_create(['username' => $user, 'username_lc' => strtolower($user), 'email' => $email, 'email_lc' => $email, 'pass_hash' => rs_acct_hash($pass),
             'prefs' => json_encode(['weekly' => !empty($in['news']) || !empty($in['weekly']), 'launcher' => !empty($in['news']) || !empty($in['launcher']), 'updates' => !empty($in['updates'])])]);
-        // (3.9) No confirmation email: the account is signed in straight away. Its email stays
-        // unconfirmed (email_ok 0), so nothing else is mailed to it.
+        // (3.9) The account is signed in straight away. Its email stays unconfirmed (email_ok 0) until
+        // the link is used, so nothing else is mailed to it. (4.9) The confirmation email is back.
+        try { rs_acct_mail_confirm($acc); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); }
         rs_ac_out(200, ['ok' => true] + rs_acct_sign_in($acc));
     }
     if ($a === 'resend') {
@@ -191,7 +192,8 @@ try {
         if (rs_acct_try_count('resend', $ip, 60) >= 4) rs_ac_err(429, 'That\'s a few already. Check your spam folder, or try again in an hour.');
         rs_acct_try_add('resend', $ip);
         $acc = filter_var($email, FILTER_VALIDATE_EMAIL) ? rs_acct_by('email_lc', $email) : ($me ?: null);
-        rs_ac_out(200, ['ok' => true, 'message' => 'No confirmation needed any more: just sign in.']);
+        if ($acc && !$acc['email_ok'] && !$acc['banned']) { try { rs_acct_mail_confirm($acc); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); } }
+        rs_ac_out(200, ['ok' => true, 'message' => 'If that email is waiting to be confirmed, a new link is on its way. Check your spam folder too.']);
     }
     if ($a === 'signin') {
         $login = strtolower($s('login', 190));
@@ -287,6 +289,7 @@ try {
         if (rs_acct_try_count('email', (string)$id, 60) >= 4) rs_ac_err(429, 'Try again in an hour.');
         rs_acct_try_add('email', (string)$id);
         rs_acct_update($id, ['email' => $email, 'email_lc' => $email, 'email_ok' => 0]);
+        try { rs_acct_mail_confirm(rs_acct_get($id)); } catch (Throwable $e) { error_log('account.php confirm mail: ' . $e->getMessage()); }
         rs_ac_out(200, ['ok' => true, 'account' => rs_acct_public(rs_acct_get($id))]);
     }
     if ($a === 'password') {

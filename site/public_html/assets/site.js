@@ -6189,7 +6189,7 @@
           <div class="acct-pic">${avatarHTML(me, 64)}<div><b>${t('Profile picture')}</b><small>${t('A small square picture, shown next to your comments.')}</small>
             <div class="form-row"><label class="btn small acct-pic-pick">${me.avatar ? t('Change') : t('Add a picture')}<input type="file" accept="image/png,image/jpeg,image/webp" data-pic hidden></label>${me.avatar ? `<button type="button" class="linkish" data-pic-off>${t('Remove')}</button>` : ''}<span class="status" role="status" data-pic-st></span></div></div></div>
           <form class="form acct-inline" data-f="username"><label>${t('Username')}<input name="username" value="${esc(me.username)}" maxlength="20" spellcheck="false"${me.canRename ? '' : ' disabled'}><small>${me.canRename ? t('You can change it once every 30 days.') : t('You changed it recently. You can change it again 30 days after.')}</small></label>${me.canRename ? `<button class="btn" type="submit">${t('Save')}</button>` : ''}<span class="status" role="status"></span></form>
-          <form class="form acct-inline" data-f="email"><label>${t('Email')}<input name="email" type="email" value="${esc(me.email || '')}"><small>${me.email ? (me.emailOk ? t('Confirmed.') : t('Not confirmed yet. Check your inbox for the link.')) : t('Add one to get emails and set a password.')}</small></label>${me.hasPassword || me.twoStep ? `<input name="confirm" type="password" placeholder="${t('Your password')}" autocomplete="current-password">` : ''}<button class="btn" type="submit">${t('Save')}</button><span class="status" role="status"></span></form>
+          <form class="form acct-inline" data-f="email"><label>${t('Email')}<input name="email" type="email" value="${esc(me.email || '')}"><small>${me.email ? (me.emailOk ? t('Confirmed.') : t('Not confirmed yet. Check your inbox for the link.') + ` <button type="button" class="acct-resend" data-resend-me>${t('Send it again')}</button>`) : t('Add one to get emails and set a password.')}</small></label>${me.hasPassword || me.twoStep ? `<input name="confirm" type="password" placeholder="${t('Your password')}" autocomplete="current-password">` : ''}<button class="btn" type="submit">${t('Save')}</button><span class="status" role="status"></span></form>
           ${me.developer ? `<p class="acct-dev">${tf('Developer account: {name}', { name: esc(me.developer.name) })} · <a href="/hub">${t('Developer hub')}</a></p>` : ''}`)}
         ${card('signin', t('Ways to sign in'), `
           <div class="acct-ways">${ways}</div>
@@ -6222,6 +6222,14 @@
         if (['2fa-off', 'username', 'password'].includes(kind)) setTimeout(accountPage, 900);
       });
     }));
+    // (4.9) Confirmation emails are back: another link for a signed-in account that isn't confirmed.
+    const rsm = view.querySelector('[data-resend-me]');
+    if (rsm) rsm.addEventListener('click', (e) => {
+      e.preventDefault();
+      const st = rsm.closest('form').querySelector('.status');
+      rsm.disabled = true;
+      acctApi('resend', {}).then((j) => { say(st, j.ok ? j.message : j.error, j.ok ? 'ok' : 'bad'); setTimeout(() => { rsm.disabled = false; }, 20000); });
+    });
     const pic = view.querySelector('[data-pic]'), picSt = view.querySelector('[data-pic-st]');
     if (pic) pic.addEventListener('change', () => {
       const file = pic.files && pic.files[0];

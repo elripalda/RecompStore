@@ -126,6 +126,16 @@ table{font-size:13px}
 .pl-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .pl-tools form.pl-q{flex:1 1 300px;margin:0}
 .pl-tools .chip{min-height:30px;padding:4px 10px;font-size:12.5px;text-decoration:none}
+.pl-wave{margin:0 0 12px;display:flex;flex-direction:column;gap:10px}
+.pl-wave h2{margin:0 0 4px;font-size:16px;display:flex;align-items:center;gap:8px}
+.pl-wave p{margin:0}
+.pl-wave-state{font-size:13.5px}
+.pl-wave-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:10px;align-items:end;margin:0}
+.pl-wave-form label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:600;color:var(--muted);min-width:0}
+.pl-wave-form input{width:100%;box-sizing:border-box}
+.pl-wave-acts{display:flex;gap:8px}
+@media (max-width:760px){.pl-wave-form{grid-template-columns:repeat(3,minmax(0,1fr))}.pl-wave-acts{grid-column:1/-1}}
+@media (max-width:480px){.pl-wave-form{grid-template-columns:minmax(0,1fr)}}
 .pl-tools .chip.on{background:rgba(var(--ink-rgb),.16);border-color:rgba(var(--ink-rgb),.3)}
 .pl-table{width:100%;border-collapse:collapse}
 .pl-table th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
