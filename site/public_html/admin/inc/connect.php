@@ -450,7 +450,7 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     $have = $st->fetch() ?: null;
     if ($have && (int)$have['age'] < $maxAge) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => false, 'age' => (int)$have['age']];
     $gl = $via === 'gitlab';
-    $who = ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge'][$via] ?? 'GitHub';
+    $who = ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge', 'forgejo' => 'The project\'s Forgejo'][$via] ?? 'GitHub';
     $staleOut = fn() => ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
     // (4.1) While GitHub is slow or refusing (rs_gh_cool), nobody waits on it: the last copy goes out, or
     // "busy" at once. Before this, every page and PS5 asking held a PHP worker up to 20 s, and enough of
@@ -468,7 +468,8 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
         if ($have) return $staleOut();
     }
     try {
-        $r = rs_http($url, ($via === 'sourceforge' ? [] : [$gl ? 'gitlab' : 'github' => true]) + ['max' => 16 << 20, 'timeout' => $have ? 6 : 12]);
+        // (4.9) A developer's own Forgejo gets no token of ours, like SourceForge.
+        $r = rs_http($url, (in_array($via, ['sourceforge', 'forgejo'], true) ? ['headers' => ['Accept: application/json']] : [$gl ? 'gitlab' : 'github' => true]) + ['max' => 16 << 20, 'timeout' => $have ? 6 : 12]);
     } finally {
         if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
     }
@@ -501,7 +502,7 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
 }
 
 // (4.1) GitHub (or GitLab) slow or refusing: a short pause in asking it, shared by every PHP worker.
-function rs_gh_cool_file(string $via): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-cool-' . (in_array($via, ['gitlab', 'sourceforge'], true) ? $via : 'github'); }
+function rs_gh_cool_file(string $via): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-cool-' . (in_array($via, ['gitlab', 'sourceforge', 'forgejo'], true) ? $via : 'github'); }
 function rs_gh_cooling(string $via): bool {
     $f = rs_gh_cool_file($via);
     clearstatcache(true, $f);
@@ -585,16 +586,17 @@ function rs_gl_path_ok(string $path): bool {
 }
 
 // '' (GitHub), 'gitlab' or (4.3) 'sourceforge'.
-function rs_host_norm(?string $host): string { $h = strtolower(trim((string)$host)); return in_array($h, ['gitlab', 'sourceforge'], true) ? $h : ''; }
-function rs_host_name(?string $host): string { return ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge'][rs_host_norm($host)] ?? 'GitHub'; }
+function rs_host_norm(?string $host): string { $h = strtolower(trim((string)$host)); return in_array($h, ['gitlab', 'sourceforge', 'forgejo'], true) ? $h : ''; }
+function rs_host_name(?string $host): string { return ['gitlab' => 'GitLab', 'sourceforge' => 'SourceForge', 'forgejo' => 'Forgejo'][rs_host_norm($host)] ?? 'GitHub'; }
 function rs_host_repo_ok(?string $host, string $repo): bool {
     $h = rs_host_norm($host);
-    return $h === 'gitlab' ? rs_gl_path_ok($repo) : ($h === 'sourceforge' ? rs_sf_name_ok($repo) : rs_repo_ok($repo));
+    return $h === 'gitlab' ? rs_gl_path_ok($repo) : ($h === 'sourceforge' ? rs_sf_name_ok($repo) : ($h === 'forgejo' ? rs_fj_path_ok($repo) : rs_repo_ok($repo)));
 }
 // The project's page: https://github.com/owner/name, https://gitlab.com/group/project or
 // https://sourceforge.net/projects/name.
 function rs_host_web(?string $host, string $repo): string {
     $h = rs_host_norm($host);
+    if ($h === 'forgejo') return 'https://' . $repo; // (4.9) "server/owner/name"
     return $h === 'sourceforge' ? 'https://sourceforge.net/projects/' . $repo : ($h === 'gitlab' ? 'https://gitlab.com/' : 'https://github.com/') . $repo;
 }
 // Where its releases are listed, and where a bug goes.
@@ -602,7 +604,7 @@ function rs_host_releases_url(?string $host, string $repo): string { return rs_h
 // One string for a project on any host: 'owner/name' for GitHub (as before), 'gitlab.com/group/project'
 // for GitLab, 'sourceforge.net/name' for SourceForge. Used where one column holds them all (the finder's
 // list, the security checks).
-function rs_repo_key(?string $host, string $repo): string { return (['gitlab' => 'gitlab.com/', 'sourceforge' => 'sourceforge.net/'][rs_host_norm($host)] ?? '') . $repo; }
+function rs_repo_key(?string $host, string $repo): string { return (['gitlab' => 'gitlab.com/', 'sourceforge' => 'sourceforge.net/'][rs_host_norm($host)] ?? '') . $repo; } // (4.9) a Forgejo repo already starts with its server
 
 // A pasted link or path -> ['host' => ''|'gitlab', 'repo' => path], or null. GitHub keeps its owner/name
 // (anything after is dropped, as before); GitLab stops at "/-/" (its pages under a project) and ".git".
@@ -615,6 +617,11 @@ function rs_repo_from_link(string $s, string $bare = ''): ?array {
         return rs_sf_name_ok($p) ? ['host' => 'sourceforge', 'repo' => $p] : null;
     }
     if (rs_host_norm($bare) === 'sourceforge' && !preg_match('#[/.:]#', trim($s, '/ '))) { $p = strtolower(trim($s, '/ ')); return rs_sf_name_ok($p) ? ['host' => 'sourceforge', 'repo' => $p] : null; }
+    // (4.9) A Forgejo server on the list (Settings): https://server/owner/name/... -> "server/owner/name".
+    if (preg_match('#^(?:https?://)?([a-z0-9.-]+\.[a-z]{2,})/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?\#].*)?$#i', $s, $m) && in_array(strtolower($m[1]), rs_fj_hosts(), true)) {
+        $p = strtolower($m[1]) . '/' . $m[2] . '/' . $m[3];
+        return rs_fj_path_ok($p) ? ['host' => 'forgejo', 'repo' => $p] : null;
+    }
     if (preg_match('#^(?:https?://)?(?:www\.)?gitlab\.com/(.+)$#i', $s, $m)) {
         $p = preg_replace('#[?\#].*$#', '', $m[1]);
         $p = preg_replace('#/-(/.*)?$#', '', $p);
@@ -832,10 +839,65 @@ function rs_gl_project(string $path, int $maxAge = 3600): ?array {
 // Releases on any host. -> [status, body, stale, age]
 function rs_host_releases(?string $host, string $repo, int $maxAge = 900): array {
     $h = rs_host_norm($host);
-    $get = fn(int $age) => $h === 'gitlab' ? rs_gl_releases($repo, $age) : ($h === 'sourceforge' ? rs_sf_releases($repo, $age) : rs_gh_releases($repo, $age));
+    $get = fn(int $age) => $h === 'gitlab' ? rs_gl_releases($repo, $age) : ($h === 'sourceforge' ? rs_sf_releases($repo, $age) : ($h === 'forgejo' ? rs_fj_releases($repo, $age) : rs_gh_releases($repo, $age)));
     $r = $get($maxAge);
     if ($maxAge > RS_REL_EMPTY_AGE && empty($r['stale']) && (int)($r['age'] ?? 0) > RS_REL_EMPTY_AGE && rs_rel_looks_empty($r)) $r = $get(RS_REL_EMPTY_AGE);
     return $r;
+}
+
+// ---- (4.9) Forgejo (and Gitea), on a developer's own server ----------------------------------------
+// For projects like Longshot (git.magicbean.dev). A project is "server/owner/name"; its API lists
+// releases in GitHub's own shape. Only servers on the list are read (Settings, "forgejo_hosts"), and
+// nothing of ours, no token, is ever sent to them.
+const RS_FJ_HOSTS = 'git.magicbean.dev, codeberg.org';
+function rs_fj_hosts(): array {
+    return array_values(array_filter(array_map(fn($h) => strtolower(trim($h)), explode(',', (string)rs_setting('forgejo_hosts', RS_FJ_HOSTS)))));
+}
+function rs_fj_path_ok(string $p): bool {
+    if (strlen($p) > 150 || str_contains($p, '..')) return false;
+    if (!preg_match('#^([a-z0-9.-]+\.[a-z]{2,})/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$#D', $p, $m)) return false;
+    return in_array($m[1], rs_fj_hosts(), true);
+}
+function rs_fj_api(string $p): string {
+    [$h, $o, $n] = array_pad(explode('/', $p, 3), 3, '');
+    return 'https://' . $h . '/api/v1/repos/' . rawurlencode($o) . '/' . rawurlencode($n);
+}
+function rs_fj_releases(string $path, int $maxAge = 900): array {
+    if (!rs_fj_path_ok($path)) return ['status' => 404, 'body' => '{"message":"Not Found"}', 'stale' => false, 'age' => 0];
+    return rs_gh_cached('fj:' . $path . '#rel', rs_fj_api($path) . '/releases?limit=30', $maxAge, function (array $list) use ($path): array {
+        $out = [];
+        foreach (array_slice(array_values($list), 0, 30) as $r) {
+            if (!is_array($r)) continue;
+            $assets = [];
+            foreach (is_array($r['assets'] ?? null) ? $r['assets'] : [] as $a) {
+                if (!is_array($a)) continue;
+                $url = (string)($a['browser_download_url'] ?? '');
+                if (!str_starts_with($url, 'https://' . strtok($path, '/') . '/')) continue; // the project's own server only
+                $assets[] = ['name' => (string)($a['name'] ?? ''), 'size' => (int)($a['size'] ?? 0), 'browser_download_url' => $url, 'download_count' => (int)($a['download_count'] ?? 0)];
+            }
+            $out[] = [
+                'tag_name' => (string)($r['tag_name'] ?? ''), 'name' => (string)($r['name'] ?? ''),
+                'published_at' => (string)($r['published_at'] ?? ($r['created_at'] ?? '')), 'prerelease' => (bool)($r['prerelease'] ?? false),
+                'draft' => (bool)($r['draft'] ?? false), 'body' => mb_strcut((string)($r['body'] ?? ''), 0, 20000, 'UTF-8'),
+                'html_url' => (string)($r['html_url'] ?? ''), 'assets' => $assets,
+            ];
+        }
+        return $out;
+    }, 'forgejo');
+}
+// Its facts, in the shape GitHub's are read in.
+function rs_fj_project(string $path, int $maxAge = 3600): ?array {
+    if (!rs_fj_path_ok($path)) return null;
+    $r = rs_gh_cached('fj:' . $path . '#info', rs_fj_api($path), $maxAge, fn(array $j): array => [
+        'full_name' => $path, 'name' => (string)($j['name'] ?? ''), 'description' => (string)($j['description'] ?? ''),
+        'stars' => (int)($j['stars_count'] ?? 0), 'topics' => array_values(array_map('strval', (array)($j['topics'] ?? []))),
+        'owner' => (string)($j['owner']['login'] ?? ''), 'avatar' => (string)($j['avatar_url'] ?? ($j['owner']['avatar_url'] ?? '')),
+        'homepage' => (string)($j['website'] ?? ''), 'archived' => (bool)($j['archived'] ?? false), 'fork' => (bool)($j['fork'] ?? false),
+        'issues' => (int)($j['open_issues_count'] ?? 0), 'license' => '', 'default_branch' => (string)($j['default_branch'] ?? ''),
+    ], 'forgejo');
+    if ($r['status'] !== 200) return ['_status' => $r['status']];
+    $j = json_decode($r['body'], true);
+    return is_array($j) ? $j : ['_status' => 502];
 }
 
 // ---- (4.3) SourceForge ----------------------------------------------------------------------------

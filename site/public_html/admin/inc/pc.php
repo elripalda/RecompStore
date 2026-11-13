@@ -308,6 +308,7 @@ function rs_pc_read_repo(string $repo, string $host = ''): array {
     $host = rs_host_norm($host);
     if ($host === 'gitlab') return rs_pc_read_gitlab($repo);
     if ($host === 'sourceforge') return rs_pc_read_sourceforge($repo);
+    if ($host === 'forgejo') return rs_pc_read_forgejo($repo);
     if (!rs_repo_ok($repo)) return ['ok' => false, 'why' => 'Not a GitHub repo.'];
     if (in_array(strtolower($repo), RS_PC_TOOLKITS, true)) return ['ok' => false, 'why' => 'A recompiler, not a game.'];
     $info = rs_gh_cached($repo . '#pcinfo', rs_gh_api() . '/repos/' . $repo, 3600, fn(array $j): array => [
@@ -332,6 +333,16 @@ function rs_pc_read_gitlab(string $repo): array {
     if ($st !== 200 || !$i) return ['ok' => false, 'why' => 'GitLab didn\'t answer. Try again later.'];
     if ((string)$i['full_name'] === '') $i['full_name'] = $repo;
     return rs_pc_read_releases((string)$i['full_name'], 'gitlab', $i);
+}
+
+// (4.9) A project on a developer's own Forgejo server (Longshot on git.magicbean.dev).
+function rs_pc_read_forgejo(string $repo): array {
+    if (!rs_fj_path_ok($repo)) return ['ok' => false, 'why' => 'Not a project on a Forgejo server on the list (Settings).'];
+    $i = rs_fj_project($repo, 3600);
+    $st = (int)($i['_status'] ?? 200);
+    if ($st === 404) return ['ok' => false, 'why' => 'That project doesn\'t exist, or it\'s private.'];
+    if ($st !== 200 || !$i) return ['ok' => false, 'why' => 'Its server didn\'t answer. Try again later.'];
+    return rs_pc_read_releases($repo, 'forgejo', $i);
 }
 
 // (4.3) A SourceForge project: its facts from its project API, its releases from its file feed.
@@ -1111,6 +1122,7 @@ function rs_pc_add(string $repo): array {
 function rs_pc_readme(string $repo, string $host = '', int $maxAge = 86400): array {
     if (rs_host_norm($host) === 'gitlab') return rs_pc_readme_gitlab($repo);
     if (rs_host_norm($host) === 'sourceforge') return ['status' => 404, 'md' => '']; // (4.3) its page has the README
+    if (rs_host_norm($host) === 'forgejo') return ['status' => 404, 'md' => '']; // (4.9) read on its own server
     if (!rs_repo_ok($repo)) return ['status' => 400, 'md' => ''];
     $r = rs_gh_cached($repo . '#readme', rs_gh_api() . '/repos/' . $repo . '/readme', $maxAge, function (array $j): array {
         $md = (string)base64_decode((string)($j['content'] ?? ''), false);
@@ -1426,6 +1438,9 @@ function rs_pc_catalog(): array {
     $newer = [];
     $apps = array_values(array_filter($apps, function ($e) use (&$newer) {
         if (($e['host'] ?? '') === 'sourceforge') { $newer['0.90.0-beta.27'][] = $e; return false; }
+        // (4.9) A Forgejo project (Longshot): only for the launcher that reads Forgejo releases. Until one is
+        // out the setting stays far ahead, so it's on the website and in no launcher.
+        if (($e['host'] ?? '') === 'forgejo') { $newer[(string)rs_setting('forgejo_launcher_min', '99.0.0')][] = $e; return false; }
         return true;
     }));
     $origins = [];

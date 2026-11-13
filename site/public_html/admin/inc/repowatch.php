@@ -203,6 +203,20 @@ function rs_watch_sf_one(array $t): ?array {
     return $t['hid'] ? ['back', 'The project is back up. The listing is still hidden from the store.', ''] : ['ok', '', ''];
 }
 
+// (4.9) A project on a developer's own Forgejo server: gone, emptied of releases, or fine.
+function rs_watch_fj_one(array $t): ?array {
+    if (!rs_fj_path_ok((string)$t['repo'])) return null;
+    $r = rs_http(rs_fj_api((string)$t['repo']), ['timeout' => 20, 'max' => 2 << 20, 'headers' => ['Accept: application/json']]);
+    if ($r['status'] === 404) return ['gone', 'The project is gone from ' . strtok((string)$t['repo'], '/') . ': renamed, made private or deleted.', ''];
+    if ($r['status'] !== 200) return null;
+    if (!$t['soon']) {
+        $f = rs_http(rs_fj_api((string)$t['repo']) . '/releases?limit=5', ['timeout' => 20, 'max' => 4 << 20, 'headers' => ['Accept: application/json']]);
+        $list = $f['status'] === 200 ? json_decode($f['body'], true) : null;
+        if ($list === []) return ['norel', 'Every release was deleted, so there\'s nothing to download.', ''];
+    }
+    return $t['hid'] ? ['back', 'The project is back up. The listing is still hidden from the store.', ''] : ['ok', '', ''];
+}
+
 // Every target checked. -> [index => [state, why, link] | null (couldn't tell)], and whether GitHub
 // turned the token down.
 function rs_watch_check_all(array $targets, ?callable $say = null, array $forksFor = []): array {
@@ -239,6 +253,7 @@ function rs_watch_check_all(array $targets, ?callable $say = null, array $forksF
     foreach ($targets as $i => $t) {
         if ($t['host'] === 'gitlab') $res[$i] = rs_watch_gl_one($t);
         elseif ($t['host'] === 'sourceforge') $res[$i] = rs_watch_sf_one($t);
+        elseif ($t['host'] === 'forgejo') $res[$i] = rs_watch_fj_one($t);
     }
     return [$res, $auth, $batchErr, $extra];
 }

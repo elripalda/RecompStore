@@ -97,6 +97,32 @@ def zip_listing(url, size):
         return []
 
 
+# (4.9) Where a project reads its command line and its paths, so the draft can use the options it
+# already has (whatever they're called) for the game's location, saves and starting straight in.
+SRC_EXT = (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rs", ".py", ".cs", ".go", ".zig", ".java", ".kt", ".js", ".ts", ".lua")
+HINT_NAME = re.compile(r"(^|/)(main|app|args?|argv|cli|cmd|command.?line|options?|launch(er)?|config|settings|paths?|program|entry|platform|window)[^/]*$", re.I)
+SKIP_DIR = re.compile(r"(^|/)(third_?party|extern(al)?|vendor|deps|submodules?|tests?|docs?|tools?/)", re.I)
+OPT_LINE = re.compile(r"""(["'](-{1,2}|/)[A-Za-z][\w-]{1,30}["']|\bargv\b|\bargc\b|getopt|cxxopts|CLI11|clap::|argparse|add_argument|parse_args|env::args|GetCommandLine|CommandLineToArgv|FULLSCREEN|borderless|fullscreen|windowed|save_?dir|saves?_?(path|folder)|user_?(dir|folder|path)|game_?(path|dir)|rom_?path|iso_?path|romfs|data_?path)""", re.I)
+
+
+def cli_hints(repo, branch, paths):
+    cands = [p for p in paths if p.lower().endswith(SRC_EXT) and HINT_NAME.search(p) and not SKIP_DIR.search(p)]
+    cands.sort(key=lambda p: (0 if re.search(r"(^|/)main\.", p, re.I) else 1, p.count("/"), len(p)))
+    out, total = [], 0
+    for path in cands[:10]:
+        raw = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
+        if not raw:
+            continue
+        keep = [f"{i + 1}: {l.strip()[:200]}" for i, l in enumerate(raw.splitlines()) if OPT_LINE.search(l)]
+        if keep:
+            chunk = "\n".join(keep[:70])
+            out.append({"file": path, "lines": chunk})
+            total += len(chunk)
+            if total > 18000:
+                break
+    return out
+
+
 def context(p):
     repo = p["repo"]
     info = gh(f"/repos/{repo}") or {}
@@ -139,6 +165,7 @@ def context(p):
         "files": paths[:500], "files_truncated": len(paths) > 500 or bool(tree.get("truncated")),
         "releases": releases, "inside_download": {"file": inside_of, "names": inside},
         "open_pull_requests": [{"title": x.get("title"), "body": (x.get("body") or "")[:300]} for x in open_prs[:30]],
+        "command_line": cli_hints(repo, branch, paths),
     }
 
 
@@ -158,12 +185,30 @@ Rules:
   requests; or it isn't a playable PC build of a game.
 - The lines for the pull request are short, friendly and plain, like a person wrote them. No emoji, no hype,
   no "As an AI", no mention of tools or models.
+- This pull request never changes the project's code. It only adds recomplauncher.json and the badge.
+
+Three things every draft looks for, under whatever names the project uses. Check the README, the lines from its
+source under "command_line" (where it reads its command line and paths), its config files and the download's contents:
+1. The game's location: an option or settings key that points the recomp at the player's copy (a file or a folder),
+   like --game, --iso, --rom, --romfs, --path, a plain path argument, or a key in its settings file. When it has one,
+   use it: "start.args" with {game}, or "config.game_path" for a settings key, so the launcher passes the copy in.
+2. Where saves go: the real save folder or files (for "saves" and folders.saves), and any option that sets the save
+   or user folder (like --user, --savedir, --portable). Record where the saves really are. Don't move them.
+3. Starting straight into the game, borderless or fullscreen: options or settings that skip a built-in launcher,
+   picker or menu, or that set windowed, borderless or fullscreen. When it has a display mode, offer it in "settings"
+   ("in": "args", or its settings file key), and start straight into the game when there's an option for it.
+For each of the three the project doesn't have, add one "better" line asking for it by name, sized Small, like
+"Small: a --game <path> option, so launchers and Steam shortcuts can start it with the player's copy",
+"Small: a --saves <folder> option, so launchers can back up and sync saves", or
+"Small: --fullscreen and --borderless options that start straight into the game".
+Never claim one of them exists without seeing it in the README, the code lines or the files. In "notes", say which of
+the three you found and where (file and line), and which you're asking for.
 
 Answer with one JSON object and nothing else:
 {"skip": false, "skip_reason": "",
  "recomplauncher_json": { ... the file ... },
  "players": ["what it adds for players, one short line each, 3 to 6 lines"],
- "better": ["small concrete things that would make the recomp work better with the launcher, with a size: Small, Medium or Large. 0 to 4 lines"],
+ "better": ["small concrete things that would make the recomp work better with the launcher, with a size: Small, Medium or Large. The asks for any of the three things above it doesn't have come first. 0 to 6 lines"],
  "notes": "for the person reviewing: anything you weren't sure about, in a sentence or two (or empty)"}
 
 THE SDK GUIDE:
@@ -178,6 +223,10 @@ def ask(spec, p, ctx, fix=None):
                     "on the player's PC). Cover what you can verify, like saves, logs, folders and the start program when it's known, "
                     "and put what you couldn't confirm in notes. Only skip it if it's archived, already has an open RecompLauncher "
                     "pull request, or its README or CONTRIBUTING says no outside pull requests.")
+    if p.get("pick") == "redo":
+        ask_more = ("\n\nThis updates a pull request we already opened on this repo: draft the file again from scratch with the three "
+                    "checks. That pull request of ours is not a reason to skip. Only skip it if the repo is archived or its README or "
+                    "CONTRIBUTING says no outside pull requests.")
     msgs = [{"role": "user", "content": "Draft RecompLauncher support for this project." + ask_more + "\n\n" + json.dumps(user, ensure_ascii=False)}]
     if fix:
         msgs += [{"role": "assistant", "content": fix["prev"]},
@@ -261,7 +310,7 @@ def main():
     for p in picks:
         try:
             # Already had one (ours, Xarishark's or anyone's, open or closed): never a second.
-            had = earlier_pr(p["repo"])
+            had = "" if p.get("pick") == "redo" else earlier_pr(p["repo"])  # a redraft updates our own
             if had:
                 site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": "It already has a RecompLauncher pull request: " + had})
                 print(f"skip {p['repo']}: already has {had}")

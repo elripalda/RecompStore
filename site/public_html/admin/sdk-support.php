@@ -171,11 +171,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!is_array($j)) throw new RuntimeException('The recomplauncher.json isn\'t valid JSON. Fix it and save again.');
                 rs_db()->prepare("UPDATE pc_prq SET title = ?, body = ?, json = ?, updated = NOW() WHERE id = ? AND status = 'draft'")
                     ->execute([mb_substr(trim((string)($_POST['title'] ?? '')), 0, 200) ?: RS_PRQ_TITLE, mb_substr(str_replace("\r\n", "\n", (string)($_POST['body'] ?? '')), 0, 60000), json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $qid]);
-                if ($act === 'prq_send') { @set_time_limit(120); $url = rs_prq_send($qid); rs_flash('Pull request sent: ' . $url); }
+                if ($act === 'prq_send') {
+                    @set_time_limit(120);
+                    $wasSent = (string)(rs_prq_get($qid)['pr_url'] ?? '') !== '';
+                    $url = rs_prq_send($qid, !empty($_POST['here']));
+                    rs_flash(($wasSent ? 'Pull request updated: ' : 'Pull request sent: ') . $url . (!empty($_POST['here']) ? '. RecompLauncher uses the file now too.' : ''));
+                }
                 else rs_flash('Saved.');
             } elseif ($act === 'prq_skip') {
-                rs_db()->prepare("UPDATE pc_prq SET status = 'skipped', updated = NOW() WHERE id = ?")->execute([$qid]);
-                rs_flash('Skipped. It won\'t be drafted again.');
+                $row = rs_prq_get($qid);
+                if ($row && (string)$row['pr_url'] !== '') { rs_prq_keep_sent($qid); rs_flash('Left as it was: the pull request wasn\'t changed.'); }
+                else {
+                    rs_db()->prepare("UPDATE pc_prq SET status = 'skipped', updated = NOW() WHERE id = ?")->execute([$qid]);
+                    rs_flash('Skipped. It won\'t be drafted again.');
+                }
+            } elseif ($act === 'prq_reopen') {
+                // (4.9) A sent pull request drafted again (with the command-line checks), then updated with one click.
+                rs_prq_reopen($qid);
+                $row = rs_prq_get($qid);
+                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it again now. It shows up under the drafts in about a minute, with Update pull request.');
+                else rs_flash('Back in line: the next daily run drafts it again.');
+                $qid = 0;
             } elseif ($act === 'prq_redo' || $act === 'prq_now') {
                 // Draft again (a draft), or Draft now (one waiting): on this server at once when it can.
                 if ($act === 'prq_redo') rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
@@ -366,7 +382,7 @@ $prqWork = rs_prq_list(['todo', 'drafting'], 50); // (4.7) waiting, drafting now
 $prqWaiting = count(array_filter($prqWork, fn($r) => $r['status'] === 'todo'));
 $prqNow = rs_prq_now_ready();
 $prqHasAi = rs_secret_get('prq_ai_key') !== '';
-$prqSent = rs_prq_list(['sent'], 8);
+$prqSent = rs_prq_list(['sent'], 20);
 $prqLogin = (string)rs_setting('prq_gh_login', '');
 $prqHasToken = rs_prq_token() !== '';
 $prqKeyOnce = rs_is_owner() ? rs_secret_get('prq_key_once') : '';
@@ -399,6 +415,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
       <?php if ((string)$pq['error'] !== ''): ?><span class="pill bad">Didn't send</span><?php endif; ?></summary>
     <form method="post" class="prq-form"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$pq['id'] ?>">
       <?php if ((string)$pq['error'] !== ''): ?><p class="bad small"><?= h((string)$pq['error']) ?></p><?php endif; ?>
+      <?php if ((string)$pq['pr_url'] !== ''): ?><p class="small">Redraft of <a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener">the pull request we sent ↗</a>. Update pull request pushes this file and description to it.</p><?php endif; ?>
       <?php if (trim((string)$pq['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$pq['note'])) ?></p><?php endif; ?>
       <div class="prq-links small"><a href="https://github.com/<?= h($pq['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($pq['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>
       <div class="prq-grid">
@@ -407,10 +424,12 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
         <label class="prq-span">recomplauncher.json<textarea name="json" rows="14" class="mono" spellcheck="false"><?= h((string)$pq['json']) ?></textarea></label>
       </div>
       <div class="prq-btns">
-        <button class="btn primary" name="action" value="prq_send" onclick="return confirm('Open this pull request on <?= h(addslashes((string)$pq['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>>Send pull request</button>
+        <?php $isUpd = (string)$pq['pr_url'] !== ''; ?>
+        <button class="btn primary" name="action" value="prq_send" onclick="return confirm('<?= $isUpd ? 'Update the pull request on ' : 'Open this pull request on ' ?><?= h(addslashes((string)$pq['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>><?= $isUpd ? 'Update pull request' : 'Send pull request' ?></button>
         <button class="btn" name="action" value="prq_save">Save</button>
         <button class="btn" name="action" value="prq_redo" title="<?= $prqNow ? 'Writes it again from scratch, right away' : 'The next daily run drafts it again' ?>">Draft it again</button>
-        <button class="btn danger" name="action" value="prq_skip">Skip</button>
+        <button class="btn danger" name="action" value="prq_skip"><?= $isUpd ? 'Keep it as it was' : 'Skip' ?></button>
+        <label class="prq-here small"><input type="checkbox" name="here" value="1" checked> Use it on RecompLauncher now, until the developer merges it</label>
       </div>
     </form>
   </details>
@@ -418,6 +437,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <?php if ($prqSent): ?>
   <h3 class="prq-h3">Sent lately</h3>
   <ul class="prq-sent"><?php foreach ($prqSent as $pq): $fx = rs_prq_fix_state((int)$pq['id']); ?><li><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$pq['repo']) ?></a><span class="muted small"><?= h((string)$pq['sent_at']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?></span>
+    <form method="post" class="prq-sent-act"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$pq['id'] ?>"><button class="btn small" name="action" value="prq_reopen" title="Draft the file again from scratch (game location, saves, starting straight in), then update this pull request with one click">Draft it again</button></form>
     <?php if ($fx && ($fx['why'] ?? '') !== ''): ?><span class="small warn">Conflict, needs a look: <?= h((string)$fx['why']) ?></span><?php elseif ($fx): ?><span class="small ok">Re-drafted after a conflict<?= (int)$fx['n'] > 1 ? ' (' . (int)$fx['n'] . ' times)' : '' ?>, <?= h((string)$fx['at']) ?> UTC</span><?php endif; ?></li><?php endforeach; ?></ul>
   <?php endif; ?>
   <?php if (rs_is_owner()): ?>

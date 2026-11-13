@@ -263,9 +263,10 @@ function rs_prq_readme_with_badge(string $md, string $badge): string {
 }
 
 // Send one draft: fork, branch, the two commits, the pull request, the "Pull request open" mark.
-function rs_prq_send(int $id): string {
+function rs_prq_send(int $id, bool $here = false): string {
     $q = rs_prq_get($id);
     if (!$q || $q['status'] !== 'draft') throw new RuntimeException('That draft is gone or was already sent.');
+    if ((string)$q['pr_url'] !== '') return rs_prq_update($id, $here); // (4.9) a redraft of one we sent
     $a = rs_pc_app((string)$q['app_id']);
     if (!$a) throw new RuntimeException('That recomp isn\'t on RecompLauncher any more.');
     $json = json_decode((string)$q['json'], true);
@@ -327,7 +328,78 @@ function rs_prq_send(int $id): string {
     $m[$a['id']] = ['kind' => 'pr', 'url' => $url, 'note' => 'PR queue', 'who' => function_exists('rs_me_name') ? rs_me_name() : '', 'at' => gmdate('Y-m-d')];
     rs_sdk_marks_save($m);
     rs_log('sdk', $a['id'], 'pull request sent: ' . $url);
+    if ($here) rs_prq_use_here($a, $json);
     return $url;
+}
+
+// ---- (4.9) Xarishark: redraft a pull request we already sent, and use the file on our side meanwhile ----
+
+// Back in line to be drafted again from scratch (the drafter then reads the repo's command line too).
+function rs_prq_reopen(int $id): void {
+    rs_prq_tables();
+    $st = rs_db()->prepare("UPDATE pc_prq SET status = 'todo', pick = 'redo', error = NULL, updated = NOW() WHERE id = ? AND status = 'sent' AND pr_url <> ''");
+    $st->execute([$id]);
+    if (!$st->rowCount()) throw new RuntimeException('That pull request isn\'t one we sent, or it\'s already being drafted again.');
+}
+// A redraft that isn't wanted: the pull request stays as it was.
+function rs_prq_keep_sent(int $id): void {
+    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', pick = 'redo', updated = NOW() WHERE id = ? AND status IN ('draft', 'todo') AND pr_url <> ''")->execute([$id]);
+}
+// The redrafted file and description pushed to the pull request we already have open.
+function rs_prq_update(int $id, bool $here = false): string {
+    $q = rs_prq_get($id);
+    if (!$q || $q['status'] !== 'draft' || (string)$q['pr_url'] === '') throw new RuntimeException('That redraft is gone or was already sent.');
+    $a = rs_pc_app((string)$q['app_id']);
+    if (!$a) throw new RuntimeException('That recomp isn\'t on RecompLauncher any more.');
+    $json = json_decode((string)$q['json'], true);
+    if (!is_array($json)) throw new RuntimeException('The recomplauncher.json in this draft isn\'t valid JSON.');
+    if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)$#', (string)$q['pr_url'], $m)) throw new RuntimeException('Its pull request link isn\'t one GitHub gave us.');
+    try {
+        $login = (string)rs_prq_gh_ok(rs_prq_gh('GET', '/user'), 'Reading the token\'s account')['login'];
+        $p = rs_prq_gh_ok(rs_prq_gh('GET', '/repos/' . $m[1] . '/pulls/' . $m[2]), 'Reading the pull request');
+        if (!empty($p['merged'])) throw new RuntimeException('That pull request was merged already. Nothing to update.');
+        if (($p['state'] ?? '') !== 'open') throw new RuntimeException('That pull request was closed, so it can\'t be updated. Skip this redraft.');
+        if (strcasecmp((string)($p['head']['repo']['owner']['login'] ?? ''), $login) !== 0) throw new RuntimeException('It was sent from another account (@' . ($p['head']['repo']['owner']['login'] ?? '?') . '), so only that account can update it.');
+        $forkName = (string)$p['head']['repo']['full_name'];
+        $branch = (string)$p['head']['ref'];
+        $file = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        $have = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/recomplauncher.json?ref=' . rawurlencode($branch));
+        $old = $have['status'] === 200 ? (string)base64_decode((string)($have['json']['content'] ?? '')) : '';
+        if ($old !== $file) rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/recomplauncher.json', array_filter([
+            'message' => 'Update recomplauncher.json', 'content' => base64_encode($file), 'branch' => $branch,
+            'sha' => $have['status'] === 200 ? (string)($have['json']['sha'] ?? '') : null,
+        ])), 'Updating recomplauncher.json');
+        $rd = rs_prq_gh('GET', '/repos/' . $forkName . '/readme?ref=' . rawurlencode($branch));
+        if ($rd['status'] === 200) {
+            $md = (string)base64_decode((string)($rd['json']['content'] ?? ''));
+            $new = rs_prq_readme_with_badge($md, rs_prq_badge($a['id']));
+            if ($new !== $md) rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode((string)$rd['json']['path'])), [
+                'message' => 'README: Get it on RecompLauncher badge', 'content' => base64_encode($new), 'branch' => $branch, 'sha' => (string)$rd['json']['sha'],
+            ]), 'Adding the badge');
+        }
+        rs_prq_gh_ok(rs_prq_gh('PATCH', '/repos/' . $m[1] . '/pulls/' . $m[2], ['title' => (string)$q['title'] ?: RS_PRQ_TITLE, 'body' => (string)$q['body']]), 'Updating the description');
+    } catch (Throwable $e) {
+        rs_db()->prepare("UPDATE pc_prq SET error = ?, updated = NOW() WHERE id = ?")->execute([$e->getMessage(), $id]);
+        throw $e;
+    }
+    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', error = NULL, who = ?, updated = NOW() WHERE id = ?")->execute([function_exists('rs_me_name') ? rs_me_name() : '', $id]);
+    rs_log('sdk', $a['id'], 'pull request updated: ' . $q['pr_url']);
+    if ($here) rs_prq_use_here($a, $json);
+    return (string)$q['pr_url'];
+}
+// The file goes out in the catalog as the recomp's own (its Boot profile field), so the launcher uses it
+// before the developer merges anything. A profile someone wrote by hand there is never replaced.
+// -> '' when it's in use, else why not.
+function rs_prq_use_here(array $a, array $json): string {
+    $cur = trim((string)($a['boot'] ?? ''));
+    $b = $cur !== '' ? json_decode($cur, true) : null;
+    if ($cur !== '' && !(is_array($b) && (int)($b['format'] ?? 0) === 1)) return 'It already has its own Boot profile, so that one stays.';
+    if (!isset($json['start'])) return 'The file has no "start", so the launcher wouldn\'t use it.';
+    $a['boot'] = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    rs_pc_save($a);
+    if (empty($a['hidden'])) { try { rs_pc_publish_one($a['id']); } catch (Throwable $e) { /* the next publish carries it */ } }
+    rs_log('pc', $a['id'], 'Boot profile from the PR queue draft (until the developer merges it)');
+    return '';
 }
 
 // (4.8) Xarishark: sent pull requests that later conflict (the developer edited the README after we
