@@ -225,7 +225,11 @@ function rs_auto_run(int $id): void {
         // 3. VirusTotal: every download of the newest release in line, first in line (prio 1). The
         // step's answer is read live on the page from the security checks.
         if ($latest && function_exists('rs_vt_add')) {
-            foreach ((array)$latest['assets'] as $as) if (in_array((string)$as['name'], $files, true)) rs_vt_add($key, $tag, $as, 'auto', 'auto:' . $id, 1);
+            // (4.8) The main build (Windows, else the first) first in line; the other systems' files get
+            // a lookup and ClamAV when VirusTotal doesn't know them, so a big batch doesn't use up the
+            // day's VirusTotal checks on uploads of three builds of every game.
+            $main = (string)$f['assets']['win'] !== '' ? (string)$f['assets']['win'] : (string)reset($files);
+            foreach ((array)$latest['assets'] as $as) if (in_array((string)$as['name'], $files, true)) rs_vt_add($key, $tag, $as, 'auto', 'auto:' . $id, (string)$as['name'] === $main || !empty($job['sub_id']) ? 1 : 3);
             rs_auto_step($id, 'vt', 'run', 'In line');
         } else rs_auto_step($id, 'vt', 'skip', 'VirusTotal isn\'t set up');
 
