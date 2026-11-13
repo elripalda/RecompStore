@@ -125,7 +125,10 @@ def cli_hints(repo, branch, paths):
 
 def context(p):
     repo = p["repo"]
-    info = gh(f"/repos/{repo}") or {}
+    info = gh(f"/repos/{repo}")
+    if not info:
+        # (4.9) No repo means GitHub refused (its hourly limit, usually): no draft from nothing.
+        raise RuntimeError("Couldn't read the repo on GitHub (its hourly limit may be used up). Try again later.")
     branch = info.get("default_branch", "main")
     readme = gh(f"/repos/{repo}/readme", "application/vnd.github.raw") or ""
     contributing = ""
