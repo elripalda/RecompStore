@@ -268,7 +268,10 @@ function rs_pc_assets(array $assets, array &$flags): array {
         if ($size > (3 << 30)) { $flags['huge'] = true; continue; }
         // (4.3) .rar too: the launcher installs it on Windows, Linux and Mac.
         if (!preg_match('/\.(zip|7z|rar|exe|msi|tar\.gz|tgz|appimage|dmg|flatpak)$/', $l)) continue;
-        if (preg_match('/(ps5|ps4|prospero|switch|android|apk|ios|source|src|debug|symbols|pdb)/', $l)) continue;
+        // (4.8) Whole words only: "ios" used to match inside Wario's Woods and BioShock, so their builds
+        // were skipped and Auto-add said there was no download.
+        if (preg_match('/(^|[^a-z0-9])(ps5|ps4|prospero|switch2?|nx|nsp|xci|android|apk|aab|ios|ipa|vita|source|source-?code|src|debug|symbols|pdb)([^a-z0-9]|$)/', $l)
+            || preg_match('/\.(apk|ipa|nsp|xci|nro|vpk|pdb)$/', $l)) continue;
         // Not the game itself: an add-on, an upscaler pack, a mod or texture pack, a soundtrack, a
         // dedicated server, an SDK, a patch (but a "patcher" can be the game's own way in).
         if (preg_match('/(add-?on|dlss|reshade|mod-?pack|texture|soundtrack|(^|[-_. ])ost([-_. ]|$)|wallpaper|manual|(^|[-_. ])server|dedicated|(^|[-_. ])sdk([-_. ]|$)|(^|[-_. ])patch(?!er)|hotfix-only)/', $l)) { $flags['extras'] = true; continue; }
@@ -1777,7 +1780,7 @@ function rs_pc_dl_check(array $a): ?array {
     if ($name !== '') {
         // A file the developer marked as old (…_OLD.zip) while a newer one sits next to it.
         if (preg_match('/(^|[^a-z])(old|deprecated|backup|outdated)([^a-z]|$)/i', (string)preg_replace('/\.(zip|7z|rar|tar\.gz|exe|appimage|dmg)$/i', '', $name))) {
-            $others = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']), fn($n) => $n !== $name && preg_match('/\.(zip|7z|exe)$/i', $n) && !preg_match('/(linux|mac|android|ios|apk|ipa)/i', $n)));
+            $others = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']), fn($n) => $n !== $name && preg_match('/\.(zip|7z|exe)$/i', $n) && !preg_match('/(linux|mac|android)|(^|[^a-z0-9])(ios|apk|ipa)([^a-z0-9]|$)/i', $n)));
             return ['dl' => 'oldfile', 'why' => 'Players get ' . $name . ', which looks like an old copy' . ($others ? '. The release also has ' . implode(', ', array_slice($others, 0, 3)) . '.' : '.')];
         }
         return [];
@@ -1785,7 +1788,7 @@ function rs_pc_dl_check(array $a): ?array {
     $older = '';
     foreach (array_slice($stable, 1) as $x) if ($hit($x) !== '') { $older = (string)$x['tag_name']; break; }
     $winish = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']),
-        fn($n) => preg_match('/\.(zip|7z|exe|rar)$/i', $n) && preg_match('/(win|x64|x86_64|amd64|pc)/i', $n) && !preg_match('/(linux|mac|android|ios|switch|ps5|xbox)/i', $n)));
+        fn($n) => preg_match('/\.(zip|7z|exe|rar)$/i', $n) && preg_match('/(win|x64|x86_64|amd64|pc)/i', $n) && !preg_match('/(linux|mac|android|switch|ps5|xbox)|(^|[^a-z0-9])ios([^a-z0-9]|$)/i', $n)));
     if ($older !== '' && $winish) return ['dl' => 'stuck', 'why' => 'Its newest release (' . $newest['tag_name'] . ') has ' . implode(', ', array_slice($winish, 0, 2)) . ', which doesn\'t match ' . $pat . ', so players still get ' . $older . '.'];
     if ($older === '') return ['dl' => 'nofile', 'why' => 'None of its releases has a file that matches ' . $pat . '.'];
     return [];
