@@ -66,8 +66,15 @@ function hub_board_html(string $store, array $b): string {
     $o = '<div class="sh-board cols-' . count(RS_HUB_COLS[$store]) . '">';
     foreach (RS_HUB_COLS[$store] as $k => [$t, $sub]) {
         $cards = $b['cols'][$k];
-        $o .= '<section class="sh-col sh-col-' . $k . '"><header><b>' . h($t) . '</b><span class="count">' . count($cards) . '</span><small>' . h($sub) . '</small></header><div class="sh-cards">';
+        // (4.8) Drafts from the finder, requests and links that Claude and VirusTotal both passed go live
+        // together; submissions stay one by one so the developer gets the "you're live" email.
+        $good = $k === 'ready' && $store === 'pc' ? count(array_filter($cards, fn($c) => str_starts_with((string)$c['key'], 'job:') && $c['src'] !== 'Submission' && $c['note'][0] === 'ok')) : 0;
+        $more = (int)($b['more'][$k] ?? 0);
+        $o .= '<section class="sh-col sh-col-' . $k . '"><header><b>' . h($t) . '</b><span class="count">' . (count($cards) + $more) . '</span><small>' . h($sub) . '</small>'
+            . ($good ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="publish_good" data-confirm="Click again to put ' . $good . ' live" title="Drafts from the finder, player requests and links that Claude and VirusTotal both passed. Submissions publish one by one so the developer can get the email.">' . HUB_IC['check'] . 'Publish ' . $good . ' that look good</button></div>' : '')
+            . '</header><div class="sh-cards">';
         foreach ($cards as $c) $o .= hub_card($c);
+        if ($more) $o .= '<p class="sh-empty sh-more-line">And ' . $more . ' more in line. They start on their own, a few at a time.</p>';
         if (!$cards) $o .= '<p class="sh-empty">' . h(['new' => 'Nothing new. Submissions show up here as developers send them.', 'check' => 'Nothing being checked.', 'ready' => 'Nothing waiting to go live.', 'back' => 'Nobody\'s fixing anything.', 'draft' => 'No PS5 drafts waiting.'][$k]) . '</p>';
         $o .= '</div></section>';
     }
@@ -236,6 +243,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['msg'] = $name . ' is live on RecompLauncher.';
                 if (!empty($j['sub_id'])) $res['open'] = 'live:' . (int)$j['sub_id'];
                 else $res['close'] = true;
+                break;
+            }
+            case 'publish_good': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('Auto-add drafts are for the PC store.');
+                @set_time_limit(600);
+                ignore_user_abort(true);
+                $names = rs_hub_publish_good();
+                if (!$names) throw new RuntimeException('Nothing passed every check without needing a look.');
+                $res['msg'] = count($names) . ' live on RecompLauncher: ' . implode(', ', array_slice($names, 0, 5)) . (count($names) > 5 ? ' and ' . (count($names) - 5) . ' more' : '') . '.';
                 break;
             }
             case 'again': {

@@ -291,7 +291,9 @@ function rs_hub_sub_rows(): array {
 function rs_hub_jobs(): array {
     rs_auto_tables();
     $out = [];
-    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status IN ('queued', 'running', 'review', 'failed') ORDER BY id DESC LIMIT 120") as $r) {
+    // (4.8) Every open draft: with a big batch in line, a limit pushed the older ready ones (and the
+    // submissions under them) off the board. The Checking column shortens the line instead.
+    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status IN ('queued', 'running', 'review', 'failed') ORDER BY id DESC") as $r) {
         $r['steps'] = json_decode((string)$r['steps'], true) ?: [];
         $out[] = $r;
     }
@@ -395,7 +397,19 @@ function rs_hub_board(string $store): array {
     // Newest first in New; the rest by when they started.
     foreach ($cols as &$c) usort($c, fn($x, $y) => $y['when'] <=> $x['when']);
     unset($c);
-    return ['cols' => $cols, 'need' => $need];
+    // (4.8) A long line on Checking: the ones being worked on and any that stopped, then the next few in
+    // line, and a count of the rest.
+    $more = [];
+    if (isset($cols['check'])) {
+        $line = array_values(array_filter($cols['check'], fn($c) => $c['note'][1] === 'In line to start'));
+        if (count($line) > 8) {
+            $show = array_slice(array_reverse($line), 0, 8); // the next to start (the oldest in line)
+            $keep = array_column($show, 'key');
+            $cols['check'] = array_values(array_filter($cols['check'], fn($c) => $c['note'][1] !== 'In line to start' || in_array($c['key'], $keep, true)));
+            $more['check'] = count($line) - 8;
+        }
+    }
+    return ['cols' => $cols, 'need' => $need, 'more' => $more];
 }
 // How many are waiting on someone in each store (for the store switch and the menu).
 function rs_hub_counts(): array {
@@ -529,6 +543,32 @@ function rs_hub_ps5_apply(int $id, array $r, array $d): string {
     rs_log('submission-added', (string)$id, 'PS5 draft ' . $gid);
     return $gid;
 }
+// (4.8) Every draft from the finder, a player's request or a pasted link that Claude passed and
+// VirusTotal found clean, live at once with one catalog publish (not one per draft). Submissions are
+// left for one-by-one publishing, where the developer's "you're live" email goes out. -> the names.
+function rs_hub_publish_good(): array {
+    $names = [];
+    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status = 'review' AND sub_id = 0 ORDER BY id")->fetchAll() as $j) {
+        $j['steps'] = json_decode((string)$j['steps'], true) ?: [];
+        [$col, $note] = rs_hub_job_state($j);
+        if ($col !== 'ready' || $note[0] !== 'ok' || rs_auto_vt($j)[0] === 'bad') continue;
+        $a = rs_pc_app((string)$j['app_id']);
+        if (!$a) continue;
+        $a['hidden'] = false;
+        $a['live_at'] = $a['live_at'] ?? gmdate('c');
+        rs_pc_save($a);
+        rs_auto_set((int)$j['id'], ['status' => 'published']);
+        rs_log('pc', $a['id'], 'Auto-add published (with the others that looked good)');
+        $names[] = (string)$a['name'];
+    }
+    if ($names) {
+        rs_pc_publish();
+        try { rs_sub_close_live(); } catch (Throwable $e) { /* closed when the board opens */ }
+        rs_log('hub', 'publish-good', count($names) . ' drafts');
+    }
+    return $names;
+}
+
 // (4.8) A PC submission with no release yet, straight onto RecompLauncher's Coming Soon: its listing
 // (GitHub facts, art, what they sent), shown as Coming soon, and the catalog written at once. The
 // Coming soon watch tells the Dashboard when a release with files comes out. -> the listing.
