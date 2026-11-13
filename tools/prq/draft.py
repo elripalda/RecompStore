@@ -305,16 +305,38 @@ def code_files(repo, ctx):
         t = h["lines"]
         return (0 if re.search(r"\bmain\s*\(|\bargv\b|args\(\)|CommandLine", t) else 1, 0 if re.search(r"(^|/)(main|program)\.", h["file"], re.I) else 1)
     names = [h["file"] for h in sorted(ctx.get("command_line", []), key=score)]
-    out, total = {}, 0
+    out = {}
     for path in names[:5]:
         raw = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
-        if not raw or len(raw) > 60000:
+        if not raw or len(raw) > 600000:
             continue
         out[path] = raw
-        total += len(raw)
-        if len(out) >= 3 or total > 120000:
+        if len(out) >= 3:
             break
     return out
+
+
+def shown(files):
+    """What the model reads: a whole file when it's small, else the parts around its command line and paths
+    (edits are still checked against the whole file)."""
+    view = {}
+    for path, raw in files.items():
+        if len(raw) <= 50000:
+            view[path] = raw
+            continue
+        lines = raw.splitlines()
+        keep = set()
+        for i, l in enumerate(lines):
+            if OPT_LINE.search(l) or re.search(r"\bmain\s*\(", l):
+                keep.update(range(max(0, i - 40), min(len(lines), i + 60)))
+        part, last = [], -2
+        for i in sorted(keep):
+            if i != last + 1:
+                part.append(f"... (line {i + 1})")
+            part.append(lines[i])
+            last = i
+        view[path] = "\n".join(part)[:60000]
+    return view
 
 
 def has_game_option(doc):
@@ -346,14 +368,17 @@ def code_pass(spec, p, ctx, doc, validator):
         return None
     files = code_files(p["repo"], ctx)
     if not files:
+        print(f"code pass {p['repo']}: no source files to read")
         return None
     user = {"project": {k: p[k] for k in ("repo", "name", "game", "console")}, "recomplauncher_json": doc,
-            "readme": ctx.get("readme", "")[:12000], "files": files}
+            "readme": ctx.get("readme", "")[:12000], "files": shown(files),
+            "note": "Long files are shown in parts (lines marked '... (line N)'); copy find text only from what's shown."}
     msgs = [{"role": "user", "content": "Add the options if they fit.\n\n" + json.dumps(user, ensure_ascii=False)}]
     for attempt in range(2):
         body = {"model": MODEL, "max_tokens": 16000, "system": [{"type": "text", "text": CODE_SYSTEM + "\n\nTHE SDK GUIDE:\n" + spec, "cache_control": {"type": "ephemeral"}}], "messages": msgs}
         st, b = http("https://api.anthropic.com/v1/messages", data=body, timeout=300, headers={"x-api-key": AKEY, "anthropic-version": "2023-06-01"})
         if st != 200:
+            print(f"code pass {p['repo']}: model call failed ({st})")
             return None
         text = "".join(c.get("text", "") for c in json.loads(b).get("content", []) if c.get("type") == "text")
         m = re.search(r"\{.*\}", text, re.S)
@@ -362,9 +387,11 @@ def code_pass(spec, p, ctx, doc, validator):
         except ValueError:
             d = None
         if not isinstance(d, dict):
+            print(f"code pass {p['repo']}: no JSON in the answer")
             return None
         edits = [e for e in (d.get("edits") or []) if isinstance(e, dict)]
         if not edits:
+            print(f"code pass {p['repo']}: no edits ({(d.get('notes') or '')[:200]})")
             return None
         changed, errs = check_edits(edits, files)
         new_doc = d.get("recomplauncher_json") if isinstance(d.get("recomplauncher_json"), dict) else None
@@ -374,6 +401,7 @@ def code_pass(spec, p, ctx, doc, validator):
                 errs.append("- the recomplauncher.json doesn't pass the schema:\n" + serr)
         if not errs and changed and new_doc is not None:
             return {"edits": edits, "adds": d.get("adds") or [], "explain": d.get("explain") or [], "json": new_doc, "notes": (d.get("notes") or "").strip()}
+        print(f"code pass {p['repo']}: try {attempt + 1}: " + "; ".join(errs)[:300])
         msgs += [{"role": "assistant", "content": m.group(0)}, {"role": "user", "content": "These don't work:\n" + "\n".join(errs) + "\nFix them and answer with the whole JSON object again."}]
     return None
 
