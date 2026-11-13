@@ -612,16 +612,23 @@ function rs_hub_bulk(string $do, array $ids): array {
     return [$done, $skip];
 }
 
-// (4.8) Published PC submissions (the last 30 days) whose developer hasn't had the "you're live" email
-// yet, newest first: [['sub' => id, 'name', 'to', 'app', 'at']]. Skipped ones stay off.
+// (4.8) Published PC submissions (the last 14 days) whose developer hasn't had the "you're live" email
+// yet, newest first: [['sub' => id, 'name', 'to', 'app', 'at']]. One sent from the old Submissions page
+// counts (it's in the sent mail); skipped ones stay off.
 function rs_hub_live_queue(): array {
     $out = []; $seen = [];
     try {
-        $st = rs_db()->query("SELECT target, detail, at FROM admin_log WHERE action = 'pc-live' AND detail LIKE 'from submission %' AND at > NOW() - INTERVAL 30 DAY ORDER BY id DESC LIMIT 200");
+        $sent = [];
+        try {
+            rs_mail_tables();
+            foreach (rs_db()->query("SELECT DISTINCT inbox_id FROM mail_sent WHERE inbox_id > 0 AND subject LIKE '%is live on RecompLauncher%'") as $m) $sent[(int)$m['inbox_id']] = true;
+        } catch (Throwable $e) { /* no mail yet */ }
+        $st = rs_db()->query("SELECT target, detail, at FROM admin_log WHERE action = 'pc-live' AND detail LIKE 'from submission %' AND at > NOW() - INTERVAL 14 DAY ORDER BY id DESC LIMIT 200");
         foreach ($st->fetchAll() as $r) {
             if (!preg_match('/^from submission (\d+)/', (string)$r['detail'], $m) || isset($seen[(int)$m[1]])) continue;
             $sid = (int)$m[1];
             $seen[$sid] = true;
+            if (isset($sent[$sid])) continue;
             $s = rs_hub_sub($sid);
             if (!$s || !empty($s[1]['live_mail']) || !empty($s[1]['live_skip'])) continue;
             $a = rs_pc_app((string)$r['target']);

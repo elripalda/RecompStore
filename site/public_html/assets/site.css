@@ -3231,3 +3231,7 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 .gone-why{margin:0 0 22px;max-width:640px;color:#dfe6ef}
 .gone-acts{display:flex;gap:10px;flex-wrap:wrap}.gone-acts .btn{display:inline-flex;min-height:48px;padding:0 22px;font-size:16px}
 @media (max-width:640px){.gone-card{grid-template-columns:1fr;text-align:center}.gone-art{width:min(200px,60%);margin:0 auto}.gone-why{margin-inline:auto}.gone-acts{justify-content:center}.gone-acts .btn{flex:1 1 0;justify-content:center}}
+/* (4.8) The banner's console and game line stays one line, cut with an ellipsis, instead of splitting
+   into two squeezed columns on a phone. */
+.slide-meta{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}
+.slide-meta .dot{display:inline-block;vertical-align:1px;margin-inline-end:8px}

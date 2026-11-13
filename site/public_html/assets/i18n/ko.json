@@ -1022,5 +1022,20 @@
  "Show less": "접기",
  "Show recomps for": "리컴프 표시 대상",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "RecompLauncher에는 내 시스템용 버전이 있는 리컴프만 표시됩니다.",
- "Every system": "모든 시스템"
+ "Every system": "모든 시스템",
+ "Today": "오늘",
+ "Yesterday": "어제",
+ "Updated": "업데이트됨",
+ "New recomps and updates on RecompLauncher, day by day.": "RecompLauncher의 새 리컴프와 업데이트를 날짜별로.",
+ "new this week": "이번 주 신규",
+ "updated this week": "이번 주 업데이트",
+ "RSS feed": "RSS 피드",
+ "Follow new recomps and updates in your feed reader": "피드 리더에서 새 리컴프와 업데이트를 받아보세요",
+ "New on RecompLauncher": "RecompLauncher 신규",
+ "1 new": "신규 1개",
+ "{n} new": "신규 {n}개",
+ "1 updated": "업데이트 1개",
+ "{n} updated": "업데이트 {n}개",
+ "Nothing new in the last three weeks.": "지난 3주 동안 새로운 것이 없습니다.",
+ "See every new arrival": "모든 신규 보기"
 }

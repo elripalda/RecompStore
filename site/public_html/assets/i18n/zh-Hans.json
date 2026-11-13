@@ -1022,5 +1022,20 @@
  "Show less": "收起",
  "Show recomps for": "显示适用于以下系统的重编译游戏",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "RecompLauncher 只显示有适用于你系统版本的重编译游戏。",
- "Every system": "所有系统"
+ "Every system": "所有系统",
+ "Today": "今天",
+ "Yesterday": "昨天",
+ "Updated": "已更新",
+ "New recomps and updates on RecompLauncher, day by day.": "RecompLauncher 上的新重编译游戏和更新，按天查看。",
+ "new this week": "本周新增",
+ "updated this week": "本周更新",
+ "RSS feed": "RSS 订阅",
+ "Follow new recomps and updates in your feed reader": "在阅读器中关注新的重编译游戏和更新",
+ "New on RecompLauncher": "RecompLauncher 新上架",
+ "1 new": "新增 1 个",
+ "{n} new": "新增 {n} 个",
+ "1 updated": "更新 1 个",
+ "{n} updated": "更新 {n} 个",
+ "Nothing new in the last three weeks.": "过去三周没有新内容。",
+ "See every new arrival": "查看所有新上架"
 }

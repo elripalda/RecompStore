@@ -1022,5 +1022,20 @@
  "Show less": "عرض أقل",
  "Show recomps for": "عرض الألعاب لنظام",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "لن تظهر في RecompLauncher إلا الألعاب التي لها إصدار لنظامك.",
- "Every system": "كل الأنظمة"
+ "Every system": "كل الأنظمة",
+ "Today": "اليوم",
+ "Yesterday": "أمس",
+ "Updated": "تم التحديث",
+ "New recomps and updates on RecompLauncher, day by day.": "إعادات التجميع الجديدة والتحديثات على RecompLauncher، يومًا بيوم.",
+ "new this week": "جديدة هذا الأسبوع",
+ "updated this week": "محدّثة هذا الأسبوع",
+ "RSS feed": "خلاصة RSS",
+ "Follow new recomps and updates in your feed reader": "تابع إعادات التجميع الجديدة والتحديثات في قارئ الخلاصات",
+ "New on RecompLauncher": "جديد على RecompLauncher",
+ "1 new": "1 جديد",
+ "{n} new": "{n} جديدة",
+ "1 updated": "1 محدّث",
+ "{n} updated": "{n} محدّثة",
+ "Nothing new in the last three weeks.": "لا جديد في الأسابيع الثلاثة الماضية.",
+ "See every new arrival": "عرض كل الإضافات الجديدة"
 }

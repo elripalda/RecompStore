@@ -1022,5 +1022,20 @@
  "Show less": "Tampilkan lebih sedikit",
  "Show recomps for": "Tampilkan Recomp untuk",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "Hanya Recomp yang punya versi untuk sistem Anda yang tampil di RecompLauncher.",
- "Every system": "Semua sistem"
+ "Every system": "Semua sistem",
+ "Today": "Hari ini",
+ "Yesterday": "Kemarin",
+ "Updated": "Diperbarui",
+ "New recomps and updates on RecompLauncher, day by day.": "Recomp baru dan pembaruan di RecompLauncher, hari demi hari.",
+ "new this week": "baru minggu ini",
+ "updated this week": "diperbarui minggu ini",
+ "RSS feed": "Feed RSS",
+ "Follow new recomps and updates in your feed reader": "Ikuti recomp baru dan pembaruan di pembaca feed kamu",
+ "New on RecompLauncher": "Baru di RecompLauncher",
+ "1 new": "1 baru",
+ "{n} new": "{n} baru",
+ "1 updated": "1 diperbarui",
+ "{n} updated": "{n} diperbarui",
+ "Nothing new in the last three weeks.": "Tidak ada yang baru dalam tiga minggu terakhir.",
+ "See every new arrival": "Lihat semua yang baru"
 }

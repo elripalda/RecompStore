@@ -1022,5 +1022,20 @@
  "Show less": "閉じる",
  "Show recomps for": "表示するリコンパイル版",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "RecompLauncherには、お使いのシステム向けの版があるリコンパイル版だけが表示されます。",
- "Every system": "すべてのシステム"
+ "Every system": "すべてのシステム",
+ "Today": "今日",
+ "Yesterday": "昨日",
+ "Updated": "更新",
+ "New recomps and updates on RecompLauncher, day by day.": "RecompLauncher の新しいリコンプとアップデートを日ごとに。",
+ "new this week": "今週の新着",
+ "updated this week": "今週の更新",
+ "RSS feed": "RSS フィード",
+ "Follow new recomps and updates in your feed reader": "新しいリコンプとアップデートをフィードリーダーでフォロー",
+ "New on RecompLauncher": "RecompLauncher の新着",
+ "1 new": "新着 1 件",
+ "{n} new": "新着 {n} 件",
+ "1 updated": "更新 1 件",
+ "{n} updated": "更新 {n} 件",
+ "Nothing new in the last three weeks.": "この3週間で新しいものはありません。",
+ "See every new arrival": "新着をすべて見る"
 }

@@ -14,12 +14,12 @@ $items = []; $fresh = [];
 foreach ($apps as $a) {
     if (!is_array($a) || !empty($a['soon'])) continue;
     $t = $at((string)($a['added'] ?? ''));
-    if ($t >= $cut && $t <= $now + 86400) { $items[] = ['new', $a, $t]; $fresh[(string)$a['id']] = true; }
+    if ($t >= $cut && $t <= $now + 86400) { $items[] = ['new', $a, min($t, $now)]; $fresh[(string)$a['id']] = true; }
 }
 foreach ($apps as $a) {
     if (!is_array($a) || !empty($a['soon']) || isset($fresh[(string)$a['id']])) continue;
     $t = $at((string)($a['released'] ?? ''));
-    if ($t >= $cut && $t <= $now + 86400) $items[] = ['upd', $a, $t];
+    if ($t >= $cut && $t <= $now + 86400) $items[] = ['upd', $a, min($t, $now)]; // a release's day, not after now
 }
 usort($items, fn($x, $y) => $y[2] <=> $x[2]);
 $items = array_slice($items, 0, 60);

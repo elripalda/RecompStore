@@ -1022,5 +1022,20 @@
  "Show less": "Minder tonen",
  "Show recomps for": "Recomps tonen voor",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "Alleen Recomps met een versie voor jouw systeem worden op RecompLauncher getoond.",
- "Every system": "Alle systemen"
+ "Every system": "Alle systemen",
+ "Today": "Vandaag",
+ "Yesterday": "Gisteren",
+ "Updated": "Bijgewerkt",
+ "New recomps and updates on RecompLauncher, day by day.": "Nieuwe recomps en updates op RecompLauncher, dag voor dag.",
+ "new this week": "nieuw deze week",
+ "updated this week": "bijgewerkt deze week",
+ "RSS feed": "RSS-feed",
+ "Follow new recomps and updates in your feed reader": "Volg nieuwe recomps en updates in je feedlezer",
+ "New on RecompLauncher": "Nieuw op RecompLauncher",
+ "1 new": "1 nieuw",
+ "{n} new": "{n} nieuw",
+ "1 updated": "1 bijgewerkt",
+ "{n} updated": "{n} bijgewerkt",
+ "Nothing new in the last three weeks.": "Niets nieuws in de afgelopen drie weken.",
+ "See every new arrival": "Bekijk alle nieuwkomers"
 }

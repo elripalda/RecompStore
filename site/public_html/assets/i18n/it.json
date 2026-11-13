@@ -1022,5 +1022,20 @@
  "Show less": "Mostra meno",
  "Show recomps for": "Mostra i recomp per",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "Su RecompLauncher compaiono solo i recomp con una versione per il tuo sistema.",
- "Every system": "Tutti i sistemi"
+ "Every system": "Tutti i sistemi",
+ "Today": "Oggi",
+ "Yesterday": "Ieri",
+ "Updated": "Aggiornato",
+ "New recomps and updates on RecompLauncher, day by day.": "Nuovi recomp e aggiornamenti su RecompLauncher, giorno per giorno.",
+ "new this week": "nuovi questa settimana",
+ "updated this week": "aggiornati questa settimana",
+ "RSS feed": "Feed RSS",
+ "Follow new recomps and updates in your feed reader": "Segui nuovi recomp e aggiornamenti nel tuo lettore di feed",
+ "New on RecompLauncher": "Nuovo su RecompLauncher",
+ "1 new": "1 nuovo",
+ "{n} new": "{n} nuovi",
+ "1 updated": "1 aggiornato",
+ "{n} updated": "{n} aggiornati",
+ "Nothing new in the last three weeks.": "Niente di nuovo nelle ultime tre settimane.",
+ "See every new arrival": "Vedi tutte le novità"
 }

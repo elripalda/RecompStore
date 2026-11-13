@@ -1022,5 +1022,20 @@
  "Show less": "Daha az göster",
  "Show recomps for": "Recomp'ları göster:",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "RecompLauncher'da yalnızca sisteminiz için sürümü olan recomp'lar görünür.",
- "Every system": "Tüm sistemler"
+ "Every system": "Tüm sistemler",
+ "Today": "Bugün",
+ "Yesterday": "Dün",
+ "Updated": "Güncellendi",
+ "New recomps and updates on RecompLauncher, day by day.": "RecompLauncher'daki yeni recomp'lar ve güncellemeler, gün gün.",
+ "new this week": "bu hafta yeni",
+ "updated this week": "bu hafta güncellendi",
+ "RSS feed": "RSS beslemesi",
+ "Follow new recomps and updates in your feed reader": "Yeni recomp'ları ve güncellemeleri besleme okuyucunda takip et",
+ "New on RecompLauncher": "RecompLauncher'da yeni",
+ "1 new": "1 yeni",
+ "{n} new": "{n} yeni",
+ "1 updated": "1 güncellendi",
+ "{n} updated": "{n} güncellendi",
+ "Nothing new in the last three weeks.": "Son üç haftada yeni bir şey yok.",
+ "See every new arrival": "Tüm yenileri gör"
 }

@@ -3655,7 +3655,7 @@
               <div class="pc-game-words">
                 <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}${p5 ? `<a class="pc-pill ps5-pill" href="/game/${encodeURIComponent(p5.id)}" title="${esc(t('Also on PS5, through RecompStore'))}">${t('Also on PS5')}${SVG_OUT}</a>` : ''}</div>
                 <h1 dir="auto">${esc(a.name)}</h1>
-                ${a.game && a.game !== a.name ? `<p class="pc-based big">${SVG_DISC}${tf('Rebuilt from {game}', { game: `<strong dir="auto">${esc(a.game)}</strong>` })}</p>` : ''}
+                ${a.game && a.game !== a.name ? `<p class="pc-based big">${SVG_DISC}${tf('Rebuilt from {game}', { game: `<strong dir="auto">${esc((a.games || []).length > 1 ? a.games.map((g) => g.name).join('; ') : a.game)}</strong>` })}</p>` : ''}
                 ${pcByLine(a)}
                 ${tags ? `<div class="pc-taglist" aria-label="${esc(t('Tags'))}">${tags}</div>` : ''}
                 <p class="pc-head-verdict" data-head-verdict>${pcCounts ? verdictChip(pcCounts[a.id]) : ''}</p>

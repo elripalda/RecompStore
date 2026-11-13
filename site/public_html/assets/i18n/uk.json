@@ -1022,5 +1022,20 @@
  "Show less": "Згорнути",
  "Show recomps for": "Показувати рекомпіляції для",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "У RecompLauncher буде видно лише рекомпіляції з версією для вашої системи.",
- "Every system": "Усі системи"
+ "Every system": "Усі системи",
+ "Today": "Сьогодні",
+ "Yesterday": "Учора",
+ "Updated": "Оновлено",
+ "New recomps and updates on RecompLauncher, day by day.": "Нові рекомпіляції та оновлення в RecompLauncher, день за днем.",
+ "new this week": "нових цього тижня",
+ "updated this week": "оновлено цього тижня",
+ "RSS feed": "RSS-стрічка",
+ "Follow new recomps and updates in your feed reader": "Стежте за новими рекомпіляціями та оновленнями у RSS-читачі",
+ "New on RecompLauncher": "Нове в RecompLauncher",
+ "1 new": "1 нова",
+ "{n} new": "{n} нових",
+ "1 updated": "1 оновлена",
+ "{n} updated": "{n} оновлено",
+ "Nothing new in the last three weeks.": "За останні три тижні нічого нового.",
+ "See every new arrival": "Усі новинки"
 }

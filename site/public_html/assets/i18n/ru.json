@@ -1022,5 +1022,20 @@
  "Show less": "Свернуть",
  "Show recomps for": "Показывать рекомпиляции для",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "В RecompLauncher будут видны только рекомпиляции с версией для вашей системы.",
- "Every system": "Все системы"
+ "Every system": "Все системы",
+ "Today": "Сегодня",
+ "Yesterday": "Вчера",
+ "Updated": "Обновлено",
+ "New recomps and updates on RecompLauncher, day by day.": "Новые рекомпиляции и обновления в RecompLauncher, день за днём.",
+ "new this week": "новых за неделю",
+ "updated this week": "обновлено за неделю",
+ "RSS feed": "RSS-лента",
+ "Follow new recomps and updates in your feed reader": "Следите за новыми рекомпиляциями и обновлениями в RSS-читалке",
+ "New on RecompLauncher": "Новое в RecompLauncher",
+ "1 new": "1 новая",
+ "{n} new": "{n} новых",
+ "1 updated": "1 обновлена",
+ "{n} updated": "{n} обновлено",
+ "Nothing new in the last three weeks.": "За последние три недели ничего нового.",
+ "See every new arrival": "Все новинки"
 }

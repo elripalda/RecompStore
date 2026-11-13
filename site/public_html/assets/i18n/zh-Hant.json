@@ -1022,5 +1022,20 @@
  "Show less": "收合",
  "Show recomps for": "顯示適用於以下系統的重新編譯遊戲",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "RecompLauncher 只會顯示有適用於你系統版本的重新編譯遊戲。",
- "Every system": "所有系統"
+ "Every system": "所有系統",
+ "Today": "今天",
+ "Yesterday": "昨天",
+ "Updated": "已更新",
+ "New recomps and updates on RecompLauncher, day by day.": "RecompLauncher 上的新重新編譯遊戲與更新，逐日呈現。",
+ "new this week": "本週新增",
+ "updated this week": "本週更新",
+ "RSS feed": "RSS 訂閱",
+ "Follow new recomps and updates in your feed reader": "在閱讀器中追蹤新的重新編譯遊戲與更新",
+ "New on RecompLauncher": "RecompLauncher 新上架",
+ "1 new": "新增 1 個",
+ "{n} new": "新增 {n} 個",
+ "1 updated": "更新 1 個",
+ "{n} updated": "更新 {n} 個",
+ "Nothing new in the last three weeks.": "過去三週沒有新內容。",
+ "See every new arrival": "查看所有新上架"
 }

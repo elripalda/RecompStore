@@ -1022,5 +1022,20 @@
  "Show less": "Thu gọn",
  "Show recomps for": "Hiện bản recomp cho",
  "Only recomps with a build for your system show anywhere on RecompLauncher.": "Chỉ những bản recomp có phiên bản cho hệ điều hành của bạn mới hiện trên RecompLauncher.",
- "Every system": "Mọi hệ điều hành"
+ "Every system": "Mọi hệ điều hành",
+ "Today": "Hôm nay",
+ "Yesterday": "Hôm qua",
+ "Updated": "Đã cập nhật",
+ "New recomps and updates on RecompLauncher, day by day.": "Recomp mới và bản cập nhật trên RecompLauncher, theo từng ngày.",
+ "new this week": "mới trong tuần",
+ "updated this week": "cập nhật trong tuần",
+ "RSS feed": "Nguồn RSS",
+ "Follow new recomps and updates in your feed reader": "Theo dõi recomp mới và bản cập nhật trong trình đọc RSS",
+ "New on RecompLauncher": "Mới trên RecompLauncher",
+ "1 new": "1 mới",
+ "{n} new": "{n} mới",
+ "1 updated": "1 cập nhật",
+ "{n} updated": "{n} cập nhật",
+ "Nothing new in the last three weeks.": "Không có gì mới trong ba tuần qua.",
+ "See every new arrival": "Xem tất cả bản mới"
 }
