@@ -168,6 +168,17 @@ function rs_vt_backoff(int $sec): void {
     $x['hold'] = time() + $sec;
     rs_kv_put('vt_calls', (string)json_encode($x));
 }
+// (4.8) Is any of today's VirusTotal allowance left (not counting the four-a-minute limit)? ClamAV
+// stands in only when the day is used up; a full minute just means waiting for the next turn.
+function rs_vt_day_ok(bool $upload = false, bool $backfill = false, bool $low = false): bool {
+    $c = rs_kv_get('vt_calls');
+    $x = $c ? (json_decode($c['v'], true) ?: []) : [];
+    $today = (string)($x['day'] ?? '') === gmdate('Y-m-d');
+    $day = $today ? (int)($x['n'] ?? 0) : 0;
+    $up = $today ? (int)($x['up'] ?? 0) : 0;
+    if ($day >= RS_VT_PER_DAY || ($low && $day >= RS_VT_PER_DAY - RS_VT_KEEP_FOR_NEW)) return false;
+    return !($backfill && $upload && $up >= RS_VT_BACKFILL_UPLOADS);
+}
 function rs_vt_today(): int {
     $c = rs_kv_get('vt_calls');
     $x = $c ? (json_decode($c['v'], true) ?: []) : [];
@@ -367,7 +378,7 @@ function rs_vt_step(array $f): bool {
         }
         $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on(); // a submission: ClamAV only when VirusTotal is out for the day
         $clam = $low && rs_clam_on();
-        if (!rs_vt_budget(true, false, false, $low)) return ($clam || $sub) ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV
+        if (!rs_vt_budget(true, false, false, $low)) return ($clam || $sub) && !rs_vt_day_ok(false, false, $low) ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV (a full minute waits)
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
             rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
@@ -375,7 +386,7 @@ function rs_vt_step(array $f): bool {
             return true;
         }
         if ($code === 404 && $clam) return rs_clam_check($f, $tmp); // new to VirusTotal: ClamAV here instead of an upload
-        if ($code === 404 && $sub && !rs_vt_budget(false, false, false, false)) return rs_clam_check($f, $tmp); // no room left to upload it today
+        if ($code === 404 && $sub && !rs_vt_day_ok(true)) return rs_clam_check($f, $tmp); // no room left to upload it today
         if ($code === 404) { rs_vt_save($id, ['status' => (int)$f['size'] > RS_VT_MAX_BYTES ? 'big' : 'upload']); return true; }
         if ($code === 429) return false;
         rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => 'VirusTotal answered HTTP ' . $code, 'status' => (int)$f['tries'] >= 3 ? 'error' : 'new']);
@@ -383,8 +394,8 @@ function rs_vt_step(array $f): bool {
     }
     if ($f['status'] === 'upload') {
         if (!rs_vt_budget(false, true, $backfill, $low)) {
-            $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on();
-            return $sub ? rs_clam_check($f, $tmp) : false; // waiting for an upload VirusTotal can't take today
+            $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on() && !rs_vt_day_ok(true, $backfill, $low);
+            return $sub ? rs_clam_check($f, $tmp) : false; // waiting for an upload VirusTotal can't take today (a full minute waits)
         }
         if (!is_file($tmp)) {
             $why = rs_vt_fetch($f, $tmp);
