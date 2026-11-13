@@ -6,16 +6,21 @@
 (function () {
   'use strict';
   const API = 'art-api.php';
-  const form = document.querySelector('input[name="icon_file"], input[name="hero_file"], input[name="cover_file"]')?.form;
-  if (!form) return;
-  const PC = !!form.querySelector('input[name="cover_file"]');
-  const SLOTS = {
+  // (4.9) The Submissions drawer opens it too: window.rsArtPick.open(kind, form) for a form that
+  // arrives after the page has loaded.
+  let form = document.querySelector('form:not([data-panel]) input[name="icon_file"], form:not([data-panel]) input[name="hero_file"], form:not([data-panel]) input[name="cover_file"]')?.form || null;
+  const pageForm = form;
+  if (!form && !document.querySelector('[data-artpick-page]')) return;
+  let PC = !form || !!form.querySelector('input[name="cover_file"]');
+  let SLOTS = {};
+  const makeSlots = () => ({
     cover: { name: 'Cover', input: 'cover_file', ratio: 2 / 3, out: [600, 900], fmt: 'image/jpeg' },
     hero: { name: 'Backdrop', input: 'hero_file', ratio: PC ? 0 : 16 / 9, out: [3840, 0], fmt: 'image/jpeg', choices: PC ? [['Whole picture', 0], ['16:9', 16 / 9], ['Wide banner', 1920 / 620]] : [['16:9', 16 / 9], ['Whole picture', 0]] },
     logo: { name: 'Logo', input: 'logo_file', ratio: 0, out: [1600, 800], fmt: 'image/png', trim: true },
     icon: { name: 'Icon', input: 'icon_file', ratio: 1, out: [512, 512], fmt: 'image/png' },
-  };
-  const kinds = Object.keys(SLOTS).filter((k) => form.querySelector(`input[name="${SLOTS[k].input}"]`));
+  });
+  SLOTS = makeSlots();
+  let kinds = form ? Object.keys(SLOTS).filter((k) => form.querySelector(`input[name="${SLOTS[k].input}"]`)) : [];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const store = { get: (k) => { try { return localStorage.getItem('rs-art-' + k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem('rs-art-' + k, v); } catch (e) { /* fine */ } } };
   const getJSON = (q) => fetch(API + '?' + new URLSearchParams(q), { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ ok: false, error: 'The admin didn\'t answer. Try again.' }));
@@ -24,7 +29,7 @@
   const sourcesReady = getJSON({ a: 'sources' }).then((j) => { sources = j.ok ? j : { sources: {} }; return sources; });
 
   // ---- Buttons on the page ----------------------------------------------------------------------
-  kinds.forEach((k) => {
+  if (pageForm) kinds.forEach((k) => {
     const input = form.querySelector(`input[name="${SLOTS[k].input}"]`);
     const b = document.createElement('button');
     b.type = 'button';
@@ -49,7 +54,8 @@
   d.innerHTML = `
     <div class="ap-head">
       <h2>Find art</h2>
-      <div class="ap-kinds" role="tablist">${kinds.map((k) => `<button type="button" role="tab" data-kind="${k}">${SLOTS[k].name}</button>`).join('')}</div>
+      <div class="ap-kinds" role="tablist" data-kinds></div>
+      <button type="button" class="ap-local" data-local><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v4h14v-4"/></svg>From your computer</button>
       <button type="button" class="ap-x" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
     <form class="ap-search" data-search>
@@ -78,7 +84,17 @@
 
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
   $('[data-close]').addEventListener('click', () => d.close());
-  d.querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => { st.kind = b.dataset.kind; paintKinds(); showAdjust(false); loadPics(); }));
+  function paintKindTabs() {
+    $('[data-kinds]').innerHTML = kinds.map((k) => `<button type="button" role="tab" data-kind="${k}">${SLOTS[k].name}</button>`).join('');
+    d.querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => { st.kind = b.dataset.kind; paintKinds(); showAdjust(false); loadPics(); }));
+  }
+  paintKindTabs();
+  // Upload one instead: the slot's own file box, as before.
+  $('[data-local]').addEventListener('click', () => {
+    const input = form && form.querySelector(`input[name="${SLOTS[st.kind].input}"]`);
+    d.close();
+    if (input) input.click();
+  });
   $('[data-search]').addEventListener('submit', (e) => { e.preventDefault(); st.q = $('[data-search]').q.value.trim(); search(); });
   $('[data-back]').addEventListener('click', () => showAdjust(false));
 
@@ -319,9 +335,27 @@
     const url = URL.createObjectURL(file);
     const box = input.closest('label')?.querySelector('.pc-art-box');
     if (box) box.innerHTML = `<img src="${url}" alt="">`;
+    const openBtn = input.parentElement.querySelector('.ap-open');
     let tag = input.parentElement.querySelector('.ap-picked');
-    if (!tag) { tag = document.createElement('small'); tag.className = 'ap-picked'; input.parentElement.querySelector('.ap-open').insertAdjacentElement('afterend', tag); }
-    tag.textContent = `Picked from ${sources.sources[st.src].name}, ${cv.width}×${cv.height}. Save to keep it.`;
+    if (!tag && openBtn) { tag = document.createElement('small'); tag.className = 'ap-picked'; openBtn.insertAdjacentElement('afterend', tag); }
+    if (tag) tag.textContent = `Picked from ${sources.sources[st.src].name}, ${cv.width}×${cv.height}. Save to keep it.`;
+    form.dispatchEvent(new CustomEvent('artpicked', { bubbles: true, detail: { kind: st.kind, src: sources.sources[st.src].name, w: cv.width, h: cv.height } }));
     d.close();
   });
+  // For forms that show up later (the Submissions drawer).
+  window.rsArtPick = {
+    open(kind, f) {
+      if (f && f !== form) {
+        form = f;
+        PC = !!form.querySelector('input[name="cover_file"]');
+        SLOTS = makeSlots();
+        kinds = Object.keys(SLOTS).filter((k) => form.querySelector(`input[name="${SLOTS[k].input}"]`));
+        paintKindTabs();
+        st.games = []; st.game = null; st.touched = false; st.cache = {};
+      }
+      if (!form || !SLOTS[kind]) return false;
+      open(kind);
+      return true;
+    },
+  };
 })();

@@ -162,10 +162,10 @@ if ($job):
 <form class="sh-panel sh-edit" data-panel="page" data-form="page_save" enctype="multipart/form-data" hidden>
   <input type="hidden" name="item" value="job:<?= (int)$job['id'] ?>">
   <h3>Edit its page</h3>
-  <p class="muted small">Saved to its listing<?= !empty($app['hidden']) ? '. It stays hidden until you Publish.' : ', and the live page updates too.' ?> Click a picture to replace it.</p>
+  <p class="muted small">Saved to its listing<?= !empty($app['hidden']) ? '. It stays hidden until you Publish.' : ', and the live page updates too.' ?> Click a picture to pick new art from SteamGridDB and your other art sources, or upload your own.</p>
   <div class="sh-edit-art">
     <?php foreach (['cover' => 'Cover', 'hero' => 'Banner', 'logo' => 'Logo', 'icon' => 'Icon'] as $k => $l): $v = (string)($app[$k] ?? ''); ?>
-    <label class="sh-pic sh-pic-<?= $k ?>"><span class="sh-pic-img"><?= $v !== '' ? '<img src="' . h($v) . '" alt="">' : '<span class="none">None</span>' ?></span><span class="sh-pic-cap"><?= $l ?> <u>Replace</u></span><input type="file" name="<?= $k ?>_file" accept="image/png,image/jpeg,image/webp" data-pic></label>
+    <label class="sh-pic sh-pic-<?= $k ?>"><span class="sh-pic-img"><?= $v !== '' ? '<img src="' . h($v) . '" alt="">' : '<span class="none">None</span>' ?></span><span class="sh-pic-cap"><?= $l ?> <u>Change</u></span><input type="file" name="<?= $k ?>_file" accept="image/png,image/jpeg,image/webp" data-pic></label>
     <?php endforeach; ?>
   </div>
   <div class="sh-row sh-edit-sgdb"><span class="muted small">Or from SteamGridDB:</span><button type="submit" class="small" name="art" value="next">Different cover and banner</button><button type="submit" class="small" name="art" value="first">Find all its art again</button></div>

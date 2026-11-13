@@ -696,7 +696,7 @@ if ($tab === 'board') { try { if ($closed = rs_sub_close_live()) rs_flash($close
 $counts = rs_hub_counts();
 $flagN = rs_hub_flag_count();
 $csrf = rs_csrf();
-rs_head('Submissions', true, ['assets/hub.css']);
+rs_head('Submissions', true, ['assets/hub.css', 'assets/artpick.css']);
 ?>
 <div class="sh-head">
   <div><h1>Submissions</h1><p class="muted"><?= h(['board' => 'New recomps and apps, from first look to live.', 'watch' => 'Every listing\'s repo, checked twice a day. Anything taken down, deleted, made private or emptied of its releases shows up here and on top of the board.', 'requests' => 'What players asked for from RecompLauncher\'s Coming Soon page, most asked first.', 'found' => 'Projects the finder and the daily scout came across on GitHub, GitLab and Discord.', 'flags' => 'Questions for ' . $owner . ', and the answers.', 'handled' => 'Everything that left the board: live, declined, sent back or marked done.', 'dismissed' => 'Drafts you took off the board with Dismiss. Put one back to finish it, or remove it for good.', 'guide' => 'How a submission goes from New to live, and when to approve, ask for changes, decline or flag.'][$tab]) ?></p></div>
@@ -907,5 +907,7 @@ rs_head('Submissions', true, ['assets/hub.css']);
 <div class="sh-scrim" data-scrim hidden></div>
 <aside class="sh-drawer" data-drawer hidden aria-label="Details"><div data-drawer-body></div></aside>
 <div class="sh-toast" data-toast role="status" hidden></div>
+<div data-artpick-page hidden></div>
+<script src="assets/artpick.js?v=<?= (int)@filemtime(__DIR__ . '/assets/artpick.js') ?>"></script>
 <script src="assets/hub.js?v=<?= (int)@filemtime(__DIR__ . '/assets/hub.js') ?>"></script>
 <?php rs_foot();

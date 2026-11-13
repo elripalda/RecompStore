@@ -279,6 +279,16 @@
     }
   });
   // (4.9) Edit its page: a picture picked to replace one shows straight away (saved with Save).
+  // Clicking a picture opens the art picker (SteamGridDB, IGDB and the rest); it has "From your
+  // computer" for an upload. A click made by the picker itself goes through to the file box.
+  document.addEventListener('click', function (e) {
+    var tile = e.target.closest && e.target.closest('.sh-edit .sh-pic');
+    if (!tile || !window.rsArtPick || e.target.matches('input[type=file]')) return;
+    var inp = tile.querySelector('input[type=file][data-pic]');
+    if (!inp) return;
+    var kind = inp.name.replace('_file', '');
+    if (window.rsArtPick.open(kind, inp.form)) e.preventDefault();
+  });
   document.addEventListener('change', function (e) {
     var inp = e.target;
     if (!inp.matches || !inp.matches('input[type=file][data-pic]') || !inp.files || !inp.files[0]) return;
