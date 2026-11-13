@@ -60,7 +60,7 @@ function rs_auto_get(int $id): ?array {
 function rs_auto_list(int $limit = 60): array {
     rs_auto_tables();
     $out = [];
-    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status NOT IN ('removed', 'dismissed') ORDER BY id DESC LIMIT " . (int)$limit) as $r) {
+    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status NOT IN ('removed', 'dismissed') AND status NOT LIKE 'shelf-%' ORDER BY id DESC LIMIT " . (int)$limit) as $r) {
         $r['steps'] = json_decode((string)$r['steps'], true) ?: [];
         $out[] = $r;
     }
@@ -476,11 +476,17 @@ function rs_auto_vt(array $job): array {
     };
 }
 
-// Publish: shown and the catalog published. Held while VirusTotal flags it red.
-function rs_auto_publish(int $id): string {
+// Publish: shown and the catalog published. Held while VirusTotal flags it red, unless $force (4.9: a
+// false positive the owner or a manager looked at and is putting live anyway).
+function rs_auto_publish(int $id, bool $force = false): string {
     $job = rs_auto_get($id);
     if (!$job || $job['status'] !== 'review') throw new RuntimeException('That draft isn\'t ready to publish.');
-    if (rs_auto_vt($job)[0] === 'bad') throw new RuntimeException('VirusTotal flagged it, so it stays hidden. Decide on Security first.');
+    $flagged = rs_auto_vt($job)[0] === 'bad';
+    if ($flagged && !$force) throw new RuntimeException('VirusTotal flagged it, so it stays hidden. Decide on Security first.');
+    if ($flagged) {
+        rs_log('security', (string)$job['app_id'], 'published although VirusTotal flagged ' . (string)$job['tag'] . ' (by ' . (function_exists('rs_me_name') ? rs_me_name() : 'admin') . ')');
+        rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)$job['repo_key'], (string)$job['tag']]);
+    }
     $a = rs_pc_app($job['app_id']);
     if (!$a) throw new RuntimeException('Its listing is gone.');
     $a['hidden'] = false;
@@ -496,6 +502,20 @@ function rs_auto_publish(int $id): string {
     }
     try { rs_sub_close_live(); } catch (Throwable $e) { /* the Submissions page closes it when opened */ }
     return $a['name'];
+}
+// (4.9) Off the board without removing anything: Submissions > Dismissed keeps it, with Put back.
+// The status remembers where it was ("shelf-review", "shelf-failed").
+function rs_auto_shelve(int $id, bool $on): void {
+    $job = rs_auto_get($id);
+    if (!$job) throw new RuntimeException('That draft is gone.');
+    if ($on) {
+        if (!in_array($job['status'], ['review', 'failed', 'queued', 'running'], true)) throw new RuntimeException('That draft isn\'t on the board.');
+        if (in_array($job['status'], ['queued', 'running'], true) && strtotime((string)$job['updated'] . ' UTC') > time() - RS_AUTO_STUCK) throw new RuntimeException('It\'s still running. Wait for it to finish.');
+        rs_auto_set($id, ['status' => 'shelf-' . ($job['status'] === 'review' ? 'review' : 'failed')]);
+    } else {
+        if (!str_starts_with((string)$job['status'], 'shelf-')) throw new RuntimeException('That draft isn\'t dismissed.');
+        rs_auto_set($id, ['status' => substr((string)$job['status'], 6)]);
+    }
 }
 // Remove a draft; the hidden listing it made goes too (one that was already there stays).
 function rs_auto_remove(int $id): void {

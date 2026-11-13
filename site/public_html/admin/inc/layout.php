@@ -96,7 +96,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $watchN = 0;
     if (rs_can_page('hub.php')) { try { require_once __DIR__ . '/repowatch.php'; $watchN = rs_watch_count(array_values(array_intersect(rs_me()['stores_list'] ?? [], ['pc', 'ps5']))); } catch (Throwable $e) { /* not set up yet */ } }
     $hubTab = (string)($_GET['tab'] ?? '');
-    $hubAt = fn(string $t) => fn() => $here === 'hub.php' && ($hubTab === $t || ($t === 'board' && !in_array($hubTab, ['watch', 'requests', 'found', 'flags', 'handled', 'guide'], true)));
+    $hubAt = fn(string $t) => fn() => $here === 'hub.php' && ($hubTab === $t || ($t === 'board' && !in_array($hubTab, ['watch', 'requests', 'found', 'flags', 'handled', 'dismissed', 'guide'], true)));
     $hubKids = [['hub.php', 'Board' . $cnt($hubN), $hubAt('board')], ['hub.php?tab=watch', 'Repo watch' . ($watchN ? ' <span class="count red" title="Repos that need a look">' . $watchN . '</span>' : ''), $hubAt('watch')]];
     if (rs_has_store('pc')) { $hubKids[] = ['hub.php?tab=requests', 'Requests' . $cnt($reqN), $hubAt('requests')]; $hubKids[] = ['hub.php?tab=found', 'Found on GitHub', $hubAt('found')]; }
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
@@ -110,7 +110,10 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $devReq = rs_dev_waiting();
     $devUnread = rs_dev_admin_unread();
     array_push($hubKids, ['dev-accounts.php', 'Developer requests' . $cnt($devReq), null], ['messages.php', 'Messages' . $cnt($devUnread), null], ['security.php', 'Security' . $cnt($vtNeed), null],
-        ['hub.php?tab=flags', 'Flags' . $cnt($flagN), $hubAt('flags')], ['hub.php?tab=handled', 'Handled', $hubAt('handled')], ['hub.php?tab=guide', 'How to approve', $hubAt('guide')]);
+        ['hub.php?tab=flags', 'Flags' . $cnt($flagN), $hubAt('flags')], ['hub.php?tab=handled', 'Handled', $hubAt('handled')]);
+    // (4.9) Drafts taken off the board with Dismiss.
+    if (rs_has_store('pc')) $hubKids[] = ['hub.php?tab=dismissed', 'Dismissed', $hubAt('dismissed')];
+    $hubKids[] = ['hub.php?tab=guide', 'How to approve', $hubAt('guide')];
     $sections = [
         'Home' => [
             ['dashboard.php', 'Overview', 'home', [], 0],

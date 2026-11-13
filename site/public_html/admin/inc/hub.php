@@ -303,7 +303,7 @@ function rs_hub_jobs(): array {
 function rs_hub_job_state(array $j): array {
     $vt = ($j['steps']['vt']['s'] ?? '') === 'skip' ? ['skip', (string)($j['steps']['vt']['n'] ?? '')] : rs_auto_vt($j);
     $stuck = in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) < time() - RS_AUTO_STUCK;
-    if ($j['status'] === 'failed' || $stuck) return ['check', ['bad', $stuck ? 'Stopped. Run it again' : 'Didn\'t finish. Run it again'], $stuck, $vt];
+    if ($j['status'] === 'failed' || $stuck) return ['check', ['bad', $stuck ? 'Stopped. Run it again' : rs_hub_fail_note((string)$j['notes'])], $stuck, $vt];
     if ($j['status'] === 'queued') return ['check', ['run', 'In line to start'], false, $vt];
     if ($j['status'] === 'running') {
         $n = 0; $at = '';
@@ -321,6 +321,15 @@ function rs_hub_job_state(array $j): array {
     elseif ($vt[0] === 'warn' && $note[0] === 'ok') $note = ['warn', 'Look first: ' . rs_hub_short($vt[1])];
     if ($note[0] === 'warn' && $note[1] === 'Look first' && trim((string)$j['notes']) !== '') $note[1] = 'Look first: ' . rs_hub_short((string)strtok(trim((string)$j['notes']), "\n"));
     return ['ready', $note, false, $vt];
+}
+// (4.9) Why a draft didn't finish, for its card: the reason when there is one, so a listing that's
+// already there (hidden) doesn't read like something to run again and again.
+function rs_hub_fail_note(string $notes): string {
+    $n = trim((string)strtok(trim($notes), "\n"));
+    if ($n === '') return 'Didn\'t finish. Run it again';
+    if (preg_match('/^Already on RecompLauncher as .+\(hidden\)/', $n)) return 'Already listed, hidden. Run it again or dismiss';
+    if (str_starts_with($n, 'Already on RecompLauncher')) return 'Already live on RecompLauncher. Dismiss it';
+    return 'Didn\'t finish: ' . rs_hub_short($n);
 }
 // Where a draft came from.
 function rs_hub_job_src(array $j): string {
@@ -601,6 +610,9 @@ function rs_hub_bulk(string $do, array $ids): array {
         } elseif ($do === 'remove') {
             if ($running) { $skip[$name] = 'still running'; continue; }
             rs_auto_remove($id);
+        } elseif ($do === 'dismiss') {
+            if ($running) { $skip[$name] = 'still running'; continue; }
+            try { rs_auto_shelve($id, true); } catch (RuntimeException $e) { $skip[$name] = rtrim(lcfirst($e->getMessage()), '.'); continue; }
         } else throw new RuntimeException('That isn\'t something the board can do to several at once.');
         $done[] = $name;
     }
@@ -734,4 +746,93 @@ function rs_hub_live_mail(int $subId): ?array {
             . 'Players can install it from the launcher, and every release you publish on ' . rs_host_name((string)($d['host'] ?? '')) . ' reaches them automatically.'
             . ($sdk ? "\n\n" . 'If you\'d like it to feel even more native, quick install and in-launcher settings come from one small file in your release. The SDK walks you through it:' . "\n" . 'https://recomplauncher.com/sdk' : '')
             . "\n\n" . 'Thanks for sending it in.' . "\n"];
+}
+
+// ---- (4.9) Dismissed drafts, the "you're live" emails all at once, hidden listings, page edits ----
+
+// Drafts taken off the board with Dismiss, newest first.
+function rs_hub_shelved(): array {
+    rs_auto_tables();
+    $out = [];
+    foreach (rs_db()->query("SELECT * FROM pc_auto WHERE status LIKE 'shelf-%' ORDER BY updated DESC LIMIT 300") as $r) {
+        $r['steps'] = json_decode((string)$r['steps'], true) ?: [];
+        $out[] = $r;
+    }
+    return $out;
+}
+// The drafts on Checking that stopped because their listing is already there, hidden. -> ids
+function rs_hub_listed_failed(): array {
+    rs_auto_tables();
+    return array_map('intval', rs_db()->query("SELECT id FROM pc_auto WHERE status = 'failed' AND notes LIKE 'Already on RecompLauncher%'")->fetchAll(PDO::FETCH_COLUMN));
+}
+// Every waiting "you're live" email put in the mail line at once (the ones with an address).
+// -> [sent, no address, couldn't be written (its listing's repo isn't the one they sent)]
+function rs_hub_live_all(): array {
+    if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up, so no email can go out.');
+    $sent = 0; $none = 0; $cant = 0;
+    foreach (rs_hub_live_queue() as $x) {
+        $lm = rs_hub_live_mail((int)$x['sub']);
+        if (!$lm) { $cant++; continue; }
+        if ($lm['to'] === '') { $none++; continue; }
+        $s = rs_hub_sub((int)$x['sub']);
+        if (!$s) continue;
+        [, $d] = $s;
+        rs_mailq_add($lm['to'], $lm['subject'], $lm['body'] . "\n\n" . rs_mail_get('mail_sign'), ['save' => true], 3, false);
+        rs_mail_log('reply', $lm['to'], $lm['subject'], $lm['body'], '', (int)$x['sub']);
+        $d['live_mail'] = gmdate('c');
+        rs_hub_sub_save((int)$x['sub'], $d);
+        $sent++;
+    }
+    if ($sent) rs_log('hub', 'live-mail-all', $sent . ' emails');
+    return [$sent, $none, $cant];
+}
+// PC listings the repo watch hid (Hide from store), newest first, so a new repo can be put on them later.
+function rs_hub_hidden_apps(): array {
+    $out = [];
+    foreach (rs_pc_apps() as $a) {
+        if (empty($a['hidden']) || (string)($a['watch_hid'] ?? '') === '') continue;
+        [$why, $at] = array_pad(explode('|', (string)$a['watch_hid'], 2), 2, '');
+        $out[] = ['id' => (string)$a['id'], 'name' => (string)$a['name'], 'icon' => (string)$a['icon'], 'repo' => (string)$a['repo'], 'key' => rs_pc_key($a), 'host' => rs_pc_host($a), 'why' => $why, 'at' => $at];
+    }
+    usort($out, fn($x, $y) => strcmp($y['at'], $x['at']));
+    return $out;
+}
+// The drawer's "Edit its page": the listing's words and art saved from the Submissions board.
+function rs_hub_page_save(array $j, array $post, array $files): array {
+    $a = (string)$j['app_id'] !== '' ? rs_pc_app((string)$j['app_id']) : null;
+    if (!$a) throw new RuntimeException('Its listing is gone.');
+    foreach (['name' => 120, 'game' => 120, 'blurb' => 160, 'description' => 8000, 'features' => 1200, 'needs' => 200, 'tags' => 120, 'author' => 80, 'credits' => 1000] as $k => $max)
+        if (array_key_exists($k, $post)) $a[$k] = mb_substr(trim(str_replace("\r\n", "\n", (string)$post[$k])), 0, $max);
+    if (trim((string)$a['name']) === '') throw new RuntimeException('It needs a name.');
+    if (isset($post['origin'])) $a['origin'] = isset(RS_PC_ORIGINS[$post['origin']]) ? (string)$post['origin'] : 'other';
+    if (isset($post['genre'])) $a['genre'] = isset(RS_PC_GENRES[$post['genre']]) ? (string)$post['genre'] : '';
+    if (array_key_exists('features', $post)) { $a['features_read'] = true; $a['features_v'] = 2; }
+    $got = [];
+    foreach (['icon_file' => 'icon', 'hero_file' => 'hero', 'logo_file' => 'logo'] as $field => $kind) {
+        if (empty($files[$field]['name'])) continue;
+        $out = rs_save_image($files[$field], $kind, 'pc-' . $a['id']);
+        $a[$kind] = $kind === 'hero' ? ($out['hero_web'] ?? $out['hero']) : $out[$kind];
+        $got[] = ['icon' => 'icon', 'hero' => 'banner', 'logo' => 'logo'][$kind];
+    }
+    if (!empty($files['cover_file']['name'])) {
+        if (!is_uploaded_file((string)$files['cover_file']['tmp_name'])) throw new RuntimeException('The cover didn\'t upload. Try again.');
+        $a = array_merge($a, rs_pc_media_file((string)$files['cover_file']['tmp_name'], $a['id']));
+        $got[] = 'cover';
+    }
+    $sgdb = '';
+    if (!empty($post['art'])) {
+        // Same as the PC recomps page: "Different art" moves on to the next cover and banner; "Find art" starts over.
+        $next = $post['art'] === 'next';
+        $a['art_n'] = $next ? (int)($a['art_n'] ?? 0) + 1 : 0;
+        $art = rs_sgdb_art($a['game'] !== '' ? $a['game'] : $a['name'], rs_pc_art_used($a['id']), $a['art_n'], rs_pc_about_year($a));
+        $m = rs_pc_media_many(array_intersect_key($art, array_flip($next ? ['cover', 'hero'] : ['cover', 'hero', 'logo', 'icon'])), $a['id']);
+        $a = array_merge($a, $m);
+        $from = [];
+        foreach (['cover', 'hero', 'logo', 'icon'] as $k) if (isset($m[$k . '_src'])) $from[] = $k === 'hero' ? 'banner' : $k;
+        $sgdb = $from ? ' Art from SteamGridDB: ' . implode(', ', $from) . '.' : (rs_sgdb_key() === '' ? ' Add your SteamGridDB key in Settings for art.' : ' SteamGridDB has no more art for "' . ($a['game'] ?: $a['name']) . '".');
+    }
+    rs_pc_save($a);
+    rs_log('change', 'pc ' . $a['id'], 'saved from Submissions');
+    if (empty($a['hidden'])) rs_pc_publish_one($a['id']);
+    return [$a, ($got ? 'Saved, with the new ' . implode(', ', $got) . '.' : 'Saved.') . $sgdb . (empty($a['hidden']) ? ' The live page has it too.' : '')];
 }

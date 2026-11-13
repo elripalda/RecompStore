@@ -22,9 +22,9 @@ $me = rs_me();
 $stores = $me['stores_list'];
 $store = in_array($_REQUEST['store'] ?? '', $stores, true) ? (string)$_REQUEST['store'] : (in_array($_SESSION['hub_store'] ?? '', $stores, true) ? (string)$_SESSION['hub_store'] : $stores[0]);
 $_SESSION['hub_store'] = $store;
-$tabs = ['board', 'watch', 'requests', 'found', 'flags', 'handled', 'guide'];
+$tabs = ['board', 'watch', 'requests', 'found', 'flags', 'handled', 'dismissed', 'guide'];
 $tab = in_array($_GET['tab'] ?? '', $tabs, true) ? (string)$_GET['tab'] : 'board';
-if (in_array($tab, ['requests', 'found'], true) && !rs_has_store('pc')) $tab = 'board';
+if (in_array($tab, ['requests', 'found', 'dismissed'], true) && !rs_has_store('pc')) $tab = 'board';
 $isAjax = !empty($_SERVER['HTTP_X_HUB']);
 $owner = (function (): string {
     try { $r = rs_db()->query("SELECT display_name, username FROM users WHERE role = 'owner' AND active = 1 ORDER BY id LIMIT 1")->fetch(); return $r ? ((string)$r['display_name'] !== '' ? (string)$r['display_name'] : (string)$r['username']) : 'the owner'; }
@@ -43,6 +43,8 @@ const HUB_IC = [
     'plus' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     'ext' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
     'more' => '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+    'chev' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+    'hid' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 10 7a12.6 12.6 0 0 1-3.2 4.3M6.6 6.6C4.3 8 2.7 10.2 2 12c1 2.5 5 7 10 7a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
 ];
 function hub_hue(string $s): int { return array_sum(array_map('ord', str_split($s !== '' ? $s : '?'))) * 37 % 360; }
 function hub_tile(string $name, string $img = '', string $cls = ''): string {
@@ -70,13 +72,36 @@ function hub_live_strip(): string {
     if (!$q) return '';
     $ready = rs_mail_ready();
     $n = count($q);
-    $o = '<section class="sh-lq"><header><span class="sh-lq-ic">' . HUB_IC['msg'] . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'developer hasn\'t' : 'developers haven\'t') . ' heard they\'re live</b><small>Their recomp went live from a submission. Send the usual email, or edit it first.</small></div></header><div class="sh-lq-list">';
+    $withMail = count(array_filter($q, fn($x) => $x['to'] !== ''));
+    // (4.9) Folds away (remembered per browser), and all of them can go at once.
+    $o = '<details class="sh-lq sh-fold" data-keep="lq" open><summary><span class="sh-lq-ic">' . HUB_IC['msg'] . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'developer hasn\'t' : 'developers haven\'t') . ' heard they\'re live</b><small>Their recomp went live from a submission. Send the usual email, or edit it first.</small></div>'
+        . ($ready && $withMail > 1 ? '<button type="button" class="small primary" data-act="live_all" data-confirm="Click again to email all ' . $withMail . '">Send to all ' . $withMail . '</button>' : '')
+        . '<span class="sh-fold-ic">' . HUB_IC['chev'] . '</span></summary><div class="sh-lq-list">';
     foreach (array_slice($q, 0, 6) as $x) {
         $o .= '<div class="sh-lq-row" data-item="sub:' . (int)$x['sub'] . '">' . hub_tile($x['name'], $x['icon']) . '<div class="sh-lq-t"><b>' . h($x['name']) . '</b><span class="muted">' . h($x['to'] !== '' ? $x['to'] : 'No email address left') . ' · live ' . h(rs_hub_ago_long($x['at'])) . '</span></div>'
             . '<div class="sh-rowc-acts">' . ($ready && $x['to'] !== '' ? '<button type="button" class="small primary" data-act="live_quick">Send</button>' : '') . '<button type="button" class="small" data-open-item="live:' . (int)$x['sub'] . '">' . ($ready && $x['to'] !== '' ? 'Edit first' : 'Copy the message') . '</button><button type="button" class="small" data-act="live_skip">Skip</button></div></div>';
     }
     if ($n > 6) $o .= '<p class="sh-empty">And ' . ($n - 6) . ' more after these.</p>';
-    return $o . '</div></section>';
+    return $o . '</div></details>';
+}
+// (4.9) Listings the repo watch hid, at the bottom of the board: a new repo when the developer moves
+// it, then back on the store.
+function hub_hidden_list(): string {
+    $h = rs_hub_hidden_apps();
+    if (!$h) return '';
+    $n = count($h);
+    $o = '<details class="sh-hid sh-fold" data-keep="hid"><summary><span class="sh-hid-ic">' . HUB_IC['hid'] . '</span><div><b>' . $n . ' hidden from the store</b><small>Hidden by the repo watch. When the developer moves it, give it the new repo, then put it back.</small></div><span class="sh-fold-ic">' . HUB_IC['chev'] . '</span></summary><div class="sh-wlist">';
+    foreach ($h as $x) {
+        $at = $x['at'] !== '' ? (int)strtotime($x['at']) : 0;
+        $why = isset(RS_WATCH_STATES[$x['why']]) ? rs_watch_label($x['why']) : '';
+        $o .= '<article class="sh-wrow sh-w-hidden" data-item="w:pc:' . h($x['id']) . '">' . hub_tile($x['name'], $x['icon'])
+            . '<div class="sh-wrow-main"><div class="sh-wrow-t"><b>' . h($x['name']) . '</b>' . ($why !== '' ? '<span class="sh-wpill sh-bad">' . h($why) . '</span>' : '') . '<span class="sh-wpill sh-wait">Hidden</span></div>'
+            . ($x['repo'] !== '' ? '<a class="sh-link" href="' . h(rs_host_web($x['host'], $x['repo'])) . '" target="_blank" rel="noopener noreferrer">' . h($x['key']) . ' ' . HUB_IC['ext'] . '</a>' : '')
+            . '<small class="muted">' . ($at ? 'Hidden ' . h(rs_date('M j, g:i a', $at)) : 'Hidden') . '</small>'
+            . '<form class="sh-row sh-wmove" data-form="watch_move" hidden><input type="hidden" name="item" value="w:pc:' . h($x['id']) . '"><input name="to" class="mono" placeholder="github.com/owner/name, gitlab.com/group/project or sourceforge.net/projects/name" required><button class="primary">Point it there</button><button type="button" data-watch-move>Cancel</button></form></div>'
+            . '<div class="sh-rowc-acts"><button type="button" class="small" data-watch-move>New repo</button><button type="button" class="small primary" data-act="watch_unhide" data-confirm="Click again to put it back">Put it back</button>' . (rs_can_page('pc.php') ? '<a class="btn small" href="pc.php?edit=' . h(rawurlencode($x['id'])) . '#edit">Open</a>' : '') . '</div></article>';
+    }
+    return $o . '</div></details>';
 }
 function hub_board_html(string $store, array $b): string {
     $o = ($store === 'pc' ? hub_live_strip() : '') . '<div class="sh-board cols-' . count(RS_HUB_COLS[$store]) . '">';
@@ -85,16 +110,18 @@ function hub_board_html(string $store, array $b): string {
         // (4.8) Drafts from the finder, requests and links that Claude and VirusTotal both passed go live
         // together; submissions stay one by one so the developer gets the "you're live" email.
         $good = $k === 'ready' && $store === 'pc' ? count(array_filter($cards, fn($c) => str_starts_with((string)$c['key'], 'job:') && $c['src'] !== 'Submission' && $c['note'][0] === 'ok')) : 0;
+        $listed = $k === 'check' && $store === 'pc' ? count(rs_hub_listed_failed()) : 0;
         $more = (int)($b['more'][$k] ?? 0);
         $o .= '<section class="sh-col sh-col-' . $k . '"><header><b>' . h($t) . '</b><span class="count">' . (count($cards) + $more) . '</span><small>' . h($sub) . '</small>'
             . ($good ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="publish_good" data-confirm="Click again to put ' . $good . ' live" title="Drafts from the finder, player requests and links that Claude and VirusTotal both passed. Submissions publish one by one so the developer can get the email.">' . HUB_IC['check'] . 'Publish ' . $good . ' that look good</button></div>' : '')
+            . ($listed ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_listed" data-confirm="Click again to dismiss ' . $listed . '" title="Drafts that stopped because the recomp is already on RecompLauncher (hidden). They go under Dismissed, where you can put any back.">Dismiss ' . $listed . ' already listed</button></div>' : '')
             . '</header><div class="sh-cards">';
         foreach ($cards as $c) $o .= hub_card($c);
         if ($more) $o .= '<p class="sh-empty sh-more-line">And ' . $more . ' more in line. They start on their own, a few at a time.</p>';
         if (!$cards) $o .= '<p class="sh-empty">' . h(['new' => 'Nothing new. Submissions show up here as developers send them.', 'check' => 'Nothing being checked.', 'ready' => 'Nothing waiting to go live.', 'back' => 'Nobody\'s fixing anything.', 'draft' => 'No PS5 drafts waiting.'][$k]) . '</p>';
         $o .= '</div></section>';
     }
-    return $o . '</div>';
+    return $o . '</div>' . ($store === 'pc' ? hub_hidden_list() : '');
 }
 // (4.8) Repo watch: one listing whose repo needs a look, with what can be done about it.
 function hub_watch_row(array $f, bool $tagStore = false): string {
@@ -132,11 +159,11 @@ function hub_watch_strip(string $store): string {
     $when = 'checked ' . rs_hub_ago_long($at);
     if (!$flags) return '<div class="sh-watch-ok">' . HUB_IC['check'] . '<span><b>Repo watch</b> · ' . number_format($c['ok']) . ' repos up' . ($c['unk'] ? ', ' . $c['unk'] . ' couldn\'t be checked' : '') . ' · ' . h($when) . '</span><a href="hub.php?tab=watch">Report</a></div>';
     $n = count($flags);
-    $o = '<section class="sh-watch"><header><span class="sh-watch-ic">' . $ic . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'repo needs' : 'repos need') . ' a look</b><small>Repo watch checks every listing twice a day · ' . h($when) . '</small></div>'
-        . '<a class="btn small" href="hub.php?tab=watch">Full report</a></header><div class="sh-wlist">';
+    $o = '<details class="sh-watch sh-fold" data-keep="watch" open><summary><span class="sh-watch-ic">' . $ic . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'repo needs' : 'repos need') . ' a look</b><small>Repo watch checks every listing twice a day · ' . h($when) . '</small></div>'
+        . '<a class="btn small" href="hub.php?tab=watch">Full report</a><span class="sh-fold-ic">' . HUB_IC['chev'] . '</span></summary><div class="sh-wlist">';
     foreach (array_slice($flags, 0, 4) as $f) $o .= hub_watch_row($f);
     if ($n > 4) $o .= '<p class="sh-empty sh-wmore">And ' . ($n - 4) . ' more in the <a href="hub.php?tab=watch">full report</a>.</p>';
-    return $o . '</div></section>';
+    return $o . '</div></details>';
 }
 $out = function (array $j) {
     header('Content-Type: application/json; charset=utf-8');
@@ -297,7 +324,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'publish': {
                 $j = $needJob();
                 @set_time_limit(180);
-                $name = rs_auto_publish((int)$j['id']);
+                // (4.9) "Publish anyway" on something VirusTotal flagged (a false positive): managers and the owner.
+                $force = ($_POST['to'] ?? '') === 'force';
+                if ($force && !rs_hub_can_manage()) throw new RuntimeException('Only managers and ' . $owner . ' can publish something VirusTotal flagged. Flag it for ' . $owner . ' instead.');
+                $name = rs_auto_publish((int)$j['id'], $force);
                 $res['msg'] = $name . ' is live on RecompLauncher.';
                 if (!empty($j['sub_id'])) $res['open'] = 'live:' . (int)$j['sub_id'];
                 else $res['close'] = true;
@@ -324,6 +354,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_auto_remove((int)$j['id']);
                 $res['msg'] = !empty($j['sub_id']) ? 'Draft removed. The submission is back on New.' : 'Draft removed (and the hidden listing it made).';
                 $res['close'] = true;
+                break;
+            }
+            // (4.9) Its page edited right in the drawer.
+            case 'page_save': {
+                $j = $needJob();
+                @set_time_limit(150);
+                [, $res['msg']] = rs_hub_page_save($j, $_POST, $_FILES);
+                $res['refresh'] = true;
+                break;
+            }
+            // (4.9) Off the board into Dismissed, and back.
+            case 'dismiss':
+            case 'undismiss': {
+                $j = $needJob();
+                rs_auto_shelve((int)$j['id'], $act === 'dismiss');
+                rs_log('hub', $act, rs_hub_job_path((string)$j['repo_key']));
+                if ($act === 'dismiss') { $res['msg'] = 'Dismissed. It\'s under Dismissed if you want it back.'; $res['close'] = true; }
+                else { $res['msg'] = 'Back on the board.'; $res['refresh'] = true; }
+                break;
+            }
+            case 'dismiss_listed': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('Auto-add drafts are for the PC store.');
+                $n = 0;
+                foreach (rs_hub_listed_failed() as $jid) { try { rs_auto_shelve($jid, true); $n++; } catch (RuntimeException $e) { /* still running */ } }
+                if (!$n) throw new RuntimeException('Nothing to dismiss.');
+                rs_log('hub', 'dismiss', $n . ' already listed');
+                $res['msg'] = $n . ' dismissed. They\'re under Dismissed if you want any back.';
+                break;
+            }
+            // (4.9) Every waiting "you're live" email at once.
+            case 'live_all': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('These are for the PC store.');
+                [$sent, $none, $cant] = rs_hub_live_all();
+                $left = ($none ? ' ' . $none . ' left no email address: copy the message or skip them.' : '') . ($cant ? ' ' . $cant . ' couldn\'t be written (the listing points at another repo now): open them with Edit first.' : '');
+                if (!$sent) throw new RuntimeException(trim($left) !== '' ? 'Nothing went out.' . $left : 'Nobody is waiting for the email.');
+                $res['msg'] = $sent . ' ' . ($sent === 1 ? 'email is' : 'emails are') . ' on the way (they go out over the next couple of minutes).' . $left;
                 break;
             }
             case 'note': {
@@ -574,7 +640,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $row = rs_watch_check_one($wStore, $wId);
                     $res['msg'] = !$row ? $wx['name'] . ' isn\'t watched anymore.' : ($row['state'] === 'ok' ? $wx['name'] . '\'s repo is up.' : ($row['state'] === 'unk' || $row['err'] !== '' ? 'GitHub didn\'t give a clear answer. It\'s checked again with the next scan.' : $wx['name'] . ': ' . $row['why']));
                 }
-                $res['reload'] = false;
+                // (4.9) The board is drawn again too: Hidden from the store is at its bottom.
                 $res['watch'] = hub_watch_strip($store);
                 break;
             }
@@ -633,7 +699,7 @@ $csrf = rs_csrf();
 rs_head('Submissions', true, ['assets/hub.css']);
 ?>
 <div class="sh-head">
-  <div><h1>Submissions</h1><p class="muted"><?= h(['board' => 'New recomps and apps, from first look to live.', 'watch' => 'Every listing\'s repo, checked twice a day. Anything taken down, deleted, made private or emptied of its releases shows up here and on top of the board.', 'requests' => 'What players asked for from RecompLauncher\'s Coming Soon page, most asked first.', 'found' => 'Projects the finder and the daily scout came across on GitHub, GitLab and Discord.', 'flags' => 'Questions for ' . $owner . ', and the answers.', 'handled' => 'Everything that left the board: live, declined, sent back or marked done.', 'guide' => 'How a submission goes from New to live, and when to approve, ask for changes, decline or flag.'][$tab]) ?></p></div>
+  <div><h1>Submissions</h1><p class="muted"><?= h(['board' => 'New recomps and apps, from first look to live.', 'watch' => 'Every listing\'s repo, checked twice a day. Anything taken down, deleted, made private or emptied of its releases shows up here and on top of the board.', 'requests' => 'What players asked for from RecompLauncher\'s Coming Soon page, most asked first.', 'found' => 'Projects the finder and the daily scout came across on GitHub, GitLab and Discord.', 'flags' => 'Questions for ' . $owner . ', and the answers.', 'handled' => 'Everything that left the board: live, declined, sent back or marked done.', 'dismissed' => 'Drafts you took off the board with Dismiss. Put one back to finish it, or remove it for good.', 'guide' => 'How a submission goes from New to live, and when to approve, ask for changes, decline or flag.'][$tab]) ?></p></div>
   <?php if (count($stores) > 1 && in_array($tab, ['board', 'handled'], true)): ?>
   <div class="sh-store" role="tablist" aria-label="Store"><?php foreach ($stores as $s): ?><a role="tab" href="hub.php?store=<?= $s ?><?= $tab !== 'board' ? '&amp;tab=' . $tab : '' ?>"<?= $s === $store ? ' class="on" aria-selected="true"' : '' ?>><?= RS_STORES[$s] ?><?= $counts[$s] ? ' <span class="count">' . $counts[$s] . '</span>' : '' ?></a><?php endforeach; ?></div>
   <?php elseif (in_array($tab, ['board', 'handled'], true)): ?><span class="sh-store-one"><?= RS_STORES[$store] ?> store</span><?php endif; ?>
@@ -811,6 +877,23 @@ rs_head('Submissions', true, ['assets/hub.css']);
       <span class="sh-note sh-<?= $o[0] ?>"><i></i><span><?= h(mb_strimwidth($o[1], 0, 90, '…')) ?></span></span>
       <span class="sh-when"><?= h(rs_date('M j', rs_hub_ts((string)$r['created']))) ?></span>
     </button>
+    <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+<?php elseif ($tab === 'dismissed'):
+    $shelf = rs_hub_shelved(); ?>
+  <?php if (!$shelf): ?><section class="card sh-none"><p class="muted">Nothing dismissed. Drafts you dismiss from the board wait here, and Put back puts them on the board again.</p></section>
+  <?php else: ?>
+  <div class="sh-tools"><div class="sh-search"><input type="search" placeholder="Find a recomp or repo" aria-label="Find" data-find-rows></div></div>
+  <div class="sh-hlist">
+    <?php foreach ($shelf as $j): $ja = (string)$j['app_id'] !== '' ? rs_pc_app((string)$j['app_id']) : null; $jn = (string)($ja['name'] ?? rs_hub_job_path((string)$j['repo_key']));
+      $jWhy = trim((string)strtok(trim((string)$j['notes']), "\n")); $jWas = substr((string)$j['status'], 6) === 'review' ? 'Was ready to publish' : 'Didn\'t finish'; ?>
+    <div class="sh-drow" data-item="job:<?= (int)$j['id'] ?>" data-q="<?= h(mb_strtolower($jn . ' ' . $j['repo_key'])) ?>">
+      <?= hub_tile($jn, (string)($ja['icon'] ?? '')) ?><span class="sh-hrow-t"><b><?= h($jn) ?></b><span class="muted small"><?= h((string)$j['repo_key']) ?></span></span>
+      <span class="sh-note sh-wait"><i></i><span><?= h($jWas . ($jWhy !== '' ? ': ' . mb_strimwidth($jWhy, 0, 90, '…') : '')) ?></span></span>
+      <span class="sh-when"><?= h(rs_date('M j', rs_hub_ts((string)$j['updated']))) ?></span>
+      <span class="sh-rowc-acts"><button type="button" class="small" data-open-item="job:<?= (int)$j['id'] ?>">Open</button><button type="button" class="small primary" data-act="undismiss">Put back</button></span>
+    </div>
     <?php endforeach; ?>
   </div>
   <?php endif; ?>

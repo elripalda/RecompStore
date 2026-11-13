@@ -32,11 +32,13 @@ if (preg_match('/^live:(\d+)$/', $key, $m)) {
 }
 
 // ---- Find what was asked for ----------------------------------------------------------------------
-$job = null; $subId = 0; $r = null; $d = null;
+$job = null; $subId = 0; $r = null; $d = null; $shelved = false;
 if (preg_match('/^job:(\d+)$/', $key, $m)) {
     $job = rs_auto_get((int)$m[1]);
     if (!$job || in_array($job['status'], ['removed', 'dismissed'], true)) { $gone('That draft isn\'t on the board anymore.'); return; }
     if (!rs_hub_store_ok('pc')) { $gone('Auto-add drafts are for the PC store.'); return; }
+    // (4.9) Dismissed: shown as it was when it left the board, with Put back.
+    if (str_starts_with((string)$job['status'], 'shelf-')) { $shelved = true; $job['status'] = substr((string)$job['status'], 6); }
     $subId = (int)$job['sub_id'];
 } elseif (preg_match('/^sub:(\d+)$/', $key, $m)) {
     $subId = (int)$m[1];
@@ -138,9 +140,9 @@ if ($job):
   <?php if (trim((string)$job['notes']) !== ''): ?><div class="sh-d-notes"><b><?= $job['verdict'] === 'skip' ? 'Why Claude says not to list it' : 'Worth a look' ?></b><p><?= nl2br(h(trim((string)$job['notes']))) ?></p></div><?php endif; ?>
 </section>
 <?php $vtTag = (string)$job['tag']; $vtFiles = rs_hub_vt_files((string)$job['repo_key'], $vtTag); $vtSec(); ?>
-<?php if ($app && $job['status'] === 'review'): ?>
+<?php if ($app && in_array($job['status'], ['review', 'failed'], true)): $canEdit = rs_can_page('pc.php'); ?>
 <section class="sh-d-sec">
-  <h3>Its page <small>what players will see; <?= rs_can_page('pc.php') ? '<a href="pc.php?edit=' . h(rawurlencode($app['id'])) . '#edit">edit it</a>' : 'flag anything that needs changing' ?></small></h3>
+  <h3>Its page <small>what players will see<?= $canEdit ? '' : '; flag anything that needs changing' ?></small><?php if ($canEdit): ?><span class="sh-h3-acts"><button type="button" class="small primary" data-open-panel="page">Edit here</button><a class="btn small" href="pc.php?edit=<?= h(rawurlencode($app['id'])) ?>#edit">Full editor</a></span><?php endif; ?></h3>
   <div class="sh-preview">
     <?php if ((string)$app['cover'] !== ''): ?><img class="sh-pv-cover" src="<?= h((string)$app['cover']) ?>" alt="Cover"><?php else: ?><span class="sh-pv-cover none">No cover</span><?php endif; ?>
     <div>
@@ -153,6 +155,36 @@ if ($job):
   <?php if (trim((string)$app['description']) !== ''): ?><div class="sh-desc clamp" data-clamp><?= nl2br(h(trim((string)$app['description']))) ?></div><?php endif; ?>
   <div class="sh-art"><?php foreach (['hero' => 'Banner', 'logo' => 'Logo', 'icon' => 'Icon'] as $k => $l): ?><figure><?= (string)$app[$k] !== '' ? '<img src="' . h((string)$app[$k]) . '" alt="">' : '<span class="none">None</span>' ?><figcaption><?= $l ?></figcaption></figure><?php endforeach; ?></div>
 </section>
+<?php if ($canEdit):
+    // (4.9) Its page edited right here: the words, the console and genre, and the art (upload one, or
+    // let SteamGridDB pick). Saved to its listing; a live one updates on the site too.
+    $tagsTxt = is_array($app['tags']) ? implode(', ', $app['tags']) : (string)$app['tags']; ?>
+<form class="sh-panel sh-edit" data-panel="page" data-form="page_save" enctype="multipart/form-data" hidden>
+  <input type="hidden" name="item" value="job:<?= (int)$job['id'] ?>">
+  <h3>Edit its page</h3>
+  <p class="muted small">Saved to its listing<?= !empty($app['hidden']) ? '. It stays hidden until you Publish.' : ', and the live page updates too.' ?> Click a picture to replace it.</p>
+  <div class="sh-edit-art">
+    <?php foreach (['cover' => 'Cover', 'hero' => 'Banner', 'logo' => 'Logo', 'icon' => 'Icon'] as $k => $l): $v = (string)($app[$k] ?? ''); ?>
+    <label class="sh-pic sh-pic-<?= $k ?>"><span class="sh-pic-img"><?= $v !== '' ? '<img src="' . h($v) . '" alt="">' : '<span class="none">None</span>' ?></span><span class="sh-pic-cap"><?= $l ?> <u>Replace</u></span><input type="file" name="<?= $k ?>_file" accept="image/png,image/jpeg,image/webp" data-pic></label>
+    <?php endforeach; ?>
+  </div>
+  <div class="sh-row sh-edit-sgdb"><span class="muted small">Or from SteamGridDB:</span><button type="submit" class="small" name="art" value="next">Different cover and banner</button><button type="submit" class="small" name="art" value="first">Find all its art again</button></div>
+  <div class="sh-edit-grid">
+    <label>Name<input name="name" value="<?= h((string)$app['name']) ?>" maxlength="120" required></label>
+    <label>Game<input name="game" value="<?= h((string)$app['game']) ?>" maxlength="120" placeholder="The original game's name"></label>
+    <label>Console<select name="origin"><?php foreach (RS_PC_ORIGINS as $ok => $on): ?><option value="<?= h($ok) ?>"<?= (string)$app['origin'] === (string)$ok ? ' selected' : '' ?>><?= h($on) ?></option><?php endforeach; ?></select></label>
+    <label>Genre<select name="genre"><option value="">Not set</option><?php foreach (RS_PC_GENRES as $gk => $gn): ?><option value="<?= h($gk) ?>"<?= (string)($app['genre'] ?? '') === (string)$gk ? ' selected' : '' ?>><?= h($gn) ?></option><?php endforeach; ?></select></label>
+    <label class="span2">One-line summary<input name="blurb" value="<?= h((string)$app['blurb']) ?>" maxlength="160"></label>
+    <label class="span2">Description<textarea name="description" rows="7" maxlength="8000"><?= h((string)$app['description']) ?></textarea></label>
+    <label class="span2">Key features <span class="muted small">one per line</span><textarea name="features" rows="4" maxlength="1200"><?= h((string)($app['features'] ?? '')) ?></textarea></label>
+    <label>Players need<input name="needs" value="<?= h((string)$app['needs']) ?>" maxlength="200" placeholder="Their own copy of…"></label>
+    <label>Tags <span class="muted small">with commas</span><input name="tags" value="<?= h($tagsTxt) ?>" maxlength="120"></label>
+    <label>Author<input name="author" value="<?= h((string)($app['author'] ?? '')) ?>" maxlength="80"></label>
+    <label>Credits<input name="credits" value="<?= h((string)($app['credits'] ?? '')) ?>" maxlength="1000"></label>
+  </div>
+  <div class="sh-d-foot"><button class="primary">Save</button><button type="button" data-panel-close>Cancel</button></div>
+</form>
+<?php endif; ?>
 <?php endif; ?>
 <?php elseif (in_array($state, ['new', 'back'], true)):
     $chk = rs_hub_check($subId, $d, !empty($_GET['fresh']) ? 30 : 900); // opened: the release as it is now ?>
@@ -300,12 +332,20 @@ if ($d !== null): ?>
 $flagBtn = !$GLOBALS['isOwner'] ? '<button type="button" class="sh-flag" data-open-panel="flag">' . HUB_IC['flag'] . 'Flag for ' . h($GLOBALS['owner']) . '</button>' : '';
 $more = [];
 echo '<div class="sh-d-foot main" data-item="' . h($job ? 'job:' . (int)$job['id'] : $item) . '">';
-if ($job) {
+if ($job && $shelved) {
+    // (4.9) Dismissed: back on the board, or gone for good.
+    echo '<button class="primary" data-act="undismiss">Put it back on the board</button>' . $flagBtn . '<button class="danger" data-act="remove" data-confirm="Click again to remove">Remove</button>';
+} elseif ($job) {
     $vtBad = ($vt[0] ?? '') === 'bad';
-    if ($job['status'] === 'review') echo '<button class="primary" data-act="publish" data-confirm="Click again to put it live"' . ($vtBad ? ' disabled title="VirusTotal flagged it. Look at it on Security first."' : '') . '>Publish</button>';
+    // (4.9) Something VirusTotal flagged (often a false positive for an unsigned build) can still go live,
+    // once a manager or the owner has looked: "Publish anyway", with a second click.
+    if ($job['status'] === 'review' && $vtBad && rs_hub_can_manage()) echo '<button class="primary sh-pub-any" data-act="publish" data-to="force" data-confirm="Flagged. Click again to publish" title="VirusTotal flagged it. Look at the reports above first.">Publish anyway</button>';
+    elseif ($job['status'] === 'review') echo '<button class="primary" data-act="publish" data-confirm="Click again to put it live"' . ($vtBad ? ' disabled title="VirusTotal flagged it. Flag it for ' . h($GLOBALS['owner']) . ' to publish it anyway."' : '') . '>Publish</button>';
     elseif (!$live) echo '<button class="primary" data-act="again">Run it again</button>';
     if ($job['status'] === 'review') echo '<button data-act="again">Run again</button>';
     echo $flagBtn;
+    if ($job['status'] === 'failed' || $stuck) echo '<button data-act="dismiss">Dismiss</button>';
+    elseif (!$live) $more[] = '<button type="button" data-act="dismiss">Dismiss (keep it under Dismissed)</button>';
     echo '<button class="danger" data-act="remove" data-confirm="Click again to remove"' . ($live ? ' disabled title="Wait for it to finish"' : '') . '>Remove</button>';
     if ($d !== null) $more[] = '<button type="button" data-open-panel="changes">Ask for changes instead</button>';
 } elseif ($state === 'new') {

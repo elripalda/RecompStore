@@ -42,12 +42,23 @@
       .then(function (r) { return r.json(); })
       .catch(function () { return { ok: false, msg: 'The admin didn\'t answer. Check your connection and try again.' }; });
   }
+  // (4.9) Sections that fold (the "you're live" emails, repo watch, hidden listings) stay the way they
+  // were left, in this browser, across reloads and the board's quiet refreshes.
+  function keepFolds(scope) {
+    (scope || document).querySelectorAll('details[data-keep]').forEach(function (d) {
+      var k = 'hub-fold-' + d.getAttribute('data-keep');
+      try { var v = localStorage.getItem(k); if (v !== null) d.open = v === '1'; } catch (e) {}
+      if (d.hasAttribute('data-kept')) return;
+      d.setAttribute('data-kept', '');
+      d.addEventListener('toggle', function () { try { localStorage.setItem(k, d.open ? '1' : '0'); } catch (e) {} });
+    });
+  }
   function done(j) {
     toast(j.msg || (j.ok ? 'Done.' : 'That didn\'t work.'), !j.ok);
     if (!j.ok) return;
     // (4.8) Repo watch: the strip on top of the board, drawn again.
     var wEl = root.querySelector('[data-watch]');
-    if (typeof j.watch === 'string' && wEl && tab === 'board') wEl.innerHTML = j.watch;
+    if (typeof j.watch === 'string' && wEl && tab === 'board') { wEl.innerHTML = j.watch; keepFolds(wEl); }
     else if (typeof j.watch === 'string' && tab === 'watch') { setTimeout(function () { location.reload(); }, 600); return; }
     if (tab !== 'board' && j.reload !== false && !j.open) { setTimeout(function () { location.reload(); }, 600); return; }
     if (j.open) open(j.open);
@@ -107,7 +118,7 @@
     if (!boardEl) return Promise.resolve();
     return fetch(base + '&board=1', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
       boardEl.innerHTML = j.html;
-      applyFilter(); markOn(); pre(); selDraw();
+      keepFolds(boardEl); applyFilter(); markOn(); pre(); selDraw();
       document.querySelectorAll('.sh-store a').forEach(function (a) {
         var s = (a.getAttribute('href').match(/store=(\w+)/) || [])[1], n = j.counts ? j.counts[s] : 0, c = a.querySelector('.count');
         if (n && !c) { c = document.createElement('span'); c.className = 'count'; a.appendChild(document.createTextNode(' ')); a.appendChild(c); }
@@ -149,7 +160,7 @@
   var findRows = root.querySelector('[data-find-rows]');
   if (findRows) findRows.addEventListener('input', function () {
     var v = findRows.value.trim().toLowerCase();
-    root.querySelectorAll('.sh-hrow').forEach(function (r) { r.hidden = !!v && (r.getAttribute('data-q') || '').indexOf(v) === -1; });
+    root.querySelectorAll('.sh-hrow, .sh-drow').forEach(function (r) { r.hidden = !!v && (r.getAttribute('data-q') || '').indexOf(v) === -1; });
   });
   var addBox = root.querySelector('[data-addbox]');
   if (addBox && root.querySelector('[data-open-add]')) {
@@ -267,6 +278,16 @@
       send(fd).then(function (j) { busy(scope, false); done(j); });
     }
   });
+  // (4.9) Edit its page: a picture picked to replace one shows straight away (saved with Save).
+  document.addEventListener('change', function (e) {
+    var inp = e.target;
+    if (!inp.matches || !inp.matches('input[type=file][data-pic]') || !inp.files || !inp.files[0]) return;
+    var box = inp.closest('.sh-pic').querySelector('.sh-pic-img');
+    var img = box.querySelector('img');
+    if (!img) { box.innerHTML = ''; img = document.createElement('img'); img.alt = ''; box.appendChild(img); }
+    img.src = URL.createObjectURL(inp.files[0]);
+    inp.closest('.sh-pic').classList.add('changed');
+  });
   document.addEventListener('submit', function (e) {
     var f = e.target;
     if (f.hasAttribute('data-addbox')) return;
@@ -297,6 +318,7 @@
     }).catch(function () {});
   }, 6000);
 
+  keepFolds(document);
   pre();
   var h = decodeURIComponent(location.hash.slice(1));
   if (/^(sub|job|live):\d+$/.test(h)) open(h);

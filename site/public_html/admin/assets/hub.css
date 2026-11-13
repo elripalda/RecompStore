@@ -255,3 +255,38 @@ img.sh-ico{background:#0f1216}
 .sh-lq-list>.sh-lq-row:last-of-type:nth-of-type(odd){grid-column:1/-1}
 @media (max-width:1100px){.sh-lq-list{grid-template-columns:minmax(0,1fr)}.sh-lq-list>.sh-lq-row:last-of-type:nth-of-type(odd){grid-column:auto}}
 @media (max-width:620px){.sh-lq-row{grid-template-columns:38px minmax(0,1fr)}.sh-lq-row .sh-rowc-acts{grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start}}
+/* (4.9) Sections that fold: the "you're live" emails, repo watch, hidden listings */
+.sh-fold>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:0 2px}
+.sh-fold>summary::-webkit-details-marker{display:none}
+.sh-fold[open]>summary{padding-bottom:12px}
+.sh-fold>summary>div{display:flex;flex-direction:column;min-width:0}.sh-fold>summary small{color:var(--muted);font-size:12px}
+.sh-fold>summary>.sh-fold-ic{grid-column:-2;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--muted);transition:transform .15s}
+.sh-fold>summary>.sh-fold-ic svg{width:16px;height:16px}
+.sh-fold[open]>summary>.sh-fold-ic{transform:rotate(180deg)}
+.sh-fold>summary:hover>.sh-fold-ic{color:var(--frost);background:rgba(230,232,235,.06)}
+.sh-fold>summary>button,.sh-fold>summary>.btn{white-space:nowrap}
+.sh-hid{margin:16px 0 0;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+.sh-hid-ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--muted);background:rgba(230,232,235,.07)}.sh-hid-ic svg{width:18px;height:18px}
+.sh-hid .sh-wrow{background:rgba(230,232,235,.03)}
+@media (max-width:760px){.sh-fold>summary{grid-template-columns:auto minmax(0,1fr) auto}.sh-fold>summary>button,.sh-fold>summary>.btn{grid-column:1/-1;grid-row:2;justify-self:start}.sh-fold>summary>.sh-fold-ic{grid-column:3;grid-row:1}}
+/* (4.9) Edit its page, in the drawer */
+.sh-h3-acts{margin-left:auto;display:flex;gap:6px;align-items:center}
+.sh-edit-art{display:grid;grid-template-columns:64px minmax(0,2fr) minmax(0,1fr) 96px;gap:8px;align-items:start}
+.sh-pic{display:flex;flex-direction:column;gap:4px;cursor:pointer;min-width:0;position:relative}
+.sh-pic input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.sh-pic-img{display:block;height:96px;border-radius:8px;border:1px solid var(--line);background:var(--panel);overflow:hidden}
+.sh-pic-img img{width:100%;height:100%;object-fit:cover;display:block}.sh-pic-logo .sh-pic-img img{object-fit:contain;padding:6px;box-sizing:border-box}
+.sh-pic-img .none{display:grid;place-items:center;height:100%;color:var(--muted);font-size:12px}
+.sh-pic-cap{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sh-pic-cap u{color:var(--cyan-ink,var(--cyan));text-decoration:none;font-weight:600}
+.sh-pic:hover .sh-pic-img,.sh-pic:focus-within .sh-pic-img{border-color:rgba(94,245,236,.55)}
+.sh-pic.changed .sh-pic-img{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan)}
+.sh-edit-sgdb{flex-wrap:wrap;align-items:center;gap:6px}
+.sh-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.sh-edit-grid label{min-width:0}.sh-edit-grid .span2{grid-column:1/-1}
+.sh-edit-grid input,.sh-edit-grid select,.sh-edit-grid textarea{width:100%;box-sizing:border-box}
+.sh-d-foot .sh-pub-any{background:var(--warn);border-color:var(--warn);color:#1a1200}
+@media (max-width:560px){.sh-edit-art{grid-template-columns:repeat(2,minmax(0,1fr))}.sh-edit-grid{grid-template-columns:minmax(0,1fr)}}
+/* (4.9) Dismissed */
+.sh-drow{display:grid;grid-template-columns:38px minmax(0,1.2fr) minmax(0,2fr) auto auto;gap:12px;align-items:center;padding:9px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line)}
+.sh-drow[hidden]{display:none}.sh-drow .sh-rowc-acts{flex-wrap:nowrap}
+@media (max-width:860px){.sh-drow{grid-template-columns:38px minmax(0,1fr) auto}.sh-drow .sh-note{grid-column:2/-1}.sh-drow .sh-rowc-acts{grid-column:1/-1;justify-content:flex-start}}
