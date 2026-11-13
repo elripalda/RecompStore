@@ -20,6 +20,7 @@ const RS_AUTO_STEPS = [
     'settings' => 'Launcher settings',
 ];
 const RS_AUTO_STUCK = 1200; // a run that hasn't moved in 20 minutes stopped
+const RS_AUTO_WORKERS = 12;  // (4.8) runs that take more from the line once their own are done
 const RS_AUTO_MODEL = 'claude-sonnet-5-5';
 const RS_AUTO_EMULATORS = 'melonds|dolphin|xenia|pcsx2|rpcs3|retroarch|ppsspp|cemu|ryujinx|yuzu|suyu|citra|lime3ds|desmume|mgba|snes9x|bsnes|cxbx|xemu|duckstation|mednafen|project64|mupen64|simple64|flycast|redream|vita3k|shadps4|azahar|eden|sudachi';
 
@@ -160,9 +161,13 @@ function rs_auto_launch_many(array $ids): void {
 // ---- The run ---------------------------------------------------------------------------------------
 
 function rs_auto_run(int $id): void {
+    // (4.8) Taken in one step, and only while it's waiting: several runs share one line, so a draft
+    // another run already took (or finished) is never run twice.
+    $st = rs_db()->prepare("UPDATE pc_auto SET status = 'running', updated = NOW() WHERE id = ? AND status = 'queued'");
+    $st->execute([$id]);
+    if ($st->rowCount() !== 1) return;
     $job = rs_auto_get($id);
-    if (!$job || in_array($job['status'], ['published', 'removed', 'running'], true)) return;
-    rs_auto_set($id, ['status' => 'running']);
+    if (!$job) return;
     $cur = 'read';
     try {
         // 1. The repo and its newest release (the finder's reader).
