@@ -101,7 +101,7 @@ def zip_listing(url, size):
 # already has (whatever they're called) for the game's location, saves and starting straight in.
 SRC_EXT = (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rs", ".py", ".cs", ".go", ".zig", ".java", ".kt", ".js", ".ts", ".lua")
 HINT_NAME = re.compile(r"(^|/)[^/]*(main|app|args?|argv|cli|cmd|command.?line|options?|launch|config|settings|paths?|program|entry|platform|window|startup|boot)[^/]*$", re.I)
-SKIP_DIR = re.compile(r"(^|/)(third_?party|extern(al)?|vendor|deps|submodules?|tests?|docs?|tools?/)", re.I)
+SKIP_DIR = re.compile(r"(^|/)(third_?party|extern(al)?|vendor|deps|submodules?|tests?|docs?|tools?/|sdk/|codegen|generator)", re.I)
 OPT_LINE = re.compile(r"""(["'](-{1,2}|/)[A-Za-z][\w-]{1,30}["']|\bargv\b|\bargc\b|getopt|cxxopts|CLI11|clap::|argparse|add_argument|parse_args|env::args|GetCommandLine|CommandLineToArgv|FULLSCREEN|borderless|fullscreen|windowed|save_?dir|saves?_?(path|folder)|user_?(dir|folder|path)|game_?(path|dir)|rom_?path|iso_?path|romfs|data_?path)""", re.I)
 
 
@@ -243,7 +243,13 @@ def ask(spec, p, ctx, fix=None):
             m = re.search(r"\{.*\}", text, re.S)
             if not m:
                 raise RuntimeError("no JSON in the answer")
-            return json.loads(m.group(0)), m.group(0)
+            try:
+                return json.loads(m.group(0)), m.group(0)
+            except ValueError as e:
+                # (4.9) A slip in the JSON (an unescaped quote or backslash): asked once to send it again.
+                if fix and fix.get("json_retry"):
+                    raise
+                return ask(spec, p, ctx, {"prev": m.group(0), "errors": f"- it isn't valid JSON ({e}). Escape quotes and backslashes inside strings.", "json_retry": True})
         if st in (429, 500, 502, 503, 529):
             time.sleep(20 * (attempt + 1))
             continue
