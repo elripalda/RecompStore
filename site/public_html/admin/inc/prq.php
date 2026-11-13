@@ -43,6 +43,10 @@ function rs_prq_tables(): void {
         UNIQUE KEY repo (repo),
         KEY status (status)
     ) DEFAULT CHARSET=utf8mb4");
+    // (4.9) Code changes the drafter proposes (edits, what they add, the file without them), the description
+    // without them, and how a queued send goes out (here, code).
+    if (!rs_db()->query("SHOW COLUMNS FROM pc_prq LIKE 'code'")->fetch())
+        rs_db()->exec("ALTER TABLE pc_prq ADD COLUMN code MEDIUMTEXT NULL, ADD COLUMN body_plain MEDIUMTEXT NULL, ADD COLUMN opts VARCHAR(255) NOT NULL DEFAULT ''");
     $done = true;
 }
 
@@ -177,8 +181,10 @@ function rs_prq_draft_save(array $d): array {
         mb_substr(trim((string)($d['title'] ?? RS_PRQ_TITLE)), 0, 200) ?: RS_PRQ_TITLE,
         mb_substr((string)($d['body'] ?? ''), 0, 60000), mb_substr(trim((string)($d['note'] ?? ($d['skip_reason'] ?? ''))), 0, 4000),
     ];
-    if ($was === false) $db->prepare('INSERT INTO pc_prq (app_id, repo, pick, status, json, title, body, note, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute($row);
-    else $db->prepare('UPDATE pc_prq SET app_id = ?, repo = ?, pick = ?, status = ?, json = ?, title = ?, body = ?, note = ?, error = NULL, updated = NOW() WHERE repo = ?')->execute([...$row, $a['repo']]);
+    $code = !$skip && is_array($d['code'] ?? null) && !empty($d['code']['edits']) ? json_encode($d['code'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+    $plain = $code !== null ? mb_substr((string)($d['body_plain'] ?? ''), 0, 60000) : null;
+    if ($was === false) $db->prepare('INSERT INTO pc_prq (app_id, repo, pick, status, json, title, body, note, code, body_plain, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([...$row, $code, $plain]);
+    else $db->prepare('UPDATE pc_prq SET app_id = ?, repo = ?, pick = ?, status = ?, json = ?, title = ?, body = ?, note = ?, code = ?, body_plain = ?, error = NULL, updated = NOW() WHERE repo = ?')->execute([...$row, $code, $plain, $a['repo']]);
     return ['ok' => true, 'status' => $skip ? 'skipped' : 'draft'];
 }
 
@@ -263,13 +269,14 @@ function rs_prq_readme_with_badge(string $md, string $badge): string {
 }
 
 // Send one draft: fork, branch, the two commits, the pull request, the "Pull request open" mark.
-function rs_prq_send(int $id, bool $here = false): string {
+function rs_prq_send(int $id, bool $here = false, bool $codeOn = true, string $who = ''): string {
     $q = rs_prq_get($id);
-    if (!$q || $q['status'] !== 'draft') throw new RuntimeException('That draft is gone or was already sent.');
-    if ((string)$q['pr_url'] !== '') return rs_prq_update($id, $here); // (4.9) a redraft of one we sent
+    if (!$q || !in_array($q['status'], ['draft', 'outbox'], true)) throw new RuntimeException('That draft is gone or was already sent.');
+    if ($who === '') $who = function_exists('rs_me_name') ? (string)rs_me_name() : '';
+    if ((string)$q['pr_url'] !== '') return rs_prq_update($id, $here, $codeOn, $who); // (4.9) a redraft of one we sent
     $a = rs_pc_app((string)$q['app_id']);
     if (!$a) throw new RuntimeException('That recomp isn\'t on RecompLauncher any more.');
-    $json = json_decode((string)$q['json'], true);
+    [$json, $edits, $plain, $body] = rs_prq_parts($q, $codeOn);
     if (!is_array($json)) throw new RuntimeException('The recomplauncher.json in this draft isn\'t valid JSON.');
     $repo = (string)$q['repo'];
     try {
@@ -297,6 +304,8 @@ function rs_prq_send(int $id, bool $here = false): string {
         if ($mk['status'] === 422) { // left over from before: start it again from upstream
             rs_prq_gh_ok(rs_prq_gh('PATCH', '/repos/' . $forkName . '/git/refs/heads/' . $branch, ['sha' => $sha, 'force' => true]), 'Resetting the branch');
         } elseif ($mk['status'] < 200 || $mk['status'] >= 300) rs_prq_gh_ok($mk, 'Making the branch');
+        // 0. (4.9) The code changes, each file its own commit, before the file that uses them.
+        if ($edits) rs_prq_apply_code($forkName, $branch, $edits);
         // 1. recomplauncher.json
         $file = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
         $have = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/recomplauncher.json?ref=' . rawurlencode($branch));
@@ -316,20 +325,87 @@ function rs_prq_send(int $id, bool $here = false): string {
         // 3. The pull request
         $pr = rs_prq_gh_ok(rs_prq_gh('POST', '/repos/' . $repo . '/pulls', [
             'title' => (string)$q['title'] ?: RS_PRQ_TITLE, 'head' => $login . ':' . $branch, 'base' => $base,
-            'body' => (string)$q['body'], 'maintainer_can_modify' => true,
+            'body' => $body, 'maintainer_can_modify' => true,
         ]), 'Opening the pull request');
         $url = (string)$pr['html_url'];
     } catch (Throwable $e) {
         rs_db()->prepare("UPDATE pc_prq SET error = ?, updated = NOW() WHERE id = ?")->execute([$e->getMessage(), $id]);
         throw $e;
     }
-    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', pr_url = ?, error = NULL, who = ?, sent_at = NOW(), updated = NOW() WHERE id = ?")->execute([$url, function_exists('rs_me_name') ? rs_me_name() : '', $id]);
+    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', pr_url = ?, error = NULL, who = ?, sent_at = NOW(), updated = NOW() WHERE id = ?")->execute([$url, $who, $id]);
     $m = rs_sdk_marks();
-    $m[$a['id']] = ['kind' => 'pr', 'url' => $url, 'note' => 'PR queue', 'who' => function_exists('rs_me_name') ? rs_me_name() : '', 'at' => gmdate('Y-m-d')];
+    $m[$a['id']] = ['kind' => 'pr', 'url' => $url, 'note' => 'PR queue', 'who' => $who, 'at' => gmdate('Y-m-d')];
     rs_sdk_marks_save($m);
-    rs_log('sdk', $a['id'], 'pull request sent: ' . $url);
-    if ($here) rs_prq_use_here($a, $json);
+    rs_log('sdk', $a['id'], 'pull request sent: ' . $url . ($edits ? ' (with code changes)' : ''));
+    if ($here) rs_prq_use_here($a, $plain);
     return $url;
+}
+
+// (4.9) What goes out: [file, code edits, the file the launcher can use today, description]. With the code
+// changes left out, the file and description from before them.
+function rs_prq_parts(array $q, bool $codeOn): array {
+    $json = json_decode((string)$q['json'], true);
+    if (!is_array($json)) throw new RuntimeException('The recomplauncher.json in this draft isn\'t valid JSON.');
+    $code = (string)($q['code'] ?? '') !== '' ? json_decode((string)$q['code'], true) : null;
+    if (!is_array($code) || empty($code['edits'])) return [$json, [], $json, (string)$q['body']];
+    $plain = is_array($code['plain'] ?? null) ? $code['plain'] : $json;
+    if (!$codeOn) return [$plain, [], $plain, (string)($q['body_plain'] ?? '') !== '' ? (string)$q['body_plain'] : (string)$q['body']];
+    return [$json, (array)$code['edits'], $plain, (string)$q['body']];
+}
+// The edits put on the branch: every file read and checked first, so nothing goes up half done. An edit
+// that's already there (sent before) is fine.
+function rs_prq_apply_code(string $forkName, string $branch, array $edits): void {
+    $files = [];
+    foreach ($edits as $e) {
+        $path = (string)($e['path'] ?? '');
+        if ($path === '' || str_contains($path, '..')) throw new RuntimeException('A code change has a bad file path.');
+        if (!isset($files[$path])) {
+            $r = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode($path)) . '?ref=' . rawurlencode($branch));
+            if ($r['status'] !== 200) throw new RuntimeException('Couldn\'t read ' . $path . ' for the code change (GitHub ' . $r['status'] . '). Draft it again.');
+            $files[$path] = ['sha' => (string)$r['json']['sha'], 'old' => (string)base64_decode((string)($r['json']['content'] ?? '')), 'new' => null];
+            $files[$path]['new'] = $files[$path]['old'];
+        }
+        $find = (string)($e['find'] ?? ''); $rep = (string)($e['replace'] ?? '');
+        $n = substr_count($files[$path]['new'], $find);
+        if ($n === 1) $files[$path]['new'] = str_replace($find, $rep, $files[$path]['new']);
+        elseif (!($n === 0 && $rep !== '' && str_contains($files[$path]['new'], $rep)))
+            throw new RuntimeException($path . ' changed since the draft, so its code change doesn\'t fit any more. Draft it again.');
+    }
+    foreach ($files as $path => $f) {
+        if ($f['new'] === $f['old']) continue;
+        rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode($path)), [
+            'message' => 'Add launch options so launchers can pass the game\'s location (' . basename($path) . ')', 'content' => base64_encode($f['new']), 'branch' => $branch, 'sha' => $f['sha'],
+        ]), 'Committing the change to ' . $path);
+    }
+}
+
+// ---- (4.9) Xarishark: at most 5 new pull requests an hour ------------------------------------------
+const RS_PRQ_PER_HOUR = 5;
+function rs_prq_sent_last_hour(): int { return (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'sent' AND sent_at > NOW() - INTERVAL 1 HOUR AND pick <> 'redo'")->fetchColumn(); }
+// Send pressed: straight out while there's room this hour, else in line. -> url, or '' when it's in line.
+function rs_prq_send_or_queue(int $id, bool $here, bool $codeOn, string $who): string {
+    rs_prq_tables();
+    $q = rs_prq_get($id);
+    if (!$q || $q['status'] !== 'draft') throw new RuntimeException('That draft is gone or was already sent.');
+    $waiting = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'outbox'")->fetchColumn();
+    if ((string)$q['pr_url'] !== '' || ($waiting === 0 && rs_prq_sent_last_hour() < RS_PRQ_PER_HOUR)) return rs_prq_send($id, $here, $codeOn, $who);
+    rs_db()->prepare("UPDATE pc_prq SET status = 'outbox', opts = ?, who = ?, updated = NOW() WHERE id = ? AND status = 'draft'")
+        ->execute([json_encode(['here' => $here, 'code' => $codeOn]), $who, $id]);
+    return '';
+}
+// The half-hourly job: the next ones in line, keeping to the hourly number. -> [sent, failed]
+function rs_prq_send_due(): array {
+    rs_prq_tables();
+    $done = [0, 0];
+    if (rs_prq_token() === '') return $done;
+    $room = RS_PRQ_PER_HOUR - rs_prq_sent_last_hour();
+    if ($room <= 0) return $done;
+    foreach (rs_db()->query("SELECT id, opts, who FROM pc_prq WHERE status = 'outbox' ORDER BY updated LIMIT " . min(3, $room))->fetchAll() as $r) {
+        $o = json_decode((string)$r['opts'], true) ?: [];
+        try { rs_prq_send((int)$r['id'], !empty($o['here']), ($o['code'] ?? true) !== false, (string)$r['who']); ++$done[0]; }
+        catch (Throwable $e) { rs_db()->prepare("UPDATE pc_prq SET status = 'draft', error = ?, updated = NOW() WHERE id = ?")->execute([mb_substr($e->getMessage(), 0, 300), (int)$r['id']]); ++$done[1]; }
+    }
+    return $done;
 }
 
 // ---- (4.9) Xarishark: redraft a pull request we already sent, and use the file on our side meanwhile ----
@@ -346,13 +422,12 @@ function rs_prq_keep_sent(int $id): void {
     rs_db()->prepare("UPDATE pc_prq SET status = 'sent', pick = 'redo', updated = NOW() WHERE id = ? AND status IN ('draft', 'todo') AND pr_url <> ''")->execute([$id]);
 }
 // The redrafted file and description pushed to the pull request we already have open.
-function rs_prq_update(int $id, bool $here = false): string {
+function rs_prq_update(int $id, bool $here = false, bool $codeOn = true, string $who = ''): string {
     $q = rs_prq_get($id);
-    if (!$q || $q['status'] !== 'draft' || (string)$q['pr_url'] === '') throw new RuntimeException('That redraft is gone or was already sent.');
+    if (!$q || !in_array($q['status'], ['draft', 'outbox'], true) || (string)$q['pr_url'] === '') throw new RuntimeException('That redraft is gone or was already sent.');
     $a = rs_pc_app((string)$q['app_id']);
     if (!$a) throw new RuntimeException('That recomp isn\'t on RecompLauncher any more.');
-    $json = json_decode((string)$q['json'], true);
-    if (!is_array($json)) throw new RuntimeException('The recomplauncher.json in this draft isn\'t valid JSON.');
+    [$json, $edits, $plain, $body] = rs_prq_parts($q, $codeOn);
     if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)$#', (string)$q['pr_url'], $m)) throw new RuntimeException('Its pull request link isn\'t one GitHub gave us.');
     try {
         $login = (string)rs_prq_gh_ok(rs_prq_gh('GET', '/user'), 'Reading the token\'s account')['login'];
@@ -366,6 +441,7 @@ function rs_prq_update(int $id, bool $here = false): string {
         $baseRef = (string)($p['base']['ref'] ?? '');
         if ($baseRef !== '' && rs_prq_gh('GET', '/repos/' . $m[1] . '/contents/recomplauncher.json?ref=' . rawurlencode($baseRef))['status'] === 200)
             throw new RuntimeException('The developer has their own recomplauncher.json now, so this pull request may not be needed. Look at it on GitHub, then choose Keep it as it was.');
+        if ($edits) rs_prq_apply_code($forkName, $branch, $edits);
         $file = json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
         $have = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/recomplauncher.json?ref=' . rawurlencode($branch));
         $old = $have['status'] === 200 ? (string)base64_decode((string)($have['json']['content'] ?? '')) : '';
@@ -381,14 +457,14 @@ function rs_prq_update(int $id, bool $here = false): string {
                 'message' => 'README: Get it on RecompLauncher badge', 'content' => base64_encode($new), 'branch' => $branch, 'sha' => (string)$rd['json']['sha'],
             ]), 'Adding the badge');
         }
-        rs_prq_gh_ok(rs_prq_gh('PATCH', '/repos/' . $m[1] . '/pulls/' . $m[2], ['title' => (string)$q['title'] ?: RS_PRQ_TITLE, 'body' => (string)$q['body']]), 'Updating the description');
+        rs_prq_gh_ok(rs_prq_gh('PATCH', '/repos/' . $m[1] . '/pulls/' . $m[2], ['title' => (string)$q['title'] ?: RS_PRQ_TITLE, 'body' => $body]), 'Updating the description');
     } catch (Throwable $e) {
         rs_db()->prepare("UPDATE pc_prq SET error = ?, updated = NOW() WHERE id = ?")->execute([$e->getMessage(), $id]);
         throw $e;
     }
-    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', error = NULL, who = ?, updated = NOW() WHERE id = ?")->execute([function_exists('rs_me_name') ? rs_me_name() : '', $id]);
-    rs_log('sdk', $a['id'], 'pull request updated: ' . $q['pr_url']);
-    if ($here) rs_prq_use_here($a, $json);
+    rs_db()->prepare("UPDATE pc_prq SET status = 'sent', error = NULL, who = ?, updated = NOW() WHERE id = ?")->execute([$who, $id]);
+    rs_log('sdk', $a['id'], 'pull request updated: ' . $q['pr_url'] . ($edits ? ' (with code changes)' : ''));
+    if ($here) rs_prq_use_here($a, $plain);
     return (string)$q['pr_url'];
 }
 // The file goes out in the catalog as the recomp's own (its Boot profile field), so the launcher uses it

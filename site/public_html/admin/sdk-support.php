@@ -174,8 +174,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($act === 'prq_send') {
                     @set_time_limit(120);
                     $wasSent = (string)(rs_prq_get($qid)['pr_url'] ?? '') !== '';
-                    $url = rs_prq_send($qid, !empty($_POST['here']));
-                    rs_flash(($wasSent ? 'Pull request updated: ' : 'Pull request sent: ') . $url . (!empty($_POST['here']) ? '. RecompLauncher uses the file now too.' : ''));
+                    $url = rs_prq_send_or_queue($qid, !empty($_POST['here']), !empty($_POST['code_on']) || empty($_POST['has_code']), rs_me_name());
+                    if ($url === '') rs_flash('In line to send. Pull requests go out ' . RS_PRQ_PER_HOUR . ' an hour at most, so it goes out within the hour.');
+                    else rs_flash(($wasSent ? 'Pull request updated: ' : 'Pull request sent: ') . $url . (!empty($_POST['here']) ? '. RecompLauncher uses the file now too.' : ''));
                 }
                 else rs_flash('Saved.');
             } elseif ($act === 'prq_skip') {
@@ -185,6 +186,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rs_db()->prepare("UPDATE pc_prq SET status = 'skipped', updated = NOW() WHERE id = ?")->execute([$qid]);
                     rs_flash('Skipped. It won\'t be drafted again.');
                 }
+            } elseif ($act === 'prq_unqueue') {
+                rs_db()->prepare("UPDATE pc_prq SET status = 'draft', updated = NOW() WHERE id = ? AND status = 'outbox'")->execute([$qid]);
+                rs_flash('Taken out of the line. It\'s back with the drafts.');
             } elseif ($act === 'prq_reopen') {
                 // (4.9) A sent pull request drafted again (with the command-line checks), then updated with one click.
                 rs_prq_reopen($qid);
@@ -383,6 +387,7 @@ $prqWaiting = count(array_filter($prqWork, fn($r) => $r['status'] === 'todo'));
 $prqNow = rs_prq_now_ready();
 $prqHasAi = rs_secret_get('prq_ai_key') !== '';
 $prqSent = rs_prq_list(['sent'], 20);
+$prqOut = rs_prq_list(['outbox'], 50); // (4.9) waiting their turn, 5 an hour
 $prqLogin = (string)rs_setting('prq_gh_login', '');
 $prqHasToken = rs_prq_token() !== '';
 $prqKeyOnce = rs_is_owner() ? rs_secret_get('prq_key_once') : '';
@@ -423,6 +428,16 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
         <label class="prq-span">Pull request description<textarea name="body" rows="14"><?= h((string)$pq['body']) ?></textarea></label>
         <label class="prq-span">recomplauncher.json<textarea name="json" rows="14" class="mono" spellcheck="false"><?= h((string)$pq['json']) ?></textarea></label>
       </div>
+      <?php $pqCode = (string)($pq['code'] ?? '') !== '' ? json_decode((string)$pq['code'], true) : null; if (is_array($pqCode) && !empty($pqCode['edits'])): ?>
+      <div class="prq-code"><input type="hidden" name="has_code" value="1">
+        <h4>Code changes <span class="muted small">adds <?= h(implode(', ', array_map('strval', (array)($pqCode['adds'] ?? [])))) ?></span></h4>
+        <?php foreach ((array)($pqCode['explain'] ?? []) as $ex): ?><p class="small">• <?= h((string)$ex) ?></p><?php endforeach; ?>
+        <?php foreach ((array)$pqCode['edits'] as $ed): ?>
+        <div class="prq-diff"><div class="prq-diff-path mono small"><?= h((string)($ed['path'] ?? '')) ?></div><pre class="prq-del"><?= h((string)($ed['find'] ?? '')) ?></pre><pre class="prq-add"><?= h((string)($ed['replace'] ?? '')) ?></pre></div>
+        <?php endforeach; ?>
+        <label class="prq-here small"><input type="checkbox" name="code_on" value="1" checked> Include the code changes (off: only recomplauncher.json and the badge, as before)</label>
+      </div>
+      <?php endif; ?>
       <div class="prq-btns">
         <?php $isUpd = (string)$pq['pr_url'] !== ''; ?>
         <button class="btn primary" name="action" value="prq_send" onclick="return confirm('<?= $isUpd ? 'Update the pull request on ' : 'Open this pull request on ' ?><?= h(addslashes((string)$pq['repo'])) ?>?')"<?= $prqHasToken ? '' : ' disabled title="Add the GitHub token first"' ?>><?= $isUpd ? 'Update pull request' : 'Send pull request' ?></button>
@@ -434,6 +449,11 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
     </form>
   </details>
   <?php endforeach; ?>
+  <?php if ($prqOut): ?>
+  <h3 class="prq-h3">Going out next <span class="muted small"><?= RS_PRQ_PER_HOUR ?> an hour, in this order</span></h3>
+  <ul class="prq-sent"><?php foreach ($prqOut as $pq): ?><li><span><?= h((string)$pq['repo']) ?></span><span class="muted small">queued <?= h((string)$pq['updated']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?><?= (string)$pq['error'] !== '' ? ' · ' . h((string)$pq['error']) : '' ?></span>
+    <form method="post" class="prq-sent-act"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$pq['id'] ?>"><button class="btn small" name="action" value="prq_unqueue">Take it back</button></form></li><?php endforeach; ?></ul>
+  <?php endif; ?>
   <?php if ($prqSent): ?>
   <h3 class="prq-h3">Sent lately</h3>
   <ul class="prq-sent"><?php foreach ($prqSent as $pq): $fx = rs_prq_fix_state((int)$pq['id']); ?><li><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h((string)$pq['repo']) ?></a><span class="muted small"><?= h((string)$pq['sent_at']) ?><?= (string)$pq['who'] !== '' ? ' · ' . h((string)$pq['who']) : '' ?></span>

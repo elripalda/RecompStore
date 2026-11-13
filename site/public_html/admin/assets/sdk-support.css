@@ -139,3 +139,11 @@
 /* (4.9) Draft a sent pull request again; use the file on RecompLauncher meanwhile */
 .prq-sent li{align-items:center}.prq-sent-act{margin:0 0 0 auto}.prq-sent-act .btn{min-height:30px;padding:4px 12px;font-size:12.5px}
 .prq-form .prq-btns label.prq-here{flex-basis:100%;display:flex;flex-direction:row;justify-content:flex-start;text-align:left;gap:8px;align-items:center;margin-top:4px;font-weight:500}.prq-form .prq-btns label.prq-here input{width:16px;height:16px;margin:0;flex:none}
+/* (4.9) Code changes in a draft */
+.prq-code{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:10px;display:grid;gap:8px}
+.prq-code h4{margin:0;font-size:14px}.prq-code p{margin:0}
+.prq-diff{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.prq-diff-path{padding:6px 10px;background:rgba(255,255,255,.04)}
+.prq-diff pre{margin:0;padding:8px 10px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto}
+.prq-del{background:rgba(255,92,92,.08);color:#ffb3b3}.prq-add{background:rgba(87,214,141,.08);color:#b5f2cd}
+.prq-code label.prq-here{display:flex;flex-direction:row;gap:8px;align-items:center;justify-content:flex-start}.prq-code label.prq-here input{width:16px;height:16px;margin:0}

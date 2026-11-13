@@ -42,6 +42,9 @@ try {
     require_once 'admin/inc/prq.php';
     $fx = rs_prq_fix_conflicts(60);
     if ($fx['fixed'] || $fx['flagged']) echo gmdate('c') . ' sdk prs: looked at ' . $fx['looked'] . ', re-drafted ' . $fx['fixed'] . ', need a look ' . $fx['flagged'] . "\n";
+    // (4.9) Pull requests waiting their turn go out, at most 5 an hour.
+    [$ok, $bad] = rs_prq_send_due();
+    if ($ok || $bad) echo gmdate('c') . ' sdk prs: sent ' . $ok . ' from the line' . ($bad ? ', ' . $bad . ' back to drafts' : '') . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' sdk prs: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
