@@ -343,12 +343,23 @@ function rs_pc_read_sourceforge(string $repo): array {
 }
 
 // What every host shares: the newest release, its files per system, the numbers.
+// (4.8) The release players get: the newest by when it came out (GitHub lists by the tag's commit
+// date, so a source-only release made from an older commit can sit above the builds), skipping drafts
+// and pre-releases; when that one has no build, the newest one that does, as the launcher does. -> null
+// when there's no release.
+function rs_pc_pick_release(array $list): ?array {
+    $rels = rs_rel_sorted(array_filter($list, fn($x) => is_array($x) && empty($x['draft'])));
+    if (!$rels) return null;
+    $full = array_values(array_filter($rels, fn($x) => empty($x['prerelease'])));
+    $flags = [];
+    foreach ([$full, $rels] as $pool) foreach ($pool as $r) if (array_filter(rs_pc_assets((array)($r['assets'] ?? []), $flags))) return $r;
+    return $full[0] ?? $rels[0];
+}
+
 function rs_pc_read_releases(string $repo, string $host, array $i): array {
     $rel = rs_host_releases($host, $repo, 3600);
     $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
-    $latest = null;
-    foreach ($list as $r) if (empty($r['draft']) && empty($r['prerelease'])) { $latest = $r; break; }
-    if (!$latest && $list) $latest = $list[0];
+    $latest = rs_pc_pick_release($list);
     $flags = [];
     $assets = $latest ? rs_pc_assets((array)$latest['assets'], $flags) : ['win' => '', 'linux' => '', 'mac' => ''];
     $size = 0; $downloads = 0;
@@ -361,6 +372,7 @@ function rs_pc_read_releases(string $repo, string $host, array $i): array {
         'releases' => count(array_filter($list, fn($r) => empty($r['draft']))), 'first' => $list ? substr((string)end($list)['published_at'], 0, 10) : '',
         'game' => rs_pc_game_guess((string)$i['name'], (string)$i['description']), 'origin' => rs_pc_origin_guess($text),
         'version' => $latest ? rs_tidy_version((string)$latest['tag_name']) : '', 'released' => $latest ? substr((string)$latest['published_at'], 0, 10) : '',
+        'tag' => $latest ? (string)$latest['tag_name'] : '',
         'assets' => $assets, 'size' => $size, 'downloads' => $downloads, 'flags' => $flags,
         'pattern' => [
             'win' => $assets['win'] !== '' && $latest ? rs_asset_pattern($assets['win'], (string)$latest['tag_name']) : '',
@@ -633,7 +645,7 @@ function rs_pc_sdk_probe(string $repo, string $host, string $pat): array {
         } elseif ($r['status'] === 404) $out['has'] = 'none';
     }
     $rel = rs_host_releases($host, $repo, 60);
-    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    $list = $rel['status'] === 200 ? rs_rel_sorted(json_decode((string)$rel['body'], true) ?: []) : [];
     $x = null;
     foreach ($list as $y) if (empty($y['draft']) && empty($y['prerelease'])) { $x = $y; break; }
     if (!$x) foreach ($list as $y) if (empty($y['draft'])) { $x = $y; break; }
@@ -1702,7 +1714,7 @@ function rs_pc_heal_assets(array $a, array $r): array {
     $latest = rs_pc_release_for($a);
     if (!$latest) {
         $rel = rs_host_releases(rs_pc_host($a), $a['repo'], 3600);
-        $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+        $list = $rel['status'] === 200 ? rs_rel_sorted(json_decode((string)$rel['body'], true) ?: []) : [];
         foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) { $latest = $x; break; }
     }
     if (!$latest) return $a;
@@ -1720,12 +1732,10 @@ function rs_pc_heal_assets(array $a, array $r): array {
     return $a;
 }
 
-// The release rs_pc_read_repo goes by: the newest that isn't a draft or a pre-release, else the newest.
+// The release rs_pc_read_repo goes by (rs_pc_pick_release).
 function rs_pc_latest_release(string $repo, string $host = ''): ?array {
     $rel = rs_host_releases($host, $repo, 3600);
-    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
-    foreach ($list as $x) if (empty($x['draft']) && empty($x['prerelease'])) return $x;
-    return $list[0] ?? null;
+    return rs_pc_pick_release($rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : []);
 }
 
 // (3.8) The newest release (not a draft or pre-release) with a file matching one of the recomp's
@@ -1733,7 +1743,7 @@ function rs_pc_latest_release(string $repo, string $host = ''): ?array {
 function rs_pc_release_for(array $a): ?array {
     $pats = array_values(array_filter([(string)$a['asset_win'], (string)$a['asset_linux'], (string)$a['asset_mac']], fn($p) => trim($p) !== ''));
     $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
-    $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+    $list = $rel['status'] === 200 ? rs_rel_sorted(json_decode((string)$rel['body'], true) ?: []) : [];
     $has = function (array $x) use ($pats): bool { foreach ((array)$x['assets'] as $f) foreach ($pats as $p) if (rs_pattern_matches($p, (string)$f['name'])) return true; return false; };
     foreach ($list as $x) {
         if (!empty($x['draft']) || !empty($x['prerelease'])) continue;
@@ -1755,7 +1765,7 @@ function rs_pc_dl_check(array $a): ?array {
     $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
     if ($rel['status'] === 404) return ['dl' => 'gone', 'why' => 'Its project page is gone: renamed, made private or deleted.'];
     if ($rel['status'] !== 200) return null;
-    $list = array_values(array_filter(json_decode((string)$rel['body'], true) ?: [], fn($x) => empty($x['draft'])));
+    $list = rs_rel_sorted(array_filter(json_decode((string)$rel['body'], true) ?: [], fn($x) => empty($x['draft'])));
     $stable = array_values(array_filter($list, fn($x) => empty($x['prerelease'])));
     $hit = function (array $x) use ($pat): string { foreach ((array)$x['assets'] as $f) if (rs_pattern_matches($pat, (string)$f['name'])) return (string)$f['name']; return ''; };
     // Like rs_pc_release_for: full releases, or its pre-releases when no full release has its file.

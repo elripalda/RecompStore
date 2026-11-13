@@ -1124,18 +1124,23 @@ function rs_pattern_matches(string $pattern, string $name): bool {
     return (bool)preg_match($re, $name);
 }
 
+// (4.8) Releases newest first by when they came out. GitHub lists them by the tag's commit date, so a
+// release made from an older commit can sit above newer builds (Excitebike, Wario's Woods: a
+// source-only release above the "Latest" one). Ties keep GitHub's order.
+function rs_rel_sorted(array $list): array {
+    $list = array_values($list);
+    $at = fn($x) => is_array($x) ? (int)strtotime((string)($x['published_at'] ?? $x['created_at'] ?? '')) : 0;
+    $ord = array_flip(array_keys($list));
+    uksort($list, fn($i, $j) => ($at($list[$j]) <=> $at($list[$i])) ?: ($ord[$i] <=> $ord[$j]));
+    return array_values($list);
+}
+
 // (4.8) The release a project's files are looked for in, the way RecompLauncher picks it: the newest that
 // isn't a draft or a pre-release, else the newest that isn't a draft. -> [that release, another release
 // that has the named files when that one doesn't (the launcher installs it until the newest has them)].
 function rs_rel_pick(array $rels, array $pats = []): array {
-    $list = array_values(array_filter($rels, fn($x) => is_array($x) && empty($x['draft'])));
+    $list = rs_rel_sorted(array_values(array_filter($rels, fn($x) => is_array($x) && empty($x['draft']))));
     if (!$list) return [null, null];
-    // Newest by when it came out: GitHub lists by the tag's commit date, so a release made from an older
-    // commit can sit on top of newer builds (Excitebike: a source-only release above its "Latest" one).
-    $at = fn(array $x) => (int)strtotime((string)($x['published_at'] ?? $x['created_at'] ?? ''));
-    $ord = array_flip(array_keys($list));
-    uksort($list, fn($i, $j) => ($at($list[$j]) <=> $at($list[$i])) ?: ($ord[$i] <=> $ord[$j]));
-    $list = array_values($list);
     $main = null;
     foreach ($list as $x) if (empty($x['prerelease'])) { $main = $x; break; }
     $main ??= $list[0];

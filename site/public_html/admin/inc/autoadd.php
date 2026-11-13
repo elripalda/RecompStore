@@ -184,9 +184,10 @@ function rs_auto_run(int $id): void {
         if (!$files) throw new RuntimeException('Its newest release has no download for Windows, Linux or macOS.');
         $rel = rs_host_releases($host, (string)$f['repo'], 3600);
         $list = $rel['status'] === 200 ? (json_decode((string)$rel['body'], true) ?: []) : [];
+        // The same release the reader took its files from (newest by date, with a build).
         $latest = null;
-        foreach ($list as $r) if (empty($r['draft']) && empty($r['prerelease'])) { $latest = $r; break; }
-        if (!$latest && $list) $latest = $list[0];
+        foreach ($list as $r) if ((string)($r['tag_name'] ?? '') === (string)($f['tag'] ?? '') && empty($r['draft'])) { $latest = $r; break; }
+        if (!$latest) $latest = rs_pc_pick_release($list);
         $tag = (string)($latest['tag_name'] ?? '');
         rs_auto_set($id, ['repo_key' => $key, 'tag' => $tag]);
         $warnRead = [];
