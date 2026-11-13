@@ -124,6 +124,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // (4.1) The disc or cartridge IDs this recomp is made for (GZ2E01, SLUS-203.12...): the launcher
             // reads the player's copy and says so when it's another release.
             $a['copy_ids'] = implode(', ', rs_pc_copy_ids((string)($_POST['copy_ids'] ?? '')));
+            // (4.9) Xbox 360 title ID: 8 hex digits, or empty.
+            if (array_key_exists('title_id', $_POST)) {
+                $tid = strtoupper(trim((string)preg_replace('/^0x/i', '', trim((string)$_POST['title_id']))));
+                if ($tid !== '' && !preg_match('/^[0-9A-F]{8}$/', $tid)) throw new RuntimeException('The Xbox 360 title ID is 8 hex digits, like 4D5307E6.');
+                $a['title_id'] = $tid;
+            }
             $a = rs_ai_from_post($a); // (2.9) AI-assisted
             $wasSoon = !empty($a['soon']);
             $a['soon'] = !empty($_POST['soon']); // (2.9) no release yet: on Coming soon only
@@ -410,6 +416,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
       <div class="pc-sdk-btns"><button type="button" class="btn" data-badgepr-repo="<?= h($a['repo']) ?>" data-badgepr-id="<?= h($a['id']) ?>" data-badgepr-game="<?= h($a['name']) ?>">Copy badge PR prompt</button><button type="button" class="btn" data-prompt-repo="<?= h($a['repo']) ?>" data-prompt-url="<?= h(rs_host_web($aHost, (string)$a['repo'])) ?>" data-prompt-id="<?= h($a['id']) ?>" data-prompt-game="<?= h((string)($a['game'] ?: $a['name'])) ?>">Copy agent prompt</button><button type="button" class="btn" data-badge-id="<?= h($a['id']) ?>">Copy badge</button><a class="btn" href="sdk-support.php?id=<?= h(rawurlencode((string)$a['id'])) ?>">SDK support</a></div>
     </div>
     <?php endif; ?>
+    <?php if ((string)$a['origin'] === 'x360'): ?><label class="span2">Xbox 360 title ID<input name="title_id" value="<?= h((string)($a['title_id'] ?? '')) ?>" maxlength="10" class="mono" spellcheck="false" placeholder="4D5307E6"><small>8 hex digits. It names the game's unlock file (4D5307E6.toml), so the launcher can show achievements before the first unlock. Empty: taken from its launcher profile, if it has one.</small></label><?php endif; ?>
     <label class="span2">Copy IDs<input name="copy_ids" value="<?= h((string)($a['copy_ids'] ?? '')) ?>" maxlength="300" class="mono" spellcheck="false" placeholder="GZ2E01, GZ2P01"><small>The disc or cartridge IDs of the releases it's made for (GameCube and Wii: GZ2E01; PlayStation: SLUS-203.12; N64: NZSE). The launcher reads the player's copy and warns when it's another release. A shorter one, like GZ2E, fits every disc that starts with it. Empty: any copy.</small></label>
     <div class="checks"><label class="check"><input type="checkbox" name="shown" value="1"<?= $a['hidden'] ? '' : ' checked' ?>> Show it on the site</label><label class="check"><input type="checkbox" name="featured" value="1"<?= $a['featured'] ? ' checked' : '' ?>> Featured</label><label class="check" title="Being worked on, nothing to download yet: it shows only on Coming soon"><input type="checkbox" name="soon" value="1"<?= !empty($a['soon']) ? ' checked' : '' ?>> Coming soon</label><label class="check" title="Needs Python, build tools or a long build first: a yellow Set Up instead of Play"><input type="checkbox" name="setup_required" value="1"<?= !empty($a['setup_required']) ? ' checked' : '' ?>> Setup required</label><label class="check" title="Its release is only a setup .exe: RecompLauncher runs the installer, then finds where it installed (needs a launcher with the installer flow)"><input type="checkbox" name="installer" value="1"<?= !empty($a['installer']) ? ' checked' : '' ?>> Installer only</label></div>
     <?php $pgList = rs_pc_games($a); ?>

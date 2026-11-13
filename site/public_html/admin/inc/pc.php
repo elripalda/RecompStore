@@ -1456,7 +1456,9 @@ function rs_pc_catalog(): array {
         // launcher before the game writes its first unlock file.
         if ((string)$a['origin'] === 'x360' && !isset($e['title_id'])) {
             $bt = rs_boot_effective($a);
-            $tid = strtoupper((string)($bt['files']['id'] ?? ($bt['title_id'] ?? '')));
+            // Its own field first (set on its edit page, or found in its repo), then the launcher profile.
+            $tid = strtoupper(trim((string)($a['title_id'] ?? '')));
+            if (!preg_match('/^[0-9A-F]{8}$/', $tid)) $tid = strtoupper((string)($bt['files']['id'] ?? ($bt['title_id'] ?? '')));
             if (preg_match('/^[0-9A-F]{8}$/', $tid)) $e['title_id'] = $tid;
         }
         // (4.4) Recomp Achievements: where this game's ReXGlue unlock file turned up on players' PCs,
