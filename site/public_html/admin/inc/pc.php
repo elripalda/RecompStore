@@ -645,7 +645,7 @@ function rs_pc_sdk_probe(string $repo, string $host, string $pat): array {
     $read = function (string $txt) use (&$out, $repo) {
         $k = rs_pc_sdk_keys($txt);
         $keys = (array)($k['keys'] ?? []);
-        $out['easy'] = in_array('game', $keys, true) && in_array('start', $keys, true);
+        $out['easy'] = !empty($k['easy']);
         $out['settings'] = in_array('settings', $keys, true) || in_array('config', $keys, true);
         $out['dumps'] = !empty($k['dumps']);
         $out['bad'] = !$keys; // there, but not JSON we can read
@@ -715,12 +715,25 @@ function rs_pc_sdk_due(array $a): bool {
 
 // What a developer's own recomplauncher.json covers, for the launcher's "Launcher support" list:
 // its top-level keys, and whether it lists verified copies (game.dumps).
+// (4.9) Easy Setup, as the SDK has it: "start", and the player's copy either in the older "game" part or in
+// "inputs" (a required entry whose role is game or disc; no role means game). A single-file game (a .jar, a
+// ROM) can only be described through inputs. Runtime (shared, like DLSS), key, DLC and update inputs don't count.
+function rs_sdk_easy(array $j): bool {
+    if (!isset($j['start'])) return false;
+    if (!empty($j['game'])) return true;
+    foreach ((array)($j['inputs'] ?? []) as $in) {
+        if (!is_array($in) || !empty($in['optional']) || !empty($in['shared'])) continue;
+        if (in_array((string)($in['role'] ?? 'game'), ['game', 'disc'], true)) return true;
+    }
+    return false;
+}
+
 function rs_pc_sdk_keys(string $json): array {
     $j = json_decode($json, true);
     if (!is_array($j)) return [];
     $dlss = false; // (4.6) it asks the launcher for NVIDIA's DLSS file
     foreach ((array)($j['inputs'] ?? []) as $in) if (is_array($in) && ($in['shared'] ?? '') === 'nvidia.dlss') $dlss = true;
-    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps']), 'dlss' => $dlss];
+    return ['keys' => array_values(array_filter(array_keys($j), 'is_string')), 'dumps' => !empty($j['game']['dumps']), 'dlss' => $dlss, 'easy' => rs_sdk_easy($j)];
 }
 
 // (4.3) The catalog's "support" list per recomp: which launcher features it has, and who made each
@@ -750,8 +763,9 @@ function rs_pc_support(array $a): array {
     $full = (int)($b['format'] ?? 0) === 1;
     $files = (array)($b['files'] ?? []);
     $out = ['sdk' => in_array($sdk['has'] ?? '', ['release', 'repo', 'none'], true) ? $sdk['has'] : 'unknown'];
-    if ($dev('game') && $dev('start')) $out['easy_setup'] = 'dev';
-    elseif ($full ? !empty($b['game']) : in_array((string)($files['how'] ?? ''), RS_BOOT_EASY, true)) $out['easy_setup'] = 'launcher';
+    // (4.9) Checks from before 'easy' was kept: the old game + start test until the weekly check refreshes them.
+    if (array_key_exists('easy', $sdk) ? !empty($sdk['easy']) : ($dev('game') && $dev('start'))) $out['easy_setup'] = 'dev';
+    elseif ($full ? rs_sdk_easy($b) : in_array((string)($files['how'] ?? ''), RS_BOOT_EASY, true)) $out['easy_setup'] = 'launcher';
     if ($dev('settings')) $out['settings'] = 'dev';
     elseif ($full ? !empty($b['settings']) : !empty($b['settings']['settings'])) $out['settings'] = 'launcher';
     if ($dev('prepare')) $out['prepare'] = 'dev';

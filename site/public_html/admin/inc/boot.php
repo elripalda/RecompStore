@@ -257,7 +257,8 @@ function rs_boot_summary(array $b): string {
     if (!$b) return '';
     if ((int)($b['format'] ?? 0) === 1) { // a full launcher profile: its own shape
         $n = count((array)($b['settings'] ?? []));
-        return 'Launcher profile' . (!empty($b['game']) ? ' · Easy Setup (' . (string)($b['game']['kind'] ?? 'copy') . ')' : '') . ($n ? ' · ' . $n . ' setting' . ($n === 1 ? '' : 's') : '');
+        $ez = function_exists('rs_sdk_easy') ? rs_sdk_easy($b) : !empty($b['game']); // (4.9) inputs count too
+        return 'Launcher profile' . ($ez ? ' · Easy Setup (' . (string)($b['game']['kind'] ?? ($b['inputs'][0]['formats'][0]['type'] ?? 'copy')) . ')' : '') . ($n ? ' · ' . $n . ' setting' . ($n === 1 ? '' : 's') : '');
     }
     $how = (string)($b['files']['how'] ?? '');
     $bits = [in_array($how, RS_BOOT_EASY, true) ? 'Easy Setup (' . $how . ')' : ($how !== '' ? 'copy: ' . $how : 'no files')];

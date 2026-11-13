@@ -343,7 +343,8 @@ def has_game_option(doc):
     st = doc.get("start") if isinstance(doc.get("start"), dict) else {}
     args = " ".join(str(a) for a in (st.get("args") or []))
     cfg = doc.get("config") or []
-    return "{game}" in args or any(isinstance(c, dict) and c.get("game_path") for c in cfg)
+    # (4.9) "{input:<id>}" passes a copy described in "inputs" (a .jar, a ROM): that's a game option too.
+    return "{game}" in args or "{input:" in args or any(isinstance(c, dict) and c.get("game_path") for c in cfg)
 
 
 def check_edits(edits, files):
