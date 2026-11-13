@@ -137,6 +137,7 @@ if ($job):
     <li class="sh-s-<?= h($st !== '' ? $st : 'wait') ?>"><span class="sh-s-i"><?= $st === '' ? '' : hub_step_icon($st) ?></span><span><b><?= h($label) ?></b><?php if ((string)($s['n'] ?? '') !== ''): ?><small><?= h((string)$s['n']) ?></small><?php endif; ?></span></li>
     <?php endforeach; ?>
   </ol>
+  <?php $same = $app ? rs_hub_same_game($app) : []; if ($same): ?><div class="sh-d-notes"><b>Already on the store for the same game</b><p><?php foreach ($same as $i => $x): ?><?= $i ? ' · ' : '' ?><a href="pc.php?edit=<?= h(rawurlencode((string)$x['id'])) ?>#edit" target="_blank"><?= h((string)$x['name']) ?></a> <span class="muted">(<?= h(rs_pc_key($x)) ?>)</span><?php endforeach; ?></p><p class="muted small">If this one is a copy or fork of one of them, Remove it. If it's a different project or a different version of the game, it can go up too.</p></div><?php endif; ?>
   <?php if (trim((string)$job['notes']) !== ''): ?><div class="sh-d-notes"><b><?= $job['verdict'] === 'skip' ? 'Why Claude says not to list it' : 'Worth a look' ?></b><p><?= nl2br(h(trim((string)$job['notes']))) ?></p></div><?php endif; ?>
 </section>
 <?php $vtTag = (string)$job['tag']; $vtFiles = rs_hub_vt_files((string)$job['repo_key'], $vtTag); $vtSec(); ?>

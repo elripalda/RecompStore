@@ -331,6 +331,27 @@ function rs_hub_fail_note(string $notes): string {
     if (str_starts_with($n, 'Already on RecompLauncher')) return 'Already live on RecompLauncher. Dismiss it';
     return 'Didn\'t finish: ' . rs_hub_short($n);
 }
+// (4.9) Other recomps of the same game that are already out on the store (a fork, a copy or another
+// version), so a second listing isn't published by accident: [app, …], live ones only.
+function rs_hub_game_norm(string $s): string {
+    $s = mb_strtolower($s);
+    $s = (string)preg_replace('/\b(the|recomp(iled|ilation)?|decomp(ilation)?|port|pc|native|remaster(ed)?|windows)\b/u', ' ', $s);
+    return (string)preg_replace('/[^a-z0-9]+/', '', $s);
+}
+function rs_hub_same_game(array $a): array {
+    static $idx = null;
+    if ($idx === null) {
+        $idx = [];
+        foreach (rs_pc_apps() as $x) {
+            if (!empty($x['hidden'])) continue;
+            $n = rs_hub_game_norm((string)($x['game'] ?? '') !== '' ? (string)$x['game'] : (string)$x['name']);
+            if (strlen($n) >= 3) $idx[$n][] = $x;
+        }
+    }
+    $n = rs_hub_game_norm((string)($a['game'] ?? '') !== '' ? (string)$a['game'] : (string)($a['name'] ?? ''));
+    if (strlen($n) < 3) return [];
+    return array_values(array_filter($idx[$n] ?? [], fn($x) => (string)$x['id'] !== (string)($a['id'] ?? '') && strcasecmp(rs_pc_key($x), rs_pc_key($a)) !== 0));
+}
 // Where a draft came from.
 function rs_hub_job_src(array $j): string {
     if (!empty($j['sub_id'])) return 'Submission';
@@ -355,6 +376,8 @@ function rs_hub_board(string $store): array {
     $jobs = $store === 'pc' ? rs_hub_jobs() : [];
     $jobBySub = [];
     foreach ($jobs as $j) if (!empty($j['sub_id'])) $jobBySub[(int)$j['sub_id']] = $j;
+    // (4.9) A dismissed draft's submission stays off New too (it's under Dismissed with its draft).
+    $shelfSub = $store === 'pc' ? array_flip(array_map('intval', rs_db()->query("SELECT sub_id FROM pc_auto WHERE status LIKE 'shelf-%' AND sub_id > 0")->fetchAll(PDO::FETCH_COLUMN))) : [];
     $subs = array_values(array_filter(rs_hub_sub_rows(), fn($r) => rs_hub_sub_store($r['d']) === $store));
     $subById = [];
     foreach ($subs as $r) $subById[(int)$r['id']] = $r;
@@ -367,7 +390,7 @@ function rs_hub_board(string $store): array {
     $need = [];
     foreach ($subs as $r) {
         $sid = (int)$r['id'];
-        if ($r['col'] === 'new' && isset($jobBySub[$sid])) continue;
+        if ($r['col'] === 'new' && (isset($jobBySub[$sid]) || isset($shelfSub[$sid]))) continue;
         $d = $r['d'];
         $c = $kept[$sid] ?? null;
         $note = ['run', 'Checking…'];
@@ -389,6 +412,8 @@ function rs_hub_board(string $store): array {
     foreach ($jobs as $j) {
         [$col, $note] = rs_hub_job_state($j);
         $a = $j['app_id'] !== '' ? rs_pc_app($j['app_id']) : null;
+        if ($col === 'ready' && $a && $note[0] !== 'bad' && ($same = rs_hub_same_game($a)))
+            $note = ['warn', 'Same game already listed: ' . $same[0]['name'] . (count($same) > 1 ? ' +' . (count($same) - 1) : '')];
         $sub = !empty($j['sub_id']) ? ($subById[(int)$j['sub_id']]['d'] ?? null) : null;
         $item = $sub !== null ? 'sub:' . (int)$j['sub_id'] : 'job:' . (int)$j['id'];
         $src = rs_hub_job_src($j);
