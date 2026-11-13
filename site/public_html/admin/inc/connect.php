@@ -472,7 +472,9 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     } finally {
         if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
     }
-    if (!in_array((int)$r['status'], [200, 404], true)) rs_gh_cool($via, (int)$r['status'] === 403 || (int)$r['status'] === 429 ? 300 : 90);
+    // (4.8) 451: taken down (a DMCA notice) or blocked. That's GitHub's answer, not GitHub being busy:
+    // kept like a 404 (with the block's reason and notice), without pausing every other request.
+    if (!in_array((int)$r['status'], [200, 404, 451], true)) rs_gh_cool($via, (int)$r['status'] === 403 || (int)$r['status'] === 429 ? 300 : 90);
     if ($r['status'] === 200) {
         // (4.3) SourceForge's file feed is RSS; everything else is JSON.
         $j = $via === 'sourceforge' && str_starts_with(ltrim($r['body']), '<') ? rs_sf_feed_parse($r['body']) : json_decode($r['body'], true);
@@ -485,6 +487,12 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
         $body = '{"message":"Not Found"}';
         $db->prepare('INSERT INTO gh_cache (k, status, body, fetched) VALUES (?, 404, ?, NOW()) ON DUPLICATE KEY UPDATE status = 404, body = VALUES(body), fetched = NOW()')->execute([$k, $body]);
         return ['status' => 404, 'body' => $body, 'stale' => false, 'age' => 0];
+    } elseif ($r['status'] === 451) {
+        $j = json_decode($r['body'], true);
+        $b = is_array($j['block'] ?? null) ? $j['block'] : [];
+        $body = (string)json_encode(['message' => 'Repository access blocked', 'block' => ['reason' => (string)($b['reason'] ?? ''), 'created_at' => (string)($b['created_at'] ?? ''), 'html_url' => (string)($b['html_url'] ?? '')]], JSON_UNESCAPED_SLASHES);
+        $db->prepare('INSERT INTO gh_cache (k, status, body, fetched) VALUES (?, 451, ?, NOW()) ON DUPLICATE KEY UPDATE status = 451, body = VALUES(body), fetched = NOW()')->execute([$k, $body]);
+        return ['status' => 451, 'body' => $body, 'stale' => false, 'age' => 0];
     }
     if ($have) return ['status' => (int)$have['status'], 'body' => (string)$have['body'], 'stale' => true, 'age' => (int)$have['age']];
     // 403 or 429 from GitHub's API: its limit for this site (a token in Settings lifts it).

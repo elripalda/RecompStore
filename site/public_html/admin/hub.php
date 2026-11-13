@@ -11,6 +11,7 @@ rs_inbox_table();
 rs_report_tables();
 rs_submission_columns();
 require_once __DIR__ . '/inc/hub.php';
+require_once __DIR__ . '/inc/repowatch.php';
 rs_hub_tables();
 if (!function_exists('rs_sub_fix_key')) {
     // (3.6) The key in a "fix and send it again" link for submission <id>.
@@ -21,7 +22,7 @@ $me = rs_me();
 $stores = $me['stores_list'];
 $store = in_array($_REQUEST['store'] ?? '', $stores, true) ? (string)$_REQUEST['store'] : (in_array($_SESSION['hub_store'] ?? '', $stores, true) ? (string)$_SESSION['hub_store'] : $stores[0]);
 $_SESSION['hub_store'] = $store;
-$tabs = ['board', 'requests', 'found', 'flags', 'handled', 'guide'];
+$tabs = ['board', 'watch', 'requests', 'found', 'flags', 'handled', 'guide'];
 $tab = in_array($_GET['tab'] ?? '', $tabs, true) ? (string)$_GET['tab'] : 'board';
 if (in_array($tab, ['requests', 'found'], true) && !rs_has_store('pc')) $tab = 'board';
 $isAjax = !empty($_SERVER['HTTP_X_HUB']);
@@ -79,6 +80,47 @@ function hub_board_html(string $store, array $b): string {
         $o .= '</div></section>';
     }
     return $o . '</div>';
+}
+// (4.8) Repo watch: one listing whose repo needs a look, with what can be done about it.
+function hub_watch_row(array $f, bool $tagStore = false): string {
+    $web = rs_host_web($f['host'], $f['repo']);
+    $since = rs_hub_ts($f['since']);
+    $acts = [];
+    if ($f['hidden'] && $f['hid']) $acts[] = '<button type="button" class="small primary" data-act="watch_unhide">Put it back on the store</button>';
+    if ($f['state'] === 'moved' && $f['link'] !== '') $acts[] = '<button type="button" class="small primary" data-act="watch_move" data-to="' . h($f['link']) . '">Point it to ' . h(mb_strimwidth($f['link'], 0, 40, '…')) . '</button>';
+    $acts[] = '<button type="button" class="small" data-watch-move>New repo</button>';
+    if (!$f['hidden']) $acts[] = '<button type="button" class="small sh-w-hide" data-act="watch_hide" data-confirm="Click again to hide it">Hide from store</button>';
+    $acts[] = '<button type="button" class="small" data-act="watch_check">Check again</button>';
+    if (!$f['acked']) $acts[] = '<button type="button" class="small" data-act="watch_ok">It\'s fine</button>';
+    return '<article class="sh-wrow sh-w-' . h($f['level']) . '" data-item="w:' . h($f['store']) . ':' . h($f['id']) . '">'
+        . hub_tile($f['name'], $f['icon'])
+        . '<div class="sh-wrow-main"><div class="sh-wrow-t"><b>' . h($f['name']) . '</b>'
+        . ($tagStore ? '<span class="sh-src">' . h(RS_STORES[$f['store']] ?? $f['store']) . '</span>' : '')
+        . '<span class="sh-wpill sh-' . h($f['level']) . '">' . h($f['label']) . '</span>' . ($f['hidden'] ? '<span class="sh-wpill sh-wait">Hidden</span>' : '') . '</div>'
+        . '<a class="sh-link" href="' . h($web) . '" target="_blank" rel="noopener noreferrer">' . h(rs_repo_key($f['host'], $f['repo'])) . ' ' . HUB_IC['ext'] . '</a>'
+        . '<p>' . h($f['why']) . ($f['state'] === 'dmca' && $f['link'] !== '' ? ' <a href="' . h($f['link']) . '" target="_blank" rel="noopener noreferrer">Read the notice</a>' : '') . '</p>'
+        . '<small class="muted">' . ($since ? 'Since ' . h(rs_date('M j, g:i a', $since)) . ' · ' : '') . 'checked ' . h(rs_hub_ago_long(rs_hub_ts($f['checked']))) . '</small>'
+        . '<form class="sh-row sh-wmove" data-form="watch_move" hidden><input type="hidden" name="item" value="w:' . h($f['store']) . ':' . h($f['id']) . '">'
+        . '<input name="to" class="mono" placeholder="' . ($f['store'] === 'pc' ? 'github.com/owner/name, gitlab.com/group/project or sourceforge.net/projects/name' : 'github.com/owner/name') . '" required>'
+        . '<button class="primary">Point it there</button><button type="button" data-watch-move>Cancel</button></form></div>'
+        . '<div class="sh-rowc-acts">' . implode('', $acts) . '</div></article>';
+}
+// The strip on top of a store's board: what needs a look, or one line saying all's well.
+function hub_watch_strip(string $store): string {
+    $last = rs_watch_last();
+    $at = (int)($last['at'] ?? 0);
+    $flags = rs_watch_flags([$store]);
+    $c = rs_watch_counts([$store]);
+    $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></svg>';
+    if (!$at) return '<div class="sh-watch-ok">' . HUB_IC['spin'] . '<span><b>Repo watch</b> · The first scan is running. Anything that\'s down shows up here.</span><a href="hub.php?tab=watch">Report</a></div>';
+    $when = 'checked ' . rs_hub_ago_long($at);
+    if (!$flags) return '<div class="sh-watch-ok">' . HUB_IC['check'] . '<span><b>Repo watch</b> · ' . number_format($c['ok']) . ' repos up' . ($c['unk'] ? ', ' . $c['unk'] . ' couldn\'t be checked' : '') . ' · ' . h($when) . '</span><a href="hub.php?tab=watch">Report</a></div>';
+    $n = count($flags);
+    $o = '<section class="sh-watch"><header><span class="sh-watch-ic">' . $ic . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'repo needs' : 'repos need') . ' a look</b><small>Repo watch checks every listing twice a day · ' . h($when) . '</small></div>'
+        . '<a class="btn small" href="hub.php?tab=watch">Full report</a></header><div class="sh-wlist">';
+    foreach (array_slice($flags, 0, 4) as $f) $o .= hub_watch_row($f);
+    if ($n > 4) $o .= '<p class="sh-empty sh-wmore">And ' . ($n - 4) . ' more in the <a href="hub.php?tab=watch">full report</a>.</p>';
+    return $o . '</div></section>';
 }
 $out = function (array $j) {
     header('Content-Type: application/json; charset=utf-8');
@@ -463,6 +505,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['close'] = true;
                 break;
             }
+            // (4.8) Repo watch
+            case 'watch_hide':
+            case 'watch_unhide':
+            case 'watch_move':
+            case 'watch_ok':
+            case 'watch_check': {
+                [$wStore] = rs_watch_item($item);
+                if (!rs_hub_store_ok($wStore)) throw new RuntimeException('That listing is in a store you don\'t work on.');
+                @set_time_limit(120);
+                if ($act === 'watch_hide') $res['msg'] = rs_watch_hide($item);
+                elseif ($act === 'watch_unhide') $res['msg'] = rs_watch_unhide($item);
+                elseif ($act === 'watch_move') $res['msg'] = rs_watch_move($item, (string)($_POST['to'] ?? ''));
+                elseif ($act === 'watch_ok') $res['msg'] = rs_watch_ack($item);
+                else {
+                    [, $wId, $wx] = rs_watch_item($item);
+                    $row = rs_watch_check_one($wStore, $wId);
+                    $res['msg'] = !$row ? $wx['name'] . ' isn\'t watched anymore.' : ($row['state'] === 'ok' ? $wx['name'] . '\'s repo is up.' : ($row['state'] === 'unk' || $row['err'] !== '' ? 'GitHub didn\'t give a clear answer. It\'s checked again with the next scan.' : $wx['name'] . ': ' . $row['why']));
+                }
+                $res['reload'] = false;
+                $res['watch'] = hub_watch_strip($store);
+                break;
+            }
+            case 'watch_scan': {
+                $res['msg'] = rs_watch_launch() ? 'Scanning every repo now. It takes a few minutes; this page shows it when it\'s done.' : 'A scan is already running.';
+                break;
+            }
             default:
                 throw new RuntimeException('That button doesn\'t do anything here.');
         }
@@ -493,13 +561,14 @@ $csrf = rs_csrf();
 rs_head('Submissions', true, ['assets/hub.css']);
 ?>
 <div class="sh-head">
-  <div><h1>Submissions</h1><p class="muted"><?= h(['board' => 'New recomps and apps, from first look to live.', 'requests' => 'What players asked for from RecompLauncher\'s Coming Soon page, most asked first.', 'found' => 'Projects the finder and the daily scout came across on GitHub, GitLab and Discord.', 'flags' => 'Questions for ' . $owner . ', and the answers.', 'handled' => 'Everything that left the board: live, declined, sent back or marked done.', 'guide' => 'How a submission goes from New to live, and when to approve, ask for changes, decline or flag.'][$tab]) ?></p></div>
+  <div><h1>Submissions</h1><p class="muted"><?= h(['board' => 'New recomps and apps, from first look to live.', 'watch' => 'Every listing\'s repo, checked twice a day. Anything taken down, deleted, made private or emptied of its releases shows up here and on top of the board.', 'requests' => 'What players asked for from RecompLauncher\'s Coming Soon page, most asked first.', 'found' => 'Projects the finder and the daily scout came across on GitHub, GitLab and Discord.', 'flags' => 'Questions for ' . $owner . ', and the answers.', 'handled' => 'Everything that left the board: live, declined, sent back or marked done.', 'guide' => 'How a submission goes from New to live, and when to approve, ask for changes, decline or flag.'][$tab]) ?></p></div>
   <?php if (count($stores) > 1 && in_array($tab, ['board', 'handled'], true)): ?>
   <div class="sh-store" role="tablist" aria-label="Store"><?php foreach ($stores as $s): ?><a role="tab" href="hub.php?store=<?= $s ?><?= $tab !== 'board' ? '&amp;tab=' . $tab : '' ?>"<?= $s === $store ? ' class="on" aria-selected="true"' : '' ?>><?= RS_STORES[$s] ?><?= $counts[$s] ? ' <span class="count">' . $counts[$s] . '</span>' : '' ?></a><?php endforeach; ?></div>
   <?php elseif (in_array($tab, ['board', 'handled'], true)): ?><span class="sh-store-one"><?= RS_STORES[$store] ?> store</span><?php endif; ?>
 </div>
 <div class="sh" data-store="<?= h($store) ?>" data-tab="<?= h($tab) ?>" data-csrf="<?= h($csrf) ?>">
-<?php if ($tab === 'board'): $b = rs_hub_board($store); ?>
+<?php if ($tab === 'board'): $b = rs_hub_board($store); rs_watch_maybe(); ?>
+  <div data-watch><?= hub_watch_strip($store) ?></div>
   <div class="sh-tools">
     <div class="sh-search"><input type="search" placeholder="Find a recomp, developer or repo" aria-label="Find on the board" data-find></div>
     <div class="sh-filt" role="group" aria-label="Show"><button type="button" class="on" data-filt="all">Everything</button><button type="button" data-filt="ver"><?= HUB_IC['ver'] ?>Verified developers</button><button type="button" data-filt="look">Needs a look</button><button type="button" data-filt="flag">Flagged</button></div>
@@ -511,6 +580,42 @@ rs_head('Submissions', true, ['assets/hub.css']);
     <div class="sh-row"><button class="primary">Check them</button><button type="button" data-close-add>Cancel</button></div>
   </form><?php endif; ?>
   <div data-board><?= hub_board_html($store, $b) ?></div>
+<?php elseif ($tab === 'watch'):
+    rs_watch_maybe();
+    $wStores = array_values(array_intersect($stores, ['pc', 'ps5']));
+    $wl = rs_watch_last(); $wc = rs_watch_counts($wStores); $wf = rs_watch_flags($wStores, true);
+    $wNeed = array_values(array_filter($wf, fn($f) => !$f['acked']));
+    $wHid = array_values(array_filter($wf, fn($f) => $f['acked'] && $f['hid']));
+    $wFine = array_values(array_filter($wf, fn($f) => $f['acked'] && !$f['hid']));
+    $wLog = rs_watch_log($wStores, 40);
+    $wRun = rs_watch_running();
+    $wTag = count($wStores) > 1;
+    // The next cron run: 5:23 or 17:23 UTC, whichever comes first.
+    $wNext = 0;
+    foreach ([0, 1] as $d) foreach (['05:23', '17:23'] as $hm) { $t = strtotime(gmdate('Y-m-d', time() + $d * 86400) . ' ' . $hm . ' UTC'); if ($t > time() && (!$wNext || $t < $wNext)) $wNext = $t; } ?>
+  <div class="sh-wstats">
+    <div class="card"><span>Watched</span><b><?= number_format($wc['all']) ?></b><small>PC recomps<?= $wTag ? ' and PS5 apps' : '' ?> with a repo</small></div>
+    <div class="card"><span>Up</span><b class="ok"><?= number_format($wc['ok']) ?></b><small>Answered fine</small></div>
+    <div class="card"><span>Need a look</span><b class="<?= $wNeed ? 'bad' : '' ?>"><?= count($wNeed) ?></b><small><?= count($wHid) + count($wFine) ? (count($wHid) + count($wFine)) . ' more hidden or marked fine' : 'Down, taken down or emptied' ?></small></div>
+    <div class="card"><span>Couldn't check</span><b class="<?= $wc['unk'] ? 'warn' : '' ?>"><?= number_format($wc['unk']) ?></b><small>Asked again next scan</small></div>
+  </div>
+  <section class="card sh-wscan">
+    <p><?php if ($wRun): ?><?= HUB_IC['spin'] ?> Scanning now. Reload in a few minutes to see it.<?php elseif ($wl): ?>Last scan <?= h(rs_hub_ago_long((int)$wl['at'])) ?> (<?= h(rs_date('M j, g:i a', (int)$wl['at'])) ?>), took <?= (int)$wl['took'] ?> s. <?php else: ?>No scan yet. <?php endif; ?>Next one around <?= h(rs_date('g:i a', $wNext)) ?>.<?= !empty($wl['auth']) ? ' <b class="bad">GitHub turned the site\'s token down, so most repos couldn\'t be checked. Check the token in Settings.</b>' : '' ?></p>
+    <div class="sh-row"><button type="button" data-act="watch_scan"<?= $wRun ? ' disabled' : '' ?>>Scan now</button></div>
+  </section>
+  <h2 class="sh-h2">Need a look <span class="count"><?= count($wNeed) ?></span></h2>
+  <?php if (!$wNeed): ?><section class="card sh-none"><p class="muted"><?= $wl ? 'Nothing. Every repo answered fine on the last scan.' : 'The first scan hasn\'t finished yet.' ?></p></section>
+  <?php else: ?><div class="sh-wlist"><?php foreach ($wNeed as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>
+  <?php if ($wHid): ?><h2 class="sh-h2">Hidden by the watch <span class="count"><?= count($wHid) ?></span></h2>
+  <div class="sh-wlist"><?php foreach ($wHid as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>
+  <?php if ($wFine): ?><h2 class="sh-h2">Marked fine <span class="count"><?= count($wFine) ?></span></h2>
+  <div class="sh-wlist"><?php foreach ($wFine as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>
+  <h2 class="sh-h2">What changed</h2>
+  <?php if (!$wLog): ?><section class="card sh-none"><p class="muted">Nothing yet. Every time a repo goes down or comes back, it's listed here.</p></section>
+  <?php else: ?><div class="sh-wlog card"><?php foreach ($wLog as $r): $lv = rs_watch_level((string)$r['state']); ?>
+    <div class="sh-wlog-r"><span class="muted"><?= h(rs_date('M j, g:i a', rs_hub_ts((string)$r['at']))) ?></span><b><?= h((string)$r['name']) ?><?= $wTag ? ' <span class="sh-src">' . h(RS_STORES[$r['store']] ?? $r['store']) . '</span>' : '' ?></b>
+      <span class="sh-wpill sh-<?= $lv !== '' ? h($lv) : 'ok' ?>"><?= h($lv !== '' ? rs_watch_label((string)$r['state']) : 'Up again') ?></span><span class="mono muted"><?= h((string)$r['repo']) ?></span></div>
+  <?php endforeach; ?></div><?php endif; ?>
 <?php elseif ($tab === 'requests'):
     $handled = !empty($_GET['handled']);
     $reqs = rs_req_list($handled);

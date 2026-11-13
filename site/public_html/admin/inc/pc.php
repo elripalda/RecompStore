@@ -1767,6 +1767,7 @@ function rs_pc_dl_check(array $a): ?array {
     if ($pat === '') return [];
     $rel = rs_host_releases(rs_pc_host($a), (string)$a['repo'], 3600);
     if ($rel['status'] === 404) return ['dl' => 'gone', 'why' => 'Its project page is gone: renamed, made private or deleted.'];
+    if ($rel['status'] === 451) return ['dl' => 'gone', 'why' => 'Its repo was taken down (blocked for legal reasons, usually a DMCA notice).'];
     if ($rel['status'] !== 200) return null;
     $list = rs_rel_sorted(array_filter(json_decode((string)$rel['body'], true) ?: [], fn($x) => empty($x['draft'])));
     $stable = array_values(array_filter($list, fn($x) => empty($x['prerelease'])));

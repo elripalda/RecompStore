@@ -103,6 +103,7 @@ function rs_health_check(array $g): array {
     if ($asset === '') $bad('No zip name, so the store can\'t pick the file.');
     $rel = rs_gh_releases($repo, 6 * 3600);
     if ($rel['status'] === 404) { $bad('The repo is gone, or it\'s private now.'); return ['bad', $p]; }
+    if ($rel['status'] === 451) { $bad('The repo was taken down (blocked for legal reasons, usually a DMCA notice).'); return ['bad', $p]; }
     if ($rel['status'] !== 200) return ['retry', [['warn', 'GitHub didn\'t answer. It\'s checked again within the hour.']]];
     $list = json_decode($rel['body'], true);
     $list = is_array($list) ? array_values(array_filter($list, fn($r) => is_array($r) && empty($r['draft']))) : [];

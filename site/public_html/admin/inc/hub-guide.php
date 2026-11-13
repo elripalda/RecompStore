@@ -35,6 +35,7 @@ $doc = [
         'Keep it short and friendly. Say what to change, not how we found out.',
     ]],
     ['The other tabs', [
+        'Repo watch: every listing\'s repo is checked twice a day. One that\'s taken down, deleted, made private or emptied shows on top of the board: point it at its new repo, hide it from the store, or mark it fine if you know why.',
         'Requests: what players asked for from RecompLauncher\'s Coming Soon page, most asked first. Check it runs the checks on that project; Already listed and Mark done close it.',
         'Found on GitHub: projects the finder and the daily scout came across. Check it or Skip.',
         'Developer requests: changes developers made to their own pages and projects they say are theirs. Approve what\'s right, turn down what isn\'t.',

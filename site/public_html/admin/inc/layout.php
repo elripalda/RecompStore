@@ -92,9 +92,12 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
             }
         } catch (Throwable $e) { /* no flags yet */ }
     }
+    // (4.8) Repo watch: listings whose repo is down, taken down or emptied, in this login's stores.
+    $watchN = 0;
+    if (rs_can_page('hub.php')) { try { require_once __DIR__ . '/repowatch.php'; $watchN = rs_watch_count(array_values(array_intersect(rs_me()['stores_list'] ?? [], ['pc', 'ps5']))); } catch (Throwable $e) { /* not set up yet */ } }
     $hubTab = (string)($_GET['tab'] ?? '');
-    $hubAt = fn(string $t) => fn() => $here === 'hub.php' && ($hubTab === $t || ($t === 'board' && !in_array($hubTab, ['requests', 'found', 'flags', 'handled', 'guide'], true)));
-    $hubKids = [['hub.php', 'Board' . $cnt($hubN), $hubAt('board')]];
+    $hubAt = fn(string $t) => fn() => $here === 'hub.php' && ($hubTab === $t || ($t === 'board' && !in_array($hubTab, ['watch', 'requests', 'found', 'flags', 'handled', 'guide'], true)));
+    $hubKids = [['hub.php', 'Board' . $cnt($hubN), $hubAt('board')], ['hub.php?tab=watch', 'Repo watch' . ($watchN ? ' <span class="count red" title="Repos that need a look">' . $watchN . '</span>' : ''), $hubAt('watch')]];
     if (rs_has_store('pc')) { $hubKids[] = ['hub.php?tab=requests', 'Requests' . $cnt($reqN), $hubAt('requests')]; $hubKids[] = ['hub.php?tab=found', 'Found on GitHub', $hubAt('found')]; }
     // Each section: [label, icon, its pages [href, label, matches?], count]. A page matches when
     // it's the file in the address (and, for pc.php, the ?view=).
@@ -114,7 +117,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'To do' => [
             // (4.8) Submissions, Auto-add, requests, finds, developers' requests, messages, Security and flags, together.
-            ['hub.php', 'Submissions', 'send', $hubKids, $hubN + $flagN + $reqN],
+            ['hub.php', 'Submissions', 'send', $hubKids, $hubN + $flagN + $reqN + $watchN],
             ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
             ['roadmap.php', 'Roadmap', 'map', [], 0], // (4.8) the team's features and fixes
         ],
@@ -158,7 +161,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $me = rs_me();
     $first = mb_strtoupper(mb_substr(rs_me_name(), 0, 1));
     // (4.8) Counts by page, for the pinned column.
-    $GLOBALS['rs_nav_counts'] = ['hub.php' => $hubN + $flagN + $reqN, 'submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
+    $GLOBALS['rs_nav_counts'] = ['hub.php' => $hubN + $flagN + $reqN + $watchN, 'submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
     ?>
 <body class="adm">
 <input type="checkbox" id="side-open" class="side-check" hidden>

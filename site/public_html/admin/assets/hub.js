@@ -29,6 +29,10 @@
   function done(j) {
     toast(j.msg || (j.ok ? 'Done.' : 'That didn\'t work.'), !j.ok);
     if (!j.ok) return;
+    // (4.8) Repo watch: the strip on top of the board, drawn again.
+    var wEl = root.querySelector('[data-watch]');
+    if (typeof j.watch === 'string' && wEl && tab === 'board') wEl.innerHTML = j.watch;
+    else if (typeof j.watch === 'string' && tab === 'watch') { setTimeout(function () { location.reload(); }, 600); return; }
     if (tab !== 'board' && j.reload !== false && !j.open) { setTimeout(function () { location.reload(); }, 600); return; }
     if (j.open) open(j.open);
     else if (j.close) close();
@@ -163,6 +167,13 @@
       open(oi.getAttribute('data-open-item')); return;
     }
     if (t.closest('[data-close]')) { close(); return; }
+    var wm = t.closest('[data-watch-move]');
+    if (wm) {
+      var wf = wm.closest('.sh-wrow').querySelector('[data-form="watch_move"]');
+      wf.hidden = !wf.hidden;
+      if (!wf.hidden) wf.querySelector('input[name=to]').focus();
+      return;
+    }
     var clamp = t.closest('[data-clamp]');
     if (clamp) { clamp.classList.remove('clamp'); return; }
     if (t.closest('[data-recheck]')) { open(openKey, { fresh: true, keep: true }); toast('Checking it again…'); return; }

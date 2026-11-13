@@ -135,6 +135,8 @@ $task($psChanged, 'Game changed, not published', 'Games changed, not published',
 $task($subs['ps5'], 'PS5 submission', 'PS5 submissions', 'Apps developers sent in for the store.', 'hub.php?store=ps5', 'ps5');
 $task((int)$health['bad'] + (int)$health['warn'], 'Listing needs a look', 'Listings need a look', 'A renamed repo, a missing zip, a changed title ID or a dead link.', 'health.php', 'ps5');
 // Both stores
+// (4.8) Repo watch: a listing's repo taken down, deleted, made private or emptied of its releases.
+$task($safe(function () { require_once __DIR__ . '/inc/repowatch.php'; return rs_watch_count(array_values(array_intersect(rs_me()['stores_list'] ?? [], ['pc', 'ps5']))); }), 'Repo needs a look', 'Repos need a look', 'Taken down, deleted, made private or emptied of its releases. Hide it or point it at a new repo.', 'hub.php?tab=watch');
 $task($safe(fn() => rs_vt_need_count()), 'Download flagged', 'Downloads flagged', 'Flagged by several virus scanners. Look before it goes out.', 'security.php');
 $task($safe(fn() => rs_dev_waiting()), 'Developer request', 'Developer requests', 'New developer accounts, page changes and claims to approve.', 'developers.php');
 $task($safe(fn() => rs_dev_admin_unread()), 'Unread developer message', 'Unread developer messages', 'Replies stay between the team and the developer.', 'messages.php');
