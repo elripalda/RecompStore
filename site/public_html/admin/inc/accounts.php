@@ -365,7 +365,7 @@ function rs_acct_mail_confirm(array $a): void {
     $brand = rs_acct_brand();
     rs_mailq_add((string)$a['email'], 'Confirm your ' . $brand . ' account',
         "Hi " . ($a['username'] ?: 'there') . ",\n\nConfirm your email for $brand with this link:\n$link\n\nIt works for 48 hours. If you didn't make an account, ignore this email and nothing happens.",
-        ['kind' => 'confirm'], 1, true);
+        ['kind' => 'confirm', 'brand' => $brand], 1, true);
 }
 
 function rs_acct_mail_reset(array $a): void {
@@ -375,7 +375,7 @@ function rs_acct_mail_reset(array $a): void {
     $brand = rs_acct_brand();
     rs_mailq_add((string)$a['email'], 'Set a new ' . $brand . ' password',
         "Hi " . ($a['username'] ?: 'there') . ",\n\nSet a new password for $brand here:\n$link\n\nThe link works once, for 30 minutes. If you didn't ask for this, ignore this email: your password stays as it is.",
-        ['kind' => 'reset'], 1, true);
+        ['kind' => 'reset', 'brand' => $brand], 1, true);
 }
 
 // ---- Two-step sign-in (an authenticator app) ---------------------------------------------------

@@ -104,6 +104,14 @@ function rs_relay_on(): bool {
     return rs_setting('relay_on', '0') === '1' && rs_mail_unlock('relay_key') !== '';
 }
 
+// (4.9) Where account emails (confirmations, password resets) come from when it isn't the mailbox,
+// e.g. no-reply@recomplauncher.com. Only through the sending service, which has to allow that
+// address; with the service off they come from the mailbox as before. '' = the mailbox.
+function rs_mail_acct_from(): string {
+    $a = strtolower(trim((string)rs_setting('acct_from', '')));
+    return rs_relay_on() && filter_var($a, FILTER_VALIDATE_EMAIL) ? $a : '';
+}
+
 function rs_mail_ready(): bool {
     if (rs_relay_on()) return (bool)filter_var(rs_mail_get('mail_from'), FILTER_VALIDATE_EMAIL);
     return filter_var(rs_mail_get('mail_from'), FILTER_VALIDATE_EMAIL) && rs_mail_password() !== '';
@@ -140,10 +148,13 @@ function rs_mail_html(string $text, string $footer = ''): string {
         . $body . $foot . '</div></div></body></html>';
 }
 
-// opt: html, footer (added to both parts), unsub (URL for List-Unsubscribe), reply_to
+// opt: html, footer (added to both parts), unsub (URL for List-Unsubscribe), reply_to, kind
+// ('confirm' and 'reset' are account emails: they use the account address when one is set, with
+// brand as the name people see)
 function rs_mail_build(string $to, string $subject, string $text, array $opt = []): array {
-    $from = rs_mail_get('mail_from');
-    $name = (string)($opt['from_name'] ?? rs_mail_get('mail_name'));
+    $acct = in_array($opt['kind'] ?? '', ['confirm', 'reset'], true) ? rs_mail_acct_from() : '';
+    $from = $acct !== '' ? $acct : rs_mail_get('mail_from');
+    $name = (string)($opt['from_name'] ?? ($acct !== '' ? ($opt['brand'] ?? (str_ends_with($acct, '@recomplauncher.com') ? 'RecompLauncher' : rs_mail_get('mail_name'))) : rs_mail_get('mail_name')));
     $footer = (string)($opt['footer'] ?? '');
     $plain = rtrim(str_replace("\r\n", "\n", $text)) . ($footer !== '' ? "\n\n--\n" . $footer : '') . "\n";
     $html = $opt['html'] ?? rs_mail_html($text, $footer);
@@ -193,7 +204,8 @@ function rs_smtp_cmd($s, string $cmd, array $ok, string $what = ''): string {
     return $text;
 }
 
-// One SMTP connection for one or more messages: [[to, data], ...]. Returns an error per message ('' = sent).
+// One SMTP connection for one or more messages: [[to, data], ...], or [to, data, from] when it isn't
+// from the mailbox (only through the sending service). Returns an error per message ('' = sent).
 // (3.1g) Gmail rate-limits mail that comes through the sending service's address when a lot goes out
 // at once (421 4.7.28), which held up account emails. So a few emails at a time that are all for
 // Gmail (account confirmations, password resets) go straight from the mailbox, which has its own
@@ -202,7 +214,12 @@ function rs_smtp_send(array $messages): array {
     $relay = rs_relay_on();
     if ($relay && $messages && count($messages) <= 3 && rs_setting('relay_gmail_direct', '0') === '1') {
         $gmail = true;
-        foreach ($messages as [$to]) if (!preg_match('/@(gmail|googlemail)\.com$/i', trim((string)$to))) $gmail = false;
+        $box = strtolower(rs_mail_get('mail_from'));
+        foreach ($messages as $msg) {
+            if (!preg_match('/@(gmail|googlemail)\.com$/i', trim((string)$msg[0]))) $gmail = false;
+            // The mailbox can only send as itself.
+            if (!empty($msg[2]) && strtolower((string)$msg[2]) !== $box) $gmail = false;
+        }
         if ($gmail) {
             $out = null;
             try { if (rs_mail_password() !== '') $out = rs_smtp_send_via($messages, false); } catch (Throwable $e) { $out = null; }
@@ -247,11 +264,13 @@ function rs_smtp_send_via(array $messages, bool $relay): array {
         rs_smtp_cmd($s, 'AUTH LOGIN', [334], 'Sign-in');
         rs_smtp_cmd($s, base64_encode($login), [334], 'Sign-in');
         rs_smtp_cmd($s, base64_encode($pass), [235], $relay ? 'The sending service\'s key didn\'t work' : 'The mailbox password didn\'t work');
-        foreach ($messages as $i => [$to, $data]) {
+        foreach ($messages as $i => $msg) {
+            [$to, $data] = $msg;
+            $env = $relay && !empty($msg[2]) ? (string)$msg[2] : $user;
             // The service takes about two a second; a short gap keeps every one under that.
             if ($relay && $i > 0) usleep(550000);
             try {
-                rs_smtp_cmd($s, 'MAIL FROM:<' . $user . '>', [250], 'Sender');
+                rs_smtp_cmd($s, 'MAIL FROM:<' . $env . '>', [250], 'Sender');
                 rs_smtp_cmd($s, 'RCPT TO:<' . $to . '>', [250, 251], $to);
                 rs_smtp_cmd($s, 'DATA', [354], 'Message');
                 // Lines that start with a dot get a second one (SMTP's rule).
@@ -330,7 +349,7 @@ function rs_mail_log(string $kind, string $to, string $subject, ?string $body, s
 function rs_mail_send(string $to, string $subject, string $text, array $opt = []): void {
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('That isn\'t an email address: ' . $to);
     $m = rs_mail_build($to, $subject, $text, $opt);
-    $err = rs_smtp_send([[$to, $m['data']]])[0] ?? 'Not sent.';
+    $err = rs_smtp_send([[$to, $m['data'], $m['from']]])[0] ?? 'Not sent.';
     if ($err !== '') throw new RuntimeException($err);
     if (!empty($opt['save'])) rs_mail_save_sent($m['data']);
 }

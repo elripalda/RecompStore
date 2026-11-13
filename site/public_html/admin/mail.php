@@ -125,12 +125,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $rk = trim((string)($_POST['relay_key'] ?? ''));
             if ($rk !== '') rs_set_setting('relay_key', rs_mail_lock($rk));
             rs_set_setting('relay_on', !empty($_POST['relay_on']) ? '1' : '0');
-            rs_log('settings', 'Mail', 'sending service ' . (rs_relay_on() ? 'on' : 'off') . ($rk !== '' ? ', key changed' : ''));
+            $af = strtolower(trim((string)($_POST['acct_from'] ?? '')));
+            if ($af !== '' && !filter_var($af, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('"Account emails from" isn\'t an email address.');
+            rs_set_setting('acct_from', $af);
+            rs_log('settings', 'Mail', 'sending service ' . (rs_relay_on() ? 'on' : 'off') . ($rk !== '' ? ', key changed' : '') . ($af !== '' ? ', account emails from ' . $af : ''));
             if (rs_relay_on()) {
                 $me = rs_mail_get('mail_from');
                 rs_mail_send($me, 'RecompStore can send through the sending service', "This went out through the sending service. Emails to the list, account emails and replies now go this way, still from " . $me . ".", ['save' => true]);
                 rs_mail_log('test', $me, 'RecompStore can send through the sending service', null, '');
-                rs_flash('Saved, and a test email went to ' . $me . ' through the sending service. Check that it arrived.');
+                $acctNote = '';
+                if (rs_mail_acct_from() !== '') {
+                    // (4.9) And one the way account emails go, so a refused address shows up now.
+                    try {
+                        rs_mail_send($me, 'Account emails can send from ' . rs_mail_acct_from(), "This is how confirmations and password resets go out now: from " . rs_mail_acct_from() . ", through the sending service.", ['kind' => 'confirm']);
+                        $acctNote = ' A second one came from ' . rs_mail_acct_from() . ', the way account emails go.';
+                    } catch (Throwable $e) {
+                        rs_set_setting('acct_from', '');
+                        throw new RuntimeException('The sending service works, but it turned down ' . $af . ' (' . $e->getMessage() . '). Account emails stay on ' . $me . ' until it allows that address.');
+                    }
+                }
+                rs_flash('Saved, and a test email went to ' . $me . ' through the sending service.' . $acctNote . ' Check that it arrived.');
             } else rs_flash(rs_setting('relay_on', '0') === '1' ? 'Saved. Add the key to start sending through it.' : 'Saved. Emails go out from the mailbox again.');
             $back = 'mail.php#relay';
         } elseif ($action === 'forget') {
@@ -257,11 +271,12 @@ rs_head('Mail');
 <?php $relayOn = rs_relay_on(); $relayKey = rs_mail_unlock('relay_key') !== ''; ?>
 <section class="card" id="relay">
   <h2>Sending service <?= $relayOn ? '<span class="status-pill used">On</span>' : '<span class="status-pill off">Off</span>' ?></h2>
-  <p class="muted">With this on, every email still comes from <?= h(rs_mail_get('mail_from')) ?> and replies still land in its inbox, but it goes out through a sending service (Brevo, SMTP2GO, MailerSend or any other with SMTP), so the mailbox's daily limit doesn't apply. Copy the server, port, username and SMTP key from the service's SMTP settings. The key is kept encrypted and never shown again.</p>
+  <p class="muted">With this on, every email still comes from <?= h(rs_mail_get('mail_from')) ?> and replies still land in its inbox, but it goes out through a sending service (Brevo, SMTP2GO, MailerSend or any other with SMTP), so the mailbox's daily limit doesn't apply. Copy the server, port, username and SMTP key from the service's SMTP settings. The key is kept encrypted and never shown again. Account confirmations and password resets can come from another address, like a no-reply one, if the service allows it.</p>
   <form method="post" autocomplete="off">
     <input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="relay">
     <div class="filters">
       <label>SMTP key<input name="relay_key" type="password" autocomplete="new-password" placeholder="<?= $relayKey ? 'Saved. Paste a new one to change it' : 'From the service\'s SMTP settings' ?>"></label>
+      <label>Account emails from<input name="acct_from" type="email" value="<?= h((string)rs_setting('acct_from', '')) ?>" placeholder="<?= h(rs_mail_get('mail_from')) ?>"></label>
       <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="relay_on" value="1"<?= rs_setting('relay_on', '0') === '1' ? ' checked' : '' ?>> Send through it</label>
     </div>
     <?php $rport = (string)rs_setting('relay_port', '465'); ?>
