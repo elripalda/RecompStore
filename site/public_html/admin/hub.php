@@ -63,8 +63,23 @@ function hub_card(array $c): string {
         . ($c['notes'] ? '<span class="sh-nn" title="Team notes">' . HUB_IC['msg'] . (int)$c['notes'] . '</span>' : '') . '<span class="sh-when">' . h($c['when'] ? rs_hub_ago($c['when']) : '') . '</span></span>'
         . '</button>';
 }
+// (4.8) Developers whose recomp went live without the "you're live" email: Send (the usual words), Edit
+// first (the drawer), or Skip.
+function hub_live_strip(): string {
+    $q = rs_hub_live_queue();
+    if (!$q) return '';
+    $ready = rs_mail_ready();
+    $n = count($q);
+    $o = '<section class="sh-lq"><header><span class="sh-lq-ic">' . HUB_IC['msg'] . '</span><div><b>' . $n . ' ' . ($n === 1 ? 'developer hasn\'t' : 'developers haven\'t') . ' heard they\'re live</b><small>Their recomp went live from a submission. Send the usual email, or edit it first.</small></div></header><div class="sh-lq-list">';
+    foreach (array_slice($q, 0, 6) as $x) {
+        $o .= '<div class="sh-lq-row" data-item="sub:' . (int)$x['sub'] . '">' . hub_tile($x['name'], $x['icon']) . '<div class="sh-lq-t"><b>' . h($x['name']) . '</b><span class="muted">' . h($x['to'] !== '' ? $x['to'] : 'No email address left') . ' · live ' . h(rs_hub_ago_long($x['at'])) . '</span></div>'
+            . '<div class="sh-rowc-acts">' . ($ready && $x['to'] !== '' ? '<button type="button" class="small primary" data-act="live_quick">Send</button>' : '') . '<button type="button" class="small" data-open-item="live:' . (int)$x['sub'] . '">' . ($ready && $x['to'] !== '' ? 'Edit first' : 'Copy the message') . '</button><button type="button" class="small" data-act="live_skip">Skip</button></div></div>';
+    }
+    if ($n > 6) $o .= '<p class="sh-empty">And ' . ($n - 6) . ' more after these.</p>';
+    return $o . '</div></section>';
+}
 function hub_board_html(string $store, array $b): string {
-    $o = '<div class="sh-board cols-' . count(RS_HUB_COLS[$store]) . '">';
+    $o = ($store === 'pc' ? hub_live_strip() : '') . '<div class="sh-board cols-' . count(RS_HUB_COLS[$store]) . '">';
     foreach (RS_HUB_COLS[$store] as $k => [$t, $sub]) {
         $cards = $b['cols'][$k];
         // (4.8) Drafts from the finder, requests and links that Claude and VirusTotal both passed go live
@@ -491,6 +506,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['refresh'] = true;
                 break;
             }
+            case 'live_quick':
+            case 'live_skip': {
+                [$id, $r, $d] = $needSub();
+                if ($act === 'live_skip') {
+                    $d['live_skip'] = gmdate('c');
+                    rs_hub_sub_save($id, $d);
+                    $res['msg'] = 'Skipped. It won\'t ask about this one again.';
+                    break;
+                }
+                $lm = rs_hub_live_mail($id);
+                if (!$lm || $lm['to'] === '') throw new RuntimeException('There\'s no email address to send it to.');
+                if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up, so no email can go out.');
+                $mailOut($lm['to'], $lm['subject'], $lm['body'], $id);
+                $d['live_mail'] = gmdate('c');
+                rs_hub_sub_save($id, $d);
+                $res['msg'] = 'Sent to ' . $lm['to'] . '.';
+                break;
+            }
             case 'live_send': {
                 [$id, $r, $d] = $needSub();
                 $to = rs_inbox_email($r, null);
@@ -555,6 +588,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!in_array($keep, [$m[1], $m[2]], true)) throw new RuntimeException('Pick which one to keep.');
                     $res['msg'] = rs_watch_merge($keep, $keep === $m[1] ? $m[2] : $m[1]);
                 }
+                break;
+            }
+            case 'gone_page': {
+                if (!rs_hub_can_manage()) throw new RuntimeException('Only managers and the owner can change this.');
+                $on = rs_setting('pc_gone_page', '') !== '1';
+                rs_set_setting('pc_gone_page', $on ? '1' : '');
+                rs_watch_pc_out();
+                rs_log('watch', 'gone-page', $on ? 'on' : 'off');
+                $res['msg'] = $on ? 'On. Old links to removed recomps show what happened now.' : 'Off. Old links say the page isn\'t here again.';
                 break;
             }
             case 'watch_scan': {
@@ -629,10 +671,19 @@ rs_head('Submissions', true, ['assets/hub.css']);
     <div class="card"><span>Need a look</span><b class="<?= $wNeed ? 'bad' : '' ?>"><?= count($wNeed) ?></b><small><?= count($wHid) + count($wFine) ? (count($wHid) + count($wFine)) . ' more hidden or marked fine' : 'Down, taken down or emptied' ?></small></div>
     <div class="card"><span>Couldn't check</span><b class="<?= $wc['unk'] ? 'warn' : '' ?>"><?= number_format($wc['unk']) ?></b><small>Asked again next scan</small></div>
   </div>
+  <?php // (4.8) Removed-game pages: what an old link to a hidden recomp shows (off until turned on; preview first).
+    $wGoneOn = rs_setting('pc_gone_page', '') === '1'; $wGoneEx = '';
+    if (in_array('pc', $wStores, true)) foreach (rs_pc_apps() as $gx) if (!empty($gx['hidden']) && empty($gx['soon']) && ((string)($gx['watch_hid'] ?? '') !== '' || (string)($gx['replaced_by'] ?? '') !== '' || (string)($gx['live_at'] ?? '') !== '')) { $wGoneEx = (string)$gx['id']; break; } ?>
+  <div class="sh-wcards<?= in_array('pc', $wStores, true) ? '' : ' one' ?>">
   <section class="card sh-wscan">
     <p><?php if ($wRun): ?><?= HUB_IC['spin'] ?> Scanning now. Reload in a few minutes to see it.<?php elseif ($wl): ?>Last scan <?= h(rs_hub_ago_long((int)$wl['at'])) ?> (<?= h(rs_date('M j, g:i a', (int)$wl['at'])) ?>), took <?= (int)$wl['took'] ?> s. <?php else: ?>No scan yet. <?php endif; ?>Next one around <?= h(rs_date('g:i a', $wNext)) ?>.<?= !empty($wl['auth']) ? ' <b class="bad">GitHub turned the site\'s token down, so most repos couldn\'t be checked. Check the token in Settings.</b>' : '' ?></p>
     <div class="sh-row"><button type="button" data-act="watch_scan"<?= $wRun ? ' disabled' : '' ?>>Scan now</button></div>
   </section>
+  <?php if (in_array('pc', $wStores, true)): ?><section class="card sh-wscan sh-wgone">
+    <p><b>Removed-game page<?= $wGoneOn ? ' · on' : ' · off' ?></b><br><span class="muted">When someone opens the link of a recomp that was taken off, they see what happened and others like it instead of "That page isn't here". A listing that moved sends them to its new page.</span></p>
+    <div class="sh-row"><?php if ($wGoneEx !== ''): ?><a class="btn small" href="https://recomplauncher.com/game/<?= rawurlencode($wGoneEx) ?>?preview=gone" target="_blank" rel="noopener">Preview it</a><?php endif; ?><?php if (rs_hub_can_manage()): ?><button type="button" data-act="gone_page"<?= $wGoneOn ? '' : ' class="primary"' ?>><?= $wGoneOn ? 'Turn it off' : 'Turn it on' ?></button><?php endif; ?></div>
+  </section><?php endif; ?>
+  </div>
   <h2 class="sh-h2">Need a look <span class="count"><?= count($wNeed) ?></span></h2>
   <?php if (!$wNeed): ?><section class="card sh-none"><p class="muted"><?= $wl ? 'Nothing. Every repo answered fine on the last scan.' : 'The first scan hasn\'t finished yet.' ?></p></section>
   <?php else: ?><div class="sh-wlist"><?php foreach ($wNeed as $f) echo hub_watch_row($f, $wTag); ?></div><?php endif; ?>

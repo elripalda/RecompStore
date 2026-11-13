@@ -4,6 +4,8 @@
 //   GET  ?a=feedback&id=<app>          -> {counts: {runs, issues, broken}, items: [...]}
 //   GET  ?a=app&id=<app>              -> {app: {...}}            (one recomp's whole entry, for its page)
 //   GET  ?a=counts                     -> {counts: {app: {runs, issues, broken}}}
+// (4.8) GET ?a=gone&id=<app> -> {gone: {id, name, game, origin, genre, cover, hero, why, to}} for a recomp
+//        that was out and was taken off (why: takedown, gone, moved, off; to: the listing that replaced it).
 //   POST a=feedback id verdict sys note version   (one per player and recomp: a new one replaces theirs)
 // (4.0) GET a=notifies -> {apps}; POST a=notify app on -> {on}: Notify me when a Coming soon game is out.
 // (4.0) POST a=feedback also takes proton=1 (Linux or Steam Deck, the Windows build through Proton). GET
@@ -177,6 +179,24 @@ try {
         $why = rs_req_add($s('url', 400), $s('note', 500), $install, $s('version', 40), $me ? (int)$me[0]['id'] : null);
         if ($why !== '') rs_pc_out(200, ['ok' => false, 'error' => $why]);
         rs_pc_out(200, ['ok' => true]);
+    }
+    // (4.8) A recomp that left RecompLauncher (hidden after it was out): what its old page shows instead
+    // of a dead end. Its name and art, what happened in a word (its repo was taken down or deleted, it
+    // moved to another listing, or it was taken off), and the listing that replaced it. Listings that
+    // never went out stay unknown.
+    if ($a === 'gone' && !$post) {
+        $gid = $s('id', 64);
+        if (!preg_match('/^[a-z0-9-]{1,64}$/', $gid) || rs_pc_listed($gid) !== null) rs_pc_out(404, ['ok' => false], 300);
+        $g = rs_pc_app($gid);
+        $was = $g && !empty($g['hidden']) && empty($g['soon'])
+            && ((string)($g['live_at'] ?? '') !== '' || (string)($g['watch_hid'] ?? '') !== '' || (string)($g['replaced_by'] ?? '') !== '');
+        if (!$was) rs_pc_out(404, ['ok' => false], 300);
+        $state = explode('|', (string)($g['watch_hid'] ?? ''))[0];
+        $to = (string)($g['replaced_by'] ?? '');
+        $to = $to !== '' && rs_pc_listed($to) !== null ? $to : '';
+        $why = $to !== '' ? 'moved' : (in_array($state, ['dmca', 'blocked'], true) ? 'takedown' : (in_array($state, ['gone', 'private', 'norel'], true) ? 'gone' : 'off'));
+        rs_pc_out(200, ['ok' => true, 'gone' => ['id' => $gid, 'name' => (string)$g['name'], 'game' => (string)$g['game'], 'origin' => (string)$g['origin'], 'genre' => (string)$g['genre'],
+            'cover' => (string)$g['cover'] !== '' ? rs_abs((string)$g['cover']) : '', 'hero' => (string)$g['hero'] !== '' ? rs_abs((string)$g['hero']) : '', 'why' => $why, 'to' => $to]], 600);
     }
     $app = rs_pc_listed($s('id', 64));
     if ($app === null) rs_pc_out(404, ['ok' => false, 'error' => 'That recomp isn\'t on RecompLauncher.']);

@@ -1445,6 +1445,8 @@ function rs_pc_catalog(): array {
     $have = array_flip(array_column($apps, 'id'));
     foreach (rs_pc_apps() as $x) if (!empty($x['hidden']) && (string)($x['replaced_by'] ?? '') !== '' && isset($have[(string)$x['replaced_by']])) $replaced[$x['id']] = (string)$x['replaced_by'];
     $cat['replaced'] = (object)$replaced;
+    // (4.8) A removed recomp's old link shows what happened and others like it (Repo watch turns it on).
+    if (rs_setting('pc_gone_page', '') === '1') $cat['gonePage'] = true;
     if ($newer) foreach ($newer as $min => $list) $cat['apps_min'][] = ['min' => $min, 'apps' => $list];
     // (4.3) Every profile the launcher had built in is in the admin now: Beta 27 and newer use the
     // catalog's alone (its built-in ones only when there's no catalog at all).

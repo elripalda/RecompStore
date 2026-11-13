@@ -297,6 +297,11 @@ try {
                 . (!empty($a['game']) && $a['game'] !== $a['name'] ? ' — ' . $e((string)$a['game']) : '') . '</li>', $mine)) . '</ul>';
             $m = ['title' => $name(t($g[1])), 'ogTitle' => $name(t($g[1])), 'path' => $pp('/' . str_replace('pc-', 'pc/', $p)), 'desc' => $pcDesc, 'noindex' => !$mine,
                 'body' => '<h1>' . $e(t($g[1])) . '</h1>' . $pcNav . $list . $pcByo];
+        } elseif ($p === 'pc-whats-new') {
+            // (4.8) What's new, day by day (the feed is /feed.xml).
+            $d = t('New recomps and updates on RecompLauncher, day by day.');
+            $m = ['title' => $name(t('What\'s new')), 'ogTitle' => t('What\'s new on RecompLauncher'), 'path' => $pp('/pc/whats-new'), 'desc' => $d, 'noindex' => !$pcApps,
+                'body' => '<h1>' . $e(t('What\'s new')) . '</h1><p>' . $e($d) . '</p><p><a href="/feed.xml">RSS</a></p>' . $pcNav . $pcByo];
         } elseif ($p === 'pc-soon') {
             $soon = array_values(array_filter($pcApps, fn($a) => !empty($a['soon'])));
             $m = ['title' => $name(t('Coming soon')), 'path' => $pp('/pc/soon'), 'desc' => t('Recomps being worked on now. Nothing to download yet: follow them on GitHub to see when they land.'), 'noindex' => !$soon,

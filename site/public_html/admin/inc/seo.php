@@ -129,6 +129,8 @@ function rs_seo_render(string $html, array $m): string {
         '<link rel="canonical" href="' . $e($url) . '">',
     ];
     if (!empty($m['noindex'])) $head[] = '<meta name="robots" content="noindex">';
+    // (4.8) RecompLauncher's feed of new recomps and updates, for feed readers.
+    if (rs_launcher()) $head[] = '<link rel="alternate" type="application/rss+xml" title="RecompLauncher: What\'s new" href="' . $e($base . '/feed.xml') . '">';
     $head = array_merge($head, [
         '<meta property="og:type" content="website">',
         '<meta property="og:site_name" content="' . (rs_launcher() ? 'RecompLauncher' : 'RecompStore') . '">',

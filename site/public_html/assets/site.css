@@ -3192,3 +3192,42 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 }
 @media (max-width:760px){.sx-steps{display:flex}.sx-steps li{flex:1;min-width:0}.sx-steps li.on{flex:3}}
 .sx-rv dd{text-align:start}
+/* (4.8) What's new: the last three weeks, day by day */
+.pc-wn .wn-head{max-width:none;margin-bottom:30px}
+.wn-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
+.wn-stat{display:inline-flex;align-items:baseline;gap:8px;min-height:44px;padding:0 16px;border-radius:12px;background:var(--panel);border:1px solid var(--edge);font-size:15px;color:var(--muted);white-space:nowrap}
+.wn-stat b{font:800 20px Figtree,sans-serif;color:var(--frost);align-self:center}
+.wn-stat{align-items:center}
+.btn.wn-rss{display:inline-flex;gap:8px;min-height:44px;font-size:15px;padding:0 16px;margin-inline-start:auto}
+.wn-rss svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}.wn-rss svg circle{fill:currentColor;stroke:none}
+.wn-day{padding:26px 0 6px;border-top:1px solid var(--edge)}
+.wn-day:first-of-type{border-top:0;padding-top:0}
+.wn-dh{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;font-size:clamp(24px,2.4vw,30px);margin:0 0 16px}
+.wn-dh small{font:600 15px Figtree,sans-serif;letter-spacing:0;color:var(--muted)}
+.wn-row{margin-bottom:22px}
+.wn-row .pc-row-head h3,.wn-sub h3{font:700 13px Figtree,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan);margin:0 0 12px}
+.wn-sub{margin-bottom:26px}
+.wn-list{display:flex;flex-direction:column;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge);overflow:hidden}
+.wn-u{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px;align-items:center;padding:10px 16px;color:var(--frost);text-decoration:none;border-top:1px solid var(--edge);transition:background .2s}
+.wn-u:first-child{border-top:0}
+.wn-u:hover{background:var(--panel2);color:var(--frost)}
+.wn-u-art{width:44px;height:58px;border-radius:8px;object-fit:cover;background:var(--panel2)}
+.wn-u-fb{display:grid;place-items:center;font:800 15px Figtree,sans-serif;color:var(--muted)}
+.wn-u-t{display:flex;flex-direction:column;min-width:0}
+.wn-u-t strong,.wn-u-t small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wn-u-t strong{font-size:16px}.wn-u-t small{font-size:14px;color:var(--muted)}
+.wn-u-v{max-width:160px;padding:4px 10px;border-radius:999px;background:rgba(52,242,232,.1);color:var(--cyan);font:700 13px Figtree,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wn-more{margin:30px 0 0}.wn-more .btn{display:inline-flex;min-height:46px;font-size:15px}
+@media (max-width:640px){.btn.wn-rss{margin-inline-start:0}.wn-stat{flex:1 1 0;justify-content:center}.wn-bar .btn.wn-rss{flex:1 1 100%;justify-content:center}.wn-u{padding:10px 12px;gap:12px}.wn-u-v{max-width:96px}}
+/* (4.8) A recomp that isn't on RecompLauncher anymore */
+.gone-card{display:grid;grid-template-columns:220px minmax(0,1fr);gap:clamp(20px,3vw,40px);align-items:center;padding:clamp(20px,3vw,34px);margin:0 0 40px;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge)}
+.gone-art{position:relative;aspect-ratio:2/3;border-radius:14px;overflow:hidden;background:var(--panel2)}
+.gone-art img{width:100%;height:100%;object-fit:cover;filter:grayscale(.85) brightness(.75)}
+.gone-fb{display:grid;place-items:center;width:100%;height:100%;font:800 42px Figtree,sans-serif;color:var(--muted)}
+.gone-words{min-width:0}
+.gone-pill{display:inline-flex;align-items:center;min-height:30px;padding:0 12px;border-radius:999px;background:rgba(255,138,128,.12);color:#ff9d94;font:700 13px Figtree,sans-serif;letter-spacing:.06em;text-transform:uppercase}
+.gone-words h1{font-size:clamp(32px,4vw,52px);margin:14px 0 6px;overflow-wrap:anywhere}
+.gone-game{margin:0 0 14px;color:var(--muted);font-size:17px}
+.gone-why{margin:0 0 22px;max-width:640px;color:#dfe6ef}
+.gone-acts{display:flex;gap:10px;flex-wrap:wrap}.gone-acts .btn{display:inline-flex;min-height:48px;padding:0 22px;font-size:16px}
+@media (max-width:640px){.gone-card{grid-template-columns:1fr;text-align:center}.gone-art{width:min(200px,60%);margin:0 auto}.gone-why{margin-inline:auto}.gone-acts{justify-content:center}.gone-acts .btn{flex:1 1 0;justify-content:center}}

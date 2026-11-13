@@ -34,7 +34,7 @@ if (!$L) foreach ($soon as $a) $urls[] = ['/soon/' . rawurlencode((string)$a['id
 $pcCat = json_decode((string)@file_get_contents(__DIR__ . '/pc-catalog.json'), true);
 $pcApps = is_array($pcCat['apps'] ?? null) ? $pcCat['apps'] : [];
 if ($L && $pcApps) {
-    array_push($urls, ['/', '1.0'], ['/all', '0.8'], ['/top', '0.7'], ['/new', '0.7'], ['/consoles', '0.5'], ['/get', '0.6'], ['/how', '0.5'], ['/press', '0.4'], ['/soon', '0.5']);
+    array_push($urls, ['/', '1.0'], ['/all', '0.8'], ['/top', '0.7'], ['/new', '0.7'], ['/whats-new', '0.7'], ['/consoles', '0.5'], ['/get', '0.6'], ['/how', '0.5'], ['/press', '0.4'], ['/soon', '0.5']);
     foreach (['action' => 'action', 'adventure' => 'adventure', 'platformer' => 'platformers', 'racing' => 'racing', 'fighting' => 'fighting', 'shooter' => 'shooters', 'sports' => 'sports', 'rpg' => 'rpg', 'puzzle' => 'puzzle'] as $g => $slug)
         foreach ($pcApps as $a) if (($a['genre'] ?? '') === $g) { $urls[] = ['/' . $slug, '0.6']; break; }
     foreach ($pcApps as $a) {

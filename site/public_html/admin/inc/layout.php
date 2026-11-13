@@ -145,12 +145,12 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'Admin' => [
             ['team.php', 'Team', 'team', [], 0],
-            ['settings.php', 'Settings', 'gear', [], 0],
+            ['settings.php', 'Settings', 'gear', [['settings.php', 'Settings', null], ['digest.php', 'Weekly digest', null]], 0],
         ],
     ];
     // Pages that live under another section's link.
     $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php', 'statcard.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
-        'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
+        'settings.php' => ['digest.php'], 'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
         'hub.php' => ['dev-accounts.php', 'messages.php', 'security.php', 'submissions.php', 'auto.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;

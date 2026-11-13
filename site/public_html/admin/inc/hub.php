@@ -612,6 +612,26 @@ function rs_hub_bulk(string $do, array $ids): array {
     return [$done, $skip];
 }
 
+// (4.8) Published PC submissions (the last 30 days) whose developer hasn't had the "you're live" email
+// yet, newest first: [['sub' => id, 'name', 'to', 'app', 'at']]. Skipped ones stay off.
+function rs_hub_live_queue(): array {
+    $out = []; $seen = [];
+    try {
+        $st = rs_db()->query("SELECT target, detail, at FROM admin_log WHERE action = 'pc-live' AND detail LIKE 'from submission %' AND at > NOW() - INTERVAL 30 DAY ORDER BY id DESC LIMIT 200");
+        foreach ($st->fetchAll() as $r) {
+            if (!preg_match('/^from submission (\d+)/', (string)$r['detail'], $m) || isset($seen[(int)$m[1]])) continue;
+            $sid = (int)$m[1];
+            $seen[$sid] = true;
+            $s = rs_hub_sub($sid);
+            if (!$s || !empty($s[1]['live_mail']) || !empty($s[1]['live_skip'])) continue;
+            $a = rs_pc_app((string)$r['target']);
+            if (!$a || !empty($a['hidden'])) continue;
+            $out[] = ['sub' => $sid, 'name' => (string)$a['name'], 'icon' => (string)$a['icon'], 'to' => rs_inbox_email($s[0], null), 'app' => (string)$a['id'], 'at' => rs_hub_ts((string)$r['at'])];
+        }
+    } catch (Throwable $e) { /* no log yet */ }
+    return $out;
+}
+
 // (4.8) A PC submission with no release yet, straight onto RecompLauncher's Coming Soon: its listing
 // (GitHub facts, art, what they sent), shown as Coming soon, and the catalog written at once. The
 // Coming soon watch tells the Dashboard when a release with files comes out. -> the listing.
