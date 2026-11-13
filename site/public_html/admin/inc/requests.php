@@ -52,9 +52,10 @@ function rs_req_key(string $url): string {
     $host = preg_replace('/^www\./', '', strtolower((string)($u['host'] ?? '')));
     $path = strtolower(trim((string)($u['path'] ?? ''), '/'));
     $path = (string)preg_replace('/\.git$/', '', $path);
-    if (in_array($host, ['github.com', 'codeberg.org'], true)) $path = implode('/', array_slice(explode('/', $path), 0, 2));
     if ($host === 'gitlab.com') $path = (string)preg_replace('#/-/.*$#', '', $path);
-    if ($host === 'sourceforge.net') $path = (string)preg_replace('#^(projects/[^/]+).*$#', '$1', $path);
+    elseif ($host === 'sourceforge.net') $path = (string)preg_replace('#^(projects/[^/]+).*$#', '$1', $path);
+    // GitHub, Codeberg and every other Forgejo/Gitea server: owner/name.
+    else $path = implode('/', array_slice(explode('/', $path), 0, 2));
     return substr($host . '/' . $path, 0, 191);
 }
 
@@ -79,7 +80,21 @@ function rs_req_clean(string $url): ?string {
         foreach ($parts as $p) if (!preg_match('/^[A-Za-z0-9._-]{1,100}$/', $p)) return null;
         return 'https://gitlab.com/' . implode('/', $parts);
     }
-    return null;
+    // (4.9) Beta 44 sends any project's whole link: SourceForge, and Forgejo or Gitea servers (Codeberg,
+    // git.notrexed.dev...). Those are checked in rs_req_add, after the daily limits, by asking the server.
+    if ($host === 'sourceforge.net') {
+        if (count($parts) < 2 || !in_array($parts[0], ['projects', 'p'], true) || !preg_match('/^[a-z0-9-]{2,63}$/', strtolower($parts[1]))) return null;
+        return 'https://sourceforge.net/projects/' . strtolower($parts[1]);
+    }
+    if (!preg_match('/^(?=.{4,100}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/', $host) || count($parts) < 2) return null;
+    if (!preg_match('/^[A-Za-z0-9._-]{1,100}$/', $parts[0]) || !preg_match('/^[A-Za-z0-9._-]{1,100}$/', $parts[1])) return null;
+    return 'https://' . $host . '/' . $parts[0] . '/' . $parts[1];
+}
+
+// A link on some other server: only a Forgejo or Gitea project goes in.
+function rs_req_other_host(string $clean): string {
+    $h = strtolower((string)parse_url($clean, PHP_URL_HOST));
+    return in_array($h, ['github.com', 'gitlab.com', 'sourceforge.net'], true) ? '' : $h;
 }
 
 // The recomp already on RecompLauncher for this link: [app, 'listed' | 'soon'], or null. Hidden
@@ -97,7 +112,7 @@ function rs_req_add(string $url, string $note, string $install, string $version,
     rs_req_tables();
     $db = rs_db();
     $clean = rs_req_clean($url);
-    if ($clean === null) return 'Request a project on GitHub or GitLab.';
+    if ($clean === null) return 'Send the link to the project itself: on GitHub, GitLab, SourceForge, or a Forgejo or Gitea server.';
     $key = rs_req_key($clean);
     if ($known = rs_req_known($key)) return $known[1] === 'soon' ? 'It\'s already in RecompLauncher\'s Coming Soon. Press Notify Me on it to hear when it\'s out.' : 'It\'s already in RecompLauncher.';
     $who = hash('sha256', 'rq|' . $install);
@@ -117,6 +132,7 @@ function rs_req_add(string $url, string $note, string $install, string $version,
     $st = $db->prepare('SELECT id, status FROM pc_requests WHERE url_key = ?');
     $st->execute([$key]);
     $row = $st->fetch();
+    if (!$row && ($oh = rs_req_other_host($clean)) !== '' && !rs_fj_detect($oh, false)) return 'That site isn\'t one we can read projects from. Send a GitHub, GitLab, SourceForge, Forgejo or Gitea link.';
     if ($row) {
         $mine = $db->prepare('SELECT 1 FROM pc_request_asks WHERE request_id = ? AND install = ?');
         $mine->execute([(int)$row['id'], $who]);

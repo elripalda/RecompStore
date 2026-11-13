@@ -861,7 +861,7 @@ function rs_fj_hosts(): array {
 // (4.9) Xarishark: a pasted link to any server is recognized by asking it, not by its name. Forgejo (and
 // Gitea) answer /api/v1/version with {"version": ...}. Public https servers only (never one on a private
 // network); the answer is kept a day either way, and a server that answers joins the list for good.
-function rs_fj_detect(string $host): bool {
+function rs_fj_detect(string $host, bool $remember = true): bool {
     $host = strtolower(trim($host));
     if (!preg_match('/^(?=.{4,100}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/', $host)) return false;
     if (in_array($host, rs_fj_hosts(), true)) return true;
@@ -877,7 +877,7 @@ function rs_fj_detect(string $host): bool {
         $ok = is_array($j) && is_string($j['version'] ?? null) && $j['version'] !== '';
     }
     if (function_exists('rs_kv_put')) rs_kv_put($k, $ok ? '1' : '0');
-    if ($ok) {
+    if ($ok && $remember) {
         $seen = array_filter(array_map('trim', explode(',', (string)rs_setting('forgejo_seen', ''))));
         if (!in_array($host, $seen, true)) { $seen[] = $host; rs_set_setting('forgejo_seen', implode(', ', $seen)); }
     }

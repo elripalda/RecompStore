@@ -46,6 +46,22 @@ try {
     [$ok, $bad] = rs_prq_send_due();
     if ($ok || $bad) echo gmdate('c') . ' sdk prs: sent ' . $ok . ' from the line' . ($bad ? ', ' . $bad . ' back to drafts' : '') . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' sdk prs: ' . $e->getMessage() . "\n"; }
+// (4.9) Forgejo listings move up to the next launcher once it's published on GitHub (not while it's a
+// draft): forgejo_launcher_min_next, e.g. 0.90.0-beta.44, the first launcher with their Easy Setup.
+try {
+    $next = trim((string)rs_setting('forgejo_launcher_min_next', ''));
+    if ($next !== '') {
+        require_once 'admin/inc/betawave.php';
+        $g = rs_lb_gh_latest('windows', 600);
+        if ($g && version_compare((string)$g['version'], $next, '>=')) {
+            rs_set_setting('forgejo_launcher_min', $next);
+            rs_set_setting('forgejo_launcher_min_next', '');
+            rs_log('pc', 'forgejo', 'Forgejo listings now need launcher ' . $next . ' (it is out)');
+            rs_pc_publish();
+            echo gmdate('c') . ' forgejo min -> ' . $next . "\n";
+        }
+    }
+} catch (Throwable $e) { echo gmdate('c') . ' forgejo min: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
 // launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.
