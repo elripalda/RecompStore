@@ -111,6 +111,22 @@ rs_head('Developers');
     <?php if (!$isNew): ?><button class="btn danger" name="action" value="delete" formnovalidate onclick="return confirm('Remove <?= h(addslashes($d['name'])) ?>? Their games stay, without a page.');">Remove</button><?php endif; ?>
   </div>
 </form>
+<?php // (4.10) Their recomps and apps, linked to this developer, so you can see what's connected to them.
+if (!$isNew && $editSlug !== null && isset($devs[$editSlug])):
+    if (!function_exists('rs_pc_apps')) require_once __DIR__ . '/inc/pc.php';
+    $acc = null;
+    try { $st = rs_db()->prepare("SELECT gh_login FROM dev_accounts WHERE slug = ? AND status = 'approved' LIMIT 1"); $st->execute([$editSlug]); $acc = $st->fetchColumn() ?: null; } catch (Throwable $e) { }
+    $theirPc = array_values(array_filter(rs_pc_apps(true), fn($x) => (string)($x['dev'] ?? '') === $editSlug || ($acc && strcasecmp((string)strtok((string)$x['repo'], '/'), (string)$acc) === 0)));
+    $theirPs = $byDev[$editSlug] ?? []; ?>
+<section class="card dev-their">
+  <h2>Connected to <?= h($d['name']) ?> <span class="muted small"><?= count($theirPc) ?> PC recomp<?= count($theirPc) === 1 ? '' : 's' ?><?= $theirPs ? ' · ' . count($theirPs) . ' PS5 app' . (count($theirPs) === 1 ? '' : 's') : '' ?></span></h2>
+  <?php if (!$theirPc && !$theirPs): ?><p class="muted">Nothing linked yet. Pick them on each game's page (Developer), or they're matched by the Author name.</p><?php endif; ?>
+  <ul class="dev-their-list">
+    <?php foreach ($theirPc as $x): ?><li><a href="pc.php?edit=<?= h(rawurlencode((string)$x['id'])) ?>#edit"><?= h($x['name']) ?></a><span class="muted small">PC · <?= h((string)$x['repo']) ?><?= !empty($x['hidden']) ? ' · hidden' : (!empty($x['soon']) ? ' · Coming soon' : '') ?><?= (string)($x['dev'] ?? '') === $editSlug ? '' : ' · from their GitHub' ?></span></li><?php endforeach; ?>
+    <?php foreach ($theirPs as $x): ?><li><a href="edit.php?id=<?= h(rawurlencode((string)$x['id'])) ?>"><?= h($x['name']) ?></a><span class="muted small">PS5<?= $x['hidden'] ? ' · hidden' : '' ?><?= $x['picked'] ? '' : ' · matched by Author' ?></span></li><?php endforeach; ?>
+  </ul>
+</section>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php

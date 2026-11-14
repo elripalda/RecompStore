@@ -311,9 +311,12 @@ function rs_log_translate(int $id): array {
     if ($body === '') throw new RuntimeException('There\'s no note to translate.');
     if (rs_secret_get('prq_ai_key') === '') throw new RuntimeException('Translating needs the Anthropic API key (SDK support, PR queue, Setup).');
     require_once __DIR__ . '/autoadd.php';
-    $d = rs_ai_json(['model' => RS_AUTO_MODEL, 'max_tokens' => 2500, 'messages' => [['role' => 'user', 'content' =>
+    require_once __DIR__ . '/aiuse.php';
+    $tm = rs_ai_model_for('translate');
+    if ($tm === '') throw new RuntimeException('Translating is turned off on Settings > AI usage.');
+    $d = rs_ai_json(['model' => $tm, 'max_tokens' => 2500, 'messages' => [['role' => 'user', 'content' =>
         "A player sent this note with a crash report. Translate it into plain English. Keep technical words, game names, versions, error messages and file paths exactly as they are. If it is already English, return it unchanged and set lang to \"\".\n"
-        . "Answer only with JSON: {\"lang\": \"<the language's name in English, or empty>\", \"en\": \"<the English text>\"}\n\n" . mb_substr($body, 0, 4000)]]]);
+        . "Answer only with JSON: {\"lang\": \"<the language's name in English, or empty>\", \"en\": \"<the English text>\"}\n\n" . mb_substr($body, 0, 4000)]]], 'translate');
     $en = trim((string)($d['en'] ?? ''));
     if ($en === '') throw new RuntimeException('Claude didn\'t send a translation back. Try again.');
     $lang = mb_substr(trim((string)($d['lang'] ?? '')), 0, 40);

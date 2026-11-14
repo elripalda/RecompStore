@@ -315,7 +315,7 @@ function rs_hub_job_state(array $j): array {
         return ['check', ['run', ($at !== '' ? $at : 'Finishing') . ' · ' . $n . ' of ' . count(RS_AUTO_STEPS)], false, $vt];
     }
     // Ready: Claude's verdict, with the live VirusTotal state on top.
-    $note = match ($j['verdict']) { 'good' => ['ok', 'Looks good'], 'skip' => ['bad', 'Claude says don\'t list it'], default => ['warn', 'Look first'] };
+    $note = match ($j['verdict']) { 'good' => ['ok', 'Looks good'], 'skip' => ['bad', 'Checks say don\'t list it'], default => ['warn', 'Look first'] };
     if ($vt[0] === 'bad') $note = ['bad', 'VirusTotal flagged it'];
     elseif ($vt[0] === 'run') $note = ['run', 'VirusTotal checking'];
     elseif ($vt[0] === 'warn' && $note[0] === 'ok') $note = ['warn', 'Look first: ' . rs_hub_short($vt[1])];
@@ -412,8 +412,7 @@ function rs_hub_board(string $store): array {
     foreach ($jobs as $j) {
         [$col, $note] = rs_hub_job_state($j);
         $a = $j['app_id'] !== '' ? rs_pc_app($j['app_id']) : null;
-        if ($col === 'ready' && $a && $note[0] !== 'bad' && ($same = rs_hub_same_game($a)))
-            $note = ['warn', 'Same game already listed: ' . $same[0]['name'] . (count($same) > 1 ? ' +' . (count($same) - 1) : '')];
+        // (4.10) Another developer's version of the same game is no reason to hold one back: more choice is better.
         $sub = !empty($j['sub_id']) ? ($subById[(int)$j['sub_id']]['d'] ?? null) : null;
         $item = $sub !== null ? 'sub:' . (int)$j['sub_id'] : 'job:' . (int)$j['id'];
         $src = rs_hub_job_src($j);

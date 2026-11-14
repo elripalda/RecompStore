@@ -1,0 +1,23 @@
+/* RecompStore admin (4.10): Settings > AI usage */
+.au-head{margin:4px 0 16px}
+.au-head h1{margin:0 0 4px}
+.au-head p{margin:0;max-width:820px}
+.au-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+.au-days h2,.au-set h2{margin:0 0 12px}
+.au-bars{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:6px;align-items:end;height:140px}
+.au-bar{display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.au-bar span{display:block;width:100%;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,var(--cyan),rgba(52,242,232,.35))}
+.au-bar small{font-size:11px;color:var(--muted)}
+.au-table{width:100%;border-collapse:collapse;font-size:14px}
+.au-table th,.au-table td{padding:9px 10px;border-top:1px solid var(--line);text-align:left}
+.au-table th{border-top:0;color:var(--muted);font-weight:600;font-size:13px}
+.au-table td:nth-child(n+3),.au-table th:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}
+.au-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 20px}
+.au-grid label,.au-prices label{margin:0;text-align:left}
+.au-check{display:flex!important;flex-direction:row!important;align-items:center;gap:8px;grid-column:1/-1}
+.au-prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.au-prices fieldset{margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:14px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.au-prices legend{padding:0 6px;font-weight:700}
+.au-foot{display:flex;justify-content:flex-end;margin-top:14px}
+@media (max-width:1000px){.au-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.au-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.au-prices{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){.au-grid{grid-template-columns:minmax(0,1fr)}.au-prices fieldset{grid-template-columns:repeat(2,minmax(0,1fr))}.au-table th:nth-child(2),.au-table td:nth-child(2){display:none}}

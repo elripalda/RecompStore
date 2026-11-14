@@ -248,6 +248,14 @@ try {
     }
     $db->commit();
     $db->query("SELECT RELEASE_LOCK('rs_inbox')");
+    // (4.10) A PC submission starts its checks straight away (Auto-add: hidden draft, VirusTotal, ClamAV, a
+    // look inside, art), written from the developer's own answers. Nothing goes live until someone publishes it.
+    if (($d['platform'] ?? '') === 'pc' && !$fixRow && rs_setting('sub_autostart', '1') === '1') {
+        try {
+            require_once dirname(__DIR__) . '/admin/inc/autoadd.php';
+            rs_auto_start(rs_host_web($repoHost, $d['repo']), 'Submission', true, $id);
+        } catch (Throwable $e) { /* it waits on the board for Approve and check */ }
+    }
     // (3.8) A confirmation to the developer: it arrived, how long a review takes, and where to ask.
     try {
         if (filter_var($d['contact'], FILTER_VALIDATE_EMAIL) && function_exists('rs_mailq_add') && rs_mail_ready()) {

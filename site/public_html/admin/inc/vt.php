@@ -533,6 +533,12 @@ function rs_vt_promote(): void {
                 $a['pending']['told'] = gmdate('c');
                 rs_pc_save($a);
                 rs_log('security', $a['id'], 'held: ' . $p['tag'] . ' was flagged');
+                // (4.10) The developer hears about it too, once per release.
+                try {
+                    rs_pc_dev_notify($a, 'vt:' . $p['tag'], 'Your update to ' . $a['name'] . ' is on hold',
+                        'Our security scan (VirusTotal) flagged a file in ' . $a['name'] . ' ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now and players keep the version before it.' . "\n\n"
+                        . 'This is often a false alarm for programs that aren\'t code-signed. We\'ll look at it soon. If you can, check the scan of your release on VirusTotal and let us know what you find.');
+                } catch (Throwable $e) { /* the owner was told either way */ }
                 try {
                     if (function_exists('rs_mail_ready') && rs_mail_ready()) rs_mail_send(rs_mail_get('mail_from'), 'Held: ' . $a['name'] . ' ' . $p['version'],
                         'VirusTotal flagged the new release of ' . $a['name'] . ' (' . $p['tag'] . '). Players keep the version before it until you look at it.' . "\n\n" . rs_abs('/admin/security.php'));

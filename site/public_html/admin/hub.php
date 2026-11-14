@@ -154,7 +154,7 @@ function hub_watch_row(array $f, bool $tagStore = false): string {
         . '<a class="sh-link" href="' . h($web) . '" target="_blank" rel="noopener noreferrer">' . h(rs_repo_key($f['host'], $f['repo'])) . ' ' . HUB_IC['ext'] . '</a>'
         . '<p>' . h($f['why']) . ($f['state'] === 'dmca' && $f['link'] !== '' ? ' <a href="' . h($f['link']) . '" target="_blank" rel="noopener noreferrer">Read the notice</a>' : '') . '</p>'
         . '<small class="muted">' . ($since ? 'Since ' . h(rs_date('M j, g:i a', $since)) . ' · ' : '') . 'checked ' . h(rs_hub_ago_long(rs_hub_ts($f['checked']))) . '</small>'
-        . ($f['homes'] ? '<div class="sh-whomes"><span>Possible new home' . (count($f['homes']) > 1 ? 's' : '') . ':</span>' . implode('', array_map(fn($x) => '<button type="button" class="small" data-act="watch_move" data-to="' . h($x['repo']) . '" title="' . h(($x['via'] === 'fork' ? 'A fork noted while the repo was up' : 'A copy with the same name') . ($x['pushed'] !== '' ? ', last updated ' . $x['pushed'] : '') . '. Check it\'s the same project first.') . '">' . h($x['repo']) . ($x['stars'] ? ' · ★' . (int)$x['stars'] : '') . '</button>', $f['homes'])) . '</div>' : '')
+        . ($f['homes'] ? '<div class="sh-whomes"><span>Possible new home' . (count($f['homes']) > 1 ? 's' : '') . ':</span>' . implode('', array_map(fn($x) => '<span class="sh-whome"><a class="sh-whome-open" href="https://github.com/' . h($x['repo']) . '" target="_blank" rel="noopener" title="Open it on GitHub to check it\'s the same project">' . h($x['repo']) . ($x['stars'] ? ' · ★' . (int)$x['stars'] : '') . ' ↗</a><button type="button" class="small" data-act="watch_move" data-confirm="Click again to switch to ' . h($x['repo']) . '" data-to="' . h($x['repo']) . '" title="' . h(($x['via'] === 'fork' ? 'A fork noted while the repo was up' : 'A copy with the same name') . ($x['pushed'] !== '' ? ', last updated ' . $x['pushed'] : '') . '. Check it\'s the same project first.') . '">Use this repo</button></span>', $f['homes'])) . '</div>' : '')
         . '<form class="sh-row sh-wmove" data-form="watch_move" hidden><input type="hidden" name="item" value="w:' . h($f['store']) . ':' . h($f['id']) . '">'
         . '<input name="to" class="mono" placeholder="' . ($f['store'] === 'pc' ? 'github.com/owner/name, gitlab.com/group/project or sourceforge.net/projects/name' : 'github.com/owner/name') . '" required>'
         . '<button class="primary">Point it there</button><button type="button" data-watch-move>Cancel</button></form></div>'
@@ -354,6 +354,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['msg'] = count($names) . ' live on RecompLauncher: ' . implode(', ', array_slice($names, 0, 5)) . (count($names) > 5 ? ' and ' . (count($names) - 5) . ' more' : '') . '.';
                 break;
             }
+            // (4.10) A draft that didn't finish because there's no build yet: it waits on Coming Soon.
+            case 'job_soon': {
+                $j = $needJob();
+                require_once __DIR__ . '/inc/rules.php';
+                $l = rs_repo_from_link((string)$j['link']);
+                if (!$l) throw new RuntimeException('It has no repo to list.');
+                $subD = !empty($j['sub_id']) && ($s0 = rs_hub_sub((int)$j['sub_id'])) ? $s0[1] : [];
+                $a = rs_hub_soon_add((int)($j['sub_id'] ?? 0), array_merge(['platform' => 'pc'], $subD, ['host' => rs_host_norm((string)$l['host']), 'repo' => (string)$l['repo']]));
+                if (!empty($j['sub_id']) && $subD) { $subD['handled'] = ['reason' => 'Added to Coming Soon', 'at' => gmdate('c'), 'by' => rs_me_name()]; $subD['soon_app'] = (string)$a['id']; rs_hub_sub_save((int)$j['sub_id'], $subD, 'done'); }
+                rs_auto_set((int)$j['id'], ['status' => 'dismissed', 'app_id' => (string)$a['id'], 'notes' => 'Put on Coming Soon']);
+                rs_log('hub', 'soon', (string)$a['name']);
+                $res['msg'] = $a['name'] . ' is on Coming Soon. When a release with a download comes out, it shows on the Dashboard.';
+                $res['close'] = true;
+                break;
+            }
+            // (4.10) Rules wrote it; a person wants Claude to write the page instead (counts against the AI budget).
+            case 'again_ai': {
+                $j = $needJob();
+                if (in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) > time() - RS_AUTO_STUCK) throw new RuntimeException('It\'s still running.');
+                require_once __DIR__ . '/inc/aiuse.php';
+                if (rs_ai_model_for('ondemand') === '') throw new RuntimeException('"Write it with AI" is off on Settings > AI usage.');
+                rs_ai_budget_ok();
+                rs_kv_put('auto_ai_' . (int)$j['id'], '1');
+                rs_auto_again((int)$j['id']);
+                $res['msg'] = 'Running it again with AI writing the page.';
+                break;
+            }
             case 'again': {
                 $j = $needJob();
                 if (in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) > time() - RS_AUTO_STUCK) throw new RuntimeException('It\'s still running.');
@@ -487,9 +514,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rs_req_delete((int)$rq['id']);
                     $res['msg'] = 'Deleted.';
                 } elseif ($act === 'req_add') {
-                    rs_auto_start((string)$rq['url'], rs_me_name() . ' · request');
-                    rs_req_mark((int)$rq['id'], 'added');
-                    $res['msg'] = 'Checking it now. It\'s on the Board under Checking.';
+                    // (4.10) Rules first: no time spent on what isn't a recomp, Coming Soon for one with no build yet.
+                    require_once __DIR__ . '/inc/rules.php';
+                    $rc = rs_rules_check((string)$rq['url']);
+                    $why = implode('. ', array_map(fn($x) => $x[1], $rc['reasons'] ?? []));
+                    if (empty($rc['ok']) && $rc['verdict'] !== 'listed') { $res['msg'] = 'Couldn\'t check it: ' . $why . '. It stays on the list.'; }
+                    elseif ($rc['verdict'] === 'listed') { rs_req_mark((int)$rq['id'], 'listed'); $res['msg'] = $why . '. Marked added.'; }
+                    elseif ($rc['verdict'] === 'skip') { rs_req_mark((int)$rq['id'], 'declined'); $res['msg'] = 'Not for RecompLauncher: ' . $why . '. Marked declined (put it back with "Back on the list" if that\'s wrong).'; }
+                    elseif ($rc['verdict'] === 'soon' && ($rc['kind'] ?? '') === 'recomp') {
+                        $l = rs_repo_from_link((string)$rq['url']);
+                        $a = rs_hub_soon_add(0, ['platform' => 'pc', 'host' => rs_host_norm((string)$l['host']), 'repo' => (string)$l['repo']]);
+                        rs_req_mark((int)$rq['id'], 'added');
+                        $res['msg'] = 'No build yet, so ' . $a['name'] . ' is on Coming Soon. It moves up when a release with a download comes out.';
+                    } else {
+                        rs_auto_start((string)$rq['url'], rs_me_name() . ' · request');
+                        rs_req_mark((int)$rq['id'], 'added');
+                        $res['msg'] = 'Checking it now (' . $why . '). It\'s on the Board under Checking.';
+                    }
                 } else {
                     $to = (string)($_POST['to'] ?? '');
                     if (!isset(RS_REQ_STATUS[$to])) throw new RuntimeException('Pick what happened to it.');

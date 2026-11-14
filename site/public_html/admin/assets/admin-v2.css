@@ -180,3 +180,11 @@ table{font-size:13px}
 .login-acct .who b{display:block}
 .login-acct button,.login-acct .btn{width:100%;justify-content:center}
 .pl-acts form:last-child:nth-child(odd){grid-column:1/-1} /* (4.8) an odd last button takes the whole row */
+
+/* (4.10) Developer ↔ game links */
+.pc-devline{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:-4px 0 14px;font-size:14px}
+.dev-their h2{margin:0 0 10px}
+.dev-their-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}
+.dev-their-list li{display:flex;flex-direction:column;padding:8px 10px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.dev-their-list .small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:700px){.dev-their-list{grid-template-columns:minmax(0,1fr)}}

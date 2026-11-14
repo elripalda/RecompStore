@@ -374,6 +374,15 @@ function rs_watch_save(array $t, ?array $r, string $err = '', array $extra = [])
     if ($changed && (($old && $old['state'] !== 'unk') || $state !== 'ok'))
         $db->prepare('INSERT INTO repo_watch_log (at, store, app_id, name, repo, state, why) VALUES (NOW(), ?, ?, ?, ?, ?, ?)')
             ->execute([$t['store'], $t['id'], mb_substr($t['name'], 0, 160), mb_substr($t['repo'], 0, 200), $state, mb_substr($why, 0, 600)]);
+    // (4.10) A PC repo that went down: its developer hears about it once (not for a takedown: they know).
+    if ($changed && $t['store'] === 'pc' && in_array($state, ['gone', 'private', 'norel'], true) && $old && $old['state'] === 'ok') {
+        try {
+            $pa = rs_pc_app((string)$t['id']);
+            if ($pa) rs_pc_dev_notify($pa, 'watch:' . $state . ':' . gmdate('Y-m'), $pa['name'] . ': we can\'t reach its downloads',
+                'We check every listed recomp\'s repo twice a day, and ' . $t['repo'] . ' ' . ['gone' => 'can\'t be found anymore (deleted, renamed or made private)', 'private' => 'is private now', 'norel' => 'has no releases anymore'][$state] . '.' . "\n\n"
+                . 'If you moved it, reply with the new link, or use "Moved to a new repo?" in your developer hub, and we\'ll switch ' . $pa['name'] . ' over.');
+        } catch (Throwable $e) { }
+    }
     return $changed && rs_watch_level($state) !== '' ? $state : '';
 }
 

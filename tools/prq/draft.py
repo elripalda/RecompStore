@@ -34,6 +34,24 @@ AKEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GHT = os.environ.get("GITHUB_TOKEN", "")
 COUNT = int(os.environ.get("PRQ_COUNT", "8") or 8)
 MODEL = os.environ.get("PRQ_MODEL", "claude-sonnet-5-5")
+# (4.10) Tokens used per project, sent back with its draft so the site can count the cost (Settings > AI usage).
+import threading
+USAGE = {}
+USAGE_LOCK = threading.Lock()
+
+
+def note_usage(pid, j):
+    u = (j or {}).get("usage") or {}
+    with USAGE_LOCK:
+        t = USAGE.setdefault(str(pid), {"model": MODEL, "calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0})
+        t["calls"] += 1
+        for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+            t[k] += int(u.get(k) or 0)
+
+
+def take_usage(pid):
+    with USAGE_LOCK:
+        return USAGE.pop(str(pid), None)
 IDS = os.environ.get("PRQ_IDS", "")  # Draft now on SDK support: just these recomps
 WORKERS = max(1, min(6, int(os.environ.get("PRQ_WORKERS", "3") or 3)))  # drafts made side by side
 SPEC_URL = "https://recomplauncher.com/sdk-files/recomplauncher-agent.md"
@@ -311,6 +329,7 @@ def ask(spec, p, ctx, fix=None):
                      headers={"x-api-key": AKEY, "anthropic-version": "2023-06-01"})
         if st == 200:
             j = json.loads(b)
+            note_usage(p.get("id"), j)
             text = "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text")
             m = re.search(r"\{.*\}", text, re.S)
             if not m:
@@ -485,7 +504,9 @@ def code_pass(spec, p, ctx, doc, validator):
         if st != 200:
             print(f"code pass {p['repo']}: model call failed ({st})")
             return None
-        text = "".join(c.get("text", "") for c in json.loads(b).get("content", []) if c.get("type") == "text")
+        jj = json.loads(b)
+        note_usage(p.get("id"), jj)
+        text = "".join(c.get("text", "") for c in jj.get("content", []) if c.get("type") == "text")
         m = re.search(r"\{.*\}", text, re.S)
         try:
             d = json.loads(m.group(0)) if m else None
@@ -637,7 +658,7 @@ def draft_one(p, todo, spec, validator):
         ctx = context(p)
         d, raw = ask(spec, p, ctx)
         if d.get("skip"):
-            site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": d.get("skip_reason", "")})
+            site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": d.get("skip_reason", ""), "usage": take_usage(p["id"])})
             print(f"skip {p['repo']}: {d.get('skip_reason')}")
             return 0
         doc = d.get("recomplauncher_json")
@@ -669,12 +690,13 @@ def draft_one(p, todo, spec, validator):
             payload["note"] = (note + "\n\nGame location: uses its own " + str(code["existing"].get("how", "")) + (" (" + str(code["existing"]["where"]) + ")" if code["existing"].get("where") else "") + ", so no code change.").strip()
         elif code and code.get("notes"):
             payload["note"] = (note + "\n\nNo code changes: " + code["notes"]).strip()
+        payload["usage"] = take_usage(p["id"])
         st, r = site("POST", "draft", payload)
         print(("drafted " if r.get("ok") else "not saved ") + p["repo"] + ("" if r.get("ok") else f": {r.get('error')}"))
         return 1 if r.get("ok") else 0
     except Exception as e:
         print(f"error {p['repo']}: {e}")
-        site("POST", "fail", {"id": p["id"], "error": str(e)[:300]})
+        site("POST", "fail", {"id": p["id"], "error": str(e)[:300], "usage": take_usage(p["id"])})
         return 0
 
 
@@ -686,6 +708,13 @@ def main():
     if st != 200 or not todo.get("ok"):
         sys.exit(f"The site said no ({st}): {todo.get('error')}")
     picks = todo.get("picks", [])
+    # (4.10) The site says which model (Settings > AI usage) and whether today's budget has room.
+    global MODEL
+    if not os.environ.get("PRQ_MODEL") and todo.get("model"):
+        MODEL = todo["model"]
+    if todo.get("budget_ok") is False:
+        print("today's AI budget is used up; nothing drafted")
+        return
     print(time.strftime("%Y-%m-%d %H:%M:%S"), f"{len(picks)} to draft, {min(WORKERS, max(1, len(picks)))} at a time")
     if not picks:
         return

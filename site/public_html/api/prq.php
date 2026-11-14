@@ -21,18 +21,26 @@ $a = (string)($_GET['a'] ?? '');
 try {
     if ($a === 'todo' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $ids = array_values(array_filter(array_map('trim', explode(',', (string)($_GET['ids'] ?? '')))));
-        $out(200, ['ok' => true, 'title' => RS_PRQ_TITLE, 'what' => RS_PRQ_WHAT, 'picks' => $ids ? rs_prq_by_ids($ids) : rs_prq_targets((int)($_GET['n'] ?? 8))]);
+        // (4.10) The model from Settings > AI usage, and whether today's budget has room.
+        require_once dirname(__DIR__) . '/admin/inc/aiuse.php';
+        $pm = rs_ai_model_for('prq');
+        $okBudget = $pm !== '';
+        try { rs_ai_budget_ok(); } catch (Throwable $e) { $okBudget = false; }
+        $out(200, ['ok' => true, 'title' => RS_PRQ_TITLE, 'what' => RS_PRQ_WHAT, 'model' => $pm, 'budget_ok' => $okBudget,
+            'picks' => !$okBudget ? [] : ($ids ? rs_prq_by_ids($ids) : rs_prq_targets((int)($_GET['n'] ?? 8)))]);
     }
     if ($a === 'draft' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $raw = (string)file_get_contents('php://input', false, null, 0, 400000);
         $d = json_decode($raw, true);
         if (!is_array($d)) $out(400, ['ok' => false, 'error' => 'Send the draft as JSON.']);
+        if (is_array($d['usage'] ?? null)) { require_once dirname(__DIR__) . '/admin/inc/aiuse.php'; rs_ai_record_n('prq', (string)($d['usage']['model'] ?? ''), $d['usage']); }
         $r = rs_prq_draft_save($d);
         $out($r['ok'] ? 200 : 422, $r);
     }
     if ($a === 'fail' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $d = json_decode((string)file_get_contents('php://input', false, null, 0, 20000), true);
         if (is_array($d)) rs_prq_fail((string)($d['id'] ?? ''), (string)($d['error'] ?? ''));
+        if (is_array($d['usage'] ?? null)) { require_once dirname(__DIR__) . '/admin/inc/aiuse.php'; rs_ai_record_n('prq', (string)($d['usage']['model'] ?? ''), $d['usage']); }
         $out(200, ['ok' => true]);
     }
     if ($a === 'touch' && $_SERVER['REQUEST_METHOD'] === 'POST') {

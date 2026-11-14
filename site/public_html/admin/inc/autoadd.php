@@ -276,19 +276,32 @@ function rs_auto_run(int $id): void {
         } else rs_auto_step($id, 'clam', 'skip', $tmp === '' ? 'Nothing downloaded to scan' : 'ClamAV isn\'t installed');
         if ($tmp !== '') @unlink($tmp);
 
-        // 5. Claude writes the page and the boot profile.
+        // 5. The page and the boot profile. (4.10) By rules from the submission and the README unless
+        // Settings > AI usage turns Claude on for Auto-add (or a person asks: "Write it with AI").
         $cur = 'ai';
         $a = rs_pc_app($a['id']);
-        if (rs_secret_get('prq_ai_key') === '') {
-            rs_auto_step($id, 'ai', 'skip', 'Add the Anthropic API key on SDK support (PR queue, Setup) for this step');
-            rs_auto_step($id, 'easy', 'skip', 'Needs the Claude step');
-            rs_auto_step($id, 'settings', 'skip', 'Needs the Claude step');
-            $d = null;
+        require_once __DIR__ . '/aiuse.php';
+        $fk = rs_kv_get('auto_ai_' . $id);
+        if ($fk && $fk['v'] === '1') { $GLOBALS['rs_auto_force_ai'] = true; rs_kv_put('auto_ai_' . $id, '0'); }
+        $aiModel = !empty($GLOBALS['rs_auto_force_ai']) ? rs_ai_model_for('ondemand') : rs_ai_model_for('autoadd');
+        if ($aiModel === '' || rs_secret_get('prq_ai_key') === '') {
+            require_once __DIR__ . '/rules.php';
+            $rd = rs_pc_readme((string)$f['repo'], $host, 3600);
+            $sub = rs_auto_sub($job);
+            $d = rs_rules_fill($a, $f, (string)($rd['md'] ?? ''), $names, $sub);
+            $a = rs_auto_apply($a, $d);
+            if ($sub && trim((string)($sub['credits'] ?? '')) !== '' && trim((string)($a['credits'] ?? '')) === '') $a['credits'] = mb_substr(trim((string)$sub['credits']), 0, 1000);
+            // A developer's own recomplauncher.json does Easy Setup and settings; RecompLauncher reads it from their release.
+            rs_pc_save($a);
+            $concerns = array_merge($concerns, array_map('strval', (array)($d['concerns'] ?? [])));
+            rs_auto_step($id, 'ai', $d['concerns'] ? 'warn' : 'ok', $a['name'] . ' · ' . $a['game'] . ' · ' . (RS_PC_ORIGINS[$a['origin']] ?? 'console not found') . ' · written ' . ($sub ? 'from the submission' : 'from the README') . ', no AI');
+            rs_auto_step($id, 'easy', 'skip', 'Set it on the listing, or from the developer\'s own recomplauncher.json');
+            rs_auto_step($id, 'settings', 'skip', 'Set by hand, or from the developer\'s own recomplauncher.json');
         } else {
             rs_auto_step($id, 'ai', 'run', 'Reading the README and the release');
             $rd = rs_pc_readme((string)$f['repo'], $host, 3600);
             $sub = rs_auto_sub($job);
-            $d = rs_auto_ai($a, $f, $latest ?: [], (string)($rd['md'] ?? ''), $names, $sub);
+            $d = rs_auto_ai($a, $f, $latest ?: [], (string)($rd['md'] ?? ''), $names, $sub, $aiModel);
             $a = rs_auto_apply($a, $d);
             // From a submission: the developer's own credits and links, which the README may not have.
             if ($sub) {
@@ -383,7 +396,7 @@ Answer with one JSON object and nothing else:
 SDK guide:
 ';
 
-function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $names, array $sub = []): array {
+function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $names, array $sub = [], string $model = RS_AUTO_MODEL): array {
     $user = [
         'repo' => $f['repo'], 'description' => $f['description'] ?? '', 'stars' => $f['stars'] ?? 0, 'license' => $f['license'] ?? '', 'topics' => $f['topics'] ?? [],
         'fork' => !empty($f['fork']), 'archived' => !empty($f['archived']),
@@ -402,15 +415,18 @@ function rs_auto_ai(array $a, array $f, array $latest, string $readme, array $na
             if (isset($sub[$k]) && $sub[$k] !== '' && $sub[$k] !== []) $keep[$k] = is_string($sub[$k]) ? mb_substr($sub[$k], 0, 4000) : $sub[$k];
         $user['developer_submission'] = $keep;
     }
-    $body = ['model' => RS_AUTO_MODEL, 'max_tokens' => 8000,
+    $body = ['model' => $model, 'max_tokens' => 8000,
         'system' => [['type' => 'text', 'text' => RS_AUTO_SYSTEM . rs_auto_spec(), 'cache_control' => ['type' => 'ephemeral']]],
         'messages' => [['role' => 'user', 'content' => "Curate this project for RecompLauncher.\n\n" . json_encode($user, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]]];
-    return rs_ai_json($body);
+    return rs_ai_json($body, !empty($GLOBALS['rs_auto_force_ai']) ? 'ondemand' : 'autoadd');
 }
 
 // One call to Claude with the Anthropic key from SDK support; the JSON it answers with. Busy or overloaded
 // answers are tried again a few times.
-function rs_ai_json(array $body) {
+function rs_ai_json(array $body, string $feature = 'autoadd') {
+    // (4.10) Counted, and stopped once today's budget is used up (Settings > AI usage).
+    require_once __DIR__ . '/aiuse.php';
+    rs_ai_budget_ok();
     for ($try = 0; $try < 3; $try++) {
         $c = curl_init('https://api.anthropic.com/v1/messages');
         curl_setopt_array($c, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300, CURLOPT_CONNECTTIMEOUT => 20,
@@ -421,6 +437,7 @@ function rs_ai_json(array $body) {
         curl_close($c);
         if ($code === 200) {
             $j = json_decode($res, true) ?: [];
+            rs_ai_record($feature, (string)($body['model'] ?? ''), (array)($j['usage'] ?? []));
             $text = '';
             foreach ((array)($j['content'] ?? []) as $p) if (($p['type'] ?? '') === 'text') $text .= $p['text'];
             if (preg_match('/[\[{].*[\]}]/s', $text, $m) && is_array($d = json_decode($m[0], true))) return $d;

@@ -3709,6 +3709,14 @@
     const hostSay = (ghText, glText, sfText, fjText) => byHost(a.host, ghText, glText, sfText, fjText);
     const fjAt = fjServer(a.repo);
     const gh = esc(repoWeb(a.repo, a.host)), ghLatest = esc(repoLatest(a.repo, a.host)), ghRels = esc(repoReleases(a.repo, a.host)), ghIssues = esc(repoIssues(a.repo, a.host));
+    // (4.10) What it does in RecompLauncher, from the catalog's support list.
+    const SUP = [['easy_setup', t('Easy Setup'), t('Pick your own copy once and press Play')], ['settings', t('Settings in the launcher'), t('Its options on one screen')],
+      ['saves', t('Save backups'), t('Saves kept safe and moved between PCs')], ['prepare', t('Setup step'), t('Run for you the first time')],
+      ['verified', t('Checks your copy'), t('A bad dump is caught before it runs')], ['mods', t('Mods'), t('Installed from the launcher')]];
+    const sup = a.support || null;
+    const supHas = sup ? SUP.filter(([k]) => sup[k]) : [];
+    const supCard = supHas.length ? `<section class="glass pc-side-card pc-sup"><h2>${t('In RecompLauncher')}</h2><ul>${SUP.map(([k, n, w]) => `<li class="${sup[k] ? 'on' : 'off'}"><strong>${n}</strong><span>${sup[k] ? w : t('Not yet')}</span></li>`).join('')}</ul>
+      ${sup.sdk === 'repo' || sup.sdk === 'release' ? `<p class="pc-sup-by">${t('Set up by its developer')}</p>` : ''}</section>` : '';
     const feats = (a.features || []).length ? `<section class="glass pc-side-card pc-feats"><h2>${t("What's in it")}</h2><ul>${a.features.map((f) => `<li dir="auto">${featIcon(f)}<span>${esc(f)}</span></li>`).join('')}</ul></section>` : '';
     const ab = a.about || null;
     const abYear = ab && ab.released ? new Date(ab.released + 'T12:00:00Z') : null;
@@ -3793,6 +3801,7 @@
               <p class="note">${hostSay(t('Each download comes straight from the developer\'s own GitHub release.'), t('Each download comes straight from the developer\'s own GitLab release.'), t('Each download comes straight from the developer\'s own SourceForge files.'), tf('Each download comes straight from the developer\'s own releases on {site}.', { site: fjAt }))}</p>
             </div>
             ${feats}
+            ${supCard}
             ${gameCard}
             ${about}
           </aside>
@@ -5476,6 +5485,16 @@
     const pcUpdHtml = (a) => a.upd ? `<div class="hub-upd hub-upd-${esc(a.upd.state)}" data-upd="${esc(a.id)}">
         <span class="hub-upd-dot" aria-hidden="true"></span><p>${esc(a.upd.text)}</p>
         <button type="button" class="btn small" data-upd-check="${esc(a.id)}">${t('Check for my new release now')}</button><span class="status" role="status"></span></div>` : '';
+    // (4.10) Which launcher features it has and who made each work, with the way to add the rest.
+    const pcFeatHtml = (a) => {
+      if (!a.feat || !(a.feat.list || []).length) return '';
+      const by = { dev: t('From your recomplauncher.json'), launcher: t('Set up by RecompLauncher for now') };
+      const has = a.feat.list.filter((f) => f.by).length;
+      return `<details class="hub-feat"><summary><span>${t('Launcher features')}</span><b>${tf('{n} of {all}', { n: has, all: a.feat.list.length })}</b></summary>
+        <ul>${a.feat.list.map((f) => `<li class="${f.by ? 'on' : 'off'}"><strong>${esc(t(f.name))}</strong><span>${esc(f.by ? by[f.by] || '' : t(f.what))}</span></li>`).join('')}</ul>
+        <p class="muted">${a.feat.json === 'repo' || a.feat.json === 'release' ? t('Found your recomplauncher.json. Add the parts that aren\'t ticked yet to it.') : t('Ticks marked "for now" come from our own profile. A recomplauncher.json in your repo or release makes them yours, and adds the rest.')}
+          <a href="/pc/sdk" target="_blank" rel="noopener">${t('How to add them')}</a></p></details>`;
+    };
     const wireUpd = (list) => pane().querySelectorAll('[data-upd-check]').forEach((b) => b.addEventListener('click', () => {
       const box = b.closest('.hub-upd'), st = box.querySelector('.status');
       b.disabled = true; st.textContent = t('Looking…');
@@ -5501,7 +5520,7 @@
             <dl class="hub-stats">
               <div><dt>${t('GitHub downloads')}</dt><dd>${num(a.stats.downloads)}</dd></div><div><dt>${t('Plays great')}</dt><dd>${num(a.stats.runs)}</dd></div>
               <div><dt>${t('Has problems')}</dt><dd>${num(a.stats.issues)}</dd></div><div><dt>${t("Won't run")}</dt><dd>${num(a.stats.broken)}</dd></div></dl>
-            ${pcUpdHtml(a)}
+            ${pcUpdHtml(a)}${pcFeatHtml(a)}
             <details><summary>${data.canEdit ? t('Edit its page') : t('Suggest changes to its page')}</summary>
               <form class="form hub-change" data-pc="${esc(a.id)}" novalidate>
                 ${data.canEdit ? `<p class="muted">${t('Your words go on its page right away. New pictures wait for a quick look first, usually within a day.')}</p>${pcPicsHtml(a)}` : ''}

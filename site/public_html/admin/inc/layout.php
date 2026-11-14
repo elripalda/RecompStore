@@ -80,11 +80,25 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     // (4.8) The Submissions hub: what's waiting on someone in the stores this login works on, and flags.
     $hubN = 0; $flagN = 0;
     if (rs_can_page('hub.php')) {
+        // (4.10) One per card that needs a person: a submission and its draft count once, and a submission
+        // whose checks are still running, or that was dismissed, doesn't count yet.
         try {
             $mineS = rs_me()['stores_list'] ?? [];
-            foreach (rs_db()->query("SELECT data FROM inbox WHERE kind = 'submit' AND status = 'new'") as $x) { $dd = json_decode((string)$x['data'], true); if (is_array($dd) && in_array(($dd['platform'] ?? '') === 'pc' ? 'pc' : 'ps5', $mineS, true)) $hubN++; }
+            $cards = [];
+            $busy = [];
+            if (rs_has_store('pc')) {
+                foreach (rs_db()->query("SELECT id, sub_id, status FROM pc_auto WHERE status IN ('queued', 'running', 'review') OR (status LIKE 'shelf-%' AND sub_id > 0) OR (status = 'dismissed' AND sub_id > 0)") as $j) {
+                    if ($j['status'] === 'review') $cards[(int)$j['sub_id'] ? 'sub:' . (int)$j['sub_id'] : 'job:' . (int)$j['id']] = 1;
+                    elseif ((int)$j['sub_id']) $busy[(int)$j['sub_id']] = 1;
+                }
+            }
+            foreach (rs_db()->query("SELECT id, data FROM inbox WHERE kind = 'submit' AND status = 'new'") as $x) {
+                $dd = json_decode((string)$x['data'], true);
+                if (!is_array($dd) || !in_array(($dd['platform'] ?? '') === 'pc' ? 'pc' : 'ps5', $mineS, true)) continue;
+                if (!isset($busy[(int)$x['id']])) $cards['sub:' . (int)$x['id']] = 1;
+            }
+            $hubN = count($cards);
         } catch (Throwable $e) { /* inbox not made yet */ }
-        $hubN += $autoN;
         try {
             if (rs_setting('hub_schema', '') === '1') {
                 if (rs_role_at_least('manager')) $flagN = (int)rs_db()->query("SELECT COUNT(*) FROM hub_flags WHERE status = 'open' AND answer IS NULL")->fetchColumn();
@@ -120,7 +134,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'To do' => [
             // (4.8) Submissions, Auto-add, requests, finds, developers' requests, messages, Security and flags, together.
-            ['hub.php', 'Submissions', 'send', $hubKids, $hubN + $flagN + $reqN + $watchN],
+            ['hub.php', 'Submissions', 'send', $hubKids, $hubN + $flagN + $watchN],
             ['inbox.php', 'Inbox & logs', 'inbox', [], $inboxNew],
             ['roadmap.php', 'Roadmap', 'map', [], 0], // (4.8) the team's features and fixes
         ],
@@ -148,12 +162,12 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'Admin' => [
             ['team.php', 'Team', 'team', [], 0],
-            ['settings.php', 'Settings', 'gear', [['settings.php', 'Settings', null], ['digest.php', 'Weekly digest', null]], 0],
+            ['settings.php', 'Settings', 'gear', [['settings.php', 'Settings', null], ['digest.php', 'Weekly digest', null], ['ai-usage.php', 'AI usage', null]], 0],
         ],
     ];
     // Pages that live under another section's link.
     $also = ['analytics.php' => ['stats.php', 'app-stats.php', 'status.php', 'diag-db.php', 'statcard.php'], 'launcher.php' => ['launcher-upload.php', 'launcher-stats.php', 'launcher-beta.php'],
-        'settings.php' => ['digest.php'], 'sponsors.php' => ['instant-gaming.php'], 'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
+        'settings.php' => ['digest.php', 'ai-usage.php'], 'sponsors.php' => ['instant-gaming.php'], 'players.php' => ['accounts.php', 'mail.php', 'email-asset.php'], 'developers.php' => ['community.php', 'docs.php'], 'index.php' => ['edit.php'],
         'hub.php' => ['dev-accounts.php', 'messages.php', 'security.php', 'submissions.php', 'auto.php']];
     $isOn = function (array $pg) use ($here): bool {
         [$href, , $m] = $pg;
@@ -164,7 +178,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     $me = rs_me();
     $first = mb_strtoupper(mb_substr(rs_me_name(), 0, 1));
     // (4.8) Counts by page, for the pinned column.
-    $GLOBALS['rs_nav_counts'] = ['hub.php' => $hubN + $flagN + $reqN + $watchN, 'submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
+    $GLOBALS['rs_nav_counts'] = ['hub.php' => $hubN + $flagN + $watchN, 'submissions.php' => $subNew, 'auto.php' => $autoN + $reqN, 'dev-accounts.php' => $devReq, 'security.php' => $vtNeed, 'inbox.php' => $inboxNew, 'messages.php' => $devUnread, 'health.php' => $radar];
     ?>
 <body class="adm">
 <input type="checkbox" id="side-open" class="side-check" hidden>

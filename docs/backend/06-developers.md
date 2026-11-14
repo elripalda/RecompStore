@@ -16,6 +16,7 @@ Two separate things that work together:
 
 - See their games with numbers (downloads, player reports, logs players sent).
 - See where each game's newest release stands (`rs_pc_update_status`: out, being scanned, going out, waiting for a look, or no matching file) and press **Check for my new release now** (`api/dev.php a=pc-check`, a few an hour per game), which reads their repo straight away and gives the scan a turn.
+- See which launcher features each game has (`rs_pc_feature_list`, built from the catalog's `support` list: Easy Setup, settings, save backups, setup step, checks the player's copy, mods), marked as from their own recomplauncher.json or set up by our profile for now, with a link to the SDK for the rest. The public game page shows the same list as **In RecompLauncher**.
 - Edit their page and their games' pages. These are **suggested changes** (`dev_changes`, status `pending`) the team approves, except a verified developer's own changes, which go out at once (`rs_pc_publish_one`).
 - Run betas for their own games, see the docs (`dev_docs`), message the team.
 - Submit a new game (it goes into Submissions like any other).
@@ -28,10 +29,20 @@ Requests come from invites the team emailed (`dev_invites`) or from the develope
 
 `dev_messages` (`admin/messages.php`): each developer has one conversation with the team, shown in their hub; the Lounge is a room every approved developer shares. Messages from the Submissions drawer go here when the developer has an account, otherwise by email. `dev_broadcasts` are announcements shown to every developer.
 
+## Emails we send developers on our own
+
+`rs_pc_dev_notify` (`inc/pc.php`) emails the developer (their approved account's address, else the submission's contact) through the mail queue, once per reason (a `kv` key):
+- a release held because several VirusTotal engines flagged a file (`vt:<tag>`, from `inc/vt.php`)
+- their repo went down, private or lost its releases (`watch:<state>:<month>`, from `inc/repowatch.php`)
+
+Each says what happened and how to fix it, with a link to their hub.
+
+## In the admin
+
+A developer's page in the admin (`developers.php?edit=`) lists **Connected to** them: PC recomps with their `dev` slug or on their approved account's GitHub, and PS5 apps. A game's edit page shows its developer (with Verified) or author at the top.
+
 ## Things on the to-do list
 
-- A developer's admin page should list the games linked to them; a game's edit page should show its developer near the top.
-- The hub and game pages should show which launcher features each game supports or is missing (reusing the PR drafter's feature check, with "not needed" where it doesn't apply).
-- Emailing a developer when their release gets flagged (repo gone, safety check), with a link to fix it.
+- Use the PR drafter's feature check (`found.features`, with "not needed") for games that have no recomplauncher.json yet, so the checklist can say what doesn't apply.
 
 Update this list as they're done.

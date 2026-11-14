@@ -332,6 +332,7 @@ try {
                     'ai' => ['v' => (string)($a['ai'] ?? ''), 'uses' => rs_ai_uses_clean($a['ai_uses'] ?? []), 'note' => (string)($a['ai_note'] ?? ''), 'by' => (string)($a['ai_by'] ?? '')], 
                     'unseen' => $unseen[$a['id']] ?? 0,
                     'upd' => rs_pc_update_status($a), // (4.10) where its newest release stands
+                    'feat' => rs_pc_feature_list($a), // (4.10) the launcher features it has, and who made each work
                     'stats' => ['downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'runs' => (int)($fb[$a['id']]['runs'] ?? 0),
                         'issues' => (int)($fb[$a['id']]['issues'] ?? 0), 'broken' => (int)($fb[$a['id']]['broken'] ?? 0)]], $pcApps);
             })(),

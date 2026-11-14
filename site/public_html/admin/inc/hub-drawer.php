@@ -138,7 +138,7 @@ if ($job):
     <?php endforeach; ?>
   </ol>
   <?php $same = $app ? rs_hub_same_game($app) : []; if ($same): ?><div class="sh-d-notes"><b>Already on the store for the same game</b><p><?php foreach ($same as $i => $x): ?><?= $i ? ' · ' : '' ?><a href="pc.php?edit=<?= h(rawurlencode((string)$x['id'])) ?>#edit" target="_blank"><?= h((string)$x['name']) ?></a> <span class="muted">(<?= h(rs_pc_key($x)) ?>)</span><?php endforeach; ?></p><p class="muted small">If this one is a copy or fork of one of them, Remove it. If it's a different project or a different version of the game, it can go up too.</p></div><?php endif; ?>
-  <?php if (trim((string)$job['notes']) !== ''): ?><div class="sh-d-notes"><b><?= $job['verdict'] === 'skip' ? 'Why Claude says not to list it' : 'Worth a look' ?></b><p><?= nl2br(h(trim((string)$job['notes']))) ?></p></div><?php endif; ?>
+  <?php if (trim((string)$job['notes']) !== ''): ?><div class="sh-d-notes"><b><?= $job['verdict'] === 'skip' ? 'Why the checks say not to list it' : 'Worth a look' ?></b><p><?= nl2br(h(trim((string)$job['notes']))) ?></p></div><?php endif; ?>
 </section>
 <?php $vtTag = (string)$job['tag']; $vtFiles = rs_hub_vt_files((string)$job['repo_key'], $vtTag); $vtSec(); ?>
 <?php if ($app && in_array($job['status'], ['review', 'failed'], true)): $canEdit = rs_can_page('pc.php'); ?>
@@ -332,6 +332,19 @@ if ($d !== null): ?>
 // ---- The buttons -------------------------------------------------------------------------------------
 $flagBtn = !$GLOBALS['isOwner'] ? '<button type="button" class="sh-flag" data-open-panel="flag">' . HUB_IC['flag'] . 'Flag for ' . h($GLOBALS['owner']) . '</button>' : '';
 $more = [];
+if ($job && empty($shelved)) {
+    // (4.10) Reach the developer: their hub, an email we have, or their GitHub.
+    if (in_array($job['status'], ['failed', 'review'], true)) {
+        $ca = $job['app_id'] !== '' ? rs_pc_app((string)$job['app_id']) : null;
+        if (!$ca && ($cl0 = rs_repo_from_link((string)$job['link']))) $ca = ['id' => '', 'name' => basename((string)$cl0['repo']), 'repo' => (string)$cl0['repo'], 'host' => rs_host_norm((string)$cl0['host']), 'dev' => '', 'hidden' => true];
+        $cWhy = $job['status'] === 'failed' ? trim((string)$job['notes']) : ((($vt[0] ?? '') === 'bad') ? 'Our security scan (VirusTotal) flagged a file in your newest release. It may well be a false alarm; could you take a look?' : '');
+        if ($ca && ($cls = rs_pc_contact_links($ca, $cWhy))) {
+            echo '<div class="sh-d-contact"><span>Ask the developer</span>';
+            foreach ($cls as [$cL, $cH, $cK]) echo '<a class="btn small" href="' . h($cH) . '"' . ($cK === 'gh' ? ' target="_blank" rel="noopener"' : '') . '>' . h($cL) . '</a>';
+            echo '</div>';
+        }
+    }
+}
 echo '<div class="sh-d-foot main" data-item="' . h($job ? 'job:' . (int)$job['id'] : $item) . '">';
 if ($job && $shelved) {
     // (4.9) Dismissed: back on the board, or gone for good.
@@ -342,8 +355,13 @@ if ($job && $shelved) {
     // once a manager or the owner has looked: "Publish anyway", with a second click.
     if ($job['status'] === 'review' && $vtBad && rs_hub_can_manage()) echo '<button class="primary sh-pub-any" data-act="publish" data-to="force" data-confirm="Flagged. Click again to publish" title="VirusTotal flagged it. Look at the reports above first.">Publish anyway</button>';
     elseif ($job['status'] === 'review') echo '<button class="primary" data-act="publish" data-confirm="Click again to put it live"' . ($vtBad ? ' disabled title="VirusTotal flagged it. Flag it for ' . h($GLOBALS['owner']) . ' to publish it anyway."' : '') . '>Publish</button>';
-    elseif (!$live) echo '<button class="primary" data-act="again">Run it again</button>';
+    elseif (!$live && $job['status'] === 'failed' && preg_match('/no download|no release/i', (string)($job['notes'] ?? ''))) {
+        // (4.10) No build yet: Coming Soon is the obvious next step.
+        echo '<button class="primary" data-act="job_soon" data-confirm="Click again to put it on Coming Soon">Add to Coming Soon</button><button data-act="again">Check again</button>';
+    } elseif (!$live) echo '<button class="primary" data-act="again">Run it again</button>';
     if ($job['status'] === 'review') echo '<button data-act="again">Run again</button>';
+    if ($job['status'] === 'review' && !$live) $more[] = '<button type="button" data-act="again_ai" data-confirm="Uses the AI budget. Click again">Write the page with AI</button>';
+    if ($job['status'] === 'failed' && !preg_match('/no download|no release/i', (string)($job['notes'] ?? ''))) $more[] = '<button type="button" data-act="job_soon" data-confirm="Click again to put it on Coming Soon">Put it on Coming Soon</button>';
     echo $flagBtn;
     if ($job['status'] === 'failed' || $stuck) echo '<button data-act="dismiss">Dismiss</button>';
     elseif (!$live) $more[] = '<button type="button" data-act="dismiss">Dismiss (keep it under Dismissed)</button>';

@@ -72,6 +72,23 @@ Answer with one JSON array and nothing else, one object per project, in the orde
 
 // Claude's call on a few finds at once. -> [key => [pick, kind, game, why]]
 function rs_scout_judge(array $finds): array {
+    // (4.10) Rules first: Claude only when Settings > AI usage turns it on for the scout.
+    require_once __DIR__ . '/aiuse.php';
+    $model = rs_ai_model_for('scout');
+    if ($model === '' || rs_secret_get('prq_ai_key') === '') {
+        require_once __DIR__ . '/rules.php';
+        $out = [];
+        foreach ($finds as $f) {
+            $md = '';
+            try { $md = (string)(rs_pc_readme((string)$f['repo'], (string)$f['host'], 86400)['md'] ?? ''); } catch (Throwable $e) { }
+            $k = rs_rules_kind((string)($f['name'] ?? $f['repo']), (string)($f['description'] ?? ''), $md, (array)($f['topics'] ?? []));
+            $hasBuild = array_filter((array)($f['assets'] ?? []));
+            $pick = $k['kind'] === 'recomp' && $hasBuild && empty($f['archived']);
+            $kind = $k['kind'] === 'recomp' ? ($hasBuild ? 'recomp' : 'no-build') : ($k['kind'] === 'fan' ? 'fan-game' : ($k['kind'] === 'unsure' ? 'other' : $k['kind']));
+            $out[strtolower((string)$f['key'])] = [$pick, $kind, (string)($f['game'] ?? ''), $k['why'] . ($hasBuild ? '' : ', no build yet')];
+        }
+        return $out;
+    }
     $items = [];
     foreach ($finds as $f) {
         $md = '';
@@ -86,11 +103,11 @@ function rs_scout_judge(array $finds): array {
             'readme_start' => mb_substr(preg_replace('/<!--.*?-->|!\[[^\]]*\]\([^)]*\)/s', '', $md) ?? $md, 0, 5000),
         ];
     }
-    $body = ['model' => RS_SCOUT_MODEL, 'max_tokens' => 4000,
+    $body = ['model' => $model, 'max_tokens' => 4000,
         'system' => [['type' => 'text', 'text' => RS_SCOUT_SYSTEM, 'cache_control' => ['type' => 'ephemeral']]],
         'messages' => [['role' => 'user', 'content' => "Sort these projects.\n\n" . json_encode($items, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]]];
     $out = [];
-    foreach ((array)rs_ai_json($body) as $i => $d) {
+    foreach ((array)rs_ai_json($body, 'scout') as $i => $d) {
         if (!is_array($d)) continue;
         $key = (string)($d['key'] ?? ($items[$i]['key'] ?? ''));
         if ($key === '') continue;
@@ -106,8 +123,7 @@ function rs_scout_run(bool $fresh = true): array {
     $sum = ['at' => time(), 'found' => 0, 'looked' => 0, 'picked' => 0, 'drafted' => [], 'passed' => [], 'waiting' => 0, 'error' => ''];
     $state = fn(string $phase, int $done = 0, int $total = 0) => rs_scout_put_state(['running' => true, 'phase' => $phase, 'done' => $done, 'total' => $total, 'at' => $sum['at']]);
     try {
-        if (rs_secret_get('prq_ai_key') === '') throw new RuntimeException('The Anthropic API key isn\'t set (SDK support, PR queue setup).');
-        // 1. New finds.
+        // 1. New finds. (4.10: sorting works without the Anthropic key now, by rules.)
         if ($fresh) {
             $state('Looking on GitHub');
             try { $sum['found'] += rs_pc_find(150)[0]; } catch (Throwable $e) { /* the others still run */ }

@@ -9,7 +9,7 @@ What gets checked on its own:
 
 Files are found by their SHA-256 (GitHub publishes it per release file); only files VirusTotal has never seen are downloaded and sent. The free key allows 4 requests a minute and about 480 a day here, with 100 a day kept for submissions and Check a link. Everything waits its turn in `vt_files`; `vt-run.php` can work the line from the command line.
 
-**Holds:** a new release from a developer who isn't verified waits until its files are checked, then goes out at once (`rs_vt_promote`, run after every scan turn) and the catalog entry is republished (`rs_pc_publish_one`). There's no extra waiting period any more (`vt_hold_mins` is 0; the setting can add one). Files VirusTotal can't take (over 650 MB, or a scan that keeps erroring) count as clean, so they don't hold a release. A release nobody could check within 12 hours goes out anyway and is checked afterwards. The release that got through is saved on the listing as `ok_tag`. Several engines flagging a file holds it until someone approves it on Security.
+**Holds:** a new release from a developer who isn't verified waits until its files are checked, then goes out at once (`rs_vt_promote`, run after every scan turn) and the catalog entry is republished (`rs_pc_publish_one`). There's no extra waiting period any more (`vt_hold_mins` is 0; the setting can add one). Files VirusTotal can't take (over 650 MB, or a scan that keeps erroring) count as clean, so they don't hold a release. A release nobody could check within 12 hours goes out anyway and is checked afterwards. The release that got through is saved on the listing as `ok_tag`. Several engines flagging a file holds it until someone approves it on Security, and the developer is emailed once about it (see [06-developers.md](06-developers.md)).
 
 **Reaching the developer:** each held update on Security, and the **Download needs a look** box, has "Ask the developer" buttons (`rs_pc_contact_links`): **Message** (their hub, when they have an approved account), **Email** (a prepared mailto with their account or submission address; a person sends it), **Open an issue** (prefilled on GitHub) and **Its repo** (for a pull request).
 
@@ -26,6 +26,10 @@ States (`RS_WATCH_STATES`): `dmca` (taken down), `blocked`, `gone` (deleted or a
 - **Hide from store**: hides it (`watch_hid` is set, so we know why it's hidden).
 - **It's fine**: acknowledge it (`ack`), it stays quiet until the state changes.
 - **Use emergency backup**: when the game has a backup and it isn't a takedown (see [10-extras.md](10-extras.md)).
+
+When a PC listing's repo goes from fine to `gone`, `private` or `norel`, its developer is emailed (once a month per state at most).
+
+The **New repo** suggestions show as the repo (opens it on GitHub) plus **Use this repo**, which needs a second click to switch.
 
 Rows: `repo_watch` (store, app_id, state, ack, …) and `repo_watch_log`.
 

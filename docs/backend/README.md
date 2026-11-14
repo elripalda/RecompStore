@@ -15,6 +15,7 @@ How the website and admin behind recompstore.com and recomplauncher.com work, so
 | [09-background-jobs.md](09-background-jobs.md) | Cron jobs, the GitHub Action, what runs on page loads |
 | [10-extras.md](10-extras.md) | Trending, Emergency backup, Instant Gaming, sponsors, achievements |
 | [11-website.md](11-website.md) | The public site: one page app, page.php, caches, Cloudflare |
+| [12-ai-and-rules.md](12-ai-and-rules.md) | Which features use Claude, the rules that do the work without it, the AI usage page and budget |
 
 ## The rule: keep these up to date
 

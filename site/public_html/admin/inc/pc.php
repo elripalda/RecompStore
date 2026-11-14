@@ -790,6 +790,24 @@ function rs_pc_support(array $a): array {
     return $out;
 }
 
+// (4.10) The launcher features a recomp has, for its developer's hub: [key, name, what it does, who made it
+// work ('dev' = their recomplauncher.json, 'launcher' = our profile, '' = not yet)]. The public game page
+// reads the same 'support' list from the catalog.
+const RS_PC_FEATS = [
+    'easy_setup' => ['Easy Setup', 'Players pick their own copy once and press Play.'],
+    'settings' => ['Settings in the launcher', 'Your game\'s options on RecompLauncher\'s settings screen.'],
+    'saves' => ['Save backups', 'Saves backed up and moved between PCs.'],
+    'prepare' => ['Setup step', 'A one-time step (extracting, patching) the launcher runs for players.'],
+    'verified' => ['Checks the player\'s copy', 'Known good copies, so a bad dump is caught before it runs.'],
+    'mods' => ['Mods', 'Mods installed and turned on from the launcher.'],
+];
+function rs_pc_feature_list(array $a): array {
+    $s = rs_pc_support($a);
+    $out = ['json' => $s['sdk'], 'list' => []];
+    foreach (RS_PC_FEATS as $k => [$name, $what]) $out['list'][] = ['key' => $k, 'name' => $name, 'what' => $what, 'by' => (string)($s[$k] ?? '')];
+    return $out;
+}
+
 // Looks a repo up by hand (the admin's box): it lands in the found list either way.
 // (3.9) A gitlab.com link is read from GitLab; it's filed as gitlab.com/<project>.
 function rs_pc_find_one(string $repo): array {
@@ -2172,17 +2190,54 @@ function rs_pc_contact_links(array $a, string $why = ''): array {
     if ($email === '') {
         try {
             $st = rs_db()->prepare("SELECT contact FROM inbox WHERE kind = 'submit' AND contact LIKE '%@%' AND (app_id = ? OR repo LIKE ?) ORDER BY id DESC LIMIT 1");
-            $st->execute([(string)$a['id'], '%' . (string)$a['repo']]);
+            $st->execute([(string)($a['id'] ?? ''), '%' . (string)$a['repo']]);
             $c = (string)($st->fetchColumn() ?: '');
             if (filter_var($c, FILTER_VALIDATE_EMAIL)) $email = $c;
         } catch (Throwable $e) { }
     }
     $subject = $a['name'] . ' on RecompLauncher';
-    $body = "Hi! Quick note about " . $a['name'] . " on RecompLauncher (" . rs_abs('/game/' . $a['id']) . ").\n\n" . ($why !== '' ? $why . "\n\n" : '') . "Thanks!";
+    $page = (string)($a['id'] ?? '') !== '' && empty($a['hidden']) ? ' (' . rs_abs('/game/' . $a['id']) . ')' : '';
+    $body = "Hi! Quick note about " . $a['name'] . ($page !== '' ? " on RecompLauncher" . $page : " and RecompLauncher (https://recomplauncher.com)") . ".\n\n" . ($why !== '' ? $why . "\n\n" : '') . "Thanks!";
     if ($email !== '') $out[] = ['Email', 'mailto:' . rawurlencode($email) . '?subject=' . rawurlencode($subject) . '&body=' . rawurlencode($body), 'mail'];
     if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') {
         $out[] = ['Open an issue', 'https://github.com/' . $a['repo'] . '/issues/new?title=' . rawurlencode('RecompLauncher: ' . ($why !== '' ? mb_substr($why, 0, 80) : 'about the latest release')) . '&body=' . rawurlencode($body), 'gh'];
         $out[] = ['Its repo', 'https://github.com/' . $a['repo'], 'gh'];
     } elseif ((string)$a['repo'] !== '') $out[] = ['Its repo', rs_host_web(rs_pc_host($a), (string)$a['repo']), 'gh'];
     return $out;
+}
+
+
+// (4.10) The address we have for a recomp's developer: their approved developer account, else the email on
+// their submission. -> '' when there's none.
+function rs_pc_dev_email(array $a): string {
+    $owner = strtolower((string)strtok((string)$a['repo'], '/'));
+    try {
+        $st = rs_db()->prepare("SELECT email FROM dev_accounts WHERE status = 'approved' AND email <> '' AND ((slug <> '' AND slug = ?) OR (gh_login <> '' AND LOWER(gh_login) = ?)) ORDER BY slug = ? DESC LIMIT 1");
+        $st->execute([(string)($a['dev'] ?? ''), $owner, (string)($a['dev'] ?? '')]);
+        $e = (string)($st->fetchColumn() ?: '');
+        if (filter_var($e, FILTER_VALIDATE_EMAIL)) return $e;
+        $st = rs_db()->prepare("SELECT contact FROM inbox WHERE kind = 'submit' AND contact LIKE '%@%' AND (app_id = ? OR repo LIKE ?) ORDER BY id DESC LIMIT 1");
+        $st->execute([(string)($a['id'] ?? ''), '%' . (string)$a['repo']]);
+        $e = (string)($st->fetchColumn() ?: '');
+        if (filter_var($e, FILTER_VALIDATE_EMAIL)) return $e;
+    } catch (Throwable $e) { }
+    return '';
+}
+
+// (4.10) Tells a recomp's developer something about their listing by email, once per $once key (a flagged
+// release, a repo that went down). Automatic, from the site's own mailbox. -> sent or not
+function rs_pc_dev_notify(array $a, string $once, string $subject, string $text): bool {
+    $to = rs_pc_dev_email($a);
+    if ($to === '') return false;
+    if (!function_exists('rs_mailq_add')) require_once __DIR__ . '/mailq.php';
+    $k = 'devnote_' . substr(md5((string)$a['id'] . '|' . $once), 0, 20);
+    if (rs_kv_get($k)) return false;
+    try {
+        if (function_exists('rs_mail_ready') && !rs_mail_ready()) return false;
+        $hub = 'https://recomplauncher.com/dev';
+        rs_mailq_add($to, $subject, "Hi,\n\n" . $text . "\n\nYou can see where it stands in your developer hub: " . $hub . "\nIf you think this is a mistake, just reply to this email.\n\nRipalda\nRecompLauncher", ['kind' => 'dev-notice'], 3);
+        rs_kv_put($k, gmdate('c'));
+        rs_log('developers', 'pc:' . $a['id'], 'emailed: ' . $subject);
+        return true;
+    } catch (Throwable $e) { return false; }
 }

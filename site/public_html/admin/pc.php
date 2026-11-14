@@ -380,6 +380,10 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
 <?php if ($edit): $a = $edit; ?>
 <section class="card" id="edit">
   <div class="an-head"><h2><?= h($a['name']) ?></h2><a class="an-csv an-plain" href="pc.php?<?= h($lsQs()) ?>#list">All PC recomps</a></div>
+  <?php // (4.10) Who it's from, up top: their developer page (with the Verified tick) or the repo owner.
+    $pcDevs = function_exists('rs_developers') ? rs_developers() : [];
+    $pcDev = (string)($a['dev'] ?? '') !== '' ? ($pcDevs[$a['dev']] ?? null) : null; ?>
+  <p class="pc-devline"><span class="muted">Developer</span> <?php if ($pcDev): ?><a href="developers.php?edit=<?= h(rawurlencode((string)$a['dev'])) ?>"><strong><?= h((string)$pcDev['name']) ?></strong></a><?= !empty($pcDev['verified']) ? ' <span class="pill ok">Verified</span>' : '' ?><?php else: ?><strong><?= h((string)($a['author'] ?: strtok((string)$a['repo'], '/'))) ?></strong> <span class="muted small">(no developer page linked; pick one under Developer below)</span><?php endif; ?></p>
   <?php // (3.8) Its release files, as VirusTotal saw them, and a held update.
   if (function_exists('rs_vt_on') && rs_vt_on()): $vb = rs_vt_repo_badge(rs_pc_key($a), (string)($a['pending']['tag'] ?? ($a['ok_tag'] ?? ''))); ?>
   <p class="vt-line"><?= $vb ? rs_vt_badge_html($vb) : '<span class="vt-badge grey"><span class="vt-dot">…</span>Not checked yet</span>' ?>

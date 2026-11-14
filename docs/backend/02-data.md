@@ -15,6 +15,7 @@ Tables create themselves the first time their code runs (`CREATE TABLE IF NOT EX
 | Area | Tables | Notes |
 |---|---|---|
 | PC recomps | `pc_apps` | One row per listing: `id`, `data` (JSON with every field), `sort`. Read with `rs_pc_apps($withHidden)` / `rs_pc_app($id)`, save with `rs_pc_save($a)`. See [03-pc-catalog.md](03-pc-catalog.md). |
+| AI usage | `ai_usage` | Calls and tokens per day, feature and model. See [12-ai-and-rules.md](12-ai-and-rules.md). |
 | Finding recomps | `pc_found`, `pc_scout`, `pc_auto`, `pc_requests`, `pc_request_asks` | Found on GitHub (state `new`, `skipped`, `added`), the daily scout, Auto-add drafts, players' requests. See [04-how-games-move.md](04-how-games-move.md). |
 | Submissions | `inbox`, `inbox_files`, `inbox_pictures`, `inbox_reports`, `hub_flags`, `hub_notes` | Everything sent in (submissions, bug reports), flags for the owner, team notes on cards. |
 | Titles | `titles`, `title_reservations` | One game, many versions. |
