@@ -1858,7 +1858,7 @@ function rs_pc_dl_check(array $a): ?array {
     foreach (array_slice($stable, 1) as $x) if ($hit($x) !== '') { $older = (string)$x['tag_name']; break; }
     $winish = array_values(array_filter(array_map(fn($f) => (string)$f['name'], (array)$newest['assets']),
         fn($n) => preg_match('/\.(zip|7z|exe|rar)$/i', $n) && preg_match('/(win|x64|x86_64|amd64|pc)/i', $n) && !preg_match('/(linux|mac|android|switch|ps5|xbox)|(^|[^a-z0-9])ios([^a-z0-9]|$)/i', $n)));
-    if ($older !== '' && $winish) return ['dl' => 'stuck', 'why' => 'Its newest release (' . $newest['tag_name'] . ') has ' . implode(', ', array_slice($winish, 0, 2)) . ', which doesn\'t match ' . $pat . ', so players still get ' . $older . '.'];
+    if ($older !== '' && $winish) return ['dl' => 'stuck', 'files' => array_slice($winish, 0, 3), 'tag' => (string)$newest['tag_name'], 'why' => 'Its newest release (' . $newest['tag_name'] . ') has ' . implode(', ', array_slice($winish, 0, 2)) . ', which doesn\'t match ' . $pat . ', so players still get ' . $older . '.'];
     if ($older === '') return ['dl' => 'nofile', 'why' => 'None of its releases has a file that matches ' . $pat . '.'];
     return [];
 }
@@ -1948,7 +1948,7 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         // (4.0) Whether players get the right file, and (once a week) whether the project moved.
         try {
             $dl = rs_pc_dl_check($a);
-            if ($dl !== null) { $a['dl_state'] = (string)($dl['dl'] ?? ''); $a['dl_why'] = (string)($dl['why'] ?? ''); }
+            if ($dl !== null) { $a['dl_state'] = (string)($dl['dl'] ?? ''); $a['dl_why'] = (string)($dl['why'] ?? ''); $a['dl_files'] = (array)($dl['files'] ?? []); $a['dl_tag'] = (string)($dl['tag'] ?? ''); }
             if (time() - (int)($a['moved_at'] ?? 0) > 6 * 86400) { $a['moved_to'] = rs_pc_moved_check($a); $a['moved_at'] = time(); }
         } catch (Throwable $e) { /* looked at again next time */ }
         if (!empty($r['ok'])) $a = rs_pc_heal_assets($a, $r);

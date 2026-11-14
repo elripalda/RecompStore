@@ -256,6 +256,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($act === 'delete') {
             rs_db()->prepare('DELETE FROM pc_apps WHERE id = ?')->execute([(string)($_POST['id'] ?? '')]);
             rs_flash('Deleted from the PC store. Publish to take it off the site.');
+        } elseif ($act === 'dl-use') {
+            // (4.10) A renamed Windows file: point the download at the new one (its version becomes *).
+            $a = rs_pc_app((string)($_POST['id'] ?? ''));
+            if (!$a) throw new RuntimeException('That app is gone.');
+            $dl = rs_pc_dl_check($a);
+            $file = (string)($_POST['file'] ?? '');
+            if (!$dl || ($dl['dl'] ?? '') !== 'stuck') throw new RuntimeException('Its download looks fine now, nothing to change.');
+            if (!in_array($file, (array)($dl['files'] ?? []), true)) throw new RuntimeException('That file isn\'t in its newest release anymore. Reload the page.');
+            $old = (string)$a['asset_win'];
+            $pat = rs_pc_pattern($file, (string)$dl['tag']);
+            if (!rs_pattern_matches($pat, $file)) $pat = $file;
+            $a['asset_win'] = $pat;
+            $after = rs_pc_dl_check($a);
+            $a['dl_state'] = (string)($after['dl'] ?? ''); $a['dl_why'] = (string)($after['why'] ?? ''); $a['dl_files'] = (array)($after['files'] ?? []); $a['dl_tag'] = (string)($after['tag'] ?? '');
+            rs_pc_save($a);
+            rs_log('pc', 'pc:' . $a['id'], 'Windows download ' . $old . ' -> ' . $pat);
+            rs_flash('Windows download is now ' . $pat . ', so players get ' . $dl['tag'] . '. Publish to put it live.');
+            $back = 'pc.php?edit=' . rawurlencode($a['id']) . '#edit';
         } elseif ($act === 'dl-ok' || $act === 'moved-ok' || $act === 'move-repo') {
             // (4.0) The download or moved alerts on its edit page: fine as it is, or follow the move.
             $a = rs_pc_app((string)($_POST['id'] ?? ''));
@@ -370,7 +388,10 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     <?php $al = rs_pc_alerts($a); if ($al): ?>
   <div class="pc-alert">
     <?php if (isset($al['dl'])): ?><p><strong>Download needs a look.</strong> <?= h($al['dl']) ?></p>
-    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button name="action" value="dl-ok">It's fine</button><?php if ($a['repo'] !== ''): ?> <a class="btn" href="<?= h(rs_host_releases_url(rs_pc_host($a), $a['repo'])) ?>" target="_blank" rel="noopener">Its releases</a><?php endif; ?></form><?php endif; ?>
+    <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><?php // (4.10) Renamed file: one click to follow it
+        $dlFiles = (string)($a['dl_state'] ?? '') === 'stuck' ? (array)($a['dl_files'] ?? []) : [];
+        if ((string)($a['dl_state'] ?? '') === 'stuck' && !$dlFiles) { try { $dlC = rs_pc_dl_check($a); $dlFiles = (array)($dlC['files'] ?? []); } catch (Throwable $e) { } }
+        foreach ($dlFiles as $dlF): ?><button name="action" value="dl-use" class="primary" onclick="this.form.file.value=<?= h(json_encode((string)$dlF)) ?>" title="Point the Windows download at this file, with its version as *"><?= count($dlFiles) > 1 ? 'Use ' . h((string)$dlF) : 'Use the new file' ?></button> <?php endforeach; ?><input type="hidden" name="file" value=""><button name="action" value="dl-ok">It's fine</button><?php if ($a['repo'] !== ''): ?> <a class="btn" href="<?= h(rs_host_releases_url(rs_pc_host($a), $a['repo'])) ?>" target="_blank" rel="noopener">Its releases</a><?php endif; ?></form><?php endif; ?>
     <?php if (isset($al['moved'])): ?><p><strong>This project may have moved.</strong> Its README points to <a href="https://github.com/<?= h($al['moved']) ?>" target="_blank" rel="noopener"><?= h($al['moved']) ?></a>.</p>
     <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="id" value="<?= h($a['id']) ?>"><button name="action" value="move-repo" class="primary" onclick="return confirm('Point this listing at <?= h($al['moved']) ?>? Its next release gets the security checks before it goes out.')">Switch to it</button> <button name="action" value="moved-ok">Keep this one</button></form><?php endif; ?>
   </div>
