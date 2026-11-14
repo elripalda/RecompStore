@@ -147,3 +147,21 @@
 .prq-diff pre{margin:0;padding:8px 10px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto}
 .prq-del{background:rgba(255,92,92,.08);color:#ffb3b3}.prq-add{background:rgba(87,214,141,.08);color:#b5f2cd}
 .prq-code label.prq-here{display:flex;flex-direction:row;gap:8px;align-items:center;justify-content:flex-start}.prq-code label.prq-here input{width:16px;height:16px;margin:0}
+
+/* (4.10) What the project already has, in each draft (the same look as a submission's How to approve) */
+.prq-found{margin:10px 0 12px;padding:12px;border:1px solid var(--line);border-radius:10px}
+.prq-found h4{margin:0 0 10px;font-size:14px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.prq-found h4.prq-h4b{margin:14px 0 8px}
+.prq-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.prq-steps li{display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:start;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--panel);min-width:0}
+.prq-steps b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}.prq-steps b .pill{font-size:11px;padding:1px 7px}
+.prq-steps small{display:block;color:var(--muted);font-size:12.5px;overflow-wrap:anywhere;margin-top:2px}
+.prq-s-i{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-weight:700;color:var(--muted);background:rgba(var(--ink-rgb),.06)}.prq-s-i svg{width:15px;height:15px}
+.prq-s-ok .prq-s-i{color:var(--ok);background:rgba(95,227,161,.12)}
+.prq-s-bad{border-color:rgba(255,138,128,.5)!important}.prq-s-bad .prq-s-i{color:var(--bad);background:rgba(255,138,128,.12)}
+.prq-s-no,.prq-s-wait{opacity:.7}
+.prq-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+.prq-facts div{padding:8px 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);min-width:0}
+.prq-facts dt{font-size:12.5px;font-weight:700;overflow-wrap:anywhere}.prq-facts dd{margin:3px 0 0;font-size:12.5px;color:var(--soft);overflow-wrap:anywhere}
+.prq-where{display:block;margin-top:3px}.prq-found a.mono,.prq-found .mono{font-size:12px}
+.prq-redo-all{margin:0 0 0 auto}
+@media (max-width:760px){.prq-steps,.prq-facts{grid-template-columns:1fr}}

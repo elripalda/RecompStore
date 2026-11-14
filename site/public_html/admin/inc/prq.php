@@ -47,6 +47,9 @@ function rs_prq_tables(): void {
     // without them, and how a queued send goes out (here, code).
     if (!rs_db()->query("SHOW COLUMNS FROM pc_prq LIKE 'code'")->fetch())
         rs_db()->exec("ALTER TABLE pc_prq ADD COLUMN code MEDIUMTEXT NULL, ADD COLUMN body_plain MEDIUMTEXT NULL, ADD COLUMN opts VARCHAR(255) NOT NULL DEFAULT ''");
+    // (4.10) What the drafter saw the project already has (features with file:line, its command-line options).
+    if (!rs_db()->query("SHOW COLUMNS FROM pc_prq LIKE 'found'")->fetch())
+        rs_db()->exec("ALTER TABLE pc_prq ADD COLUMN found MEDIUMTEXT NULL");
     $done = true;
 }
 
@@ -79,7 +82,7 @@ function rs_prq_run(array $appIds): int {
     if (!rs_prq_now_ready()) throw new RuntimeException('Add the Anthropic API key in Setup first.');
     $db = rs_db();
     $ids = [];
-    foreach (array_slice(array_values(array_unique($appIds)), 0, 20) as $id) {
+    foreach (array_slice(array_values(array_unique($appIds)), 0, 40) as $id) {
         $st = $db->prepare("UPDATE pc_prq SET status = 'drafting', error = NULL, updated = NOW() WHERE app_id = ? AND (status = 'todo' OR (status = 'drafting' AND updated < NOW() - INTERVAL " . RS_PRQ_STUCK . " SECOND))");
         $st->execute([(string)$id]);
         if ($st->rowCount()) $ids[] = (string)$id;
@@ -109,11 +112,25 @@ function rs_prq_fail(string $appId, string $why): void {
     rs_db()->prepare("UPDATE pc_prq SET status = 'todo', error = ?, updated = NOW() WHERE app_id = ? AND status = 'drafting'")
         ->execute([mb_substr($why !== '' ? $why : 'Something went wrong while drafting.', 0, 300), $appId]);
 }
+// (4.10) A "file:line" from the drafter's report as a link to that line on GitHub (else plain text).
+function rs_prq_where(string $repo, string $where): string {
+    $where = trim($where);
+    if ($where === '') return '';
+    if (preg_match('#^([\w./+@-]+\.[\w]+):(\d+)(?:[-–](\d+))?#u', $where, $m) && !str_contains($m[1], '..'))
+        return '<a href="https://github.com/' . h($repo) . '/blob/HEAD/' . h(implode('/', array_map('rawurlencode', explode('/', $m[1])))) . '#L' . (int)$m[2] . (isset($m[3]) ? '-L' . (int)$m[3] : '') . '" target="_blank" rel="noopener" class="mono">' . h($where) . '</a>';
+    return '<span class="mono">' . h($where) . '</span>';
+}
+// (4.10) The run is still on these (drafts go a few at a time, so the last ones wait their turn).
+function rs_prq_touch(array $appIds): void {
+    rs_prq_tables();
+    $ids = array_slice(array_values(array_filter(array_map('strval', $appIds))), 0, 40);
+    if ($ids) rs_db()->prepare("UPDATE pc_prq SET updated = NOW() WHERE status = 'drafting' AND app_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ')')->execute($ids);
+}
 // Draft now's picks: the rows it marked Drafting.
 function rs_prq_by_ids(array $appIds): array {
     rs_prq_tables();
     $res = [];
-    foreach (array_slice($appIds, 0, 20) as $id) {
+    foreach (array_slice($appIds, 0, 40) as $id) {
         $st = rs_db()->prepare("SELECT pick FROM pc_prq WHERE app_id = ? AND status = 'drafting'");
         $st->execute([(string)$id]);
         $pick = $st->fetchColumn();
@@ -183,8 +200,9 @@ function rs_prq_draft_save(array $d): array {
     ];
     $code = !$skip && is_array($d['code'] ?? null) && !empty($d['code']['edits']) ? json_encode($d['code'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
     $plain = $code !== null ? mb_substr((string)($d['body_plain'] ?? ''), 0, 60000) : null;
-    if ($was === false) $db->prepare('INSERT INTO pc_prq (app_id, repo, pick, status, json, title, body, note, code, body_plain, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([...$row, $code, $plain]);
-    else $db->prepare('UPDATE pc_prq SET app_id = ?, repo = ?, pick = ?, status = ?, json = ?, title = ?, body = ?, note = ?, code = ?, body_plain = ?, error = NULL, updated = NOW() WHERE repo = ?')->execute([...$row, $code, $plain, $a['repo']]);
+    $found = !$skip && is_array($d['found'] ?? null) ? mb_substr((string)json_encode($d['found'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0, 200000) : null;
+    if ($was === false) $db->prepare('INSERT INTO pc_prq (app_id, repo, pick, status, json, title, body, note, code, body_plain, found, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([...$row, $code, $plain, $found]);
+    else $db->prepare('UPDATE pc_prq SET app_id = ?, repo = ?, pick = ?, status = ?, json = ?, title = ?, body = ?, note = ?, code = ?, body_plain = ?, found = ?, error = NULL, updated = NOW() WHERE repo = ?')->execute([...$row, $code, $plain, $found, $a['repo']]);
     return ['ok' => true, 'status' => $skip ? 'skipped' : 'draft'];
 }
 

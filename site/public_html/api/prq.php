@@ -5,6 +5,7 @@
 //   POST ?a=draft      one draft (JSON): {id, pick, json, title, body, note} or {id, skip: true, skip_reason}
 //   GET  ?a=todo&ids=  (4.7) Draft now: just these (the ones marked Drafting)
 //   POST ?a=fail       (4.7) {id, error}: it couldn't be drafted, back to waiting with why
+//   POST ?a=touch      (4.10) {ids}: still on these (drafts go a few at a time)
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/pc.php';
@@ -32,6 +33,11 @@ try {
     if ($a === 'fail' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $d = json_decode((string)file_get_contents('php://input', false, null, 0, 20000), true);
         if (is_array($d)) rs_prq_fail((string)($d['id'] ?? ''), (string)($d['error'] ?? ''));
+        $out(200, ['ok' => true]);
+    }
+    if ($a === 'touch' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $d = json_decode((string)file_get_contents('php://input', false, null, 0, 20000), true);
+        if (is_array($d) && is_array($d['ids'] ?? null)) rs_prq_touch($d['ids']);
         $out(200, ['ok' => true]);
     }
     $out(400, ['ok' => false, 'error' => 'Unknown call.']);

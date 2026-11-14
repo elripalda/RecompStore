@@ -12,6 +12,7 @@ Environment:
   GITHUB_TOKEN       read access to public repos (the Action's own token is enough)
   PRQ_COUNT          how many to draft this run (default 8)
   PRQ_MODEL          the model (default claude-sonnet-5-5)
+  PRQ_WORKERS        how many to draft side by side (default 3)
   RS_SITE            default https://recompstore.com
 """
 import io
@@ -19,7 +20,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +35,7 @@ GHT = os.environ.get("GITHUB_TOKEN", "")
 COUNT = int(os.environ.get("PRQ_COUNT", "8") or 8)
 MODEL = os.environ.get("PRQ_MODEL", "claude-sonnet-5-5")
 IDS = os.environ.get("PRQ_IDS", "")  # Draft now on SDK support: just these recomps
+WORKERS = max(1, min(6, int(os.environ.get("PRQ_WORKERS", "3") or 3)))  # drafts made side by side
 SPEC_URL = "https://recomplauncher.com/sdk-files/recomplauncher-agent.md"
 SCHEMA_URL = "https://recomplauncher.com/schema/recomplauncher.json"
 UA = "RecompStore-PR-Drafter"
@@ -100,16 +104,16 @@ def zip_listing(url, size):
 # (4.9) Where a project reads its command line and its paths, so the draft can use the options it
 # already has (whatever they're called) for the game's location, saves and starting straight in.
 SRC_EXT = (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rs", ".py", ".cs", ".go", ".zig", ".java", ".kt", ".js", ".ts", ".lua")
-HINT_NAME = re.compile(r"(^|/)[^/]*(main|app|args?|argv|cli|cmd|command.?line|options?|launch|config|settings|paths?|program|entry|platform|window|startup|boot)[^/]*$", re.I)
+HINT_NAME = re.compile(r"(^|/)[^/]*(main|app|args?|argv|cli|cmd|command.?line|options?|launch|config|settings|paths?|program|entry|platform|window|startup|boot|engine|game|init|loader|import|rom|iso|disc|dump|extract|setup|install|picker|dialog|menu|gui|frontend)[^/]*$", re.I)
 SKIP_DIR = re.compile(r"(^|/)(third_?party|extern(al)?|vendor|deps|submodules?|tests?|docs?|tools?/|sdk/|codegen|generator)", re.I)
-OPT_LINE = re.compile(r"""(["'](-{1,2}|/)[A-Za-z][\w-]{1,30}["']|\bargv\b|\bargc\b|getopt|cxxopts|CLI11|clap::|argparse|add_argument|parse_args|env::args|GetCommandLine|CommandLineToArgv|FULLSCREEN|borderless|fullscreen|windowed|save_?dir|saves?_?(path|folder)|user_?(dir|folder|path)|game_?(path|dir)|rom_?path|iso_?path|romfs|data_?path)""", re.I)
+OPT_LINE = re.compile(r"""(["'](-{1,2}|/)[A-Za-z][\w-]{1,30}["']|\bargv\b|\bargc\b|getopt|cxxopts|CLI11|clap::|argparse|add_argument|parse_args|env::args|GetCommandLine|CommandLineToArgv|FULLSCREEN|borderless|fullscreen|windowed|save_?dir|saves?_?(path|folder)|user_?(dir|folder|path)|game_?(path|dir)|rom_?path|iso_?path|romfs|exefs|data_?path|OpenFileDialog|GetOpenFileName|IFileOpenDialog|SDL_ShowOpenFileDialog|tinyfd_\w+|NFD_\w+|FileDialog|QFileDialog|rfd::|\.(iso|xci|nsp|nup|wbfs|rvz|gcm|z64|n64|v64|sfc|smc|gba|nds|xex|cso|chd)\b|main\.dol)""", re.I)
 
 
 def cli_hints(repo, branch, paths):
     cands = [p for p in paths if p.lower().endswith(SRC_EXT) and HINT_NAME.search(p) and not SKIP_DIR.search(p)]
-    cands.sort(key=lambda p: (0 if re.search(r"(^|/)(main|program)\.", p, re.I) else 1 if re.search(r"launch|arg|cli|option", p.rsplit("/", 1)[-1], re.I) else 2, p.count("/"), len(p)))
+    cands.sort(key=lambda p: (0 if re.search(r"(^|/)(main|program)\.", p, re.I) else 1 if re.search(r"launch|arg|cli|option|import|picker|dialog|rom|iso|dump|setup", p.rsplit("/", 1)[-1], re.I) else 2, p.count("/"), len(p)))
     out, total = [], 0
-    for path in cands[:12]:
+    for path in cands[:20]:
         raw = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
         if not raw:
             continue
@@ -118,7 +122,7 @@ def cli_hints(repo, branch, paths):
             chunk = "\n".join(keep[:70])
             out.append({"file": path, "lines": chunk})
             total += len(chunk)
-            if total > 18000:
+            if total > 26000:
                 break
     return out
 
@@ -214,7 +218,18 @@ Answer with one JSON object and nothing else:
  "recomplauncher_json": { ... the file ... },
  "players": ["what it adds for players, one short line each, 3 to 6 lines"],
  "better": ["small concrete things that would make the recomp work better with the launcher, with a size: Small, Medium or Large. The asks for any of the three things above it doesn't have come first. 0 to 6 lines"],
+ "found": {"features": [{"what": "Game location", "has": true, "how": "--dump <path>: the extracted dump folder", "where": "src/main.c:120", "used": true}],
+           "options": [{"flag": "--dump <path>", "does": "where it reads the game's files", "where": "src/main.c:120"}]},
  "notes": "for the person reviewing: anything you weren't sure about, in a sentence or two (or empty)"}
+
+"found" is for the team, so they can see what the project already supports before sending. Be thorough there:
+- "features": one entry each for Game location, Saves, Start straight into the game, Fullscreen or borderless,
+  Settings file, Logs, and Mods or packs, plus any other launcher-relevant thing it has (an online mode, a
+  built-in launcher or picker, a setup or build step). "has": true, false or null when you couldn't tell.
+  "how": the flag, settings key, file or folder, and what it takes. "where": file:line (or the README section)
+  you saw it in. "used": whether your recomplauncher.json uses it.
+- "options": every command-line option the project reads that you can see, with what it does and where.
+Only list what you actually saw. Empty lists are fine.
 
 THE SDK GUIDE:
 """
@@ -278,6 +293,16 @@ What to add, in this order, each only if the project doesn't already have it und
 3. --fullscreen and --borderless: only if the window is made in one place with an existing fullscreen setting.
 Skip 2 and 3 freely. Skip everything (edits: []) if you can't see clearly where the path is chosen.
 
+Before adding anything, check whether it already reads the game's location under another name: a flag like
+--dump, --rom, --iso, --data, --game_data_root, a plain path argument (argv[1]), an environment variable or a
+settings key. If it does, make no edits: put that option in the recomplauncher.json ("start.args" with "{game}",
+or "config.game_path" for a settings key, and a "game" section saying what copy to pick, as the SDK guide says) and
+describe it under "existing". Only do that when the option takes the player's own copy (the file or folder they
+have), not a folder the project builds itself.
+
+When the project picks the copy in its own dialog (a file picker or an import screen), --game can hand the same
+path to the code the dialog calls, skipping the dialog. Keep it to that.
+
 Rules:
 - The smallest change that works, in the project's own style and language. Reuse its existing argument parsing.
   No new files, no new dependencies, no reformatting, no renames.
@@ -293,25 +318,28 @@ Answer with one JSON object and nothing else:
 {"edits": [{"path": "", "find": "", "replace": ""}],
  "adds": ["--game <path>", ...],
  "explain": ["what each change does, one short plain line each, for the pull request"],
+ "existing": {"how": "the option it already has, e.g. --dump <path>, and what it takes", "where": "file:line"},
  "recomplauncher_json": { ... the whole file, updated ... },
- "notes": "for the reviewer: anything you're unsure of (or empty)"}"""
+ "notes": "for the reviewer: anything you're unsure of (or empty)"}
+"existing" is only for an option the project already has that the file now uses (else leave it out)."""
 
 
 def code_files(repo, ctx):
-    """The files to read whole: where the command line is read (main first), up to 3 and 120 KB."""
+    """The files to read: where the command line is read or the game is picked (main first), up to 4."""
     branch = ctx.get("_branch", "main")
     names = [h["file"] for h in ctx.get("command_line", [])]
     def score(h):
         t = h["lines"]
-        return (0 if re.search(r"\bmain\s*\(|\bargv\b|args\(\)|CommandLine", t) else 1, 0 if re.search(r"(^|/)(main|program)\.", h["file"], re.I) else 1)
+        return (0 if re.search(r"\bmain\s*\(|\bargv\b|args\(\)|CommandLine", t) else 1 if re.search(r"FileDialog|GetOpenFileName|tinyfd_|NFD_|rfd::|main\.dol|\.(iso|xci|nsp|z64|n64|xex)\b", t, re.I) else 2,
+                0 if re.search(r"(^|/)(main|program)\.", h["file"], re.I) else 1)
     names = [h["file"] for h in sorted(ctx.get("command_line", []), key=score)]
     out = {}
-    for path in names[:5]:
+    for path in names[:8]:
         raw = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
         if not raw or len(raw) > 600000:
             continue
         out[path] = raw
-        if len(out) >= 3:
+        if len(out) >= 4:
             break
     return out
 
@@ -374,10 +402,15 @@ def code_pass(spec, p, ctx, doc, validator):
     user = {"project": {k: p[k] for k in ("repo", "name", "game", "console")}, "recomplauncher_json": doc,
             "readme": ctx.get("readme", "")[:12000], "files": shown(files),
             "note": "Long files are shown in parts (lines marked '... (line N)'); copy find text only from what's shown."}
-    msgs = [{"role": "user", "content": "Add the options if they fit.\n\n" + json.dumps(user, ensure_ascii=False)}]
+    msgs = [{"role": "user", "content": "Use the option it already has for the game's location, or add the options if they fit.\n\n" + json.dumps(user, ensure_ascii=False)}]
     for attempt in range(2):
         body = {"model": MODEL, "max_tokens": 16000, "system": [{"type": "text", "text": CODE_SYSTEM + "\n\nTHE SDK GUIDE:\n" + spec, "cache_control": {"type": "ephemeral"}}], "messages": msgs}
-        st, b = http("https://api.anthropic.com/v1/messages", data=body, timeout=300, headers={"x-api-key": AKEY, "anthropic-version": "2023-06-01"})
+        for wait in (0, 20, 40, 60):  # (the model busy or rate-limited: a few drafts run side by side)
+            if wait:
+                time.sleep(wait)
+            st, b = http("https://api.anthropic.com/v1/messages", data=body, timeout=300, headers={"x-api-key": AKEY, "anthropic-version": "2023-06-01"})
+            if st not in (429, 500, 502, 503, 529):
+                break
         if st != 200:
             print(f"code pass {p['repo']}: model call failed ({st})")
             return None
@@ -391,17 +424,27 @@ def code_pass(spec, p, ctx, doc, validator):
             print(f"code pass {p['repo']}: no JSON in the answer")
             return None
         edits = [e for e in (d.get("edits") or []) if isinstance(e, dict)]
-        if not edits:
-            print(f"code pass {p['repo']}: no edits ({(d.get('notes') or '')[:200]})")
-            return None
-        changed, errs = check_edits(edits, files)
         new_doc = d.get("recomplauncher_json") if isinstance(d.get("recomplauncher_json"), dict) else None
+        existing = d.get("existing") if isinstance(d.get("existing"), dict) and d["existing"].get("how") else None
+        if not edits:
+            # (4.10) No code needed when it already reads the game's location: the file uses that option.
+            if existing and new_doc is not None and has_game_option(new_doc):
+                serr = schema_errors(validator, new_doc)
+                if not serr:
+                    print(f"code pass {p['repo']}: uses its own {existing.get('how', '')[:80]}")
+                    return {"edits": [], "adds": [], "explain": [], "json": new_doc, "existing": existing, "notes": (d.get("notes") or "").strip()}
+                if attempt == 0:
+                    msgs += [{"role": "assistant", "content": m.group(0)}, {"role": "user", "content": "The recomplauncher.json doesn't pass the schema:\n" + serr + "\nFix it and answer with the whole JSON object again."}]
+                    continue
+            print(f"code pass {p['repo']}: no edits ({(d.get('notes') or '')[:200]})")
+            return {"edits": [], "notes": (d.get("notes") or "").strip()} if (d.get("notes") or "").strip() else None
+        changed, errs = check_edits(edits, files)
         if new_doc is not None:
             serr = schema_errors(validator, new_doc)
             if serr:
                 errs.append("- the recomplauncher.json doesn't pass the schema:\n" + serr)
         if not errs and changed and new_doc is not None:
-            return {"edits": edits, "adds": d.get("adds") or [], "explain": d.get("explain") or [], "json": new_doc, "notes": (d.get("notes") or "").strip()}
+            return {"edits": edits, "adds": d.get("adds") or [], "explain": d.get("explain") or [], "json": new_doc, "existing": existing, "notes": (d.get("notes") or "").strip()}
         print(f"code pass {p['repo']}: try {attempt + 1}: " + "; ".join(errs)[:300])
         msgs += [{"role": "assistant", "content": m.group(0)}, {"role": "user", "content": "These don't work:\n" + "\n".join(errs) + "\nFix them and answer with the whole JSON object again."}]
     return None
@@ -427,22 +470,86 @@ def body_text(p, what, d, code=None):
              "**What's RecompLauncher?**", what, "",
              "**What it adds for players**"]
     lines += [f"- {x.strip()}" for x in d.get("players", []) if x.strip()]
-    if code:
+    if code and code.get("edits"):
         lines += ["", "**Code changes**"] + [f"- {x.strip()}" for x in code.get("explain", []) if str(x).strip()]
         lines += ["- They're only used when those options are passed. Without them the game starts and behaves exactly as before.",
-                  "- We haven't built it on our side, so a quick build before merging would be great. Happy to adjust anything.",
-                  "", "Also adds `recomplauncher.json` and the \"Get it on RecompLauncher\" badge in the README. If your release zips don't already include files from the repo root, putting `recomplauncher.json` in them keeps the launcher in step with each release."]
-    else:
-        lines += ["", "**Code changes**",
-                  "- None. This only adds `recomplauncher.json` and the \"Get it on RecompLauncher\" badge in the README. If your release zips don't already include files from the repo root, putting `recomplauncher.json` in them keeps the launcher in step with each release."]
+                  "- We haven't built it on our side, so a quick build before merging would be great. Happy to adjust anything."]
     better = [x.strip() for x in d.get("better", []) if x.strip()]
     if better:
         lines += ["", "**Things that would make your recomp better**"] + [f"- {x}" for x in better]
     lines += ["", "**For the developer**",
               "A free developer account at https://recomplauncher.com/dev (sign in with GitHub) lets you claim the recomp on RecompLauncher. Its page then shows it as yours, with the Verified developer badge once approved, and you can edit its page and art, see stats and read player reports with their logs.",
               "", "If you'd rather not have the badge, a plain link to its RecompLauncher page somewhere in the README works too.",
+              "", "If your release zips don't already include files from the repo root, putting `recomplauncher.json` in them keeps the launcher in step with each release.",
               "", "Feel free to change anything here, or close this if it's not for you. No hard feelings."]
     return "\n".join(lines)
+
+
+def merge_found(d, code):
+    """The team's report of what the project already has, with what the code step found or added."""
+    f = d.get("found") if isinstance(d.get("found"), dict) else {}
+    feats = [x for x in (f.get("features") or []) if isinstance(x, dict) and x.get("what")]
+    opts = [x for x in (f.get("options") or []) if isinstance(x, dict) and x.get("flag")]
+    if code and (code.get("existing") or code.get("edits")):
+        ex = code.get("existing") or {}
+        row = {"what": "Game location", "has": True, "used": True,
+               "how": ex.get("how") or ("Added in this pull request: " + ", ".join(str(a) for a in code.get("adds") or [])),
+               "where": ex.get("where", "")}
+        feats = [row] + [x for x in feats if str(x.get("what", "")).lower() != "game location"]
+    return {"features": feats[:16], "options": opts[:40]}
+
+
+def draft_one(p, todo, spec, validator):
+    """One pick, start to end. -> 1 when a draft was saved."""
+    try:
+        # Already had one (ours, Xarishark's or anyone's, open or closed): never a second.
+        had = "" if p.get("pick") == "redo" else earlier_pr(p["repo"])  # a redraft updates our own
+        if had:
+            site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": "It already has a RecompLauncher pull request: " + had})
+            print(f"skip {p['repo']}: already has {had}")
+            return 0
+        ctx = context(p)
+        d, raw = ask(spec, p, ctx)
+        if d.get("skip"):
+            site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": d.get("skip_reason", "")})
+            print(f"skip {p['repo']}: {d.get('skip_reason')}")
+            return 0
+        doc = d.get("recomplauncher_json")
+        if not isinstance(doc, dict):
+            raise RuntimeError("no recomplauncher.json in the answer")
+        errs = schema_errors(validator, doc)
+        if errs:
+            d, raw = ask(spec, p, ctx, {"prev": raw, "errors": errs})
+            doc = d.get("recomplauncher_json") if isinstance(d.get("recomplauncher_json"), dict) else doc
+            errs = schema_errors(validator, doc)
+        note = (d.get("notes") or "").strip()
+        if errs:
+            note = (note + "\n\nStill doesn't pass the schema:\n" + errs).strip()
+        code = None
+        try:
+            code = None if errs else code_pass(spec, p, ctx, doc, validator)
+        except Exception as e:  # the draft goes out without code changes
+            print(f"code pass {p['repo']}: {e}")
+        payload = {"id": p["id"], "pick": p["pick"], "json": doc, "title": todo.get("title"),
+                   "body": body_text(p, todo.get("what", ""), d, code), "note": note, "found": merge_found(d, code)}
+        if code and code.get("edits"):
+            payload["json"] = code["json"]
+            payload["code"] = {"edits": code["edits"], "adds": code["adds"], "explain": code["explain"], "plain": doc}
+            payload["body_plain"] = body_text(p, todo.get("what", ""), d)
+            if code["notes"]:
+                payload["note"] = (note + "\n\nCode changes: " + code["notes"]).strip()
+        elif code and code.get("existing"):
+            payload["json"] = code["json"]
+            payload["note"] = (note + "\n\nGame location: uses its own " + str(code["existing"].get("how", "")) + (" (" + str(code["existing"]["where"]) + ")" if code["existing"].get("where") else "") + ", so no code change.").strip()
+        elif code and code.get("notes"):
+            payload["note"] = (note + "\n\nNo code changes: " + code["notes"]).strip()
+        st, r = site("POST", "draft", payload)
+        print(("drafted " if r.get("ok") else "not saved ") + p["repo"] + ("" if r.get("ok") else f": {r.get('error')}"))
+        return 1 if r.get("ok") else 0
+    except Exception as e:
+        print(f"error {p['repo']}: {e}")
+        site("POST", "fail", {"id": p["id"], "error": str(e)[:300]})
+        return 0
 
 
 def main():
@@ -452,7 +559,7 @@ def main():
     if st != 200 or not todo.get("ok"):
         sys.exit(f"The site said no ({st}): {todo.get('error')}")
     picks = todo.get("picks", [])
-    print(f"{len(picks)} to draft")
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), f"{len(picks)} to draft, {min(WORKERS, max(1, len(picks)))} at a time")
     if not picks:
         return
     st, spec = http(SPEC_URL, timeout=60)
@@ -468,52 +575,25 @@ def main():
             validator = jsonschema.Draft202012Validator(json.loads(sch)) if "2020-12" in sch else jsonschema.Draft7Validator(json.loads(sch))
     except Exception as e:
         print("schema check off:", e)
-    done = 0
-    for p in picks:
+    # (4.10) Draft now: the rows waiting in this run keep saying Drafting (not "didn't finish") while it works.
+    left, lock, stop = {p["id"] for p in picks}, threading.Lock(), threading.Event()
+    def beat():
+        while not stop.wait(120):
+            with lock:
+                ids = sorted(left)
+            if ids and IDS:
+                site("POST", "touch", {"ids": ids})
+    threading.Thread(target=beat, daemon=True).start()
+    def one(p):
         try:
-            # Already had one (ours, Xarishark's or anyone's, open or closed): never a second.
-            had = "" if p.get("pick") == "redo" else earlier_pr(p["repo"])  # a redraft updates our own
-            if had:
-                site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": "It already has a RecompLauncher pull request: " + had})
-                print(f"skip {p['repo']}: already has {had}")
-                continue
-            ctx = context(p)
-            d, raw = ask(spec, p, ctx)
-            if d.get("skip"):
-                site("POST", "draft", {"id": p["id"], "pick": p["pick"], "skip": True, "skip_reason": d.get("skip_reason", "")})
-                print(f"skip {p['repo']}: {d.get('skip_reason')}")
-                continue
-            doc = d.get("recomplauncher_json")
-            if not isinstance(doc, dict):
-                raise RuntimeError("no recomplauncher.json in the answer")
-            errs = schema_errors(validator, doc)
-            if errs:
-                d, raw = ask(spec, p, ctx, {"prev": raw, "errors": errs})
-                doc = d.get("recomplauncher_json") if isinstance(d.get("recomplauncher_json"), dict) else doc
-                errs = schema_errors(validator, doc)
-            note = (d.get("notes") or "").strip()
-            if errs:
-                note = (note + "\n\nStill doesn't pass the schema:\n" + errs).strip()
-            code = None
-            try:
-                code = None if errs else code_pass(spec, p, ctx, doc, validator)
-            except Exception as e:  # the draft goes out without code changes
-                print(f"code pass {p['repo']}: {e}")
-            payload = {"id": p["id"], "pick": p["pick"], "json": doc, "title": todo.get("title"),
-                       "body": body_text(p, todo.get("what", ""), d, code), "note": note}
-            if code:
-                payload["json"] = code["json"]
-                payload["code"] = {"edits": code["edits"], "adds": code["adds"], "explain": code["explain"], "plain": doc}
-                if code["notes"]:
-                    payload["note"] = (note + "\n\nCode changes: " + code["notes"]).strip()
-                payload["body_plain"] = body_text(p, todo.get("what", ""), d)
-            st, r = site("POST", "draft", payload)
-            print(("drafted " if r.get("ok") else "not saved ") + p["repo"] + ("" if r.get("ok") else f": {r.get('error')}"))
-            done += 1 if r.get("ok") else 0
-        except Exception as e:
-            print(f"error {p['repo']}: {e}")
-            site("POST", "fail", {"id": p["id"], "error": str(e)[:300]})
-    print(f"{done} drafts saved")
+            return draft_one(p, todo, spec, validator)
+        finally:
+            with lock:
+                left.discard(p["id"])
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        done = sum(pool.map(one, picks))
+    stop.set()
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), f"{done} drafts saved")
 
 
 if __name__ == "__main__":

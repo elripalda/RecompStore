@@ -154,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // (4.7) Draft now: straight away on this server when the Anthropic key is saved.
         $started = 0; $why = '';
         if (rs_prq_now_ready()) { try { $started = rs_prq_run($ids); } catch (Throwable $e) { $why = $e->getMessage(); } }
-        if ($started) $msg = 'Drafting ' . $started . ' now. ' . ($started === 1 ? 'It shows' : 'They show') . ' up below in about a minute' . ($started > 2 ? ' or two' : '') . '.';
+        if ($started) $msg = 'Drafting ' . $started . ' now, a few at a time. Each takes a few minutes and shows up below when it\'s done.';
         elseif ($why !== '') $msg = $why;
         elseif ($n) $msg = $n . ' queued for tomorrow\'s drafts. Add the Anthropic API key in Setup to draft right away.';
         else $msg = 'Nothing to draft: already drafted or sent (see below), or not on GitHub.';
@@ -193,15 +193,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // (4.9) A sent pull request drafted again (with the command-line checks), then updated with one click.
                 rs_prq_reopen($qid);
                 $row = rs_prq_get($qid);
-                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it again now. It shows up under the drafts in about a minute, with Update pull request.');
+                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it again now. It shows up under the drafts in a few minutes, with Update pull request.');
                 else rs_flash('Back in line: the next daily run drafts it again.');
                 $qid = 0;
             } elseif ($act === 'prq_redo' || $act === 'prq_now') {
                 // Draft again (a draft), or Draft now (one waiting): on this server at once when it can.
-                if ($act === 'prq_redo') rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
+                if ($act === 'prq_redo') rs_db()->prepare("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, found = NULL, code = NULL, body_plain = NULL, error = NULL, updated = NOW() WHERE id = ? AND status <> 'sent'")->execute([$qid]);
                 $row = rs_prq_get($qid);
-                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it now. It shows up below in about a minute.');
+                if ($row && rs_prq_now_ready() && rs_prq_run([(string)$row['app_id']])) rs_flash('Drafting it now. It shows up below in a few minutes.');
                 else rs_flash(rs_prq_now_ready() ? 'It\'s already being drafted.' : 'Back in line: the next daily run drafts it. Add the Anthropic API key in Setup to draft right away.');
+                $qid = 0;
+            } elseif ($act === 'prq_redo_all') {
+                // (4.10) Every draft not sent yet, written again with the latest drafter (redrafts of sent ones too).
+                $ids = array_column(rs_db()->query("SELECT app_id FROM pc_prq WHERE status = 'draft' ORDER BY updated DESC LIMIT 40")->fetchAll(), 'app_id');
+                if ($ids) rs_db()->exec("UPDATE pc_prq SET status = 'todo', json = NULL, body = NULL, note = NULL, found = NULL, code = NULL, body_plain = NULL, error = NULL, updated = NOW() WHERE status = 'draft' AND app_id IN (" . implode(',', array_map(fn($x) => rs_db()->quote((string)$x), $ids)) . ')');
+                $n = $ids && rs_prq_now_ready() ? rs_prq_run($ids) : 0;
+                rs_flash($n ? 'Drafting ' . $n . ' again, a few at a time. Each takes a few minutes and shows up below when it\'s done.' : 'Back in line for the next daily run.');
                 $qid = 0;
             } elseif ($act === 'prq_forget') {
                 rs_db()->prepare("DELETE FROM pc_prq WHERE id = ? AND status = 'todo'")->execute([$qid]);
@@ -396,7 +403,7 @@ if (!empty($_SESSION['prq_key_once'])) rs_session_write(function () { unset($_SE
 $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queued by hand'];
 ?>
 <section class="card prq-card" id="prq">
-  <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting' : '' ?> · <?= $prqNow ? 'Draft now, and daily at 7:23' : 'drafted daily at 7:23' ?><?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span></div>
+  <div class="an-head"><h2>PR queue</h2><span class="muted small"><?= count($prqDrafts) ?> to look over<?= $prqWaiting ? ' · ' . $prqWaiting . ' waiting' : '' ?> · <?= $prqNow ? 'Draft now, and daily at 7:23' : 'drafted daily at 7:23' ?><?= $prqLogin !== '' ? ' · sent as @' . h($prqLogin) : '' ?></span><?php if ($prqDrafts && $prqNow): ?><form method="post" class="prq-redo-all"><?= $csrf ?><button class="btn small" name="action" value="prq_redo_all" onclick="return confirm('Draft all <?= count($prqDrafts) ?> again from scratch with the latest drafter?')">Draft them all again</button></form><?php endif; ?></div>
   <p class="muted small">Pick recomps on the <a href="sdk-support.php">Recomps</a> tab and click <strong>Draft PRs now</strong>: their <code>recomplauncher.json</code> and pull request are written in about a minute and show up here. Every day at 7:23 the drafter also picks a few with no file yet by itself (half just added, half popular console ports). Look each draft over, fix anything, then Send: it forks the repo, adds the file and the badge, opens the pull request and marks the recomp "Pull request open". Nothing is sent until you click Send.</p>
   <?php if (!$prqHasAi && rs_is_owner()): ?><p class="warn small">Add the Anthropic API key in Setup below so Draft now works right away. Until then, picked recomps wait for the daily run.</p><?php endif; ?>
   <?php if ($prqWork): ?>
@@ -422,6 +429,24 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
       <?php if ((string)$pq['error'] !== ''): ?><p class="bad small"><?= h((string)$pq['error']) ?></p><?php endif; ?>
       <?php if ((string)$pq['pr_url'] !== ''): ?><p class="small">Redraft of <a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener">the pull request we sent ↗</a>. Update pull request pushes this file and description to it.</p><?php endif; ?>
       <?php if (trim((string)$pq['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$pq['note'])) ?></p><?php endif; ?>
+      <?php $pqFound = (string)($pq['found'] ?? '') !== '' ? json_decode((string)$pq['found'], true) : null; if (is_array($pqFound) && (!empty($pqFound['features']) || !empty($pqFound['options']))): ?>
+      <div class="prq-found">
+        <h4>What it already has <span class="muted small">what the drafter saw in the project, and where</span></h4>
+        <ol class="prq-steps">
+        <?php foreach ((array)($pqFound['features'] ?? []) as $f): if (!is_array($f) || trim((string)($f['what'] ?? '')) === '') continue;
+            $has = $f['has'] ?? null; $isGame = strtolower(trim((string)$f['what'])) === 'game location';
+            $cls = $has === true ? 'ok' : ($has === false ? ($isGame ? 'bad' : 'no') : 'wait'); ?>
+          <li class="prq-s-<?= $cls ?>"><span class="prq-s-i"><?= $has === true ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : ($has === false && $isGame ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>' : '–') ?></span>
+            <span><b><?= h((string)$f['what']) ?><?php if ($has === true && !empty($f['used'])): ?> <span class="pill ok">In the file</span><?php endif; ?></b>
+            <small><?= h(trim((string)($f['how'] ?? '')) !== '' ? (string)$f['how'] : ($has === false ? 'Not found' : 'Couldn\'t tell')) ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($f['where'] ?? '')); if ($w !== ''): ?> · <?= $w ?><?php endif; ?></small></span></li>
+        <?php endforeach; ?>
+        </ol>
+        <?php $pqOpts = array_values(array_filter((array)($pqFound['options'] ?? []), fn($o) => is_array($o) && trim((string)($o['flag'] ?? '')) !== '')); if ($pqOpts): ?>
+        <h4 class="prq-h4b">Command-line options it reads <span class="muted small"><?= count($pqOpts) ?></span></h4>
+        <dl class="prq-facts"><?php foreach ($pqOpts as $o): ?><div><dt class="mono"><?= h((string)$o['flag']) ?></dt><dd><?= h((string)($o['does'] ?? '')) ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($o['where'] ?? '')); if ($w !== ''): ?><span class="prq-where small"><?= $w ?></span><?php endif; ?></dd></div><?php endforeach; ?></dl>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
       <div class="prq-links small"><a href="https://github.com/<?= h($pq['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($pq['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>
       <div class="prq-grid">
         <label>Pull request title<input name="title" value="<?= h((string)$pq['title']) ?>" maxlength="200"></label>
