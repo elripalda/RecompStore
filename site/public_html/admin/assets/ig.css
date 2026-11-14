@@ -1,6 +1,7 @@
 /* RecompStore admin (4.8): Sponsors > Instant Gaming */
 .ig-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:4px 0 16px}
 .ig-head h1{margin:0 0 4px;display:flex;align-items:center;gap:4px}
+.ig-btns{display:flex;gap:8px;flex-wrap:wrap}
 .ig-head p{margin:0;max-width:760px}
 .ig-head form{margin:0;flex:none}
 .ig-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0 0 20px;align-items:stretch}

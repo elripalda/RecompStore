@@ -131,6 +131,6 @@ try {
             'old' => $d['price'] && $deal ? $fmt((float)$was, $cur, $d['rates'], true) : '', 'pct' => $d['price'] && $deal ? $pct : 0, 'off' => false];
         foreach ($g['ids'] as $id) $l[$id] = $card;
     }
-    $out = ['on' => (bool)$d['on'], 'round' => (int)$d['round'], 'v' => $d['v'], 'all' => $d['all'], 'cc' => $cc, 'cur' => $cur, 'l' => $l ?: new stdClass()];
+    $out = ['on' => (bool)$d['on'], 'launcher' => !empty($d['launcher']), 'round' => (int)$d['round'], 'v' => $d['v'], 'all' => $d['all'], 'cc' => $cc, 'cur' => $cur, 'l' => $l ?: new stdClass()];
 } catch (Throwable $e) { $out = ['on' => false, 'round' => 1, 'v' => [], 'all' => [], 'l' => new stdClass()]; }
 echo json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

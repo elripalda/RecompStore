@@ -76,7 +76,7 @@ function rs_ig_tables(): void {
 // variants: the versions being tested. round: goes up when a new test starts (stats and visitors'
 // versions start over). price: show prices. tag: show the discount tag; tagMin: only from this %.
 function rs_ig_defaults(): array {
-    return ['on' => false, 'igr' => 'recomp', 'price' => true, 'tag' => true, 'tagMin' => 10, 'round' => 1, 'roundAt' => gmdate('Y-m-d'),
+    return ['on' => false, 'launcher' => false, 'igr' => 'recomp', 'price' => true, 'tag' => true, 'tagMin' => 10, 'round' => 1, 'roundAt' => gmdate('Y-m-d'),
         'variants' => [
             ['id' => 'a', 'name' => 'Side, top', 'place' => 'side-top', 'btn' => 'hover', 'share' => 50, 'on' => true],
             ['id' => 'b', 'name' => 'Wide strip', 'place' => 'wide', 'btn' => 'hover', 'share' => 50, 'on' => true],
@@ -97,6 +97,7 @@ function rs_ig_cfg(): array {
     }
     $c['variants'] = $vs ?: $d['variants'];
     $c['on'] = !empty($c['on']);
+    $c['launcher'] = !empty($c['launcher']); // RecompLauncher shows the cards only when this is on too
     $c['price'] = !empty($c['price']);
     $c['tag'] = !empty($c['tag']);
     $c['tagMin'] = max(0, min(90, (int)$c['tagMin']));
@@ -340,7 +341,7 @@ function rs_ig_cache_build(): array {
         if ((int)$r['paused'] || empty($offers[$k])) continue;
         $games[$k] = ['t' => (string)$r['title'], 'p' => (string)$r['platform'], 'tag' => (int)$r['tag'], 'ids' => str_starts_with($k, 't:') ? ($members[$k] ?? []) : [$k], 'offers' => $offers[$k]];
     }
-    return ['on' => $c['on'], 'round' => $c['round'], 'igr' => $c['igr'], 'price' => $c['price'], 'tag' => $c['tag'], 'tagMin' => $c['tagMin'],
+    return ['on' => $c['on'], 'launcher' => !empty($c['launcher']), 'round' => $c['round'], 'igr' => $c['igr'], 'price' => $c['price'], 'tag' => $c['tag'], 'tagMin' => $c['tagMin'],
         'v' => array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn'], 'share' => $x['share']], rs_ig_live_variants($c)),
         'all' => array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn']], $c['variants']),
         'rates' => rs_ig_rates(), 'games' => $games, 'at' => time()];

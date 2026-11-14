@@ -42,6 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_ig_save($c);
             rs_log('sponsors', 'Instant Gaming', $c['on'] ? 'on' : 'off');
             rs_flash($c['on'] ? 'On. Linked recomps show the card within 2 minutes.' : 'Off. The cards are gone within 2 minutes.');
+        } elseif ($act === 'launcher') {
+            $c['launcher'] = !$c['launcher'];
+            rs_ig_save($c);
+            rs_log('sponsors', 'Instant Gaming', $c['launcher'] ? 'launcher on' : 'launcher off');
+            rs_flash($c['launcher'] ? 'RecompLauncher will show the cards too, within a few minutes.' : 'RecompLauncher stops showing the cards within a few minutes.');
         } elseif ($act === 'code') {
             $igr = trim((string)($_POST['igr'] ?? ''));
             if (!preg_match('/^[A-Za-z0-9_-]{1,40}$/', $igr)) throw new RuntimeException('The partner code is letters, numbers, - and _ only.');
@@ -220,10 +225,13 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
 ?>
 <div class="ig-head">
   <div>
-    <h1>Instant Gaming <span class="<?= $c['on'] ? 'pill ok' : 'pill' ?>"><?= $c['on'] ? 'On' : 'Off' ?></span></h1>
+    <h1>Instant Gaming <span class="<?= $c['on'] ? 'pill ok' : 'pill' ?>"><?= $c['on'] ? 'On' : 'Off' ?></span> <span class="<?= $c['launcher'] ? 'pill ok' : 'pill' ?>">Launcher <?= $c['launcher'] ? 'on' : 'off' ?></span></h1>
     <p class="muted">Recomps' pages show where to buy the original game, through your partner link. Sales show on <a href="https://www.instant-gaming.com/en/partnership/" target="_blank" rel="noopener">your Instant Gaming dashboard</a>; views and clicks are counted here.</p>
   </div>
-  <form method="post"><?= $csrf ?><button name="action" value="onoff"<?= $c['on'] ? '' : ' class="primary"' ?>><?= $c['on'] ? 'Turn it off' : 'Turn it on' ?></button></form>
+  <div class="ig-btns">
+    <form method="post"><?= $csrf ?><button name="action" value="launcher" title="Shows the same cards on game pages in RecompLauncher (needs the cards on as well)"><?= $c['launcher'] ? 'Hide in the launcher' : 'Show in the launcher' ?></button></form>
+    <form method="post"><?= $csrf ?><button name="action" value="onoff"<?= $c['on'] ? '' : ' class="primary"' ?>><?= $c['on'] ? 'Turn it off' : 'Turn it on' ?></button></form>
+  </div>
 </div>
 
 <div class="ig-pair">
