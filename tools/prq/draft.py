@@ -156,6 +156,8 @@ def cli_hints(repo, branch, paths):
 def context(p):
     repo = p["repo"]
     info = gh(f"/repos/{repo}")
+    if not info and http(f"https://api.github.com/repos/{repo}", headers={"Accept": "application/vnd.github+json", **({"Authorization": "Bearer " + GHT} if GHT else {})}, timeout=20)[0] == 404:
+        raise RuntimeError("GitHub says this repo doesn't exist anymore (or it's private now).")
     if not info:
         # (4.9) No repo means GitHub refused (its hourly limit, usually): no draft from nothing.
         raise RuntimeError("Couldn't read the repo on GitHub (its hourly limit may be used up). Try again later.")
@@ -394,11 +396,30 @@ def shown(files):
 
 
 def has_game_option(doc):
-    st = doc.get("start") if isinstance(doc.get("start"), dict) else {}
-    args = " ".join(str(a) for a in (st.get("args") or []))
+    # (4.10) The player's copy handed over anywhere the launcher passes it: the start or setup step's arguments or
+    # environment ("{game}", or "{input:<id>}" for a copy described in "inputs"), or a settings key (config.game_path).
+    parts = []
+    for step in ("start", "prepare"):
+        st = doc.get(step) if isinstance(doc.get(step), dict) else {}
+        parts += [str(a) for a in (st.get("args") or [])]
+        if isinstance(st.get("env"), dict):
+            parts += [str(v) for v in st["env"].values()]
+    text = " ".join(parts)
     cfg = doc.get("config") or []
-    # (4.9) "{input:<id>}" passes a copy described in "inputs" (a .jar, a ROM): that's a game option too.
-    return "{game}" in args or "{input:" in args or any(isinstance(c, dict) and c.get("game_path") for c in cfg)
+    return "{game}" in text or "{input:" in text or any(isinstance(c, dict) and c.get("game_path") for c in cfg)
+
+
+def sdk_easy(doc):
+    """Easy Setup the way the site and the launcher count it (admin/inc/pc.php rs_sdk_easy): "start", plus the
+    player's copy in the "game" part or in a required "inputs" entry whose role is game or disc (none means game)."""
+    if not isinstance(doc, dict) or "start" not in doc:
+        return False
+    if doc.get("game"):
+        return True
+    for i in doc.get("inputs") or []:
+        if isinstance(i, dict) and not i.get("optional") and not i.get("shared") and str(i.get("role") or "game") in ("game", "disc"):
+            return True
+    return False
 
 
 def check_edits(edits, files):
@@ -510,10 +531,8 @@ def feature_list(doc, d, code=None):
         adds = [str(a) for a in code.get("adds") or []]
         add = next((a for a in adds if "game" in a.lower()), adds[0] if adds else "--game <path>")
         out.append(f"- [x] Easy Setup: players pick their own copy once and it's handed to the game, through a small `{add}` option added here (see Code changes)")
-    elif code and code.get("existing"):
-        out.append(f"- [x] Easy Setup: players pick their own copy once and it's handed to the game through your existing `{code['existing'].get('how', '').split(':')[0].strip()}`, no code change")
-    elif has_game_option(doc):
-        how = str((found.get("game location") or {}).get("how", "")).split(":")[0].strip()
+    elif sdk_easy(doc):
+        how = str((code or {}).get("existing", {}).get("how", "") if code and code.get("existing") else (found.get("game location") or {}).get("how", "")).split(":")[0].strip()
         out.append("- [x] Easy Setup: players pick their own copy once and it's handed to the game" + (f" through your existing `{how}`" if how else "") + ", no code change")
     else:
         big = bool(code and code.get("notes"))  # (the code step looked and said why it left it)
@@ -620,6 +639,7 @@ def draft_one(p, todo, spec, validator):
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)  # (the log shows each draft as it's done)
     if not KEY or not AKEY:
         sys.exit("Set RS_PRQ_KEY and ANTHROPIC_API_KEY.")
     st, todo = site("GET", "todo")
