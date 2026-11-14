@@ -265,6 +265,10 @@ Answer with one JSON object and nothing else:
   built-in launcher or picker, a setup or build step). "has": true, false or null when you couldn't tell.
   "how": the flag, settings key, file or folder, and what it takes. "where": file:line (or the README section)
   you saw it in. "used": whether your recomplauncher.json uses it.
+  "hook": whether the launcher can actually drive it: a command-line flag, an environment variable, a settings
+  file key it can write, or a fixed folder or file it can point at. A feature that only lives in the game's own
+  menus or its own GUI (fullscreen in the in-game settings, say) has "has": true but "hook": false, because
+  the launcher can't do anything with it. What we care about is what can be paired with the json.
   When "has" is true but "used" is false, give "why": one short line on why your recomplauncher.json doesn't
   use it (the launcher has no field for it, the key names weren't anywhere you could read, it's only in an
   in-game menu...). Before leaving one out, check "config_docs": the key names and flags are often there.
