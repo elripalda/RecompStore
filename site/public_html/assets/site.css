@@ -3292,29 +3292,33 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
   #top-kofi{width:42px;padding:0;justify-content:center;gap:0}
   #top-kofi span,#top-kofi .kofi-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 }
-/* (4.10) The download page: real screenshots of the launcher, stacked at an angle and turning */
-.pc-shots{position:relative;width:calc(100% + clamp(0px,(100vw - 1320px)/2 - 28px,380px));padding:10% 0 0;perspective:2400px;perspective-origin:20% 40%;isolation:isolate}
-.pc-shots::before{content:"";position:absolute;inset:18% -6% 4% 8%;z-index:-1;background:radial-gradient(closest-side,rgba(52,242,232,.30),rgba(52,242,232,.08) 55%,transparent 75%);filter:blur(34px);pointer-events:none}
-.pc-shots::after{content:"";position:absolute;left:6%;right:10%;bottom:46px;height:44px;z-index:-1;background:radial-gradient(closest-side,rgba(0,0,0,.65),transparent);filter:blur(14px);pointer-events:none}
-.pc-shots-stage{position:relative;aspect-ratio:1600/934;transform-style:preserve-3d;transform:rotateY(-17deg) rotateX(7deg) rotateZ(-1.2deg);transition:transform .9s cubic-bezier(.2,.7,.1,1)}
-.pc-shots.held .pc-shots-stage{transform:rotateY(-11deg) rotateX(4deg) rotateZ(-.6deg)}
-.pc-shot{position:absolute;inset:0;margin:0;border-radius:14px;overflow:hidden;background:#08101c;box-shadow:0 0 0 1px rgba(244,248,252,.18),0 34px 80px -18px rgba(0,0,0,.75);transition:transform 1s cubic-bezier(.2,.75,.1,1),opacity .9s ease,filter .9s ease;backface-visibility:hidden;will-change:transform,opacity}
+/* (4.10) The download page: real screenshots of the launcher, stacked at an angle and turning. Each shot keeps
+   the window's own black edge, so the rounded corners never cut into the window. */
+.pc-shots{position:relative;width:calc(100% + clamp(0px,(100vw - 1320px)/2 - 28px,250px));max-width:760px;padding:9% 0 0;perspective:2400px;perspective-origin:20% 40%;isolation:isolate}
+.pc-shots::before{content:"";position:absolute;inset:16% -6% 10% 8%;z-index:-1;background:radial-gradient(closest-side,rgba(52,242,232,.28),rgba(52,242,232,.07) 55%,transparent 75%);filter:blur(36px);pointer-events:none}
+.pc-shots::after{content:"";position:absolute;left:8%;right:12%;bottom:52px;height:46px;z-index:-1;background:radial-gradient(closest-side,rgba(0,0,0,.7),transparent);filter:blur(14px);pointer-events:none}
+.pc-shots-stage{position:relative;aspect-ratio:1444/1227;transform-style:preserve-3d;transform:rotateY(-16deg) rotateX(6deg) rotateZ(-1deg);transition:transform .9s cubic-bezier(.2,.7,.1,1)}
+.pc-shots.held .pc-shots-stage{transform:rotateY(-10deg) rotateX(3.5deg) rotateZ(-.5deg)}
+.pc-shot{position:absolute;inset:0;margin:0;border-radius:18px;overflow:hidden;background:#000;box-shadow:0 0 0 1px rgba(244,248,252,.12),0 36px 80px -18px rgba(0,0,0,.8);transition:transform 1s cubic-bezier(.2,.75,.1,1),opacity .9s ease,filter .9s ease;backface-visibility:hidden;will-change:transform,opacity}
 .pc-shot img{display:block;width:100%;height:100%;object-fit:cover}
-.pc-shot.p0{z-index:3;transform:translate3d(0,0,0);opacity:1}
-.pc-shot.p1{z-index:2;transform:translate3d(6%,-8%,-170px);opacity:.62;filter:brightness(.62) saturate(.85)}
-.pc-shot.p2{z-index:1;transform:translate3d(12%,-16%,-340px);opacity:.32;filter:brightness(.45) saturate(.7)}
-.pc-shot.out{z-index:4;transform:translate3d(-16%,10%,120px) rotateZ(-3deg);opacity:0;filter:none;transition:transform .7s cubic-bezier(.5,0,.75,0),opacity .55s ease}
-.pc-shot.p0::after{content:"";position:absolute;inset:0;background:linear-gradient(112deg,transparent 38%,rgba(255,255,255,.09) 50%,transparent 62%);transform:translateX(-120%);pointer-events:none}
+.pc-shot.p0{z-index:4;transform:translate3d(0,0,0);opacity:1}
+.pc-shot.p1{z-index:3;transform:translate3d(5.5%,-6%,-150px);opacity:.6;filter:brightness(.6) saturate(.85)}
+.pc-shot.p2{z-index:2;transform:translate3d(11%,-12%,-300px);opacity:.3;filter:brightness(.45) saturate(.7)}
+.pc-shot.p3{z-index:1;transform:translate3d(16%,-18%,-450px);opacity:0;filter:brightness(.4)}
+.pc-shot.out{z-index:5;transform:translate3d(-16%,9%,120px) rotateZ(-3deg);opacity:0;filter:none;transition:transform .7s cubic-bezier(.5,0,.75,0),opacity .55s ease}
+.pc-shot.p0::after{content:"";position:absolute;inset:0;background:linear-gradient(112deg,transparent 38%,rgba(255,255,255,.08) 50%,transparent 62%);transform:translateX(-120%);pointer-events:none}
 .pc-shots.run .pc-shot.p0::after{animation:pcShotSheen 1.6s .35s ease-out both}
 @keyframes pcShotSheen{to{transform:translateX(120%)}}
-.pc-shots-tabs{display:flex;justify-content:center;gap:8px;margin:26px auto 0;width:fit-content;max-width:100%;padding:5px;border-radius:999px;background:rgba(11,18,32,.6);border:1px solid var(--line);backdrop-filter:blur(10px)}
-.pc-shots-tabs button{position:relative;overflow:hidden;border:0;background:none;color:#a7b3c4;font:600 13.5px Figtree,system-ui,sans-serif;padding:8px 16px;border-radius:999px;cursor:pointer;transition:color .2s,background .2s}
+.pc-shots-tabs{display:flex;justify-content:center;gap:6px;margin:26px auto 0;width:fit-content;max-width:100%;padding:5px;border-radius:999px;background:rgba(11,18,32,.6);border:1px solid var(--line);backdrop-filter:blur(10px)}
+.pc-shots-tabs button{position:relative;overflow:hidden;border:0;background:none;color:#a7b3c4;font:600 13.5px Figtree,system-ui,sans-serif;padding:8px 15px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .2s,background .2s}
 .pc-shots-tabs button:hover{color:#F4F8FC}
 .pc-shots-tabs button.on{color:#F4F8FC;background:rgba(52,242,232,.12)}
 .pc-shots-tabs button i{position:absolute;left:14px;right:14px;bottom:3px;height:2px;border-radius:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left}
 .pc-shots.run .pc-shots-tabs button.on i{animation:pcShotBar 4.2s linear both}
 .pc-shots.held .pc-shots-tabs button.on i{animation-play-state:paused}
 @keyframes pcShotBar{to{transform:scaleX(1)}}
-@media (max-width:900px){.pc-shots{width:100%;padding-top:9%;perspective-origin:50% 40%}.pc-shots-stage{transform:rotateY(-9deg) rotateX(5deg) rotateZ(-.6deg)}.pc-shot.p1{transform:translate3d(4%,-6%,-140px)}.pc-shot.p2{transform:translate3d(8%,-12%,-280px)}}
-@media (max-width:600px){.pc-shots-tabs button{padding:7px 11px;font-size:12.5px}}
+@media (max-width:900px){.pc-shots{width:100%;max-width:620px;margin:0 auto;padding-top:8%;perspective-origin:50% 40%}.pc-shots-stage{transform:rotateY(-8deg) rotateX(4deg) rotateZ(-.5deg)}.pc-shot{border-radius:14px}.pc-shot.p1{transform:translate3d(4%,-5%,-130px)}.pc-shot.p2{transform:translate3d(8%,-10%,-260px)}.pc-shot.p3{transform:translate3d(12%,-15%,-390px)}}
+@media (max-width:900px){.pc-shots{overflow-x:clip}}
+@media (max-width:600px){.pc-shots{padding-top:7%}.pc-shots-stage{transform:rotateY(-6deg) rotateX(3deg)}.pc-shot.p1{transform:translate3d(1.5%,-5%,-120px)}.pc-shot.p2{transform:translate3d(3%,-10%,-240px)}.pc-shot.p3{transform:translate3d(4.5%,-15%,-360px)}.pc-shot{border-radius:12px}.pc-shots-tabs{gap:2px;padding:4px}.pc-shots-tabs button{padding:7px 9px;font-size:12px}.pc-shots-tabs button i{left:9px;right:9px}}
 @media (prefers-reduced-motion:reduce){.pc-shot,.pc-shots-stage{transition:none}.pc-shot.p0::after{display:none}}
+@media (max-width:420px){.pc-launch-words h1{font-size:clamp(30px,10.4vw,40px)}}

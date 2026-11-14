@@ -18,8 +18,9 @@
   let lang = 'en';
   let dict = {};
   const N_ = (s) => s; // English that t() is given later (a table of labels): the tool finds it
-  // The download page's screenshots of the launcher (assets/launcher/shot-<key>.webp), in the order they turn.
-  const LAUNCH_SHOTS = [['discover', N_('Discover')], ['library', N_('Your Library')], ['game', N_('Game Pages')]];
+  // The download page's screenshots of the launcher (assets/launcher/rl-<key>.webp, 1444x1227 with the window's
+  // own black edge), in the order they turn.
+  const LAUNCH_SHOTS = [['home', N_('Home')], ['game', N_('Game Pages')], ['saves', N_('Cloud Saves')], ['discover', N_('Discover')]];
   // (3.0) Headings, menus and buttons in title case. The English words only: the keys stay, so
   // every translation still finds its line.
   const EN_CAPS = { 'All recomps': 'All Recomps', 'All PC recomps': 'All PC Recomps', 'Top charts': 'Top Charts', 'Coming soon': 'Coming Soon',
@@ -3454,7 +3455,7 @@
             <div class="cta-row"><a class="btn" href="/pc/all">${t('Browse PC recomps')}</a><a class="btn" href="/pc/how">${t('How it works')}</a></div>
           </div>
           <div class="pc-shots" data-shots>
-            <div class="pc-shots-stage">${LAUNCH_SHOTS.map(([k, label], i) => `<figure class="pc-shot p${i}" data-shot="${i}"><img src="/assets/launcher/shot-${k}.webp" srcset="/assets/launcher/shot-${k}-960.webp 960w, /assets/launcher/shot-${k}.webp 1600w" sizes="(max-width: 900px) 94vw, 1100px" width="1600" height="934" alt="${esc(tf('RecompLauncher: {page}', { page: t(label) }))}"${i ? ' loading="lazy"' : ''} decoding="async"></figure>`).join('')}</div>
+            <div class="pc-shots-stage">${LAUNCH_SHOTS.map(([k, label], i) => `<figure class="pc-shot p${i}" data-shot="${i}"><img src="/assets/launcher/rl-${k}.webp" srcset="/assets/launcher/rl-${k}-800.webp 800w, /assets/launcher/rl-${k}.webp 1444w" sizes="(max-width: 900px) 94vw, 760px" width="1444" height="1227" alt="${esc(tf('RecompLauncher: {page}', { page: t(label) }))}"${i ? ' loading="lazy"' : ''} decoding="async"></figure>`).join('')}</div>
             <div class="pc-shots-tabs" role="tablist">${LAUNCH_SHOTS.map(([k, label], i) => `<button type="button" role="tab" data-go="${i}"${i ? '' : ' class="on" aria-selected="true"'}>${esc(t(label))}<i></i></button>`).join('')}</div>
           </div>
         </header>
