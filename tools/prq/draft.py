@@ -590,7 +590,7 @@ def merge_found(d, code):
     opts = [x for x in (f.get("options") or []) if isinstance(x, dict) and x.get("flag")]
     if code and (code.get("existing") or code.get("edits")):
         ex = code.get("existing") or {}
-        row = {"what": "Game location", "has": True, "used": True,
+        row = {"what": "Game location", "has": True, "used": True, "added": not ex and bool(code.get("edits")),
                "how": ex.get("how") or ("Added in this pull request: " + ", ".join(str(a) for a in code.get("adds") or [])),
                "where": ex.get("where", "")}
         feats = [row] + [x for x in feats if str(x.get("what", "")).lower() != "game location"]

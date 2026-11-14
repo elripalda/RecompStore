@@ -28,6 +28,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'boot_
     if (!is_array($bj)) exit(json_encode(['problems' => [['err', 'Not valid JSON.']]]));
     exit(json_encode(['problems' => rs_boot_check($bj), 'uses' => rs_boot_uses($bj), 'summary' => rs_boot_summary($bj)], JSON_UNESCAPED_UNICODE));
 }
+// (4.10) From the search box: a pasted repo link that isn't on RecompStore yet, into Found on GitHub.
+if (isset($_GET['lookup'], $_GET['t']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    rs_session();
+    if (!empty($_SESSION['csrf']) && hash_equals((string)$_SESSION['csrf'], (string)$_GET['t'])) {
+        $s0 = rs_pc_repo_status((string)$_GET['lookup']);
+        if ($s0 && $s0['app']) { header('Location: pc.php?edit=' . rawurlencode((string)$s0['app']['id']) . '#edit'); exit; }
+        $r = rs_pc_find_one((string)$_GET['lookup']);
+        if ($r['ok'] && $s0 && $s0['found'] === 'skipped') rs_db()->prepare("UPDATE pc_found SET state = 'new' WHERE repo = ?")->execute([$s0['key']]);
+        rs_log('pc', (string)$_GET['lookup'], 'looked up from search');
+        rs_flash($r['ok'] ? $r['name'] . ' is waiting at the top of Found on GitHub. Add, Auto-add or Skip it.' : $r['why'], $r['ok'] ? 'ok' : 'err');
+    }
+    header('Location: pc.php?view=found');
+    exit;
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
@@ -39,9 +53,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_flash($n ? 'Found ' . $n . ' new PC ' . ($n === 1 ? 'recomp' : 'recomps') . '.' : 'Nothing new' . ($looked ? ' (' . $looked . ' looked at)' : '') . '.');
             $back = 'pc.php?view=found';
         } elseif ($act === 'lookup') {
-            $r = rs_pc_find_one((string)($_POST['repo'] ?? ''));
-            rs_flash($r['ok'] ? ($r['name'] . ' is in the list below.') : $r['why'], $r['ok'] ? 'ok' : 'err');
-            $back = 'pc.php?view=found';
+            // (4.10) One we already have says so (and where), instead of "in the list below".
+            $s0 = rs_pc_repo_status((string)($_POST['repo'] ?? ''));
+            if ($s0 && $s0['app']) {
+                $hw = rs_pc_hidden_why($s0['app']);
+                rs_flash('We already have this: ' . $s0['app']['name'] . (!empty($s0['app']['soon']) ? ' (Coming soon).' : ($hw !== '' ? '. It\'s hidden. ' . $hw : ', live on the store.')));
+                $back = 'pc.php?edit=' . rawurlencode((string)$s0['app']['id']) . '#edit';
+            } else {
+                $r = rs_pc_find_one((string)($_POST['repo'] ?? ''));
+                if ($r['ok'] && $s0 && $s0['found'] === 'skipped') rs_db()->prepare("UPDATE pc_found SET state = 'new' WHERE repo = ?")->execute([$s0['key']]);
+                rs_flash($r['ok'] ? ($r['name'] . ' is in the list below' . ($s0 && $s0['found'] === 'skipped' ? ' (it was skipped before)' : '') . '.') : $r['why'], $r['ok'] ? 'ok' : 'err');
+                $back = 'pc.php?view=found';
+            }
         } elseif ($act === 'add') {
             $a = rs_pc_add((string)($_POST['repo'] ?? ''));
             rs_flash($a['name'] . ' is in, hidden. Look it over, then show it and Publish.');

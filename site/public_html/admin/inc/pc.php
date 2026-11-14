@@ -2061,3 +2061,43 @@ function rs_pc_publish(): int {
     try { rs_pc_discord_announce($cat); } catch (Throwable $e) { /* best effort */ }
     return count($cat['apps']);
 }
+
+// (4.10) Why a recomp is hidden, in a line, for the admin. -> '' when it's showing
+function rs_pc_hidden_why(array $a): string {
+    if (empty($a['hidden'])) return '';
+    if (trim((string)($a['blocked_why'] ?? '')) !== '') return 'Not compatible yet: ' . trim((string)$a['blocked_why']);
+    if ((string)($a['watch_hid'] ?? '') !== '') {
+        $s = (string)$a['watch_hid'];
+        $l = defined('RS_WATCH_STATES') && isset(RS_WATCH_STATES[$s]) ? RS_WATCH_STATES[$s][1] : $s;
+        return 'Hidden by the repo watch: ' . strtolower($l) . '.';
+    }
+    try {
+        $st = rs_db()->prepare('SELECT status, verdict, notes FROM pc_auto WHERE app_id = ? ORDER BY id DESC LIMIT 1');
+        $st->execute([(string)$a['id']]);
+        if ($j = $st->fetch(PDO::FETCH_ASSOC)) {
+            $why = ['queued' => 'Auto-add is about to check it.', 'running' => 'Auto-add is checking it right now.',
+                'review' => 'Auto-add made it and it\'s waiting for someone to look it over and Publish (Auto-add tab).',
+                'failed' => 'Auto-add couldn\'t finish it: ' . mb_substr(trim((string)$j['notes']), 0, 160)][(string)$j['status']] ?? '';
+            if ($why !== '') return $why . ((string)$j['verdict'] === 'skip' ? ' One of its checks failed (VirusTotal, ClamAV or the download), so it suggests skipping it.' : '');
+        }
+    } catch (Throwable $e) { /* no Auto-add table */ }
+    if ((string)($a['live_at'] ?? '') === '') return 'Added but never shown: waiting for someone to look it over, tick Show it on the site and Publish.';
+    return 'Hidden by hand (it was live before).';
+}
+
+// (4.10) Where a repo stands with us, from a link: listed (and how), waiting in Found on GitHub,
+// skipped, or new to us. No network. -> ['key', 'link', 'app' => ?array, 'found' => ?state, 'auto' => ?status]
+function rs_pc_repo_status(string $link): ?array {
+    $l = rs_repo_from_link($link);
+    if (!$l) return null;
+    rs_pc_tables();
+    $key = rs_repo_key($l['host'], (string)$l['repo']);
+    $app = null;
+    foreach (rs_pc_apps(true) as $a) if (strcasecmp(rs_pc_key($a), $key) === 0) { $app = $a; break; }
+    $st = rs_db()->prepare('SELECT state FROM pc_found WHERE repo = ?');
+    $st->execute([$key]);
+    $found = $st->fetchColumn();
+    $auto = null;
+    try { $st = rs_db()->prepare('SELECT status FROM pc_auto WHERE repo_key = ? ORDER BY id DESC LIMIT 1'); $st->execute([$key]); $auto = $st->fetchColumn() ?: null; } catch (Throwable $e) { }
+    return ['key' => $key, 'link' => rs_host_web($l['host'], (string)$l['repo']), 'app' => $app, 'found' => $found === false ? null : (string)$found, 'auto' => $auto];
+}

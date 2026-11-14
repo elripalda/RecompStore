@@ -10,6 +10,30 @@ $q = trim(mb_substr((string)($_GET['q'] ?? ''), 0, 80));
 $out = [];
 if (mb_strlen($q) < 2) { echo json_encode(['ok' => true, 'groups' => []]); exit; }
 $lq = mb_strtolower($q);
+
+// (4.10) A GitHub / GitLab link: where that repo stands with us, and a way to queue it when it's new.
+if (rs_can_page('pc.php') && preg_match('#(github\.com|gitlab\.com|sourceforge\.net|codeberg\.org|^[\w.-]+/[\w.-]+$)#i', $q)) {
+    require_once __DIR__ . '/inc/pc.php';
+    $rsq = rs_pc_repo_status($q);
+    if ($rsq) {
+        $it = [];
+        if ($a = $rsq['app']) {
+            $hw = rs_pc_hidden_why($a);
+            $it[] = ['href' => 'pc.php?edit=' . rawurlencode((string)$a['id']) . '#edit', 'label' => 'Already listed: ' . $a['name'],
+                'note' => !empty($a['soon']) ? 'Coming soon' : ($hw !== '' ? 'Hidden · ' . $hw : 'Live on the store')];
+        } elseif ($rsq['auto'] && in_array($rsq['auto'], ['queued', 'running', 'review', 'failed'], true)) {
+            $it[] = ['href' => 'auto.php', 'label' => 'On Auto-add', 'note' => ['queued' => 'Waiting to be checked', 'running' => 'Being checked now', 'review' => 'Checked, waiting for someone to Publish', 'failed' => 'Auto-add couldn\'t finish it'][$rsq['auto']]];
+        } elseif ($rsq['found'] === 'new') {
+            $it[] = ['href' => 'pc.php?view=found', 'label' => 'Waiting in Found on GitHub', 'note' => 'Not checked yet. Add, Auto-add or Skip it there.'];
+        } elseif ($rsq['found'] === 'skipped') {
+            $it[] = ['href' => 'pc.php?lookup=' . rawurlencode($rsq['link']) . '&t=' . rawurlencode(rs_csrf()), 'label' => 'Skipped before', 'note' => 'Put it back in Found on GitHub to check again'];
+        } else {
+            $it[] = ['href' => 'pc.php?lookup=' . rawurlencode($rsq['link']) . '&t=' . rawurlencode(rs_csrf()), 'label' => 'Not on RecompStore yet', 'note' => 'Add it to Found on GitHub to be checked'];
+        }
+        $it[] = ['href' => $rsq['link'], 'label' => 'Open the repo', 'note' => $rsq['key']];
+        $out[] = ['title' => 'This repo', 'items' => $it];
+    }
+}
 $has = fn(string ...$hay) => (bool)array_filter($hay, fn($x) => $x !== '' && str_contains(mb_strtolower($x), $lq));
 
 // Admin pages

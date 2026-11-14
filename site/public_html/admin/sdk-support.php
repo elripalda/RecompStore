@@ -431,13 +431,15 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
       <?php if (trim((string)$pq['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$pq['note'])) ?></p><?php endif; ?>
       <?php $pqFound = (string)($pq['found'] ?? '') !== '' ? json_decode((string)$pq['found'], true) : null; if (is_array($pqFound) && (!empty($pqFound['features']) || !empty($pqFound['options']))): ?>
       <div class="prq-found">
-        <h4>What it already has <span class="muted small">what the drafter saw in the project, and where</span></h4>
+        <h4>Features <span class="muted small">what the project has, where, and what this pull request does with each</span></h4>
         <ol class="prq-steps">
         <?php foreach ((array)($pqFound['features'] ?? []) as $f): if (!is_array($f) || trim((string)($f['what'] ?? '')) === '') continue;
             $has = $f['has'] ?? null; $isGame = strtolower(trim((string)$f['what'])) === 'game location';
             $cls = $has === true ? 'ok' : ($has === false ? ($isGame ? 'bad' : 'no') : 'wait'); ?>
           <li class="prq-s-<?= $cls ?>"><span class="prq-s-i"><?= $has === true ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : ($has === false && $isGame ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>' : '–') ?></span>
-            <span><b><?= h((string)$f['what']) ?><?php if ($has === true && !empty($f['used'])): ?> <span class="pill ok">In the file</span><?php endif; ?></b>
+            <span><b><?= h((string)$f['what']) ?><?php // (4.10) What this pull request does with it
+                $added = !empty($f['added']) || str_starts_with(trim((string)($f['how'] ?? '')), 'Added in this pull request');
+                if ($has === true && $added): ?> <span class="pill prq-p-add">Feature added with this PR</span><?php elseif ($has === true && !empty($f['used'])): ?> <span class="pill ok">Flag exists, added to json</span><?php elseif ($has === true): ?> <span class="pill">Already there, not in json</span><?php endif; ?></b>
             <small><?= h(trim((string)($f['how'] ?? '')) !== '' ? (string)$f['how'] : ($has === false ? 'Not found' : 'Couldn\'t tell')) ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($f['where'] ?? '')); if ($w !== ''): ?> · <?= $w ?><?php endif; ?></small></span></li>
         <?php endforeach; ?>
         </ol>

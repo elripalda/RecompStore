@@ -165,3 +165,5 @@
 .prq-where{display:block;margin-top:3px}.prq-found a.mono,.prq-found .mono{font-size:12px}
 .prq-redo-all{margin:0 0 0 auto}
 @media (max-width:760px){.prq-steps,.prq-facts{grid-template-columns:1fr}}
+
+.prq-p-add{background:rgba(52,242,232,.14);color:var(--cyan-ink)}
