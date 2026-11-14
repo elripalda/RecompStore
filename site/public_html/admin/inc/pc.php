@@ -2117,6 +2117,11 @@ function rs_pc_repo_status(string $link): ?array {
 // (4.10) Of a release's Windows-looking files, the one that's the game's download: a zip over an installer,
 // then the one closest to the old name. -> '' when there's nothing sensible to pick.
 function rs_pc_dl_pick(array $files, string $old = ''): string {
+    // Only a rename of the file we had: no Windows file before, or a new one that doesn't start like the old
+    // one (another build, a co-op version...), is left for a person.
+    $lead = fn(string $n): string => strtolower((string)preg_split('/[-_. ]/', ltrim(str_replace('*', '', $n)))[0]);
+    if (trim($old) === '' || $lead($old) === '') return '';
+    $files = array_values(array_filter($files, fn($f) => $lead((string)$f) === $lead($old)));
     $best = ''; $bestScore = -99;
     foreach ($files as $f) {
         $f = (string)$f;

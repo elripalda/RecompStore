@@ -37,7 +37,7 @@ Runs in the 30-minute refresh for each PC recomp. It compares the newest release
 - `nofile`: no release has a matching file.
 - `gone`: the project page is gone or taken down.
 
-**Renamed files are followed on their own:** when the check finds `stuck`, the refresh picks the new file (`rs_pc_dl_pick`: a zip over an installer, then the name closest to the old one), sets `asset_win` with its version as `*` and logs it. The same refresh then sees the new release, which is checked like any other before it goes out.
+**Renamed files are followed on their own:** when the check finds `stuck`, the refresh picks the new file (`rs_pc_dl_pick`: a zip over an installer, then the name closest to the old one), sets `asset_win` with its version as `*` and logs it. Only a real rename is followed: the listing must already have a Windows file and the new name must start the same way (a co-op build or a different project's file is left for a person). The same refresh then sees the new release, which is checked like any other before it goes out.
 
 Whatever is left shows on the listing's edit page as **Download needs a look**, with:
 - **Use the new file** (one button per candidate when there are several): sets `asset_win` to the new file with its version as `*` (`rs_pc_pattern`). Publish to put it live.
