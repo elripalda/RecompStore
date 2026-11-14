@@ -146,6 +146,11 @@ RewriteRule ^(l|r)/([A-Za-z0-9-]{4,12})/?$ page.php?p=code [L]
   <Files "developers.json">
     Header set Cache-Control "no-cache, must-revalidate"
   </Files>
+  # (4.10) The weekly chart: small, changes once a week. Checked each time (an ETag answers 304), readable by RecompLauncher.
+  <Files "trending.json">
+    Header set Cache-Control "public, no-cache"
+    Header set Access-Control-Allow-Origin "*"
+  </Files>
   <Files "catalog.json">
     Header set Cache-Control "no-cache, must-revalidate"
     Header set Access-Control-Allow-Origin "*"
