@@ -16,7 +16,7 @@ Two separate things that work together:
 
 - See their games with numbers (downloads, player reports, logs players sent).
 - See where each game's newest release stands (`rs_pc_update_status`: out, being scanned, going out, waiting for a look, or no matching file) and press **Check for my new release now** (`api/dev.php a=pc-check`, a few an hour per game), which reads their repo straight away and gives the scan a turn.
-- See which launcher features each game has (`rs_pc_feature_list`, built from the catalog's `support` list: Easy Setup, settings, save backups, setup step, checks the player's copy, mods), marked as from their own recomplauncher.json or set up by our profile for now, with a link to the SDK for the rest. The public game page shows the same list as **In RecompLauncher**.
+- See which launcher features each game has (`rs_pc_feature_list`, built from the catalog's `support` list: Easy Setup, settings, save backups, setup step, checks the player's copy, mods), marked as from their own recomplauncher.json or set up by our profile for now, with a link to the SDK for the rest. The public game page shows the ones it has as **In RecompLauncher**.
 - Edit their page and their games' pages. These are **suggested changes** (`dev_changes`, status `pending`) the team approves, except a verified developer's own changes, which go out at once (`rs_pc_publish_one`).
 - Run betas for their own games, see the docs (`dev_docs`), message the team.
 - Submit a new game (it goes into Submissions like any other).

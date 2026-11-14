@@ -3715,7 +3715,7 @@
       ['verified', t('Checks your copy'), t('A bad dump is caught before it runs')], ['mods', t('Mods'), t('Installed from the launcher')]];
     const sup = a.support || null;
     const supHas = sup ? SUP.filter(([k]) => sup[k]) : [];
-    const supCard = supHas.length ? `<section class="glass pc-side-card pc-sup"><h2>${t('In RecompLauncher')}</h2><ul>${SUP.map(([k, n, w]) => `<li class="${sup[k] ? 'on' : 'off'}"><strong>${n}</strong><span>${sup[k] ? w : t('Not yet')}</span></li>`).join('')}</ul>
+    const supCard = supHas.length ? `<section class="glass pc-side-card pc-sup"><h2>${t('In RecompLauncher')}</h2><ul>${supHas.map(([, n, w]) => `<li class="on"><strong>${n}</strong><span>${w}</span></li>`).join('')}</ul>
       ${sup.sdk === 'repo' || sup.sdk === 'release' ? `<p class="pc-sup-by">${t('Set up by its developer')}</p>` : ''}</section>` : '';
     const feats = (a.features || []).length ? `<section class="glass pc-side-card pc-feats"><h2>${t("What's in it")}</h2><ul>${a.features.map((f) => `<li dir="auto">${featIcon(f)}<span>${esc(f)}</span></li>`).join('')}</ul></section>` : '';
     const ab = a.about || null;
