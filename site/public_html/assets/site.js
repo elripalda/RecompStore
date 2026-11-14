@@ -18,6 +18,8 @@
   let lang = 'en';
   let dict = {};
   const N_ = (s) => s; // English that t() is given later (a table of labels): the tool finds it
+  // The download page's screenshots of the launcher (assets/launcher/shot-<key>.webp), in the order they turn.
+  const LAUNCH_SHOTS = [['discover', N_('Discover')], ['library', N_('Your Library')], ['game', N_('Game Pages')]];
   // (3.0) Headings, menus and buttons in title case. The English words only: the keys stay, so
   // every translation still finds its line.
   const EN_CAPS = { 'All recomps': 'All Recomps', 'All PC recomps': 'All PC Recomps', 'Top charts': 'Top Charts', 'Coming soon': 'Coming Soon',
@@ -3425,7 +3427,6 @@
   // (2.8) RecompLauncher: what's coming to Windows.
   function pcLauncher() {
     pcTitle = `${t('Get RecompLauncher')} · RecompLauncher`;
-    const covers = pcCat.apps.filter((a) => a.cover && pcCharted(a) && !['n64', 'gc', 'wii', 'wiiu', 'switch', 'switch2', 'snes', 'nes', 'ds', '3ds', 'gb', 'gba', 'gbc'].includes(a.origin) && !/doax/i.test(a.id)).sort((x, y) => (y.downloads || 0) - (x.downloads || 0)).slice(0, 8);
     const feats = [
       ['library', t('Your whole library'), t('Every recomp in one place, with covers, play time and updates, including the ones you already have.')],
       ['disc', t('Set up from your disc'), t('Point it at your own disc image or ROM once. It checks it, and puts what each game needs where it goes.')],
@@ -3452,9 +3453,9 @@
             <div class="beta-box" data-beta-form></div>
             <div class="cta-row"><a class="btn" href="/pc/all">${t('Browse PC recomps')}</a><a class="btn" href="/pc/how">${t('How it works')}</a></div>
           </div>
-          <div class="glass pc-launch-win" aria-hidden="true">
-            <span class="pc-launch-bar"><i></i><i></i><i></i></span>
-            <span class="pc-launch-grid">${covers.map((a) => `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy">`).join('')}</span>
+          <div class="pc-shots" data-shots>
+            <div class="pc-shots-stage">${LAUNCH_SHOTS.map(([k, label], i) => `<figure class="pc-shot p${i}" data-shot="${i}"><img src="/assets/launcher/shot-${k}.webp" srcset="/assets/launcher/shot-${k}-960.webp 960w, /assets/launcher/shot-${k}.webp 1600w" sizes="(max-width: 900px) 94vw, 820px" width="1600" height="934" alt="${esc(tf('RecompLauncher: {page}', { page: t(label) }))}"${i ? ' loading="lazy"' : ''} decoding="async"></figure>`).join('')}</div>
+            <div class="pc-shots-tabs" role="tablist">${LAUNCH_SHOTS.map(([k, label], i) => `<button type="button" role="tab" data-go="${i}"${i ? '' : ' class="on" aria-selected="true"'}>${esc(t(label))}<i></i></button>`).join('')}</div>
           </div>
         </header>
         <section class="pc-launch-feats">${feats.map(([k, h, p]) => `<div class="glass card-pad"><span class="cat-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ico[k]}</svg></span><h2>${h}</h2><p>${p}</p></div>`).join('')}</section>
@@ -3462,6 +3463,36 @@
       </article>`;
     betaMount(view.querySelector('[data-beta-form]'));
     launchMount(view.querySelector('.pc-launcher'));
+    shotsMount(view.querySelector('[data-shots]'));
+  }
+
+  // The launcher itself, on the download page: real screenshots stacked at an angle, the front one
+  // sliding away every few seconds for the next. Hover holds it; the tabs jump to one.
+  function shotsMount(box) {
+    if (!box) return;
+    const cards = [...box.querySelectorAll('.pc-shot')], tabs = [...box.querySelectorAll('[data-go]')];
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let front = 0, timer = 0, held = false;
+    const place = () => cards.forEach((c, i) => { const p = (i - front + cards.length) % cards.length; c.className = 'pc-shot p' + p; });
+    const mark = () => tabs.forEach((b, i) => { const on = i === front; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    const go = (to) => {
+      if (to === front) return;
+      const out = cards[front];
+      front = to;
+      place();
+      if (!still) { out.classList.add('out'); setTimeout(() => out.classList.remove('out'), 700); }
+      mark();
+      box.classList.remove('run'); void box.offsetWidth; box.classList.add('run');
+    };
+    const tick = () => {
+      if (!box.isConnected) { clearInterval(timer); return; }
+      if (!held && !document.hidden) go((front + 1) % cards.length);
+    };
+    tabs.forEach((b, i) => b.addEventListener('click', () => go(i)));
+    box.addEventListener('mouseenter', () => { held = true; box.classList.add('held'); });
+    box.addEventListener('mouseleave', () => { held = false; box.classList.remove('held'); });
+    mark();
+    if (!still) { box.classList.add('run'); timer = setInterval(tick, 4200); }
   }
 
   // (2.8) A developer's README, shown safely: Markdown and the bits of HTML READMEs use, escaped
