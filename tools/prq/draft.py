@@ -74,6 +74,32 @@ def gh(path, accept="application/vnd.github+json"):
         return None
 
 
+GH_LOCK = threading.Lock()
+
+
+def gh_room(need=150):
+    """(4.10) Wait for GitHub's hourly limit when it's nearly used up (the account's other tools share it),
+    rather than failing the draft. Asking for the limit doesn't count against it."""
+    with GH_LOCK:
+        for _ in range(3):
+            h = {"Accept": "application/vnd.github+json"}
+            if GHT:
+                h["Authorization"] = "Bearer " + GHT
+            st, b = http("https://api.github.com/rate_limit", headers=h, timeout=20)
+            try:
+                core = json.loads(b)["resources"]["core"] if st == 200 else {}
+            except (ValueError, KeyError, TypeError):
+                core = {}
+            left, reset = int(core.get("remaining", need)), int(core.get("reset", 0))
+            wait = reset - time.time() + 5
+            if left >= need or wait <= 0:
+                return
+            if wait > 1900:
+                return  # (more than half an hour: try anyway and say why if it fails)
+            print(time.strftime("%H:%M:%S"), f"GitHub's hourly limit is used up ({left} left): waiting {int(wait)} s for it to reset")
+            time.sleep(wait)
+
+
 def site(method, a, data=None):
     st, b = http(f"{SITE}/api/prq.php?a={a}" + (f"&n={COUNT}" + (f"&ids={urllib.parse.quote(IDS)}" if IDS else "") if a == "todo" else ""), data=data,
                  headers={"X-PRQ-Key": KEY, "Accept": "application/json"}, method=method, timeout=60)
@@ -465,11 +491,51 @@ def earlier_pr(repo):
     return items[0].get("html_url", "") if items else ""
 
 
-def body_text(p, what, d, code=None):
+def first_path(v):
+    """The first folder or file named in a saves/folders list ("" when there's none)."""
+    for x in v if isinstance(v, list) else [v]:
+        if isinstance(x, str) and x.strip():
+            return x.strip()
+        if isinstance(x, dict) and str(x.get("path", "")).strip():
+            return str(x["path"]).strip()
+    return ""
+
+
+def feature_list(doc, d, code=None):
+    """(4.10) The checklist at the top of the pull request: each launcher feature, on or not, and how."""
+    doc = doc if isinstance(doc, dict) else {}
+    found = {str(x.get("what", "")).lower(): x for x in ((d.get("found") or {}).get("features") or []) if isinstance(x, dict)}
+    out = ["- [x] Installs and updates from your GitHub releases"]
+    if code and code.get("edits"):
+        adds = [str(a) for a in code.get("adds") or []]
+        add = next((a for a in adds if "game" in a.lower()), adds[0] if adds else "--game <path>")
+        out.append(f"- [x] Easy Setup: players pick their own copy once and it's handed to the game, through a small `{add}` option added here (see Code changes)")
+    elif code and code.get("existing"):
+        out.append(f"- [x] Easy Setup: players pick their own copy once and it's handed to the game through your existing `{code['existing'].get('how', '').split(':')[0].strip()}`, no code change")
+    elif has_game_option(doc):
+        how = str((found.get("game location") or {}).get("how", "")).split(":")[0].strip()
+        out.append("- [x] Easy Setup: players pick their own copy once and it's handed to the game" + (f" through your existing `{how}`" if how else "") + ", no code change")
+    else:
+        big = bool(code and code.get("notes"))  # (the code step looked and said why it left it)
+        out.append("- [ ] Easy Setup: not in this pull request. It needs a way to pass the game's location to the game (like a `--game <path>` option)"
+                   + (", and here that's a bigger change than fits in this one" if big else ""))
+    saves = first_path(doc.get("saves")) or first_path((doc.get("folders") or {}).get("saves") if isinstance(doc.get("folders"), dict) else None)
+    out.append(f"- [x] Save backups and cloud saves, from `{saves}`" if saves else "- [ ] Save backups and cloud saves: we couldn't tell where saves go")
+    labels = [str(x.get("label")) for x in (doc.get("settings") or []) if isinstance(x, dict) and x.get("label")]
+    out.append("- [x] Settings in the launcher: " + ", ".join(labels[:5]) + (" and more" if len(labels) > 5 else "") if labels else "- [ ] Settings in the launcher: none yet")
+    logs = first_path((doc.get("folders") or {}).get("logs")) if isinstance(doc.get("folders"), dict) else ""
+    out.append(f"- [x] Logs attached to crash reports, from `{logs}`" if logs else "- [ ] Logs in crash reports: we couldn't find a log file")
+    if isinstance(doc.get("prepare"), dict):
+        out.append("- [x] Runs your setup step for the player" + (f" ({doc['prepare']['label']})" if doc["prepare"].get("label") else ""))
+    if doc.get("mods"):
+        out.append("- [x] Points players to where they get mods")
+    return out
+
+
+def body_text(p, what, d, code=None, doc=None):
     lines = [f"Hi! This adds [RecompLauncher](https://recomplauncher.com) support, so players can install and update {p['name']} from the launcher. It's already listed at {p['page']}.", "",
-             "**What's RecompLauncher?**", what, "",
-             "**What it adds for players**"]
-    lines += [f"- {x.strip()}" for x in d.get("players", []) if x.strip()]
+             "**What this sets up**"] + feature_list(doc if doc is not None else d.get("recomplauncher_json"), d, code) + ["",
+             "**What's RecompLauncher?**", what]
     if code and code.get("edits"):
         lines += ["", "**Code changes**"] + [f"- {x.strip()}" for x in code.get("explain", []) if str(x).strip()]
         lines += ["- They're only used when those options are passed. Without them the game starts and behaves exactly as before.",
@@ -502,6 +568,7 @@ def merge_found(d, code):
 def draft_one(p, todo, spec, validator):
     """One pick, start to end. -> 1 when a draft was saved."""
     try:
+        gh_room()
         # Already had one (ours, Xarishark's or anyone's, open or closed): never a second.
         had = "" if p.get("pick") == "redo" else earlier_pr(p["repo"])  # a redraft updates our own
         if had:
@@ -531,11 +598,11 @@ def draft_one(p, todo, spec, validator):
         except Exception as e:  # the draft goes out without code changes
             print(f"code pass {p['repo']}: {e}")
         payload = {"id": p["id"], "pick": p["pick"], "json": doc, "title": todo.get("title"),
-                   "body": body_text(p, todo.get("what", ""), d, code), "note": note, "found": merge_found(d, code)}
+                   "body": body_text(p, todo.get("what", ""), d, code, code["json"] if code and code.get("json") else doc), "note": note, "found": merge_found(d, code)}
         if code and code.get("edits"):
             payload["json"] = code["json"]
             payload["code"] = {"edits": code["edits"], "adds": code["adds"], "explain": code["explain"], "plain": doc}
-            payload["body_plain"] = body_text(p, todo.get("what", ""), d)
+            payload["body_plain"] = body_text(p, todo.get("what", ""), d, None, doc)
             if code["notes"]:
                 payload["note"] = (note + "\n\nCode changes: " + code["notes"]).strip()
         elif code and code.get("existing"):
