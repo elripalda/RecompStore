@@ -522,6 +522,19 @@ def first_path(v):
     return ""
 
 
+def short_how(h):
+    """The option itself out of the drafter's description of it, for the checklist ("" when there's no short name)."""
+    h = str(h or "").strip()
+    m = re.search(r"(?:^|(?<=[\s`(\[]))(--?[A-Za-z][\w-]*(?:[ =](?:<[^>]+>|\{[^}]+\}|FILE|PATH|DIR|FOLDER))?)", h)
+    if m:
+        return f"`{m.group(1)}`"
+    m = re.search(r"\b([A-Z][A-Z0-9_]{2,})\b[^.]*environment", h)
+    if m:
+        return f"`{m.group(1)}` environment variable"
+    h = h.split(":")[0].strip()
+    return f"`{h}`" if 0 < len(h) <= 50 else ""
+
+
 def feature_list(doc, d, code=None):
     """(4.10) The checklist at the top of the pull request: each launcher feature, on or not, and how."""
     doc = doc if isinstance(doc, dict) else {}
@@ -532,8 +545,8 @@ def feature_list(doc, d, code=None):
         add = next((a for a in adds if "game" in a.lower()), adds[0] if adds else "--game <path>")
         out.append(f"- [x] Easy Setup: players pick their own copy once and it's handed to the game, through a small `{add}` option added here (see Code changes)")
     elif sdk_easy(doc):
-        how = str((code or {}).get("existing", {}).get("how", "") if code and code.get("existing") else (found.get("game location") or {}).get("how", "")).split(":")[0].strip()
-        out.append("- [x] Easy Setup: players pick their own copy once and it's handed to the game" + (f" through your existing `{how}`" if how else "") + ", no code change")
+        how = short_how((code or {}).get("existing", {}).get("how", "") if code and code.get("existing") else (found.get("game location") or {}).get("how", ""))
+        out.append("- [x] Easy Setup: players pick their own copy once and it's handed to the game" + (f" through your existing {how}" if how else "") + ", no code change")
     else:
         big = bool(code and code.get("notes"))  # (the code step looked and said why it left it)
         out.append("- [ ] Easy Setup: not in this pull request. It needs a way to pass the game's location to the game (like a `--game <path>` option)"
