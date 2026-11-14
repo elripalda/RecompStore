@@ -94,3 +94,6 @@ a.vt-badge:hover{filter:brightness(1.15)}
 .ft-notes .fn{font-style:normal;font-size:12px;padding:3px 9px;border-radius:999px;background:rgba(var(--ink-rgb),.06);color:var(--muted)}
 .ft-notes .fn.ok{background:rgba(95,227,161,.1);color:var(--vt-green)}.ft-notes .fn.warn{background:rgba(255,209,102,.1);color:var(--vt-yellow)}.ft-notes .fn.bad{background:rgba(255,122,122,.12);color:var(--vt-red)}
 .ft-notes .vt-badge{font-size:12px;padding:2px 9px 2px 3px}.ft-notes .vt-badge .vt-dot{width:15px;height:15px}
+
+/* (4.10) Reach the developer about a held update */
+.vt-contact{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}

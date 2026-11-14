@@ -15,6 +15,7 @@ Two separate things that work together:
 ## What a developer can do in the hub
 
 - See their games with numbers (downloads, player reports, logs players sent).
+- See where each game's newest release stands (`rs_pc_update_status`: out, being scanned, going out, waiting for a look, or no matching file) and press **Check for my new release now** (`api/dev.php a=pc-check`, a few an hour per game), which reads their repo straight away and gives the scan a turn.
 - Edit their page and their games' pages. These are **suggested changes** (`dev_changes`, status `pending`) the team approves, except a verified developer's own changes, which go out at once (`rs_pc_publish_one`).
 - Run betas for their own games, see the docs (`dev_docs`), message the team.
 - Submit a new game (it goes into Submissions like any other).

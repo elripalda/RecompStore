@@ -1930,9 +1930,10 @@ function rs_pc_alerts(array $a): array {
 // first, and only for as long as $seconds allows, so Publish never waits minutes on GitHub (the
 // server's own refresh, tools/vps/pc-refresh.php, keeps the rest up to date in the background).
 // Ones checked in the last $fresh seconds are skipped. -> how many were checked.
-function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
+function rs_pc_refresh_github(float $seconds, int $fresh = 1800, string $only = ''): int {
     $until = microtime(true) + $seconds;
-    $apps = array_values(array_filter(rs_pc_apps(), fn($a) => $a['repo'] !== '' && time() - (int)($a['gh_at'] ?? 0) >= $fresh));
+    // (4.10) $only: just this recomp, now (a developer's "Check for my new release now").
+    $apps = array_values(array_filter(rs_pc_apps(), fn($a) => $a['repo'] !== '' && ($only !== '' ? (string)$a['id'] === $only : time() - (int)($a['gh_at'] ?? 0) >= $fresh)));
     usort($apps, fn($x, $y) => (int)($x['gh_at'] ?? 0) <=> (int)($y['gh_at'] ?? 0));
     $n = 0;
     foreach ($apps as $a) {
@@ -1948,6 +1949,16 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800): int {
         // (4.0) Whether players get the right file, and (once a week) whether the project moved.
         try {
             $dl = rs_pc_dl_check($a);
+            // (4.10) The developer renamed their Windows file: follow it on our own (the release is still
+            // checked like any other), so the game doesn't get stuck on an old version.
+            if ($dl !== null && ($dl['dl'] ?? '') === 'stuck' && ($pick = rs_pc_dl_pick((array)($dl['files'] ?? []), (string)$a['asset_win'])) !== '') {
+                $pat = rs_pc_pattern($pick, (string)($dl['tag'] ?? ''));
+                if (!rs_pattern_matches($pat, $pick)) $pat = $pick;
+                $oldPat = (string)$a['asset_win'];
+                $a['asset_win'] = $pat;
+                rs_log('pc', 'pc:' . $a['id'], 'Windows download followed a rename: ' . $oldPat . ' -> ' . $pat);
+                $dl = rs_pc_dl_check($a);
+            }
             if ($dl !== null) { $a['dl_state'] = (string)($dl['dl'] ?? ''); $a['dl_why'] = (string)($dl['why'] ?? ''); $a['dl_files'] = (array)($dl['files'] ?? []); $a['dl_tag'] = (string)($dl['tag'] ?? ''); }
             if (time() - (int)($a['moved_at'] ?? 0) > 6 * 86400) { $a['moved_to'] = rs_pc_moved_check($a); $a['moved_at'] = time(); }
         } catch (Throwable $e) { /* looked at again next time */ }
@@ -2100,4 +2111,73 @@ function rs_pc_repo_status(string $link): ?array {
     $auto = null;
     try { $st = rs_db()->prepare('SELECT status FROM pc_auto WHERE repo_key = ? ORDER BY id DESC LIMIT 1'); $st->execute([$key]); $auto = $st->fetchColumn() ?: null; } catch (Throwable $e) { }
     return ['key' => $key, 'link' => rs_host_web($l['host'], (string)$l['repo']), 'app' => $app, 'found' => $found === false ? null : (string)$found, 'auto' => $auto];
+}
+
+
+// (4.10) Of a release's Windows-looking files, the one that's the game's download: a zip over an installer,
+// then the one closest to the old name. -> '' when there's nothing sensible to pick.
+function rs_pc_dl_pick(array $files, string $old = ''): string {
+    $best = ''; $bestScore = -99;
+    foreach ($files as $f) {
+        $f = (string)$f;
+        $l = strtolower($f);
+        $sc = 0;
+        if (preg_match('/\.zip$/', $l)) $sc += 3; elseif (preg_match('/\.7z$/', $l)) $sc += 2; elseif (preg_match('/\.exe$/', $l)) $sc += 0; else $sc -= 1;
+        if (preg_match('/setup|install|\.msi$/', $l)) $sc -= 3;
+        if (preg_match('/portable/', $l)) $sc += 1;
+        if (preg_match('/debug|symbols|pdb|source/', $l)) $sc -= 4;
+        similar_text(strtolower(str_replace('*', '', $old)), $l, $pct);
+        $sc += $pct / 100;
+        if ($sc > $bestScore) { $best = $f; $bestScore = $sc; }
+    }
+    return $bestScore >= 0 ? $best : '';
+}
+
+// (4.10) Where a recomp's newest release stands, in a line, for its developer. -> ['state', 'text', 'version']
+function rs_pc_update_status(array $a): array {
+    $p = is_array($a['pending'] ?? null) ? $a['pending'] : null;
+    if ($p && !empty($p['tag'])) {
+        $ver = (string)($p['version'] ?: $p['tag']);
+        $v = function_exists('rs_vt_release') ? rs_vt_release(rs_pc_key($a), (string)$p['tag'])[1] : 'grey';
+        if ($v === 'red') return ['state' => 'review', 'version' => $ver, 'text' => 'Version ' . $ver . ' is waiting for a look from our team: the security scan flagged something. Players keep the version before it until then.'];
+        if ($v === 'grey') return ['state' => 'scanning', 'version' => $ver, 'text' => 'Version ' . $ver . ' is being scanned. It goes out the moment the scan is done.'];
+        return ['state' => 'going', 'version' => $ver, 'text' => 'Version ' . $ver . ' passed the scan and is going out now.'];
+    }
+    $dl = (string)($a['dl_state'] ?? '');
+    if ($dl === 'stuck' || $dl === 'nofile') return ['state' => 'file', 'version' => (string)$a['version'], 'text' => 'Your newest release has no file we could match as the Windows download, so players get ' . ($a['version'] ?: 'an older version') . '. It shows on our side too, so we can sort it out.'];
+    $ago = time() - (int)($a['gh_at'] ?? 0);
+    $when = $ago < 120 ? 'just now' : ($ago < 3600 ? round($ago / 60) . ' minutes ago' : round($ago / 3600) . ' hours ago');
+    return ['state' => 'out', 'version' => (string)$a['version'], 'text' => 'Version ' . ($a['version'] ?: '?') . ' is out. Last checked for a new release ' . $when . '.'];
+}
+
+// (4.10) Ways to reach a recomp's developer when its update is stuck: a message in their hub (when they
+// have an account), an email (an address we have for them), and its GitHub (open an issue, or the repo
+// for a pull request). The email is only a prepared mailto link: a person sends it. -> [[label, href, kind]]
+function rs_pc_contact_links(array $a, string $why = ''): array {
+    $out = [];
+    $owner = strtolower((string)strtok((string)$a['repo'], '/'));
+    $acc = null;
+    try {
+        $st = rs_db()->prepare("SELECT id, email, name, gh_login FROM dev_accounts WHERE status = 'approved' AND ((slug <> '' AND slug = ?) OR (gh_login <> '' AND LOWER(gh_login) = ?)) ORDER BY slug = ? DESC LIMIT 1");
+        $st->execute([(string)($a['dev'] ?? ''), $owner, (string)($a['dev'] ?? '')]);
+        $acc = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    } catch (Throwable $e) { }
+    if ($acc) $out[] = ['Message ' . ($acc['name'] ?: $acc['gh_login']), 'messages.php?dev=' . (int)$acc['id'], 'msg'];
+    $email = $acc ? trim((string)$acc['email']) : '';
+    if ($email === '') {
+        try {
+            $st = rs_db()->prepare("SELECT contact FROM inbox WHERE kind = 'submit' AND contact LIKE '%@%' AND (app_id = ? OR repo LIKE ?) ORDER BY id DESC LIMIT 1");
+            $st->execute([(string)$a['id'], '%' . (string)$a['repo']]);
+            $c = (string)($st->fetchColumn() ?: '');
+            if (filter_var($c, FILTER_VALIDATE_EMAIL)) $email = $c;
+        } catch (Throwable $e) { }
+    }
+    $subject = $a['name'] . ' on RecompLauncher';
+    $body = "Hi! Quick note about " . $a['name'] . " on RecompLauncher (" . rs_abs('/game/' . $a['id']) . ").\n\n" . ($why !== '' ? $why . "\n\n" : '') . "Thanks!";
+    if ($email !== '') $out[] = ['Email', 'mailto:' . rawurlencode($email) . '?subject=' . rawurlencode($subject) . '&body=' . rawurlencode($body), 'mail'];
+    if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') {
+        $out[] = ['Open an issue', 'https://github.com/' . $a['repo'] . '/issues/new?title=' . rawurlencode('RecompLauncher: ' . ($why !== '' ? mb_substr($why, 0, 80) : 'about the latest release')) . '&body=' . rawurlencode($body), 'gh'];
+        $out[] = ['Its repo', 'https://github.com/' . $a['repo'], 'gh'];
+    } elseif ((string)$a['repo'] !== '') $out[] = ['Its repo', rs_host_web(rs_pc_host($a), (string)$a['repo']), 'gh'];
+    return $out;
 }

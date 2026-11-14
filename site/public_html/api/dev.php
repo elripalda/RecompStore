@@ -42,6 +42,7 @@
 // JSON in for POSTs (a=edit is a form, for the pictures). Changing anything is only from this site's own pages.
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
+require_once dirname(__DIR__) . '/admin/inc/vt.php'; // (4.10) update status in the hub
 
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
@@ -330,6 +331,7 @@ try {
                     'fields' => array_intersect_key($a, RS_DEV_PC_FIELDS),
                     'ai' => ['v' => (string)($a['ai'] ?? ''), 'uses' => rs_ai_uses_clean($a['ai_uses'] ?? []), 'note' => (string)($a['ai_note'] ?? ''), 'by' => (string)($a['ai_by'] ?? '')], 
                     'unseen' => $unseen[$a['id']] ?? 0,
+                    'upd' => rs_pc_update_status($a), // (4.10) where its newest release stands
                     'stats' => ['downloads' => (int)$a['downloads'], 'stars' => (int)$a['stars'], 'runs' => (int)($fb[$a['id']]['runs'] ?? 0),
                         'issues' => (int)($fb[$a['id']]['issues'] ?? 0), 'broken' => (int)($fb[$a['id']]['broken'] ?? 0)]], $pcApps);
             })(),
@@ -524,6 +526,20 @@ try {
     // (4.0) Their recomp moved to another repo: they ask, you approve. Only to a repo under their own
     // GitHub account or one of their orgs, with a release to download; its next release is checked
     // before it goes out, like any update.
+    // (4.10) "Check for my new release now": reads their repo straight away instead of on the next round,
+    // then gives the scan a turn. A few a hour per recomp.
+    if ($a === 'pc-check' && $post) {
+        $id = (string)($in['app'] ?? '');
+        if (!in_array($id, $pcIds, true)) rs_dev_out(200, ['ok' => false, 'error' => 'That isn\'t one of your recomps.']);
+        if (rs_rate_over('devcheck_' . $id, 6, 3600)) rs_dev_out(200, ['ok' => false, 'error' => 'Checked a lot in the last hour. It\'s also checked on its own every half hour.']);
+        rs_rate_hit('devcheck_' . $id);
+        // A fresh look at GitHub, not the cached one.
+        try { $rp = (string)(rs_pc_app($id)['repo'] ?? ''); if ($rp !== '') rs_db()->prepare('DELETE FROM gh_cache WHERE k IN (?, ?)')->execute([$rp, $rp . '#info']); } catch (Throwable $e) { }
+        rs_pc_refresh_github(25, 0, $id);
+        if (function_exists('rs_vt_run')) { try { rs_vt_run(12); } catch (Throwable $e) { } }
+        $p = rs_pc_app($id);
+        rs_dev_out(200, ['ok' => true, 'upd' => $p ? rs_pc_update_status($p) : null]);
+    }
     if ($a === 'pc-move' && $post) {
         $id = (string)($in['app'] ?? '');
         if (!in_array($id, $pcIds, true)) rs_dev_out(200, ['ok' => false, 'error' => 'That isn\'t one of your recomps.']);

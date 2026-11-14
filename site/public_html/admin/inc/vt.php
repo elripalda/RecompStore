@@ -123,7 +123,8 @@ function rs_vt_mins_text(int $m): string {
 function rs_vt_cfg(): array {
     return [
         // (4.1) Hold times in minutes (they were whole hours; the old settings still count until saved again).
-        'hold' => rs_vt_hold_mins('vt_hold_mins', 'vt_hold_hours', 12),
+        // (4.10) No waiting period: a release that passes the scan goes out at once (the setting can still add one).
+        'hold' => rs_vt_hold_mins('vt_hold_mins', 'vt_hold_hours', 0),
         'hold_verified' => rs_vt_hold_mins('vt_hold_verified_mins', 'vt_hold_verified', 0),
         'red_at' => max(1, min(20, (int)rs_setting('vt_red_at', '3'))),
         'auto' => rs_setting('vt_auto', '1') === '1',

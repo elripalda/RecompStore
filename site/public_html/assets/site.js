@@ -5472,6 +5472,23 @@
       const box = inp.closest('label').querySelector('.hub-pic-box');
       if (inp.files[0]) box.innerHTML = `<img src="${URL.createObjectURL(inp.files[0])}" alt="">`;
     }));
+    // (4.10) Where its newest release stands (scanned, going out, waiting for us), and a way to look now.
+    const pcUpdHtml = (a) => a.upd ? `<div class="hub-upd hub-upd-${esc(a.upd.state)}" data-upd="${esc(a.id)}">
+        <span class="hub-upd-dot" aria-hidden="true"></span><p>${esc(a.upd.text)}</p>
+        <button type="button" class="btn small" data-upd-check="${esc(a.id)}">${t('Check for my new release now')}</button><span class="status" role="status"></span></div>` : '';
+    const wireUpd = (list) => pane().querySelectorAll('[data-upd-check]').forEach((b) => b.addEventListener('click', () => {
+      const box = b.closest('.hub-upd'), st = box.querySelector('.status');
+      b.disabled = true; st.textContent = t('Looking…');
+      call('pc-check', { app: b.dataset.updCheck }).then((res) => {
+        b.disabled = false;
+        if (!res.ok || !res.upd) { say(st, res); return; }
+        const a = list.find((x) => x.id === b.dataset.updCheck);
+        if (a) a.upd = res.upd;
+        box.className = 'hub-upd hub-upd-' + res.upd.state;
+        box.querySelector('p').textContent = res.upd.text;
+        st.textContent = '';
+      });
+    }));
     const showPc = () => {
       const list = data.pcApps || [];
       pane().innerHTML = list.length ? `<div class="hub-apps">${list.map((a) => `
@@ -5484,6 +5501,7 @@
             <dl class="hub-stats">
               <div><dt>${t('GitHub downloads')}</dt><dd>${num(a.stats.downloads)}</dd></div><div><dt>${t('Plays great')}</dt><dd>${num(a.stats.runs)}</dd></div>
               <div><dt>${t('Has problems')}</dt><dd>${num(a.stats.issues)}</dd></div><div><dt>${t("Won't run")}</dt><dd>${num(a.stats.broken)}</dd></div></dl>
+            ${pcUpdHtml(a)}
             <details><summary>${data.canEdit ? t('Edit its page') : t('Suggest changes to its page')}</summary>
               <form class="form hub-change" data-pc="${esc(a.id)}" novalidate>
                 ${data.canEdit ? `<p class="muted">${t('Your words go on its page right away. New pictures wait for a quick look first, usually within a day.')}</p>${pcPicsHtml(a)}` : ''}
@@ -5498,6 +5516,7 @@
           </section>`).join('')}</div>`
         : `<section class="glass card-pad"><p>${t('None of your GitHub repositories are on RecompLauncher yet.')}</p><a class="btn primary" href="/submit">${t('Submit an app')}</a></section>`;
       wireAi(pane(), (k) => list.find((x) => 'pc:' + x.id === k));
+      wireUpd(list);
       wireAch(pane());
       pane().querySelectorAll('[data-goto-reports]').forEach((b) => b.addEventListener('click', () => goTab('reports', b.dataset.gotoReports)));
       pane().querySelectorAll('form[data-pc]').forEach((f) => f.addEventListener('submit', (e) => {

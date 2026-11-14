@@ -210,6 +210,9 @@ rs_head('Security', true, ['assets/vt.css']);
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Let it out now</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="block"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button class="danger">Block</button></form>
       </div>
+      <?php // (4.10) Stuck or flagged: reach the developer
+        $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.');
+        if ($cl): ?><div class="vt-contact"><span class="muted">Ask the developer:</span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
   </div>

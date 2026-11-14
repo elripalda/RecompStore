@@ -3367,3 +3367,15 @@ a.get-pc .get-ico{width:16px;height:16px;flex:none}body[data-platform=pc] a.get-
 }
 /* (4.10) One label at the bottom left: a recomp with more than one version shows "2 versions" there, not its setup badge too */
 .pc-poster:has(.pc-vers) .pc-setup-b{display:none}
+
+/* (4.10) Dev hub: where a recomp's newest release stands */
+.hub-upd{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 12px;margin:2px 0 14px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+.hub-upd p{margin:0;font-size:14px;line-height:1.45}
+.hub-upd .status{grid-column:2/-1;font-size:13px}
+.hub-upd .status:empty{display:none}
+.hub-upd-dot{width:10px;height:10px;border-radius:50%;background:#5fe3a1}
+.hub-upd-scanning .hub-upd-dot,.hub-upd-going .hub-upd-dot{background:#34f2e8;animation:hubUpd 1.4s ease-in-out infinite}
+.hub-upd-review .hub-upd-dot,.hub-upd-file .hub-upd-dot{background:#ffc857}
+@keyframes hubUpd{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.hub-upd-dot{animation:none!important}}
+@media (max-width:640px){.hub-upd{grid-template-columns:auto minmax(0,1fr)}.hub-upd .btn{grid-column:1/-1;justify-self:start}}

@@ -9,7 +9,9 @@ What gets checked on its own:
 
 Files are found by their SHA-256 (GitHub publishes it per release file); only files VirusTotal has never seen are downloaded and sent. The free key allows 4 requests a minute and about 480 a day here, with 100 a day kept for submissions and Check a link. Everything waits its turn in `vt_files`; `vt-run.php` can work the line from the command line.
 
-**Holds:** a new release from a developer who isn't verified is held. The site and launcher keep offering the version before it until the new files are checked and the hold time has passed. The release that got through is saved on the listing as `ok_tag`. Several engines flagging a file holds it until someone approves it on Security.
+**Holds:** a new release from a developer who isn't verified waits until its files are checked, then goes out at once (`rs_vt_promote`, run after every scan turn) and the catalog entry is republished (`rs_pc_publish_one`). There's no extra waiting period any more (`vt_hold_mins` is 0; the setting can add one). Files VirusTotal can't take (over 650 MB, or a scan that keeps erroring) count as clean, so they don't hold a release. A release nobody could check within 12 hours goes out anyway and is checked afterwards. The release that got through is saved on the listing as `ok_tag`. Several engines flagging a file holds it until someone approves it on Security.
+
+**Reaching the developer:** each held update on Security, and the **Download needs a look** box, has "Ask the developer" buttons (`rs_pc_contact_links`): **Message** (their hub, when they have an approved account), **Email** (a prepared mailto with their account or submission address; a person sends it), **Open an issue** (prefilled on GitHub) and **Its repo** (for a pull request).
 
 ## ClamAV
 
@@ -35,7 +37,9 @@ Runs in the 30-minute refresh for each PC recomp. It compares the newest release
 - `nofile`: no release has a matching file.
 - `gone`: the project page is gone or taken down.
 
-It shows on the listing's edit page as **Download needs a look**, with:
+**Renamed files are followed on their own:** when the check finds `stuck`, the refresh picks the new file (`rs_pc_dl_pick`: a zip over an installer, then the name closest to the old one), sets `asset_win` with its version as `*` and logs it. The same refresh then sees the new release, which is checked like any other before it goes out.
+
+Whatever is left shows on the listing's edit page as **Download needs a look**, with:
 - **Use the new file** (one button per candidate when there are several): sets `asset_win` to the new file with its version as `*` (`rs_pc_pattern`). Publish to put it live.
 - **It's fine**: dismisses it (`dl_ack`) until something new comes up. Changes nothing for players.
 - **Its releases**: opens the releases page.
