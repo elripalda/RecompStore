@@ -107,6 +107,20 @@
       var a = el('p', 'small mono'); a.textContent = 'A click from the US goes to: ' + firstOk.link; out.appendChild(a);
     }
     if (bad) out.appendChild(el('p', 'small warn', 'Fix or remove the pages that couldn\'t be read before saving.'));
+    // The worldwide choice: one option per page that was read.
+    var ws = form.querySelector('[data-ig-world]');
+    if (ws) {
+      var keep = ws.value;
+      while (ws.options.length > 1) ws.remove(1);
+      res.forEach(function (x, n) {
+        if (!x.ok) return;
+        var o = el('option', '', 'On: everywhere else gets the ' + (x.region || 'this') + ' key (' + x.usd + ')');
+        o.value = links[n];
+        ws.appendChild(o);
+      });
+      ws.value = keep;
+      if (ws.value !== keep) ws.value = '';
+    }
   }
   if (readBtn) readBtn.addEventListener('click', read);
   urls.addEventListener('change', read);

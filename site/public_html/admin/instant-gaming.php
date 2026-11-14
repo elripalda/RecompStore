@@ -96,11 +96,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $urls = [];
             foreach (preg_split('/\s+/', (string)($_POST['urls'] ?? '')) as $u) if (($u = rs_ig_clean_url($u)) !== '') $urls[$u] = true;
             if (!$urls) throw new RuntimeException('Paste the game\'s page on instant-gaming.com (one link per region, like its US key and its Latin America key).');
+            // (4.9) Worldwide: one of the links can also be shown in every country no other key covers.
+            $world = rs_ig_clean_url((string)($_POST['world'] ?? ''));
+            if ($world !== '' && !isset($urls[$world])) $world = '';
             $read = []; $first = null;
             foreach (array_keys($urls) as $u) {
-                $x = rs_ig_read($u);
+                $x = rs_ig_read($u, $u === $world);
                 if (!$x['ok']) throw new RuntimeException($u . ': ' . $x['why']);
-                if (!$x['countries']) throw new RuntimeException($u . ': its page doesn\'t say which countries the key works in, so it can\'t be shown to anyone.');
+                if (!$x['countries'] && $u !== $world) throw new RuntimeException($u . ': its page doesn\'t say which countries the key works in, so it can only be used as the worldwide link.');
                 $read[$u] = $x; $first = $first ?? $x;
             }
             $title = trim(mb_substr((string)($_POST['title'] ?? ''), 0, 160)) ?: $first['name'];
@@ -111,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ON DUPLICATE KEY UPDATE url = VALUES(url), title = VALUES(title), platform = VALUES(platform), tag = VALUES(tag), updated = NOW()')
                 ->execute([$id, array_key_first($read), $title, $platform, $tag]);
             foreach ($read as $u => $x) rs_ig_offer_store($id, $u, $x);
+            $db->prepare('UPDATE ig_offers SET world = (url = ?) WHERE listing = ?')->execute([$world, $id]);
             $keep = array_keys($read);
             foreach (rs_ig_offers($id) as $o) if (!in_array($o['url'], $keep, true)) $db->prepare('DELETE FROM ig_offers WHERE id = ?')->execute([$o['id']]);
             // Moving a recomp's own card up to its game: the old one goes.
@@ -118,7 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cov = [];
             foreach ($read as $x) foreach ($x['countries'] as $cc) $cov[$cc] = true;
             rs_log('sponsors', 'Instant Gaming', 'listing ' . $id . ' (' . count($read) . ' link' . (count($read) === 1 ? '' : 's') . ', ' . count($cov) . ' countries)');
-            rs_flash('Saved ' . $games[$id]['name'] . (count($games[$id]['ids']) > 1 ? ', on all ' . count($games[$id]['ids']) . ' versions' : '') . '. Shown in ' . count($cov) . ' countr' . (count($cov) === 1 ? 'y' : 'ies') . ' (where its key works); everyone else sees no card.');
+            rs_flash('Saved ' . $games[$id]['name'] . (count($games[$id]['ids']) > 1 ? ', on all ' . count($games[$id]['ids']) . ' versions' : '') . '. '
+                . ($world !== '' ? 'Shown worldwide: a regional key in the ' . count($cov) . ' countr' . (count($cov) === 1 ? 'y' : 'ies') . ' they cover, the worldwide link everywhere else.'
+                : 'Shown in ' . count($cov) . ' countr' . (count($cov) === 1 ? 'y' : 'ies') . ' (where its key works); everyone else sees no card.'));
             $back .= '#listings';
         } elseif ($act === 'refresh_now') {
             [$ok, $bad] = rs_ig_refresh(0, 200);
@@ -279,20 +285,20 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
   <?php else: ?>
   <div class="ig-rows">
     <?php foreach ($rows as $r): $g = $games[$r['app_id']] ?? null; $n = $stats['l'][$r['app_id']] ?? []; $open = $firstShown($r['app_id']); $cv = $coverOf($r['app_id']);
-        $offs = $offersBy[$r['app_id']] ?? []; $live = array_filter($offs, fn($o) => (int)$o['stock']); $cov = [];
+        $offs = $offersBy[$r['app_id']] ?? []; $live = array_filter($offs, fn($o) => (int)$o['stock']); $cov = []; $isWorld = (bool)array_filter($live, fn($o) => (int)$o['world']);
         foreach ($live as $o) foreach (json_decode((string)$o['countries'], true) ?: [] as $cc) $cov[$cc] = true;
         $status = !$g || !$g['shown'] ? ['No version out', 'pill warn'] : ($r['paused'] ? ['Paused', 'pill'] : (!$live ? ['Out of stock', 'pill warn'] : ($c['on'] ? ['Showing', 'pill ok'] : ['Ready (switch is off)', 'pill']))); ?>
     <div class="ig-row">
       <div class="ig-lgrid">
         <div class="ig-app"><?php if ($cv !== ''): ?><img src="<?= h($cv) ?>" alt="" loading="lazy"><?php else: ?><span class="ig-nocover" aria-hidden="true"></span><?php endif; ?><div><b title="<?= h($g['name'] ?? $r['app_id']) ?>"><?= h($g['name'] ?? $r['app_id']) ?></b><span class="muted small"><?= h($g['line'] ?? '') ?><?php if ($open !== ''): ?> · <a href="<?= h($rl . '/game/' . rawurlencode($open)) ?>" target="_blank" rel="noopener">Page ↗</a><?php endif; ?></span></div></div>
-        <div class="ig-card-cell"><b title="<?= h($r['title']) ?>"><?= h($r['title']) ?></b><span class="muted small"><?= h($r['platform'] ?: 'No platform line') ?></span><span class="muted small">Shown in <?= count($cov) ?> countr<?= count($cov) === 1 ? 'y' : 'ies' ?>, nowhere else</span></div>
+        <div class="ig-card-cell"><b title="<?= h($r['title']) ?>"><?= h($r['title']) ?></b><span class="muted small"><?= h($r['platform'] ?: 'No platform line') ?></span><span class="muted small"><?= $isWorld ? 'Shown worldwide' : 'Shown in ' . count($cov) . ' countr' . (count($cov) === 1 ? 'y' : 'ies') . ', nowhere else' ?></span></div>
         <div class="ig-stat"><span class="<?= $status[1] ?>"><?= h($status[0]) ?></span></div>
       </div>
       <ul class="ig-offers">
         <?php foreach ($offs as $o): $codes = json_decode((string)$o['countries'], true) ?: []; $unk = json_decode((string)$o['unknown_names'], true) ?: []; $pct = rs_ig_pct($o['price_eur'], $o['old_eur']);
             $when = $o['fetched'] ? rs_ago(max(0, time() - (int)strtotime($o['fetched'] . ' UTC'))) : 'never'; ?>
         <li>
-          <span class="ig-reg"><b><?= h($o['region'] ?: 'Region not given') ?></b> <a class="small" href="<?= h(rs_ig_link($o['url'], $c['igr'], 'USD')) ?>" target="_blank" rel="noopener">Page ↗</a></span>
+          <span class="ig-reg"><b><?= h($o['region'] ?: 'Region not given') ?></b><?php if ((int)$o['world']): ?> <span class="pill ok">Worldwide</span><?php endif; ?> <a class="small" href="<?= h(rs_ig_link($o['url'], $c['igr'], 'USD')) ?>" target="_blank" rel="noopener">Page ↗</a></span>
           <span class="ig-pr"><?php $pm = json_decode((string)($o['prices'] ?? ''), true) ?: []; foreach ($pm as $pc => $pv): ?><span class="ig-cur"><b><?= h(rs_ig_fmt((float)$pv[0], $pc, $rates)) ?></b><?php if (!empty($pv[1])): ?> <s class="muted small"><?= h(rs_ig_fmt((float)$pv[1], $pc, $rates, true)) ?></s><?php endif; ?></span><?php endforeach; ?><?php if (!$pm): ?><b><?= h(rs_ig_money((float)$o['price_eur'], 'USD', $rates)) ?></b><?php endif; ?></span>
           <details class="ig-cc"><summary><?= count($codes) ?> countr<?= count($codes) === 1 ? 'y' : 'ies' ?><?= $unk ? ' <span class="warn">(' . count($unk) . ' not placed)</span>' : '' ?></summary><p class="small"><?= h(implode(', ', array_map(fn($cc) => $ccName[$cc] ?? $cc, $codes))) ?><?= $unk ? '<br><span class="warn">Names we couldn\'t place (left out): ' . h(implode(', ', $unk)) . '</span>' : '' ?></p></details>
           <span class="muted small"><?= !(int)$o['stock'] ? '<span class="warn">Out of stock</span> · ' : '' ?><?= $o['fetch_err'] !== '' ? '<span class="warn">Last read failed: ' . h($o['fetch_err']) . '</span>' : 'Read ' . h($when) ?></span>
@@ -327,6 +333,11 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
     <?php $eUrls = $edit && empty($edit['new']) ? implode("\n", array_column($offersBy[$edit['app_id']] ?? [], 'url')) : ''; ?>
     <label class="span2">Its pages on Instant Gaming, one per region<span class="ig-inline ig-urls"><textarea name="urls" rows="3" required spellcheck="false" placeholder="https://www.instant-gaming.com/en/24209-buy-…  (its US key)&#10;https://www.instant-gaming.com/en/24210-buy-…  (its Latin America key)"><?= h($eUrls) ?></textarea><span class="ig-urlbtns"><button type="button" data-ig-read>Read them</button><a class="btn" data-ig-find href="<?= h($searchUrl((string)($eg['name'] ?? ''))) ?>" target="_blank" rel="noopener">Find it</a></span></span><small>Each page says which countries its key works in. A visitor only sees the card if one of these keys works where they are, priced in their currency, and the button opens that key's page.</small></label>
     <div class="span2 ig-read-out" data-ig-read-out aria-live="polite"></div>
+    <?php $eWorld = ''; foreach ($offersBy[$edit['app_id'] ?? ''] ?? [] as $o) if ((int)$o['world']) $eWorld = (string)$o['url']; ?>
+    <label class="span2">Worldwide<select name="world" data-ig-world>
+      <option value="">Off: only in countries where one of these keys works</option>
+      <?php foreach ($offersBy[$edit['app_id'] ?? ''] ?? [] as $o): ?><option value="<?= h($o['url']) ?>"<?= $eWorld === $o['url'] ? ' selected' : '' ?>>On: everywhere else gets the <?= h($o['region'] ?: 'this') ?> key</option><?php endforeach; ?>
+    </select><small>On: every visitor sees the card. Countries a regional key covers get that key; everyone else gets the one you pick here, priced in their currency.</small></label>
     <label>Name on the card<input name="title" maxlength="160" value="<?= h((string)($edit['title'] ?? '')) ?>" placeholder="Filled in from the page"></label>
     <label>Platform line<input name="platform" maxlength="60" value="<?= h((string)($edit['platform'] ?? '')) ?>" placeholder="Switch 2"></label>
     <label class="span2">Discount tag<select name="tag"><?php foreach (['By the rule (from ' . (int)$c['tagMin'] . '% off)', 'Always show it', 'Never show it'] as $k => $tn): ?><option value="<?= $k ?>"<?= (int)($edit['tag'] ?? 0) === $k ? ' selected' : '' ?>><?= h($tn) ?></option><?php endforeach; ?></select></label>

@@ -67,6 +67,8 @@ function rs_ig_tables(): void {
         KEY listing (listing)
     ) CHARACTER SET utf8mb4');
     $db->exec('ALTER TABLE ig_offers ADD COLUMN IF NOT EXISTS prices TEXT NULL');
+    // (4.9) Worldwide: this link is also shown in every country none of the game's other keys covers.
+    $db->exec('ALTER TABLE ig_offers ADD COLUMN IF NOT EXISTS world TINYINT NOT NULL DEFAULT 0');
     $done = true;
 }
 
@@ -181,7 +183,7 @@ function rs_ig_page_price(string $h, string $cur, array $rates): ?array {
     return [$price, $old];
 }
 
-function rs_ig_read(string $url): array {
+function rs_ig_read(string $url, bool $world = false): array {
     require_once __DIR__ . '/countries.php';
     $url = rs_ig_clean_url($url);
     if ($url === '') return ['ok' => false, 'why' => 'That isn\'t a game page on instant-gaming.com.'];
@@ -240,6 +242,8 @@ function rs_ig_read(string $url): array {
     if ($pp = rs_ig_page_price($h, 'EUR', $rt)) $prices['EUR'] = $pp;
     $need = [];
     foreach (array_keys($codes) as $cc) $need[rs_ig_currency_for($cc, $rt)] = true;
+    // A worldwide link can be shown anywhere, so it's read in every currency the store has.
+    if ($world) foreach (array_keys($rt) as $cur) $need[$cur] = true;
     foreach (array_keys($need) as $cur) {
         if (isset($prices[$cur])) continue;
         $rc = rs_ig_fetch($url, $cur);
@@ -299,11 +303,11 @@ function rs_ig_offers(?string $listing = null): array {
 function rs_ig_refresh(int $age = 600, int $max = 80): array {
     rs_ig_tables();
     $db = rs_db();
-    $st = $db->prepare('SELECT id, listing, url FROM ig_offers WHERE fetched IS NULL OR fetched < UTC_TIMESTAMP() - INTERVAL ? SECOND ORDER BY fetched LIMIT ' . (int)$max);
+    $st = $db->prepare('SELECT id, listing, url, world FROM ig_offers WHERE fetched IS NULL OR fetched < UTC_TIMESTAMP() - INTERVAL ? SECOND ORDER BY fetched LIMIT ' . (int)$max);
     $st->execute([$age]);
     $done = 0; $bad = 0;
     foreach ($st->fetchAll() as $row) {
-        $x = rs_ig_read((string)$row['url']);
+        $x = rs_ig_read((string)$row['url'], (bool)(int)$row['world']);
         if ($x['ok']) { rs_ig_offer_store((string)$row['listing'], (string)$row['url'], $x); $done++; }
         else {
             $db->prepare('UPDATE ig_offers SET fetch_err = ?, stock = IF(fetched < UTC_TIMESTAMP() - INTERVAL 1 DAY, 0, stock) WHERE id = ?')->execute([mb_substr($x['why'], 0, 160), $row['id']]);
@@ -327,7 +331,8 @@ function rs_ig_cache_build(): array {
     foreach (rs_ig_offers() as $o) {
         if (!(int)$o['stock']) continue;
         $offers[(string)$o['listing']][] = ['c' => json_decode((string)$o['countries'], true) ?: [], 'eur' => (float)$o['price_eur'],
-            'old' => $o['old_eur'] !== null ? (float)$o['old_eur'] : null, 'url' => (string)$o['url'], 'p' => json_decode((string)($o['prices'] ?? ''), true) ?: new stdClass()];
+            'old' => $o['old_eur'] !== null ? (float)$o['old_eur'] : null, 'url' => (string)$o['url'], 'p' => json_decode((string)($o['prices'] ?? ''), true) ?: new stdClass(),
+            'w' => (bool)(int)($o['world'] ?? 0)];
     }
     $games = [];
     foreach (rs_ig_listings() as $r) {

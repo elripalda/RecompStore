@@ -7,7 +7,8 @@
 // (4.9) Cards are for the visitor's country only (Cloudflare's CF-IPCountry): a game shows the Instant
 // Gaming link whose key works there, priced in the currency the store shows that country, worked out
 // from the store's own rates. No link for their country, or no country at all: no card, and a click
-// can't get past that either. Answered from a file (admin/inc/ig.php rs_ig_cache_write), no database.
+// can't get past that either, unless the game has a worldwide link, which is shown everywhere else.
+// Answered from a file (admin/inc/ig.php rs_ig_cache_write), no database.
 declare(strict_types=1);
 
 $igFile = dirname(__DIR__, 2) . '/recompstore-private/ig-cache.json';
@@ -26,12 +27,14 @@ $igData = function () use ($igFile): array {
     $d = json_decode((string)@file_get_contents($igFile), true);
     return is_array($d) ? $d : ['on' => false, 'round' => 1, 'v' => [], 'all' => [], 'games' => [], 'rates' => []];
 };
-// The link for this country: the cheapest whose key works here.
+// The link for this country: the cheapest whose key works here, else the game's worldwide link.
 $offerFor = function (array $g, string $cc): ?array {
-    if ($cc === '') return null;
-    $best = null;
-    foreach ($g['offers'] as $o) if (in_array($cc, $o['c'], true) && (!$best || $o['eur'] < $best['eur'])) $best = $o;
-    return $best;
+    $best = null; $world = null;
+    foreach ($g['offers'] as $o) {
+        if (!empty($o['w'])) $world = $o;
+        if ($cc !== '' && in_array($cc, $o['c'], true) && (!$best || $o['eur'] < $best['eur'])) $best = $o;
+    }
+    return $best ?? $world;
 };
 // A recomp's card for this country: its own card if it has a key for here, else its version group's.
 // -> [game + key, offer] or null.
@@ -41,6 +44,7 @@ $pickFor = function (array $d, string $appId, string $cc) use ($offerFor): ?arra
     return null;
 };
 $currencyFor = function (string $cc, array $rates): string {
+    if ($cc === '') return isset($rates['USD']) ? 'USD' : 'EUR';
     require_once dirname(__DIR__) . '/admin/inc/countries.php';
     $cur = RS_COUNTRY_CURRENCY[$cc] ?? 'USD';
     return isset($rates[$cur]) ? $cur : (isset($rates['USD']) ? 'USD' : 'EUR');
@@ -113,7 +117,7 @@ header('Vary: CF-IPCountry');
 try {
     $d = $igData();
     $l = [];
-    $cur = $cc !== '' ? $currencyFor($cc, $d['rates']) : '';
+    $cur = $currencyFor($cc, $d['rates']);
     // A group's card first, so a recomp's own card can take its place.
     $games = $d['games'];
     uksort($games, fn($a, $b) => (str_starts_with($b, 't:') ? 1 : 0) <=> (str_starts_with($a, 't:') ? 1 : 0));
