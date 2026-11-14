@@ -66,6 +66,7 @@ function rs_ig_tables(): void {
         UNIQUE KEY one (listing, url(191)),
         KEY listing (listing)
     ) CHARACTER SET utf8mb4');
+    $db->exec('ALTER TABLE ig_offers ADD COLUMN IF NOT EXISTS prices TEXT NULL');
     $done = true;
 }
 
@@ -159,12 +160,32 @@ function rs_ig_for_app(string $appId): ?array {
 // discount (both in euros, the store's own base), stock, and the countries its key works in
 // (window.countriesAvailability). Its currency table (window.currencies: each currency's rate from euros
 // and how it's written) is kept too, so a visitor's price is worked out exactly the way the store does it.
+function rs_ig_fetch(string $url, string $cur): array {
+    return rs_http($url . '?currency=' . rawurlencode($cur), ['timeout' => 20, 'max' => 3000000, 'headers' => ['Accept-Language: en-US,en;q=0.8', 'Accept: text/html',
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36']]);
+}
+
+// The page's own price and its price before the discount, in the currency it was asked for, exactly as
+// the store writes them ($57.45, was $58). -> [price, old|null] or null.
+function rs_ig_page_price(string $h, string $cur, array $rates): ?array {
+    if (!preg_match('~<meta[^>]+itemprop="price"[^>]+content="([0-9.]+)"~i', $h, $m) || (float)$m[1] <= 0) return null;
+    if (preg_match('~<meta[^>]+itemprop="priceCurrency"[^>]+content="([A-Z]{3})"~i', $h, $c) && $c[1] !== $cur) return null;
+    $price = round((float)$m[1], 2);
+    $old = null;
+    if (preg_match('~class="discounts".{0,1500}?class="retail"[^>]*>(.{0,400}?)</div>~s', $h, $m)) {
+        $t = preg_replace('/[^0-9.,]/', '', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5));
+        $dec = (string)($rates[$cur]['dec'] ?? '.');
+        $t = $dec === ',' ? str_replace(',', '.', str_replace('.', '', $t)) : str_replace(',', '', $t);
+        if (is_numeric($t) && (float)$t > $price) $old = round((float)$t, 2);
+    }
+    return [$price, $old];
+}
+
 function rs_ig_read(string $url): array {
     require_once __DIR__ . '/countries.php';
     $url = rs_ig_clean_url($url);
     if ($url === '') return ['ok' => false, 'why' => 'That isn\'t a game page on instant-gaming.com.'];
-    $r = rs_http($url . '?currency=EUR', ['timeout' => 20, 'max' => 3000000, 'headers' => ['Accept-Language: en-US,en;q=0.8', 'Accept: text/html',
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36']]);
+    $r = rs_ig_fetch($url, 'EUR');
     if ((int)$r['status'] !== 200) return ['ok' => false, 'why' => 'Instant Gaming didn\'t answer (' . (int)$r['status'] . '). Try again in a minute.'];
     $h = (string)$r['body'];
     $meta = function (string $prop) use ($h): string {
@@ -212,8 +233,21 @@ function rs_ig_read(string $url): array {
     $region = count($parts) >= 3 ? (string)end($parts) : '';
     if ($plat === '' && count($parts) >= 2) $plat = $parts[1];
     if ($rates) rs_set_setting('ig_rates', json_encode($rates, JSON_UNESCAPED_UNICODE));
+    // Each currency its countries pay in, read from the page in that currency: the store's own figures,
+    // to the cent, never our own conversion.
+    $rt = $rates ?: rs_ig_rates();
+    $prices = [];
+    if ($pp = rs_ig_page_price($h, 'EUR', $rt)) $prices['EUR'] = $pp;
+    $need = [];
+    foreach (array_keys($codes) as $cc) $need[rs_ig_currency_for($cc, $rt)] = true;
+    foreach (array_keys($need) as $cur) {
+        if (isset($prices[$cur])) continue;
+        $rc = rs_ig_fetch($url, $cur);
+        if ((int)$rc['status'] === 200 && ($pp = rs_ig_page_price((string)$rc['body'], $cur, $rt))) $prices[$cur] = $pp;
+        usleep(200000);
+    }
     return ['ok' => true, 'why' => '', 'name' => mb_substr($name, 0, 160), 'platform' => mb_substr($plat, 0, 60), 'region' => mb_substr($region, 0, 60),
-        'eur' => round($eur, 2), 'old_eur' => $old, 'stock' => $stock, 'countries' => array_keys($codes), 'unknown' => $unknown];
+        'eur' => round($eur, 2), 'old_eur' => $old, 'stock' => $stock, 'countries' => array_keys($codes), 'unknown' => $unknown, 'prices' => $prices];
 }
 
 // IG's currency table (from the last page read): code => [tx (from euros), fmt ("$%s"), dec, th].
@@ -225,8 +259,13 @@ function rs_ig_rates(): array {
 // A euro price in a currency, worked out and written the way Instant Gaming does it.
 function rs_ig_money(float $eur, string $cur, array $rates): string {
     $c = $rates[$cur] ?? $rates['USD'] ?? ['tx' => 1.0, 'fmt' => '%s', 'dec' => '.', 'th' => ''];
-    $v = round($eur * (float)$c['tx'], 2);
-    return str_replace('&nbsp;', "\u{a0}", str_replace('%s', number_format($v, 2, $c['dec'] ?: '.', $c['th']), $c['fmt']));
+    return rs_ig_fmt(round($eur * (float)$c['tx'], 2), $cur, $rates);
+}
+// An amount already in a currency, written the store's way (a whole number without cents, like its "was $58").
+function rs_ig_fmt(float $v, string $cur, array $rates, bool $whole = false): string {
+    $c = $rates[$cur] ?? ['fmt' => '%s', 'dec' => '.', 'th' => ''];
+    $d = $whole && abs($v - round($v)) < 0.005 ? 0 : 2;
+    return str_replace('&nbsp;', "\u{a0}", str_replace('%s', number_format($v, $d, $c['dec'] ?: '.', (string)$c['th']), (string)$c['fmt']));
 }
 
 // The currency Instant Gaming shows a visitor from a country (ISO 3166 code).
@@ -239,11 +278,11 @@ function rs_ig_currency_for(string $cc, array $rates): string {
 // Save what a page said onto one of a game's links.
 function rs_ig_offer_store(string $listing, string $url, array $x): void {
     rs_ig_tables();
-    rs_db()->prepare('INSERT INTO ig_offers (listing, url, region, countries, unknown_names, price_eur, old_eur, stock, fetched, fetch_err, created)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), \'\', UTC_TIMESTAMP())
+    rs_db()->prepare('INSERT INTO ig_offers (listing, url, region, countries, unknown_names, price_eur, old_eur, prices, stock, fetched, fetch_err, created)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), \'\', UTC_TIMESTAMP())
         ON DUPLICATE KEY UPDATE region = VALUES(region), countries = VALUES(countries), unknown_names = VALUES(unknown_names), price_eur = VALUES(price_eur),
-        old_eur = VALUES(old_eur), stock = VALUES(stock), fetched = VALUES(fetched), fetch_err = \'\'')
-        ->execute([$listing, $url, $x['region'], json_encode($x['countries']), json_encode($x['unknown'], JSON_UNESCAPED_UNICODE), $x['eur'], $x['old_eur'], $x['stock'] ? 1 : 0]);
+        old_eur = VALUES(old_eur), prices = VALUES(prices), stock = VALUES(stock), fetched = VALUES(fetched), fetch_err = \'\'')
+        ->execute([$listing, $url, $x['region'], json_encode($x['countries']), json_encode($x['unknown'], JSON_UNESCAPED_UNICODE), $x['eur'], $x['old_eur'], json_encode($x['prices'] ?? new stdClass()), $x['stock'] ? 1 : 0]);
 }
 
 function rs_ig_offers(?string $listing = null): array {
@@ -288,7 +327,7 @@ function rs_ig_cache_build(): array {
     foreach (rs_ig_offers() as $o) {
         if (!(int)$o['stock']) continue;
         $offers[(string)$o['listing']][] = ['c' => json_decode((string)$o['countries'], true) ?: [], 'eur' => (float)$o['price_eur'],
-            'old' => $o['old_eur'] !== null ? (float)$o['old_eur'] : null, 'url' => (string)$o['url']];
+            'old' => $o['old_eur'] !== null ? (float)$o['old_eur'] : null, 'url' => (string)$o['url'], 'p' => json_decode((string)($o['prices'] ?? ''), true) ?: new stdClass()];
     }
     $games = [];
     foreach (rs_ig_listings() as $r) {

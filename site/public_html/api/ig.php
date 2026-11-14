@@ -45,9 +45,19 @@ $currencyFor = function (string $cc, array $rates): string {
     $cur = RS_COUNTRY_CURRENCY[$cc] ?? 'USD';
     return isset($rates[$cur]) ? $cur : (isset($rates['USD']) ? 'USD' : 'EUR');
 };
-$money = function (float $eur, string $cur, array $rates): string {
-    $c = $rates[$cur] ?? ['tx' => 1.0, 'fmt' => '%s', 'dec' => '.', 'th' => ''];
-    return str_replace('&nbsp;', "\u{a0}", str_replace('%s', number_format(round($eur * (float)$c['tx'], 2), 2, $c['dec'] ?: '.', $c['th']), $c['fmt']));
+// Written the store's way; a whole number without cents (its "was $58").
+$fmt = function (float $v, string $cur, array $rates, bool $whole = false): string {
+    $c = $rates[$cur] ?? ['fmt' => '%s', 'dec' => '.', 'th' => ''];
+    $d = $whole && abs($v - round($v)) < 0.005 ? 0 : 2;
+    return str_replace('&nbsp;', "\u{a0}", str_replace('%s', number_format($v, $d, $c['dec'] ?: '.', (string)$c['th']), (string)$c['fmt']));
+};
+// The price and the price before the discount in this currency: the figures read from the store's page in
+// that currency, else (only until the next read) its euro price at the store's own rate.
+$priceIn = function (array $o, string $cur, array $rates): array {
+    $p = (array)($o['p'] ?? []);
+    if (isset($p[$cur][0])) return [(float)$p[$cur][0], isset($p[$cur][1]) && $p[$cur][1] ? (float)$p[$cur][1] : null];
+    $tx = (float)($rates[$cur]['tx'] ?? 1);
+    return [round($o['eur'] * $tx, 2), $o['old'] ? (float)round($o['old'] * $tx) : null];
 };
 
 $bot = (bool)preg_match('/bot|crawl|spider|slurp|preview|facebookexternalhit|headless|lighthouse/i', (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
@@ -110,10 +120,11 @@ try {
     foreach ($games as $k => $g) {
         $o = $offerFor($g, $cc);
         if (!$o) continue;
-        $pct = ($o['old'] && $o['old'] > $o['eur']) ? (int)round(($o['old'] - $o['eur']) / $o['old'] * 100) : 0;
+        [$pr, $was] = $priceIn($o, $cur, $d['rates']);
+        $pct = ($was && $was > $pr) ? (int)round(($was - $pr) / $was * 100) : 0;
         $deal = $pct > 0 && $d['tag'] && $g['tag'] !== 2 && ($g['tag'] === 1 || $pct >= (int)$d['tagMin']);
-        $card = ['t' => $g['t'], 'p' => $g['p'], 'price' => $d['price'] ? $money($o['eur'], $cur, $d['rates']) : '',
-            'old' => $d['price'] && $deal ? $money((float)$o['old'], $cur, $d['rates']) : '', 'pct' => $d['price'] && $deal ? $pct : 0, 'off' => false];
+        $card = ['t' => $g['t'], 'p' => $g['p'], 'price' => $d['price'] ? $fmt($pr, $cur, $d['rates']) : '',
+            'old' => $d['price'] && $deal ? $fmt((float)$was, $cur, $d['rates'], true) : '', 'pct' => $d['price'] && $deal ? $pct : 0, 'off' => false];
         foreach ($g['ids'] as $id) $l[$id] = $card;
     }
     $out = ['on' => (bool)$d['on'], 'round' => (int)$d['round'], 'v' => $d['v'], 'all' => $d['all'], 'cc' => $cc, 'cur' => $cur, 'l' => $l ?: new stdClass()];

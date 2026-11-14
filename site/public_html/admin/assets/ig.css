@@ -94,3 +94,4 @@
 .ig-cc summary{cursor:pointer;font-size:13px}
 .ig-cc p{margin:6px 0 0}
 @media (max-width:760px){.ig-offers li{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.ig-pr{display:flex;flex-wrap:wrap;gap:4px 10px}.ig-cur{white-space:nowrap}

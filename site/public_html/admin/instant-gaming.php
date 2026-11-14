@@ -27,8 +27,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($x['ok']) {
             $rt = rs_ig_rates();
             $x['link'] = rs_ig_link(rs_ig_clean_url((string)$_POST['url']), $c['igr'], 'USD');
-            $x['usd'] = rs_ig_money($x['eur'], 'USD', $rt);
-            $x['old_usd'] = $x['old_eur'] ? rs_ig_money($x['old_eur'], 'USD', $rt) : '';
+            $pu = $x['prices']['USD'] ?? null;
+            $x['usd'] = $pu ? rs_ig_fmt((float)$pu[0], 'USD', $rt) : rs_ig_money($x['eur'], 'USD', $rt);
+            $x['old_usd'] = $pu && $pu[1] ? rs_ig_fmt((float)$pu[1], 'USD', $rt, true) : '';
             require_once __DIR__ . '/inc/countries.php';
             $x['curs'] = array_values(array_unique(array_map(fn($cc) => rs_ig_currency_for($cc, $rt), $x['countries'])));
         }
@@ -292,7 +293,7 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
             $when = $o['fetched'] ? rs_ago(max(0, time() - (int)strtotime($o['fetched'] . ' UTC'))) : 'never'; ?>
         <li>
           <span class="ig-reg"><b><?= h($o['region'] ?: 'Region not given') ?></b> <a class="small" href="<?= h(rs_ig_link($o['url'], $c['igr'], 'USD')) ?>" target="_blank" rel="noopener">Page ↗</a></span>
-          <span class="ig-pr"><b><?= h(rs_ig_money((float)$o['price_eur'], 'USD', $rates)) ?></b> <span class="muted small"><?= h(rs_ig_money((float)$o['price_eur'], 'EUR', $rates)) ?></span><?php if ($pct): ?> <span class="pill">−<?= $pct ?>%</span><?php endif; ?></span>
+          <span class="ig-pr"><?php $pm = json_decode((string)($o['prices'] ?? ''), true) ?: []; foreach ($pm as $pc => $pv): ?><span class="ig-cur"><b><?= h(rs_ig_fmt((float)$pv[0], $pc, $rates)) ?></b><?php if (!empty($pv[1])): ?> <s class="muted small"><?= h(rs_ig_fmt((float)$pv[1], $pc, $rates, true)) ?></s><?php endif; ?></span><?php endforeach; ?><?php if (!$pm): ?><b><?= h(rs_ig_money((float)$o['price_eur'], 'USD', $rates)) ?></b><?php endif; ?></span>
           <details class="ig-cc"><summary><?= count($codes) ?> countr<?= count($codes) === 1 ? 'y' : 'ies' ?><?= $unk ? ' <span class="warn">(' . count($unk) . ' not placed)</span>' : '' ?></summary><p class="small"><?= h(implode(', ', array_map(fn($cc) => $ccName[$cc] ?? $cc, $codes))) ?><?= $unk ? '<br><span class="warn">Names we couldn\'t place (left out): ' . h(implode(', ', $unk)) . '</span>' : '' ?></p></details>
           <span class="muted small"><?= !(int)$o['stock'] ? '<span class="warn">Out of stock</span> · ' : '' ?><?= $o['fetch_err'] !== '' ? '<span class="warn">Last read failed: ' . h($o['fetch_err']) . '</span>' : 'Read ' . h($when) ?></span>
         </li>
