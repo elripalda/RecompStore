@@ -256,6 +256,10 @@ Answer with one JSON object and nothing else:
   built-in launcher or picker, a setup or build step). "has": true, false or null when you couldn't tell.
   "how": the flag, settings key, file or folder, and what it takes. "where": file:line (or the README section)
   you saw it in. "used": whether your recomplauncher.json uses it.
+  When "has" is false, also give "needed" (true or false) and "why" (one short line). "needed": false when this
+  project simply doesn't need it, like a setup or prepare step for a game that reads the ROM or disc file
+  directly, or a game location for one that ships everything it needs. "why" says why it isn't needed, or, when
+  it is needed, why this pull request doesn't add it (a bigger change than a small option, say).
 - "options": every command-line option the project reads that you can see, with what it does and where.
 Only list what you actually saw. Empty lists are fine.
 
@@ -547,6 +551,9 @@ def feature_list(doc, d, code=None):
     elif sdk_easy(doc):
         how = short_how((code or {}).get("existing", {}).get("how", "") if code and code.get("existing") else (found.get("game location") or {}).get("how", ""))
         out.append("- [x] Easy Setup: players pick their own copy once and it's handed to the game" + (f" through your existing {how}" if how else "") + ", no code change")
+    elif (found.get("game location") or {}).get("has") is False and (found.get("game location") or {}).get("needed") is False:
+        why = str((found.get("game location") or {}).get("why", "")).strip().rstrip(".")
+        out.append("- [x] Easy Setup: not needed for this one" + (f" ({why[:1].lower() + why[1:]})" if why else ""))
     else:
         big = bool(code and code.get("notes"))  # (the code step looked and said why it left it)
         out.append("- [ ] Easy Setup: not in this pull request. It needs a way to pass the game's location to the game (like a `--game <path>` option)"
