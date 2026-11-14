@@ -2216,6 +2216,11 @@
     nes: 'NES', gbc: 'Game Boy Color', '3ds': 'Nintendo 3DS', vb: 'Virtual Boy', ps5: 'PlayStation 5', genesis: 'Genesis', s32x: '32X', gg: 'Game Gear', arcade: 'Arcade', cdi: 'CD-i', amiga: 'Amiga', pc: 'PC', other: N_('Other') };
   const SYS_NAMES = { windows: 'Windows', linux: 'Linux', macos: 'macOS' };
   let pcCat = null, pcLoading = null;
+  // (4.10) Trending: the launcher's weekly chart (admin/inc/trending.php writes it every Friday). The PC
+  // pages wait a moment for it, so the home page's row and the Trending page have it from the start.
+  let pcTrend = null;
+  const trendLoad = fetch('/trending.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    .then((tr) => { pcTrend = tr && tr.ok && Array.isArray(tr.entries) && tr.entries.length ? tr : null; return pcTrend; });
   // (3.5) The website's lighter copy of the list (pc-catalog-web.json: everything but what only a
   // game's own page shows), the whole one if it isn't there. A game's page gets the rest (pcFull).
   const pcFetch = (f) => fetch(f + (VER ? '?v=' + Math.floor(Date.now() / 120000) : ''), { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
@@ -2224,7 +2229,7 @@
       pcCat = Object.assign({ apps: [], origins: [], developers: [] }, c);
       pcCat.all = pcCat.apps;
       pcFilter();
-      return pcCat;
+      return Promise.race([trendLoad, new Promise((ok) => setTimeout(ok, 1500))]).then(() => pcCat);
     })));
   // (2.9) Coming soon: being worked on, nothing to download yet. They have their own page and stay
   // out of every other list. Hidden AI-assisted ones are out of every list; their pages still open.
@@ -2364,7 +2369,7 @@
   const LAUNCHER_ORIGIN = location.origin.replace(/recompstore/i, 'recomplauncher');
   // (4.7) The Submit page starts on PC on recomplauncher.com, from the PC side, or with ?platform=pc.
   const submitPc = () => new URLSearchParams(location.search).get('platform') === 'pc' || LAUNCHER || document.body.dataset.platform === 'pc';
-  const PC_PATH_RE = /^\/pc(\/(all|how|top|new|whats-new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
+  const PC_PATH_RE = /^\/pc(\/(all|how|top|trending|new|whats-new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
   // (4.8) recomplauncher.com also has the developer hub (/dev, which the old /developers and /hub
   // addresses become), developers' pages, accounts, Submit, Contact and Copyright, so nobody who came for
   // the PC side is sent over to recompstore.com.
@@ -2498,6 +2503,14 @@
       <small class="pc-game pc-fit" dir="auto"${a.game && a.game !== a.name ? ` title="${esc(a.game)}"${fitAttrs(a.game, shortGame(a.game))}>${esc(a.game)}` : '>&nbsp;'}</small>
       ${consoleTag(a.origin)}${a.stars ? `<span class="pc-stars" aria-label="${esc(tn(a.stars, '1 star on GitHub', '{n} stars on GitHub'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.8 6.6 19.8l1.2-6.1-4.5-4.2 6.1-.7z"/></svg>${esc(starCount(a.stars))}</span>` : ''}</a>`;
   const versionsChip = (a) => { const tt = pcTitleOf('pc', a.id); const n = tt ? titleVersions(tt) : 0; return n > 1 ? `<span class="pc-vers">${esc(tn(n, '1 version', '{n} versions'))}</span>` : ''; };
+  // (4.10) Trending: the launcher's weekly chart (/trending.json, out every Friday). Its entries that are on
+  // the list, with their recomp, and how each moved since last week.
+  const trendItems = () => (!pcTrend || !pcCat ? [] : pcTrend.entries.map((e) => ({ e, a: (pcCat.apps || []).find((x) => x.id === e.id) })).filter((x) => x.a));
+  const trendMove = (e) => e.move === 'new' ? `<i class="tr-move new">${esc(t('New'))}</i>`
+    : e.move === 're' ? `<i class="tr-move re">${esc(t('Re-entry'))}</i>`
+    : e.move === 'up' ? `<i class="tr-move up" title="${esc(tf('Up from #{n} last week', { n: e.last }))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6l7 9H5z"/></svg>${e.last - e.rank}</i>`
+    : e.move === 'down' ? `<i class="tr-move down" title="${esc(tf('Down from #{n} last week', { n: e.last }))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18l7-9H5z"/></svg>${e.rank - e.last}</i>`
+    : `<i class="tr-move same" title="${esc(t('Same as last week'))}">=</i>`;
   // (3.0) Every version of a game, to pick from: each PC recomp with what players say about it, and
   // each PS5 app. The one on screen is marked; Recommended is the admin's pick or the best rated.
   function versionsHTML(kind, id) {
@@ -2928,7 +2941,8 @@
       else if (h === '/pc/all') pcAll(new URLSearchParams(location.search).get('kind') || '');
       else if (c) pcAll(pcCatBySlug(c[1]));
       else if (h === '/pc/how') pcHow();
-      else if (h === '/pc/top' || h === '/pc/new') pcList(h.slice(4));
+      else if (h === '/pc/trending' || h === '/pc/top') { if (pcTrend) pcTrending(); else pcList('top'); }
+      else if (h === '/pc/new') pcList('new');
       else if (h === '/pc/whats-new') pcWhatsNew();
       else if (h === '/pc/consoles') pcConsoles();
       else if (h === '/pc/launcher') pcLauncher();
@@ -3017,6 +3031,9 @@
     const row = (title, items, href, cls) => items.length ? `<section class="games pc-row${cls ? ' ' + cls : ''}"><div class="pc-row-head"><h2>${href ? `<a class="pc-row-link" href="${href}">${title}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>` : title}</h2></div><div class="rowscroll pc-posters">${items.map(pcPoster).join('')}</div></section>` : '';
     const inCat = (k) => apps.filter((a) => a.genre === k).sort((x, y) => (pcCharted(y) - pcCharted(x)) || byDl(x, y));
     const ranked = (html) => { let n = 0; return html.replace(/<span class="pc-poster">/g, () => `<span class="pc-poster"><b class="pc-rank" aria-hidden="true">${fmtNum(++n)}</b>`); };
+    // (4.10) Trending this week: the launcher's weekly chart, each poster with its place and its move.
+    const tItems = trendItems().slice(0, 16);
+    const trendRow = () => { if (tItems.length < 4) return ''; let i = 0; return row(t('Trending this week'), tItems.map((x) => x.a), '/pc/trending', 'pc-charts trend-row').replace(/<span class="pc-poster">/g, () => { const e = tItems[i++].e; return `<span class="pc-poster"><b class="pc-rank" aria-hidden="true">${fmtNum(e.rank)}</b>${trendMove(e)}`; }); };
     // Every category with enough recomps to fill a row, the biggest first.
     const cats = PC_CATS.filter((k) => inCat(k).length >= 3).sort((x, y) => inCat(y).length - inCat(x).length);
     // Its buttons sit in even rows: as many across as divides them evenly.
@@ -3053,7 +3070,7 @@
           ${slides.length > 1 ? `<div class="slide-bars">${slides.map((a, i) => `<button type="button" data-dot="${i}" aria-label="${tf('Show {name}', { name: esc(a.name) })}"${i === 0 ? ' aria-current="true"' : ''}><span></span></button>`).join('')}</div>` : ''}
         </section>` : ''}
         ${apps.length ? '' : `<p class="muted">${t('The first PC recomps are on their way.')}</p>`}
-        ${ranked(row(t('Top charts'), charts, '/pc/top', 'pc-charts'))}
+        ${trendRow() || ranked(row(t('Top charts'), charts, '/pc/top', 'pc-charts'))}
         ${row(t('Recently updated'), updated)}
         ${row(t('Newest arrivals'), newest, '/pc/new')}
         <div data-play-charts></div>
@@ -3242,6 +3259,38 @@
       pcPageToUrl(page);
       pcPageScroll(grid);
     });
+  }
+
+  // (4.10) Trending: the most played recomps in RecompLauncher this week, ranked like a Hot 100 (different
+  // players first, then hours played), with last week's place, the best place and weeks on the chart.
+  // A new chart every Friday at midnight (Phoenix time).
+  function pcTrending() {
+    const title = t('Trending');
+    pcTitle = `${title} · RecompLauncher`;
+    const items = trendItems();
+    const day = (d, o) => new Date(d + 'T12:00:00Z').toLocaleDateString(lang || 'en', Object.assign({ timeZone: 'UTC' }, o));
+    const md = { month: 'short', day: 'numeric' };
+    const span = `${day(pcTrend.from, md)} – ${day(pcTrend.to, Object.assign({ year: 'numeric' }, md))}`;
+    const stat = (k, v) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
+    const rowHTML = ({ e, a }) => {
+      const href = `/pc/game/${encodeURIComponent(a.id)}`;
+      const top = e.rank === 1 && a.hero;
+      return `<li class="tr-row${top ? ' tr-top' : ''}"${top ? ` style="--tr-hero:url('${esc(a.hero)}')"` : ''}>
+        <span class="tr-rank">${fmtNum(e.rank)}</span>
+        <span class="tr-mv">${trendMove(e)}</span>
+        <a class="tr-art" href="${href}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(a.cover, 200))}" alt="" loading="lazy" decoding="async"></a>
+        <a class="tr-name" href="${href}"><b dir="auto">${esc(a.name)}</b><span dir="auto">${esc([a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span></a>
+        <dl class="tr-stats">${stat(t('Last week'), e.last ? fmtNum(e.last) : '–')}${stat(t('Peak'), fmtNum(e.peak))}${stat(t('Weeks'), fmtNum(e.weeks))}</dl>
+      </li>`;
+    };
+    view.innerHTML = `
+      <article class="page pc-trending">
+        <header class="page-head"><span class="kicker">RecompLauncher</span><h1>${title}</h1>
+          <p class="lead">${t('The most played recomps on RecompLauncher this week, counted from the players in the launcher. A new chart every Friday.')}</p>
+          <p class="tr-week"><span>${esc(tf('Week of {dates}', { dates: span }))}</span><span>${esc(tf('Next chart {day}', { day: day(pcTrend.next, Object.assign({ weekday: 'long' }, md)) }))}</span></p></header>
+        <ol class="tr-list">${items.map(rowHTML).join('')}</ol>
+        ${pcNoFiles()}
+      </article>`;
   }
 
   // (4.8) What's new: the last three weeks on RecompLauncher, day by day. What arrived (its posters, in a
@@ -4701,7 +4750,7 @@
     const cats = v2on() ? CATS.filter((c) => inCat(c.key).length) : [];
     // (2.9) RecompLauncher's own: the PC side's pages, and RecompStore for PS5.
     const cols = LAUNCHER ? [
-      ['RecompLauncher', [['/pc', t('Discover')], ['/pc/all', t('All recomps')], ['/pc/top', t('Top charts')], ['/pc/whats-new', t("What's new")], ['/pc/soon', t('Coming soon')], ['/pc/consoles', t('Consoles')], ['/pc/settings', t('Settings')]]],
+      ['RecompLauncher', [['/pc', t('Discover')], ['/pc/all', t('All recomps')], ['/pc/trending', t('Trending')], ['/pc/whats-new', t("What's new")], ['/pc/soon', t('Coming soon')], ['/pc/consoles', t('Consoles')], ['/pc/settings', t('Settings')]]],
       [t('Get started'), [['/pc/how', t('How it works')], ['/pc/launcher', t('Get RecompLauncher')]]],
       [t('Developers'), [['/pc/sdk', t('RecompLauncher SDK')], ['/dev', t('Developer accounts')], ['/dev?signin=1', t('Developer sign in')], ['/submit', t('Submit a game')], ['/pc/press', t('Press kit')]]],
       // (4.8) RecompLauncher's own Contact, Copyright and Terms pages; RecompStore is one link for PS5.
@@ -7378,7 +7427,7 @@
   // address bar always has the link that shows the game's card when it's shared.
   // (2.6) The site's own pages also have plain addresses (recompstore.com/games, /how, /get...), which
   // the server answers with the page's title and links for search engines; here they're the same page.
-  const PATHS = ['/games', '/emulators', '/apps', '/tools', '/how', '/get', '/about', '/contact', '/team', '/submit', '/report', '/ids', '/soon', '/link', '/my-ps5', '/press', '/beta', '/developers', '/hub', '/dmca', '/signin', '/account', '/account/reset', '/library', '/terms', '/privacy', '/pc', '/pc/all', '/pc/how', '/pc/top', '/pc/new', '/pc/whats-new', '/pc/consoles', '/pc/launcher', '/pc/settings', '/pc/sdk', '/pc/action', '/pc/adventure', '/pc/platformers', '/pc/racing', '/pc/fighting', '/pc/shooters', '/pc/sports', '/pc/rpg', '/pc/puzzle'];
+  const PATHS = ['/games', '/emulators', '/apps', '/tools', '/how', '/get', '/about', '/contact', '/team', '/submit', '/report', '/ids', '/soon', '/link', '/my-ps5', '/press', '/beta', '/developers', '/hub', '/dmca', '/signin', '/account', '/account/reset', '/library', '/terms', '/privacy', '/pc', '/pc/all', '/pc/how', '/pc/top', '/pc/trending', '/pc/new', '/pc/whats-new', '/pc/consoles', '/pc/launcher', '/pc/settings', '/pc/sdk', '/pc/action', '/pc/adventure', '/pc/platformers', '/pc/racing', '/pc/fighting', '/pc/shooters', '/pc/sports', '/pc/rpg', '/pc/puzzle'];
   const pathNow = () => location.pathname.replace(/(.)\/+$/, '$1');
   const pathPage = () => !(location.hash.length > 1) && (PATHS.includes(pathNow()) || /^\/dev\/[a-z0-9-]{1,40}$/.test(pathNow()) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(pathNow()));
   function current() {
@@ -7510,7 +7559,7 @@
     else if (dv) devPage(dv[1]);
     else home();
     // Which part of the menu this page is in.
-    const here = pcm ? (h === '/pc' ? 'pc' : h === '/pc/how' ? 'pc-how' : (h === '/pc/all' || PC_CAT_RE.test(h)) ? 'pc-all' : h === '/pc/new' ? 'pc-whats-new' : ['/pc/top', '/pc/whats-new', '/pc/consoles', '/pc/soon', '/pc/sdk'].includes(h) ? 'pc-' + h.slice(4) : '') : isCat ? h.slice(1) : h === '/how' ? 'how' : ['/link', '/my-ps5'].includes(h) || (coded && coded[1] === 'l') ? 'my'
+    const here = pcm ? (h === '/pc' ? 'pc' : h === '/pc/how' ? 'pc-how' : (h === '/pc/all' || PC_CAT_RE.test(h)) ? 'pc-all' : h === '/pc/new' ? 'pc-whats-new' : (h === '/pc/top' || h === '/pc/trending') ? 'pc-trending' : ['/pc/whats-new', '/pc/consoles', '/pc/soon', '/pc/sdk'].includes(h) ? 'pc-' + h.slice(4) : '') : isCat ? h.slice(1) : h === '/how' ? 'how' : ['/link', '/my-ps5'].includes(h) || (coded && coded[1] === 'l') ? 'my'
       : view.querySelector('.intro-words') ? 'home' : '';
     document.querySelectorAll('[data-nav]').forEach((n) => { if (n.dataset.nav === here) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current'); });
     document.querySelectorAll('a.get').forEach((n) => n.classList.toggle('on', h === '/get'));

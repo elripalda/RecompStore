@@ -53,7 +53,7 @@ RewriteRule ^$ page.php?p=pc [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
 RewriteRule ^get/?$ page.php?p=pc-launcher [L,QSA]
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
-RewriteRule ^(all|how|top|new|whats-new|consoles|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
+RewriteRule ^(all|how|top|trending|new|whats-new|consoles|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
 # (4.8) What's new as a feed: RSS and JSON Feed
 RewriteCond %{HTTP_HOST} ^recomplauncher\.com$ [NC]
 RewriteRule ^feed\.xml$ feed.php [L]
@@ -115,7 +115,7 @@ RewriteRule ^dev/([a-z0-9-]{1,40})/?$ page.php?p=dev&slug=$1 [L,QSA]
 RewriteRule ^(signin|account|account/reset|library|terms|privacy)/?$ index.html [L,QSA]
 # (2.8) The PC side at /pc, on any other address the site is reached by
 RewriteRule ^pc/?$ page.php?p=pc [L,QSA]
-RewriteRule ^pc/(all|how|top|new|consoles|launcher|sdk|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
+RewriteRule ^pc/(all|how|top|trending|new|consoles|launcher|sdk|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle)/?$ page.php?p=pc-$1 [L,QSA]
 RewriteRule ^pc/game/([a-z0-9-]{1,64})/?$ page.php?p=pc-game&id=$1 [L,QSA]
 RewriteRule ^sitemap\.xml$ sitemap.php [L]
 # (2.7.1) The developer list's confirm and unsubscribe links.

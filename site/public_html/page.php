@@ -339,15 +339,18 @@ try {
             $m = ['title' => $name(t('Press kit')), 'path' => $pp('/pc/press'), 'desc' => t('Badges, logos and words for telling people where to get your app.'),
                 'image' => $base . '/assets/press/launcher/badge-dark.png', 'imageW' => 834, 'imageH' => 168, 'imageAlt' => 'Get it on RecompLauncher',
                 'body' => '<h1>' . $e(t('Press kit')) . '</h1><p><img src="/assets/press/launcher/badge-dark.svg" alt="Get it on RecompLauncher" height="56"></p><p><a href="/assets/press/launcher/recomplauncher-press-kit.zip">' . $e(t('Download everything (.zip)')) . '</a></p>' . $pcNav];
-        } elseif (in_array($p, ['pc-top', 'pc-new', 'pc-consoles', 'pc-launcher'], true)) {
-            $h1 = ['pc-top' => t('Top charts'), 'pc-new' => t('New'), 'pc-consoles' => t('Consoles'), 'pc-launcher' => t('Get RecompLauncher')][$p];
+        } elseif (in_array($p, ['pc-top', 'pc-trending', 'pc-new', 'pc-consoles', 'pc-launcher'], true)) {
+            // (4.10) Top charts became Trending (the weekly chart from the launcher); the old address shows it too.
+            $h1 = ['pc-top' => t('Trending'), 'pc-trending' => t('Trending'), 'pc-new' => t('New'), 'pc-consoles' => t('Consoles'), 'pc-launcher' => t('Get RecompLauncher')][$p];
+            if ($p === 'pc-top') $p = 'pc-trending';
             // (4.1) The download page, as people search for it.
             if ($p === 'pc-launcher' && in_array(rs_seo_lang(), ['', 'en'], true)) {
                 $m = ['title' => 'Download RecompLauncher (Recomp Launcher) for Windows, Linux and Mac', 'ogTitle' => 'Get RecompLauncher', 'path' => $pp('/pc/launcher'),
                     'desc' => 'Download RecompLauncher, the free Recomp Launcher for Windows, Linux and Mac (Apple Silicon): one app that installs PC recomps, keeps them up to date and sets them up from your own copy.',
                     'body' => '<h1>' . $e($h1) . '</h1><p>Download RecompLauncher, the free Recomp Launcher for Windows, Linux and Mac (Apple Silicon): one app that installs PC recomps, keeps them up to date and sets them up from your own copy.</p>' . $pcNav . $pcByo];
             }
-            $d = $p === 'pc-launcher' ? t('One app for every PC recomp. It installs them, keeps them up to date, sets them up from your own copy, and gives every game the same simple settings.') : $pcDesc;
+            $d = $p === 'pc-launcher' ? t('One app for every PC recomp. It installs them, keeps them up to date, sets them up from your own copy, and gives every game the same simple settings.')
+                : ($p === 'pc-trending' ? t('The most played recomps on RecompLauncher this week. A new chart every Friday.') : $pcDesc);
             if ($m === null) $m = ['title' => $name($h1), 'ogTitle' => $name($h1), 'path' => $pp('/' . str_replace('pc-', 'pc/', $p)), 'desc' => $d, 'noindex' => !$pcApps,
                 'body' => '<h1>' . $e($h1) . '</h1><p>' . $e($d) . '</p>' . $pcNav . ($p === 'pc-launcher' ? '' : $pcList) . $pcByo];
         } elseif ($p === 'pc-how') {

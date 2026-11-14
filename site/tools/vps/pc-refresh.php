@@ -68,6 +68,12 @@ try {
     [$ok, $bad] = rs_ig_refresh(600, 80);
     if ($ok || $bad) echo gmdate('c') . ' instant gaming: read ' . $ok . ($bad ? ', ' . $bad . ' failed' : '') . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' instant gaming: ' . $e->getMessage() . "\n"; }
+// (4.10) Trending: the new weekly chart once Friday comes (midnight Phoenix time).
+try {
+    require_once 'admin/inc/trending.php';
+    $tw = rs_trend_maybe();
+    if ($tw !== '') echo gmdate('c') . ' trending: ' . $tw . "\n";
+} catch (Throwable $e) { echo gmdate('c') . ' trending: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
 // launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.
