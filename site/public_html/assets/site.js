@@ -3448,7 +3448,6 @@
       <article class="page pc-launcher">
         <header class="pc-launch-hero">
           <div class="pc-launch-words">
-            <span class="soon-badge"><i aria-hidden="true"></i>${t('Beta coming soon to Windows')}</span>
             <h1>RecompLauncher</h1>
             <p class="lead">${t('One app for every PC recomp. It installs them, keeps them up to date, sets them up from your own copy, and gives every game the same simple settings.')}</p>
             <div class="beta-box" data-beta-form></div>
@@ -6762,7 +6761,6 @@
         <a class="btn launch-gh" href="https://github.com/elripalda/RecompLauncher" target="_blank" rel="noopener">${ghIcon}${t('Source code on GitHub')}</a>
       </div>`;
     words.innerHTML = `
-      <span class="soon-badge launch-badge"><i aria-hidden="true"></i>${t('Beta out now on') + ' ' + sysList}</span>
       <h1>RecompLauncher</h1>
       ${P.headline ? `<p class="launch-head">${esc(P.headline)}</p>` : ''}
       ${P.intro ? `<p class="lead">${esc(P.intro)}</p>` : ''}
