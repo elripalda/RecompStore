@@ -157,8 +157,9 @@ function rs_ig_read(string $url): array {
     $stock = !preg_match('~OutOfStock|SoldOut|Discontinued~i', $meta('availability'));
     // The price before the discount: the "retail" figure in the product's own price box.
     $old = null;
-    if (preg_match('~class="discounts".{0,600}?class="retail"[^>]*>\s*([^<]{1,30})<~s', $h, $m)) {
-        $n = (float)str_replace(',', '.', preg_replace('/[^0-9.,]/', '', $m[1]));
+    if (preg_match('~class="discounts".{0,1500}?class="retail"[^>]*>(.{0,400}?)</div>~s', $h, $m)
+        && preg_match('/([0-9]+(?:[.,][0-9]{1,2})?)/', trim(strip_tags($m[1])), $n)) {
+        $n = (float)str_replace(',', '.', $n[1]);
         if ($n > (float)$price) $old = round($n, 2);
     }
     // Name and platform from its breadcrumb (Nintendo > Switch 2 > The Legend of Zelda: ...), region from
