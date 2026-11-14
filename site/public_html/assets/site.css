@@ -3343,16 +3343,19 @@ a.get-pc .get-ico{width:16px;height:16px;flex:none}body[data-platform=pc] a.get-
 .tr-name{display:flex;flex-direction:column;gap:3px;min-width:0;color:inherit;text-decoration:none}
 .tr-name b{font:700 18px/1.25 Archivo,sans-serif;font-stretch:104%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tr-name span{color:#a7b3c4;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tr-name:hover b{color:var(--cyan)}
+.tr-title{color:inherit;text-decoration:none;min-width:0;display:block;overflow:hidden}.tr-title:hover b{color:var(--cyan)}.tr-title b{display:block}
+.tr-name .tr-dev{display:inline-flex;align-items:center;gap:5px;color:#cdd6e2;font-size:13.5px;min-width:0}.tr-dev bdi{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.tr-dev a{color:#F4F8FC;font-weight:600;text-decoration:none}.tr-dev a:hover{color:var(--cyan)}.tr-dev svg.verified{width:15px;height:15px;flex:none;color:var(--cyan)}
 .tr-stats{display:grid;grid-template-columns:repeat(3,74px);margin:0;text-align:center}
 .tr-stats>div{display:flex;flex-direction:column;align-items:center;gap:0;padding:2px 0;margin:0}.tr-stats>div+div{border-left:1px solid var(--line)}
 .tr-stats dt{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#7f8ca0}
 .tr-stats dd{margin:3px 0 0;font:700 17px/1 Archivo,sans-serif;color:#F4F8FC}
-.tr-top{grid-template-columns:84px 58px 104px minmax(0,1fr) auto;padding:20px 22px 20px 12px;border-color:rgba(52,242,232,.45);background:rgba(8,14,26,.6)}
+.tr-top{grid-template-columns:84px 58px 104px minmax(0,1fr) auto;padding:20px 22px 20px 12px;border-color:rgba(244,248,252,.22);background:rgba(8,14,26,.6)}
+.tr-first{border-color:rgba(52,242,232,.45)}
 .tr-top::before{content:"";position:absolute;inset:0;z-index:-2;background:var(--tr-hero) center/cover no-repeat;opacity:.38}
 .tr-top::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,rgba(8,14,26,.96) 30%,rgba(8,14,26,.55) 75%,rgba(8,14,26,.75))}
-.tr-top:hover{border-color:var(--cyan)}
-.tr-top .tr-rank{font-size:52px;color:var(--cyan)}
+.tr-top:hover{border-color:rgba(244,248,252,.4)}.tr-first:hover{border-color:var(--cyan)}
+.tr-top .tr-rank{font-size:52px}.tr-first .tr-rank{color:var(--cyan)}
 .tr-top .tr-art{width:104px;border-radius:12px}
 .tr-top .tr-name b{font-size:26px}
 @media (max-width:760px){

@@ -3274,12 +3274,16 @@
     const stat = (k, v) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
     const rowHTML = ({ e, a }) => {
       const href = `/pc/game/${encodeURIComponent(a.id)}`;
-      const top = e.rank === 1 && a.hero;
-      return `<li class="tr-row${top ? ' tr-top' : ''}"${top ? ` style="--tr-hero:url('${esc(a.hero)}')"` : ''}>
+      // The top three get their banner behind them; #1 its accent too.
+      const top = e.rank <= 3 && a.hero;
+      // Who made it, with the verified mark: the chart is their recognition too.
+      const d = pcDevOf(a), owner = a.author || String(a.repo || '').split('/')[0];
+      const dev = d ? `<a href="/dev/${encodeURIComponent(d.slug)}">${esc(d.name || owner)}</a>${d.verified ? tick() : ''}` : owner ? `<span>${esc(owner)}</span>` : '';
+      return `<li class="tr-row${top ? ' tr-top' : ''}${e.rank === 1 ? ' tr-first' : ''}"${top ? ` style="--tr-hero:url('${esc(a.hero)}')"` : ''}>
         <span class="tr-rank">${fmtNum(e.rank)}</span>
         <span class="tr-mv">${trendMove(e)}</span>
         <a class="tr-art" href="${href}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async"></a>
-        <a class="tr-name" href="${href}"><b dir="auto">${esc(a.name)}</b><span dir="auto">${esc([a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span></a>
+        <div class="tr-name"><a class="tr-title" href="${href}"><b dir="auto">${esc(a.name)}</b></a><span dir="auto">${esc([a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span>${dev ? `<span class="tr-dev">${tf('By {author}', { author: `<bdi>${dev}</bdi>` })}</span>` : ''}</div>
         <dl class="tr-stats">${stat(t('Last week'), e.last ? fmtNum(e.last) : '–')}${stat(t('Peak'), fmtNum(e.peak))}${stat(t('Weeks'), fmtNum(e.weeks))}</dl>
       </li>`;
     };
