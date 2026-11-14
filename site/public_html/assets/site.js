@@ -6796,7 +6796,8 @@
   // Live: the header button says so, and the pop-up announces it once per version.
   const LAUNCH_SEEN = 'rs-launch-pop';
   function launchNav(L) {
-    document.querySelectorAll('a.get-pc').forEach((a) => { a.textContent = t('Get the Beta'); });
+    // (4.10) Out now: the header button is a plain Download, with its icon.
+    document.querySelectorAll('a.get-pc').forEach((a) => { a.innerHTML = '<svg class="get-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span>' + esc(t('Download')) + '</span>'; });
     // (4.8) No launch pop-up any more: with a new beta most days it came back over the page again
     // and again. The header button already says the beta is out.
     if (L) return;

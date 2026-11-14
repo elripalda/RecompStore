@@ -25,7 +25,7 @@
 <link rel="apple-touch-icon" href="/assets/logo-512.png">
 <link rel="preload" href="/assets/fonts/figtree-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css?v=134">
+<link rel="stylesheet" href="/assets/site.css?v=135">
 <link rel="stylesheet" href="/assets/hub-ext.css?v=2">
 <script>document.documentElement.classList.add('js')</script>
 <style id="rl-top-kofi">/* (3.1g) RecompLauncher: a Ko-fi heart in the header in place of search and Discord (All Recomps has its own search; Discord is in the footer). */#top-kofi{display:none;align-items:center;gap:7px;height:42px;padding:0 16px 0 13px;border:1px solid rgba(244,248,252,.16);border-radius:12px;background:#141f33;color:#F4F8FC;font:500 15px/1 Figtree,sans-serif;text-decoration:none;white-space:nowrap;transition:border-color .2s,box-shadow .25s,background-color .25s}#top-kofi:hover{border-color:rgba(255,94,120,.7);background:#1f1a2e;color:#F4F8FC;box-shadow:0 0 0 3px rgba(255,94,120,.16),0 0 22px rgba(255,94,120,.38)}#top-kofi svg{width:18px;height:18px;flex:none}/* The account avatar at the far right end, after the buttons (the phone menu button stays last). */.top-actions #top-acct{order:9}.top-actions #menu-open{order:10}/* RecompLauncher: Submit a Game lives in the top menu, so the header button goes. */body[data-platform="pc"] .top-actions .submit-btn:not(.hub-btn){display:none}body[data-platform="pc"] #top-kofi{display:inline-flex}body[data-platform="pc"] #search-open,body[data-platform="pc"] #top-discord{display:none}#top-kofi svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;transition:fill .2s,stroke .2s}#top-kofi:hover svg{fill:#ff5e78;stroke:#ff5e78}</style>
@@ -60,7 +60,7 @@
       <a class="submit-btn hub-btn" id="top-hub" href="/hub" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span data-i18n="Developer hub">Developer hub</span></a>
       <a class="submit-btn" href="/submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl-ps5" data-i18n="Submit an app">Submit an App</span><span class="lbl-pc" data-i18n="Submit a game">Submit a Game</span></a>
       <a class="get" href="/get" data-i18n="Get RecompStore">Get RecompStore</a>
-      <a class="get get-pc" href="/pc/launcher" data-i18n="Get RecompLauncher">Get RecompLauncher</a>
+      <a class="get get-pc" href="/pc/launcher"><svg class="get-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span data-i18n="Download">Download</span></a>
       <button type="button" class="icon-btn menu-btn" id="menu-open" aria-label="Menu" data-i18n-attr="aria-label" aria-expanded="false" aria-controls="drawer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     </div>
   </div>
@@ -78,7 +78,7 @@
       <a class="submit-btn full hub-btn" id="drawer-hub" href="/hub" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span data-i18n="Developer hub">Developer hub</span></a>
       <a class="submit-btn full" href="/submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl-ps5" data-i18n="Submit an app">Submit an App</span><span class="lbl-pc" data-i18n="Submit a game">Submit a Game</span></a>
       <a class="get full" href="/get" data-i18n="Get RecompStore">Get RecompStore</a>
-      <a class="get get-pc full" href="/pc/launcher" data-i18n="Get RecompLauncher">Get RecompLauncher</a>
+      <a class="get get-pc full" href="/pc/launcher"><svg class="get-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span data-i18n="Download">Download</span></a>
       <a class="submit-btn full" id="drawer-discord" href="/beta" target="_blank" rel="noopener" hidden><span data-i18n="Join the Discord">Join the Discord</span></a>
     </div>
     <div class="drawer-lang" id="drawer-lang"></div>
@@ -112,7 +112,7 @@
 </footer>
 
 
-<script src="/assets/site.js?v=174"></script>
+<script src="/assets/site.js?v=175"></script>
 <script src="/assets/hub-ext.js?v=5" defer></script>
 <script src="/assets/beta-gate.js?v=4" defer></script>
 <script src="/assets/spons.js?v=2" defer></script>
