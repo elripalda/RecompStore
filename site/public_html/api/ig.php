@@ -20,12 +20,12 @@ if (isset($_GET['go'])) {
         $c = rs_ig_cfg();
         rs_ig_tables();
         if ($idOk($id)) {
-            $st = rs_db()->prepare('SELECT url FROM ig_listings WHERE app_id = ?');
-            $st->execute([$id]);
-            $url = rs_ig_clean_url((string)$st->fetchColumn());
+            // (4.9) The recomp's own card, else its game's; counted under that listing.
+            $row = rs_ig_for_app($id);
+            $url = $row ? rs_ig_clean_url((string)$row['url']) : '';
             if ($url !== '') $to = $url;
             $known = in_array($v, array_column($c['variants'], 'id'), true);
-            if ($url !== '' && $known && !$bot && empty($_GET['peek']) && !rs_rate_over('igclick', 40, 3600)) { rs_rate_hit('igclick'); rs_ig_count($id, $v, 'clicks'); }
+            if ($url !== '' && $known && !$bot && empty($_GET['peek']) && !rs_rate_over('igclick', 40, 3600)) { rs_rate_hit('igclick'); rs_ig_count((string)$row['app_id'], $v, 'clicks'); }
         }
         $to = rs_ig_link($to, $c['igr']);
     } catch (Throwable $e) { $to = rs_ig_link($to, 'recomp'); }
@@ -41,9 +41,8 @@ if (($_GET['e'] ?? '') === 'view') {
     if (!$bot && $idOk($id) && in_array($v, RS_IG_IDS, true)) {
         try {
             $c = rs_ig_cfg();
-            $st = rs_db()->prepare('SELECT 1 FROM ig_listings WHERE app_id = ? AND paused = 0');
-            $st->execute([$id]);
-            if ($c['on'] && (int)($_GET['r'] ?? 0) === $c['round'] && $st->fetchColumn() && in_array($v, array_column(rs_ig_live_variants($c), 'id'), true)) rs_ig_count($id, $v, 'views');
+            $row = rs_ig_for_app($id);
+            if ($c['on'] && (int)($_GET['r'] ?? 0) === $c['round'] && $row && !(int)$row['paused'] && in_array($v, array_column(rs_ig_live_variants($c), 'id'), true)) rs_ig_count((string)$row['app_id'], $v, 'views');
         } catch (Throwable $e) { /* counting is best-effort */ }
     }
     header('Cache-Control: no-store');

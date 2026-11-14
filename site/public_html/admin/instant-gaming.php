@@ -13,11 +13,21 @@ $db = rs_db();
 $c = rs_ig_cfg();
 $apps = [];
 foreach (rs_pc_apps(true) as $a) $apps[(string)$a['id']] = $a;
+// (4.9) Cards go on games: a version group (every recomp of it) or a recomp on its own.
+$games = rs_ig_games($apps);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
     $back = 'instant-gaming.php';
+    // (4.9) Read an Instant Gaming page for the form: name, platform, region, price, stock.
+    if ($act === 'read') {
+        header('Content-Type: application/json');
+        $x = rs_ig_read((string)($_POST['url'] ?? ''));
+        if ($x['ok']) $x['link'] = rs_ig_link(rs_ig_clean_url((string)$_POST['url']), $c['igr']);
+        echo json_encode($x, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     try {
         if ($act === 'onoff') {
             $c['on'] = !$c['on'];
@@ -73,24 +83,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_flash('New round started. Numbers start from zero and every visitor gets a version again.');
         } elseif ($act === 'listing_save') {
             $id = trim((string)($_POST['app_id'] ?? ''));
-            if (!isset($apps[$id])) throw new RuntimeException('Pick a recomp from the list.');
+            if (!isset($games[$id])) throw new RuntimeException('Pick the game from the search.');
             $url = rs_ig_clean_url((string)($_POST['url'] ?? ''));
             if ($url === '') throw new RuntimeException('Paste the game\'s page on instant-gaming.com (it starts with https://www.instant-gaming.com/).');
+            $auto = !empty($_POST['auto']);
             $title = trim(mb_substr((string)($_POST['title'] ?? ''), 0, 160));
-            if ($title === '') throw new RuntimeException('Give the card the game\'s name.');
             $platform = trim(mb_substr((string)($_POST['platform'] ?? ''), 0, 60));
             $num = function ($v) { $v = str_replace(',', '.', trim((string)$v)); return $v === '' ? null : (is_numeric($v) && (float)$v > 0 && (float)$v < 100000 ? round((float)$v, 2) : false); };
             $price = $num($_POST['price'] ?? '');
             $old = $num($_POST['old_price'] ?? '');
             if ($price === false || $old === false) throw new RuntimeException('Prices are numbers, like 57.68.');
-            if ($old !== null && $price !== null && $old <= $price) $old = null;
             $cur = in_array($_POST['currency'] ?? '', ['USD', 'EUR', 'GBP'], true) ? $_POST['currency'] : 'USD';
+            $region = trim(mb_substr((string)($_POST['region'] ?? ''), 0, 60));
+            $stock = 1; $fetched = null;
+            // Following Instant Gaming: the page decides the price, the discount and whether it's in stock.
+            if ($auto) {
+                $x = rs_ig_read($url);
+                if (!$x['ok']) throw new RuntimeException($x['why'] . ' Or untick "Keep it in step" and type the price yourself.');
+                [$price, $old, $cur, $stock, $fetched] = [$x['price'], $x['old'], $x['currency'], $x['stock'] ? 1 : 0, gmdate('Y-m-d H:i:s')];
+                if ($title === '') $title = $x['name'];
+                if ($platform === '') $platform = $x['platform'];
+                if ($region === '') $region = $x['region'];
+            }
+            if ($title === '') throw new RuntimeException('Give the card the game\'s name.');
+            if ($old !== null && $price !== null && $old <= $price) $old = null;
             $tag = max(0, min(2, (int)($_POST['tag'] ?? 0)));
-            $db->prepare('INSERT INTO ig_listings (app_id, url, title, platform, price, old_price, currency, tag, paused, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())
-                ON DUPLICATE KEY UPDATE url = VALUES(url), title = VALUES(title), platform = VALUES(platform), price = VALUES(price), old_price = VALUES(old_price), currency = VALUES(currency), tag = VALUES(tag), updated = NOW()')
-                ->execute([$id, $url, $title, $platform, $price, $old, $cur, $tag]);
+            $db->prepare('INSERT INTO ig_listings (app_id, url, title, platform, price, old_price, currency, tag, paused, auto, region, stock, fetched, fetch_err, created, updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ' . ($fetched ? 'UTC_TIMESTAMP()' : 'NULL') . ', \'\', NOW(), NOW())
+                ON DUPLICATE KEY UPDATE url = VALUES(url), title = VALUES(title), platform = VALUES(platform), price = VALUES(price), old_price = VALUES(old_price), currency = VALUES(currency),
+                tag = VALUES(tag), auto = VALUES(auto), region = VALUES(region), stock = VALUES(stock), fetched = VALUES(fetched), fetch_err = \'\', updated = NOW()')
+                ->execute([$id, $url, $title, $platform, $price, $old, $cur, $tag, $auto ? 1 : 0, $region, $stock]);
+            // Moving a recomp's own card up to its game: the old one goes.
+            if (str_starts_with($id, 't:')) foreach ($games[$id]['ids'] as $m) $db->prepare('DELETE FROM ig_listings WHERE app_id = ?')->execute([$m]);
             rs_log('sponsors', 'Instant Gaming', 'listing ' . $id);
-            rs_flash('Saved ' . $apps[$id]['name'] . '.' . ($c['on'] ? ' Its card shows within 2 minutes.' : ' It shows once Instant Gaming is turned on.'));
+            rs_flash('Saved ' . $games[$id]['name'] . (count($games[$id]['ids']) > 1 ? ', on all ' . count($games[$id]['ids']) . ' versions' : '') . '.' . (!$stock ? ' It\'s out of stock on Instant Gaming, so the card stays hidden until it\'s back.' : ($c['on'] ? ' Its card shows within 2 minutes.' : ' It shows once Instant Gaming is turned on.')));
+            $back .= '#listings';
+        } elseif ($act === 'refresh_now') {
+            $db->exec('UPDATE ig_listings SET fetched = NULL WHERE auto = 1');
+            [$ok, $bad] = rs_ig_refresh(0, 60);
+            rs_flash('Read ' . $ok . ' page' . ($ok === 1 ? '' : 's') . ' again' . ($bad ? '; ' . $bad . ' couldn\'t be read' : '') . '.');
             $back .= '#listings';
         } elseif (in_array($act, ['listing_pause', 'listing_resume', 'listing_delete', 'listing_rule'], true)) {
             $id = (string)($_POST['app_id'] ?? '');
@@ -120,20 +151,28 @@ $live = rs_ig_live_variants($c);
 $shareSum = array_sum(array_column($live, 'share')) ?: 1;
 $host = (string)($_SERVER['HTTP_HOST'] ?? '');
 $rl = preg_match('/^(localhost|127\.0\.0\.1)(:\d+)?$/', $host) ? '' : 'https://recomplauncher.com';
+// (4.9) A listing's recomp to open: the first of its game's versions that's out.
+$firstShown = function (string $key) use ($games, $apps): string {
+    foreach ($games[$key]['ids'] ?? [] as $id) if (empty($apps[$id]['hidden'])) return $id;
+    return (string)($games[$key]['ids'][0] ?? '');
+};
+$coverOf = function (string $key) use ($games, $apps): string {
+    foreach ($games[$key]['ids'] ?? [] as $id) if ((string)($apps[$id]['cover'] ?? '') !== '') return (string)$apps[$id]['cover'];
+    return '';
+};
 $peekId = '';
-foreach ($rows as $r) if (!$r['paused'] && isset($apps[$r['app_id']]) && empty($apps[$r['app_id']]['hidden'])) { $peekId = $r['app_id']; break; }
-if ($peekId === '' && $rows) $peekId = $rows[0]['app_id'];
+foreach ($rows as $r) if (!$r['paused'] && !empty($games[$r['app_id']]['shown'])) { $peekId = $firstShown($r['app_id']); break; }
+if ($peekId === '' && $rows) $peekId = $firstShown($rows[0]['app_id']);
 $small = array_values(array_filter($rows, fn($r) => ($p = rs_ig_pct($r['price'], $r['old_price'])) > 0 && $p < $c['tagMin']));
 $edit = null;
 if (isset($_GET['edit']) && isset($linked[(string)$_GET['edit']])) $edit = $linked[(string)$_GET['edit']];
-if (!$edit && isset($_GET['add']) && isset($apps[(string)$_GET['add']])) {
-    $a = $apps[(string)$_GET['add']];
-    $edit = ['app_id' => $a['id'], 'url' => '', 'title' => $a['game'] ?: $a['name'], 'platform' => '', 'price' => null, 'old_price' => null, 'currency' => 'USD', 'tag' => 0, 'new' => true];
+if (!$edit && isset($_GET['add']) && isset($games[(string)$_GET['add']])) {
+    $edit = ['app_id' => (string)$_GET['add'], 'url' => '', 'title' => '', 'platform' => '', 'price' => null, 'old_price' => null, 'currency' => 'USD', 'tag' => 0, 'auto' => 1, 'region' => '', 'new' => true];
 }
-// Recomps of games still sold today (Switch and Switch 2) that aren't linked yet, most downloaded first.
-$maybe = array_values(array_filter($apps, fn($a) => empty($a['hidden']) && empty($a['soon']) && in_array($a['origin'] ?? '', ['switch2', 'switch'], true) && !isset($linked[$a['id']])));
-usort($maybe, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
-$maybe = array_slice($maybe, 0, 8);
+// Games still sold today (Switch and Switch 2) without a card yet, most downloaded first.
+$maybe = array_filter($games, fn($g, $k) => $g['shown'] && in_array($g['origin'], ['switch2', 'switch'], true) && !isset($linked[$k]) && !array_filter($g['ids'], fn($id) => isset($linked[$id])), ARRAY_FILTER_USE_BOTH);
+uasort($maybe, fn($x, $y) => $y['dl'] <=> $x['dl']);
+$maybe = array_slice($maybe, 0, 8, true);
 // The verdict on the test: a version is ahead once every running one has enough views to compare.
 $need = 300;
 $verdict = '';
@@ -152,9 +191,10 @@ if (count($live) > 1) {
     }
 }
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
+// The game search: every game with a version that's out, its versions' names to match on too.
 $pickList = [];
-foreach ($apps as $a) if (empty($a['hidden'])) $pickList[$a['id']] = ['n' => (string)$a['name'], 'g' => (string)($a['game'] ?: $a['name'])];
-uasort($pickList, fn($x, $y) => strcasecmp($x['n'], $y['n']));
+foreach ($games as $k => $g) if ($g['shown']) $pickList[] = ['k' => $k, 'n' => $g['name'], 'l' => $g['line'], 'c' => $coverOf($k), 'has' => isset($linked[$k]),
+    'v' => array_values(array_map(fn($id) => (string)$apps[$id]['name'], array_filter($g['ids'], fn($id) => empty($apps[$id]['hidden']))))];
 $searchUrl = fn(string $q): string => 'https://www.instant-gaming.com/en/search/?q=' . rawurlencode($q) . '&igr=' . rawurlencode($c['igr']);
 $count = fn(int $n, string $w): string => number_format($n) . ' ' . $w . ($n === 1 ? '' : 's');
 $money = fn($v, string $cur): string => $v === null || (float)$v <= 0 ? '' : (['EUR' => '€', 'GBP' => '£'][$cur] ?? '$') . number_format((float)$v, 2);
@@ -220,17 +260,20 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
 </section>
 
 <section class="card" id="listings">
-  <div class="ig-sec-head"><div><h2>Recomps with a card</h2><p class="muted small">Only these recomps show it. Prices change on Instant Gaming and differ by country, so check them now and then (or turn prices off).</p></div></div>
+  <div class="ig-sec-head"><div><h2>Games with a card</h2><p class="muted small">A game's card shows on every version of it. Prices, discounts and stock are read from Instant Gaming every 3 hours, so the card matches their page.</p></div>
+    <?php if ($rows): ?><form method="post"><?= $csrf ?><button name="action" value="refresh_now">Check prices now</button></form><?php endif; ?></div>
   <?php if (!$rows): ?>
-  <p class="muted">None yet. Add one below: pick the recomp, paste the game's page on Instant Gaming, and fill in the price.</p>
+  <p class="muted">None yet. Add one below: search the game, paste its page on Instant Gaming, and the rest fills in.</p>
   <?php else: ?>
   <div class="ig-rows">
-    <?php foreach ($rows as $r): $a = $apps[$r['app_id']] ?? null; $n = $stats['l'][$r['app_id']] ?? []; $pct = rs_ig_pct($r['price'], $r['old_price']); $deal = rs_ig_shows_deal($r, $c);
-        $status = !$a || !empty($a['hidden']) ? ['Recomp hidden', 'pill warn'] : ($r['paused'] ? ['Paused', 'pill'] : ($c['on'] ? ['Showing', 'pill ok'] : ['Ready (switch is off)', 'pill'])); ?>
+    <?php foreach ($rows as $r): $g = $games[$r['app_id']] ?? null; $n = $stats['l'][$r['app_id']] ?? []; $pct = rs_ig_pct($r['price'], $r['old_price']); $deal = rs_ig_shows_deal($r, $c); $open = $firstShown($r['app_id']); $cv = $coverOf($r['app_id']);
+        $status = !$g || !$g['shown'] ? ['No version out', 'pill warn'] : ($r['paused'] ? ['Paused', 'pill'] : (!(int)$r['stock'] ? ['Out of stock', 'pill warn'] : ($c['on'] ? ['Showing', 'pill ok'] : ['Ready (switch is off)', 'pill'])));
+        $when = $r['fetched'] ? rs_ago(max(0, time() - (int)strtotime($r['fetched'] . ' UTC'))) : ''; ?>
     <div class="ig-row">
       <div class="ig-lgrid">
-        <div class="ig-app"><?php if ($a && ($a['cover'] ?? '') !== ''): ?><img src="<?= h($a['cover']) ?>" alt="" loading="lazy"><?php else: ?><span class="ig-nocover" aria-hidden="true"></span><?php endif; ?><div><b title="<?= h($a['name'] ?? $r['app_id']) ?>"><?= h($a['name'] ?? $r['app_id']) ?></b><a class="small" href="<?= h($rl . '/game/' . rawurlencode($r['app_id'])) ?>" target="_blank" rel="noopener">Its page ↗</a></div></div>
-        <div class="ig-card-cell"><b title="<?= h($r['title']) ?>"><?= h($r['title']) ?></b><span class="muted small"><?= h($r['platform'] ?: 'No platform line') ?> · <a href="<?= h($r['url']) ?>" target="_blank" rel="noopener">On Instant Gaming ↗</a></span></div>
+        <div class="ig-app"><?php if ($cv !== ''): ?><img src="<?= h($cv) ?>" alt="" loading="lazy"><?php else: ?><span class="ig-nocover" aria-hidden="true"></span><?php endif; ?><div><b title="<?= h($g['name'] ?? $r['app_id']) ?>"><?= h($g['name'] ?? $r['app_id']) ?></b><span class="muted small"><?= h($g['line'] ?? '') ?><?php if ($open !== ''): ?> · <a href="<?= h($rl . '/game/' . rawurlencode($open)) ?>" target="_blank" rel="noopener">Page ↗</a><?php endif; ?></span></div></div>
+        <div class="ig-card-cell"><b title="<?= h($r['title']) ?>"><?= h($r['title']) ?></b><span class="muted small"><?= h(trim(($r['platform'] ?: 'No platform line') . ($r['region'] !== '' ? ' · ' . $r['region'] : ''))) ?> · <a href="<?= h(rs_ig_link($r['url'], $c['igr'])) ?>" target="_blank" rel="noopener">On Instant Gaming ↗</a></span>
+          <span class="muted small"><?= (int)$r['auto'] ? ($r['fetch_err'] !== '' ? '<span class="warn">Couldn\'t read it last time: ' . h($r['fetch_err']) . '</span>' : 'Price from Instant Gaming' . ($when !== '' ? ', checked ' . h($when) : '')) : 'Price typed in by hand' ?></span></div>
         <div class="ig-price"><?php if ($r['price'] !== null): ?><b><?= h($money($r['price'], $r['currency'])) ?></b><?php if ($pct): ?><s class="muted"><?= h($money($r['old_price'], $r['currency'])) ?></s><span class="<?= $deal ? 'pill ok' : 'pill' ?>" title="<?= $deal ? 'The tag shows' : 'The tag is hidden' ?>">−<?= $pct ?>%<?= $deal ? '' : ' hidden' ?></span><?php endif; ?><?php else: ?><span class="muted">No price</span><?php endif; ?></div>
         <div class="ig-stat"><span class="<?= $status[1] ?>"><?= h($status[0]) ?></span></div>
       </div>
@@ -252,14 +295,22 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
 <div class="ig-pair ig-pair-wide">
   <form method="post" class="card ig-form" id="edit" data-tagmin="<?= (int)$c['tagMin'] ?>" data-tagon="<?= $c['tag'] ? '1' : '0' ?>" data-igr="<?= h($c['igr']) ?>">
     <?= $csrf ?>
-    <h2><?= $edit && empty($edit['new']) ? 'Edit ' . h($apps[$edit['app_id']]['name'] ?? $edit['app_id']) : 'Add a recomp' ?></h2>
-    <label class="span2">Recomp<input name="app_id" list="ig-apps" required value="<?= h((string)($edit['app_id'] ?? '')) ?>" placeholder="Start typing its name" autocomplete="off"<?= $edit && empty($edit['new']) ? ' readonly' : '' ?>></label>
-    <datalist id="ig-apps"><?php foreach ($pickList as $id => $p): ?><option value="<?= h($id) ?>"><?= h($p['n'] . ($p['g'] !== $p['n'] ? ' · ' . $p['g'] : '')) ?></option><?php endforeach; ?></datalist>
-    <label class="span2">The game on Instant Gaming<span class="ig-inline"><input name="url" type="url" required value="<?= h((string)($edit['url'] ?? '')) ?>" placeholder="https://www.instant-gaming.com/en/…"><a class="btn" data-ig-find href="<?= h($searchUrl((string)($edit['title'] ?? ''))) ?>" target="_blank" rel="noopener">Find it</a></span></label>
-    <label>Name on the card<input name="title" required maxlength="160" value="<?= h((string)($edit['title'] ?? '')) ?>" placeholder="The Legend of Zelda: Ocarina of Time"></label>
-    <label>Platform line<input name="platform" maxlength="60" value="<?= h((string)($edit['platform'] ?? '')) ?>" placeholder="Switch 2 key"></label>
-    <label>Price<input name="price" inputmode="decimal" value="<?= $edit && $edit['price'] !== null ? h(number_format((float)$edit['price'], 2, '.', '')) : '' ?>" placeholder="57.68"></label>
-    <label>Was (before the discount)<input name="old_price" inputmode="decimal" value="<?= $edit && $edit['old_price'] !== null ? h(number_format((float)$edit['old_price'], 2, '.', '')) : '' ?>" placeholder="59.00"></label>
+    <?php $eg = $edit ? ($games[$edit['app_id']] ?? null) : null; $editing = $edit && empty($edit['new']); ?>
+    <h2><?= $editing ? 'Edit ' . h($eg['name'] ?? $edit['app_id']) : 'Add a game' ?></h2>
+    <div class="span2 ig-pick" data-ig-pick>
+      <input type="hidden" name="app_id" value="<?= h((string)($edit['app_id'] ?? '')) ?>">
+      <label>Game<input type="search" data-ig-q value="<?= h($eg['name'] ?? '') ?>" placeholder="Search a game or one of its versions" autocomplete="off"<?= $editing ? ' readonly' : '' ?>></label>
+      <ul class="ig-results" data-ig-results hidden></ul>
+      <div class="ig-chosen" data-ig-chosen<?= $eg ? '' : ' hidden' ?>><?php if ($eg): ?><b><?= h($eg['name']) ?></b><span class="muted small"><?= h($eg['line']) ?></span><?php endif; ?></div>
+    </div>
+    <label class="span2">The game on Instant Gaming<span class="ig-inline"><input name="url" type="url" required value="<?= h((string)($edit['url'] ?? '')) ?>" placeholder="https://www.instant-gaming.com/en/…"><button type="button" data-ig-read>Read it</button><a class="btn" data-ig-find href="<?= h($searchUrl((string)($eg['name'] ?? ''))) ?>" target="_blank" rel="noopener">Find it</a></span></label>
+    <p class="span2 ig-read-out" data-ig-read-out aria-live="polite"><?php if (!empty($edit['url'])): ?>Clicks go to <a href="<?= h(rs_ig_link((string)$edit['url'], $c['igr'])) ?>" target="_blank" rel="noopener" class="mono"><?= h(rs_ig_link((string)$edit['url'], $c['igr'])) ?></a><?php endif; ?></p>
+    <label class="span2 check"><input type="checkbox" name="auto" value="1"<?= (int)($edit['auto'] ?? 1) ? ' checked' : '' ?> data-ig-auto> Keep it in step with Instant Gaming <span class="muted small">(price, discount and stock are read from their page every 3 hours)</span></label>
+    <label>Name on the card<input name="title" maxlength="160" value="<?= h((string)($edit['title'] ?? '')) ?>" placeholder="Filled in from the page"></label>
+    <label>Platform line<input name="platform" maxlength="60" value="<?= h((string)($edit['platform'] ?? '')) ?>" placeholder="Switch 2"></label>
+    <input type="hidden" name="region" value="<?= h((string)($edit['region'] ?? '')) ?>">
+    <label>Price<input name="price" inputmode="decimal" value="<?= $edit && $edit['price'] !== null ? h(number_format((float)$edit['price'], 2, '.', '')) : '' ?>" placeholder="From the page" data-ig-money></label>
+    <label>Was (before the discount)<input name="old_price" inputmode="decimal" value="<?= $edit && $edit['old_price'] !== null ? h(number_format((float)$edit['old_price'], 2, '.', '')) : '' ?>" placeholder="From the page" data-ig-money></label>
     <label>Currency<select name="currency"><?php foreach (['USD' => 'US dollars ($)', 'EUR' => 'Euros (€)', 'GBP' => 'Pounds (£)'] as $k => $cn): ?><option value="<?= $k ?>"<?= ($edit['currency'] ?? 'USD') === $k ? ' selected' : '' ?>><?= h($cn) ?></option><?php endforeach; ?></select></label>
     <label>Discount tag<select name="tag"><?php foreach (['By the rule (from ' . (int)$c['tagMin'] . '% off)', 'Always show it', 'Never show it'] as $k => $tn): ?><option value="<?= $k ?>"<?= (int)($edit['tag'] ?? 0) === $k ? ' selected' : '' ?>><?= h($tn) ?></option><?php endforeach; ?></select></label>
     <p class="span2 ig-hint" data-ig-hint aria-live="polite"></p>
@@ -267,15 +318,15 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
   </form>
   <section class="card ig-maybe">
     <h2>Might be on Instant Gaming</h2>
-    <p class="muted small">Recomps of Switch and Switch 2 games, the ones most likely sold as keys, most downloaded first.</p>
+    <p class="muted small">Switch and Switch 2 games, the ones most likely sold as keys, most downloaded first.</p>
     <?php if (!$maybe): ?><p class="muted">Nothing left to check.</p><?php else: ?>
     <ul>
-      <?php foreach ($maybe as $a): ?>
-      <li><div><b><?= h($a['name']) ?></b><span class="muted small"><?= h($a['game'] ?: $a['name']) ?></span></div><span class="ig-rowacts"><a class="btn small" href="<?= h($searchUrl((string)($a['game'] ?: $a['name']))) ?>" target="_blank" rel="noopener">Find</a><a class="btn small" href="instant-gaming.php?add=<?= rawurlencode($a['id']) ?>#edit">Add</a></span></li>
+      <?php foreach ($maybe as $k => $g): ?>
+      <li><div><b><?= h($g['name']) ?></b><span class="muted small"><?= h($g['line']) ?></span></div><span class="ig-rowacts"><a class="btn small" href="<?= h($searchUrl($g['name'])) ?>" target="_blank" rel="noopener">Find</a><a class="btn small" href="instant-gaming.php?add=<?= rawurlencode($k) ?>#edit">Add</a></span></li>
       <?php endforeach; ?>
     </ul>
     <?php endif; ?>
   </section>
 </div>
-<script type="application/json" id="ig-names"><?= json_encode(array_map(fn($p) => $p['g'], $pickList), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?></script>
+<script type="application/json" id="ig-games"><?= json_encode($pickList, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <?php rs_foot(['assets/ig.js']); ?>

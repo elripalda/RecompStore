@@ -69,3 +69,18 @@
 @media (max-width:760px){.ig-vgrid,.ig-lgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:480px){.ig-vgrid,.ig-lgrid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){.ig-head,.ig-sec-head{flex-direction:column;align-items:stretch}.ig-form{grid-template-columns:minmax(0,1fr)}}
+/* (4.9) Game search, Read it, prices from Instant Gaming */
+.ig-pick{position:relative;display:flex;flex-direction:column;gap:8px}
+.ig-results{list-style:none;margin:0;padding:4px;position:absolute;top:100%;left:0;right:0;z-index:20;max-height:320px;overflow:auto;background:var(--panel,#14161c);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.ig-results li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.ig-results li:hover,.ig-results li[aria-selected=true]{background:rgba(255,255,255,.06)}
+.ig-results img,.ig-results .ig-nocover{width:34px;height:46px;object-fit:cover;border-radius:6px;flex:none}
+.ig-results div{display:flex;flex-direction:column;min-width:0}
+.ig-results b,.ig-results span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ig-results .pill{flex:none;margin-left:auto}
+.ig-chosen{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.ig-read-out{margin:0;font-size:13px;word-break:break-all}
+.ig-read-out.warn{color:var(--warn,#f5b041)}
+.ig-form label.check{flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px}
+.ig-form input[data-ig-money][readonly]{opacity:.7}
+.ig-inline button{flex:none}
