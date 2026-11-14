@@ -2505,7 +2505,7 @@
   const versionsChip = (a) => { const tt = pcTitleOf('pc', a.id); const n = tt ? titleVersions(tt) : 0; return n > 1 ? `<span class="pc-vers">${esc(tn(n, '1 version', '{n} versions'))}</span>` : ''; };
   // (4.10) Trending: the launcher's weekly chart (/trending.json, out every Friday). Its entries that are on
   // the list, with their recomp, and how each moved since last week.
-  const trendItems = () => (!pcTrend || !pcCat ? [] : pcTrend.entries.map((e) => ({ e, a: (pcCat.apps || []).find((x) => x.id === e.id) })).filter((x) => x.a));
+  const trendItems = () => (!pcTrend || !pcCat ? [] : pcTrend.entries.map((e) => ({ e, a: (pcCat.apps || []).find((x) => x.id === e.id) || (pcCat.all || []).find((x) => x.id === e.id) })).filter((x) => x.a && !x.a.soon));
   const trendMove = (e) => e.move === 'new' ? `<i class="tr-move new">${esc(t('New'))}</i>`
     : e.move === 're' ? `<i class="tr-move re">${esc(t('Re-entry'))}</i>`
     : e.move === 'up' ? `<i class="tr-move up" title="${esc(tf('Up from #{n} last week', { n: e.last }))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6l7 9H5z"/></svg>${e.last - e.rank}</i>`
@@ -3278,7 +3278,7 @@
       return `<li class="tr-row${top ? ' tr-top' : ''}"${top ? ` style="--tr-hero:url('${esc(a.hero)}')"` : ''}>
         <span class="tr-rank">${fmtNum(e.rank)}</span>
         <span class="tr-mv">${trendMove(e)}</span>
-        <a class="tr-art" href="${href}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(a.cover, 200))}" alt="" loading="lazy" decoding="async"></a>
+        <a class="tr-art" href="${href}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async"></a>
         <a class="tr-name" href="${href}"><b dir="auto">${esc(a.name)}</b><span dir="auto">${esc([a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span></a>
         <dl class="tr-stats">${stat(t('Last week'), e.last ? fmtNum(e.last) : '–')}${stat(t('Peak'), fmtNum(e.peak))}${stat(t('Weeks'), fmtNum(e.weeks))}</dl>
       </li>`;
