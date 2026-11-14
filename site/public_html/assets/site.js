@@ -3455,7 +3455,7 @@
             <div class="cta-row"><a class="btn" href="/pc/all">${t('Browse PC recomps')}</a><a class="btn" href="/pc/how">${t('How it works')}</a></div>
           </div>
           <div class="pc-shots" data-shots>
-            <div class="pc-shots-stage">${LAUNCH_SHOTS.map(([k, label], i) => `<figure class="pc-shot p${i}" data-shot="${i}"><img src="/assets/launcher/rl-${k}.webp" srcset="/assets/launcher/rl-${k}-800.webp 800w, /assets/launcher/rl-${k}.webp 1444w" sizes="(max-width: 900px) 94vw, 760px" width="1444" height="1227" alt="${esc(tf('RecompLauncher: {page}', { page: t(label) }))}"${i ? ' loading="lazy"' : ''} decoding="async"></figure>`).join('')}</div>
+            <div class="pc-shots-stage">${LAUNCH_SHOTS.map(([k, label], i) => `<figure class="pc-shot p${i}" data-shot="${i}"><img src="/assets/launcher/rl-${k}.webp" srcset="/assets/launcher/rl-${k}-800.webp 800w, /assets/launcher/rl-${k}.webp 1444w" sizes="(max-width: 900px) 60vw, 1000px" width="1444" height="1227" alt="${esc(tf('RecompLauncher: {page}', { page: t(label) }))}"${i ? ' loading="lazy"' : ''} decoding="async"></figure>`).join('')}</div>
             <div class="pc-shots-tabs" role="tablist">${LAUNCH_SHOTS.map(([k, label], i) => `<button type="button" role="tab" data-go="${i}"${i ? '' : ' class="on" aria-selected="true"'}>${esc(t(label))}<i></i></button>`).join('')}</div>
           </div>
         </header>
