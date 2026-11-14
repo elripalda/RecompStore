@@ -3362,3 +3362,5 @@ a.get-pc .get-ico{width:16px;height:16px;flex:none}body[data-platform=pc] a.get-
   .tr-name b{font-size:15.5px}.tr-name span{font-size:12.5px}
   .tr-top .tr-rank{font-size:34px}.tr-top .tr-art{width:46px}.tr-top .tr-name b{font-size:17px}
 }
+/* (4.10) One label at the bottom left: a recomp with more than one version shows "2 versions" there, not its setup badge too */
+.pc-poster:has(.pc-vers) .pc-setup-b{display:none}
