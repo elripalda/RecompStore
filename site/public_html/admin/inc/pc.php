@@ -625,7 +625,9 @@ function rs_pc_sdk_check(array $a, bool $fresh = false, bool $readmeNow = false)
             foreach ($rel ? (array)$rel['assets'] : [] as $f) {
                 if ($pat === '' || !rs_pattern_matches($pat, (string)$f['name']) || !preg_match('/\.zip$/i', (string)$f['name'])) continue;
                 $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
-                if (empty($z['ok'])) break;
+                // (4.9) Its file list is all this needs: rs_zip_directory says "not ok" for any zip without a PS5
+                // app in it, which every PC release is, so a recomplauncher.json in the release was never seen.
+                if (empty($z['entries'])) break;
                 $out['has'] = 'none';
                 foreach ((array)$z['entries'] as $n => $en) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) {
                     $out['has'] = 'release';
@@ -686,7 +688,7 @@ function rs_pc_sdk_probe(string $repo, string $host, string $pat): array {
     }
     foreach (array_slice($zips, 0, 2) as $f) {
         $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
-        if (empty($z['ok'])) continue;
+        if (empty($z['entries'])) continue;
         if ($out['has'] === 'unknown') $out['has'] = 'none';
         foreach ((array)$z['entries'] as $n => $en) if (preg_match('#^([^/]+/)?recomplauncher\.json$#i', (string)$n)) {
             $out['has'] = 'release';
