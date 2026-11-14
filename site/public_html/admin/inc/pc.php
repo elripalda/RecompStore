@@ -1706,8 +1706,16 @@ function rs_pc_web_copy(array $cat): array {
     unset($cat['apps_min'], $cat['boot_all']);
     foreach ($cat['apps'] as &$a) {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
-        unset($a['about'], $a['boot'], $a['launcher'], $a['features'], $a['copy_ids']);
+        // (4.9) Only what lists, tiles, rows and search use. A game's page asks for the rest of its
+        // entry (api/pc.php?a=app) when it opens, so phones no longer download and read 2.5 MB of
+        // descriptions, setup steps and file checksums for 1,700 games on every page.
+        unset($a['about'], $a['boot'], $a['launcher'], $a['features'], $a['copy_ids'], $a['description'], $a['files'], $a['needs'],
+            $a['setup_steps'], $a['assets'], $a['support'], $a['credits'], $a['media'], $a['issues'], $a['license']);
         if ($series !== '') $a['about'] = ['series' => $series];
+        // Pictures on our own server, written from the root: they load from whichever of our two
+        // addresses the page is on (and it's 30 characters fewer, 7,000 times).
+        foreach (['cover', 'hero', 'logo', 'icon'] as $k)
+            if (isset($a[$k]) && is_string($a[$k])) $a[$k] = (string)preg_replace('#^https://(www\.)?recompstore\.com(?=/media/)#', '', $a[$k]);
         $a['lite'] = true;
     }
     unset($a);
