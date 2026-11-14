@@ -1817,7 +1817,7 @@
     const help = [
       ['code', t('Code'), t('Send a pull request'), t('RecompLauncher is open source. Pick an open issue on GitHub and have a go.'), t('Open issues'), REPO + '/issues', true],
       ['lang', t('Translations'), t('Put it in your language'), t('Spot a line that reads wrong in your language? Tell us on GitHub and we\'ll fix it.'), t('Tell us'), REPO + '/issues/new', true],
-      ['test', t('Testing'), t('Try betas, send logs'), t('When something breaks, send a report from the launcher. The log comes with it, so we can see what went wrong.'), t('Get the beta'), '/get', false],
+      ['test', t('Testing'), t('Try betas, send logs'), t('When something breaks, send a report from the launcher. The log comes with it, so we can see what went wrong.'), t('Get the beta'), '/pc/launcher', false],
       ['heart', t('Donate'), t('Keep it running'), t('Servers, code signing and test hardware cost money. Ko-fi helps cover them.'), 'Ko-fi', 'https://ko-fi.com/recomp', true]
     ];
     view.innerHTML = `
@@ -3056,7 +3056,7 @@
         <div data-play-charts></div>
         ${consoleStrip ? `<section class="con-sec"><h2>${t('Browse by console')}</h2>${consoleStrip}</section>` : ''}
         ${catBtns ? `<section class="con-sec cat-sec"><h2>${t('Categories')}</h2>${catBtns}</section>` : ''}
-        ${cats.map((k, i) => row(t(PC_GENRES[k]), inCat(k), '/pc/' + PC_CAT_SLUG[k]) + (i === Math.min(1, cats.length - 1) ? pcDevBand() : '')).join('')}
+        ${cats.map((k, i) => row(t(PC_GENRES[k]), inCat(k).slice(0, PHONE.matches ? 12 : 20), '/pc/' + PC_CAT_SLUG[k]) + (i === Math.min(1, cats.length - 1) ? pcDevBand() : '')).join('')}
         ${cats.length ? '' : pcDevBand()}
         <section class="pc-intro"><h2>${t('What is a PC recomp?')}</h2><p>${t('Every recomp here is a fan project that turns a console game into a real PC game: higher resolutions, widescreen, high frame rates and mods. Each one comes from its developer\'s own GitHub, and you bring your own copy of the game.')}</p></section>
         ${pcNoFiles()}
@@ -4396,7 +4396,7 @@
   function fillDrawer() {
     const nav = document.getElementById('drawer-nav');
     nav.innerHTML = [...document.querySelectorAll('.main-nav a')].filter((a) => !a.hidden && a.hasAttribute('data-pc') === (document.body.dataset.platform === 'pc'))
-      .map((a) => `<a href="${a.getAttribute('href')}"${a.hasAttribute('aria-current') ? ' aria-current="page"' : ''}>${esc(a.textContent)}</a>`).join('');
+      .map((a) => `<a href="${esc(a.getAttribute('href'))}"${a.hasAttribute('data-fx') ? ' data-fx' : ''}${a.hasAttribute('aria-current') ? ' aria-current="page"' : ''}>${esc(a.textContent)}</a>`).join('');
     nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">${t('For developers')}</span>
       ${document.body.dataset.platform === 'pc' ? `<a href="/pc/sdk">${t('RecompLauncher SDK')}</a>` : ''}<a href="/developers">${t('Developer accounts')}</a><a href="/developers?signin=1">${t('Developer sign in')}</a></div>`);
     if (LAUNCHER) nav.insertAdjacentHTML('beforeend', `<div class="drawer-dev"><span class="kicker">RecompLauncher</span><a href="/team">${t('The Team')}</a><a href="/contact">${t('Contact')}</a></div>`);

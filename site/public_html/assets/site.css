@@ -3275,3 +3275,20 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 /* (4.9) Account page: send the confirmation link again */
 .acct-resend{background:none;border:0;padding:0;margin-left:4px;font:inherit;color:var(--cyan);text-decoration:underline;cursor:pointer}
 .acct-resend:disabled{opacity:.5;cursor:default}
+
+/* (4.9) Phones, RecompLauncher: the header buttons sit at the right edge (the PC rule that lines them
+   up with the page on wide screens kept them next to the logo), Support is just its heart on narrow
+   phones, and nothing blurs what's behind it: on a phone every blurred card is redrawn on each scroll
+   frame, which is what made long pages stutter. Cards get a solid panel instead. */
+@media (max-width:900px){
+  body[data-platform="pc"] .top-actions{margin-inline-start:auto}
+  body[data-platform="pc"] .top-in{gap:10px}
+  .glass,.top,.top.scrolled,.rank,.pc-os,.pc-deck-b,.pc-life-b,.pc-count,.pc-cat-go,.play{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  .glass{background:rgba(17,25,40,.94)}
+  .brand{min-width:0;flex:0 1 auto}
+  .brand span{overflow:hidden;text-overflow:ellipsis}
+}
+@media (max-width:420px){
+  #top-kofi{width:42px;padding:0;justify-content:center;gap:0}
+  #top-kofi span,#top-kofi .kofi-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+}
