@@ -380,9 +380,11 @@ function rs_prq_apply_code(string $forkName, string $branch, array $edits): void
         if (!isset($files[$path])) {
             $r = rs_prq_gh('GET', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode($path)) . '?ref=' . rawurlencode($branch));
             if ($r['status'] !== 200) throw new RuntimeException('Couldn\'t read ' . $path . ' for the code change (GitHub ' . $r['status'] . '). Draft it again.');
-            $files[$path] = ['sha' => (string)$r['json']['sha'], 'old' => (string)base64_decode((string)($r['json']['content'] ?? '')), 'new' => null];
+            $files[$path] = ['sha' => (string)$r['json']['sha'], 'old' => (string)base64_decode((string)($r['json']['content'] ?? '')), 'new' => null, 'why' => ''];
             $files[$path]['new'] = $files[$path]['old'];
         }
+        // (4.11) The drafter's own commit line for this file (a packaging edit isn't a launch option).
+        if ($files[$path]['why'] === '') $files[$path]['why'] = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($e['why'] ?? ''))), 0, 72);
         $find = (string)($e['find'] ?? ''); $rep = (string)($e['replace'] ?? '');
         $n = substr_count($files[$path]['new'], $find);
         if ($n === 1) $files[$path]['new'] = str_replace($find, $rep, $files[$path]['new']);
@@ -392,7 +394,7 @@ function rs_prq_apply_code(string $forkName, string $branch, array $edits): void
     foreach ($files as $path => $f) {
         if ($f['new'] === $f['old']) continue;
         rs_prq_gh_ok(rs_prq_gh('PUT', '/repos/' . $forkName . '/contents/' . str_replace('%2F', '/', rawurlencode($path)), [
-            'message' => 'Add launch options so launchers can pass the game\'s location (' . basename($path) . ')', 'content' => base64_encode($f['new']), 'branch' => $branch, 'sha' => $f['sha'],
+            'message' => $f['why'] !== '' ? $f['why'] : 'Add launch options so launchers can pass the game\'s location (' . basename($path) . ')', 'content' => base64_encode($f['new']), 'branch' => $branch, 'sha' => $f['sha'],
         ]), 'Committing the change to ' . $path);
     }
 }
