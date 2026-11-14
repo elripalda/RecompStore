@@ -3896,6 +3896,17 @@
       setTimeout(() => { window.removeEventListener('blur', away); document.removeEventListener('visibilitychange', away); if (!left && help) help.hidden = false; }, 1800);
     }));
     // The real files from its latest release, straight from GitHub or GitLab (through this site).
+    // (4.10) Its repo is down and it was switched to its emergency backup: the files come from there.
+    if (a.backup) {
+      fetch('/api/backup.php?id=' + encodeURIComponent(a.id)).then((r) => r.json()).then((j) => {
+        if (!j || !j.ok) return;
+        view.querySelectorAll('[data-sys]').forEach((b) => {
+          const hit = (j.files || []).find((f) => f.os === b.dataset.sys);
+          if (hit) { b.href = hit.url; b.title = hit.name; }
+        });
+      }).catch(() => { /* the button keeps its link */ });
+      return;
+    }
     const pat = (p) => new RegExp('^' + String(p).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
     fetch(relApi(a.repo, a.host)).then((r) => r.json()).then((rels) => {
       const rel = (Array.isArray(rels) ? rels : []).find((r) => !r.draft && !r.prerelease) || (Array.isArray(rels) ? rels[0] : null);

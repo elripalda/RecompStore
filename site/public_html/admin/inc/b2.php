@@ -40,7 +40,7 @@ function rs_b2_sign_key(string $secret, string $date, string $region): string {
 }
 
 // One signed request (header auth). -> [status, body]
-function rs_b2_request(string $method, string $key, ?string $file = null, array $extra = []): array {
+function rs_b2_request(string $method, string $key, ?string $file = null, array $extra = [], int $timeout = 120): array {
     $c = rs_b2_cfg();
     if (!$c) throw new RuntimeException('Cloud storage isn\'t set up.');
     $now = gmdate('Ymd\THis\Z');
@@ -61,7 +61,7 @@ function rs_b2_request(string $method, string $key, ?string $file = null, array 
     $ch = curl_init('https://' . $c['endpoint'] . $path);
     $h = ['Authorization: ' . $auth];
     foreach ($headers as $k => $v) if ($k !== 'host') $h[] = "$k: $v";
-    $opts = [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120, CURLOPT_CONNECTTIMEOUT => 10];
+    $opts = [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 10];
     $fp = null;
     if ($file !== null) {
         $fp = fopen($file, 'rb');
@@ -90,8 +90,19 @@ function rs_b2_delete(string $key): void {
     try { rs_b2_request('DELETE', $key); } catch (Throwable $e) { /* gone or unreachable: the database row is what counts */ }
 }
 
+// (4.10) A big file (an emergency backup of a recomp's release): an hour to go up. -> throws when it can't.
+function rs_b2_put_big(string $key, string $file): void {
+    $last = 0;
+    for ($try = 0; $try < 3; $try++) {
+        [$last] = rs_b2_request('PUT', $key, $file, ['content-type' => 'application/octet-stream'], 3600);
+        if ($last >= 200 && $last < 300) return;
+        sleep(2 * ($try + 1));
+    }
+    throw new RuntimeException('Backblaze turned the upload down (' . $last . ').');
+}
+
 // A link that downloads the file straight from B2 for a few minutes.
-function rs_b2_link(string $key, string $filename, int $ttl = 600): string {
+function rs_b2_link(string $key, string $filename, int $ttl = 600, string $type = 'application/zip'): string {
     $c = rs_b2_cfg();
     $now = gmdate('Ymd\THis\Z');
     $date = substr($now, 0, 8);
@@ -103,7 +114,7 @@ function rs_b2_link(string $key, string $filename, int $ttl = 600): string {
         'X-Amz-Expires' => (string)$ttl,
         'X-Amz-SignedHeaders' => 'host',
         'response-content-disposition' => 'attachment; filename="' . preg_replace('/[^A-Za-z0-9._-]/', '_', $filename) . '"',
-        'response-content-type' => 'application/zip',
+        'response-content-type' => $type,
     ];
     ksort($q);
     $qs = implode('&', array_map(fn($k, $v) => rawurlencode($k) . '=' . rawurlencode($v), array_keys($q), $q));

@@ -12,6 +12,7 @@ rs_report_tables();
 rs_submission_columns();
 require_once __DIR__ . '/inc/hub.php';
 require_once __DIR__ . '/inc/repowatch.php';
+require_once __DIR__ . '/inc/backup.php';
 rs_hub_tables();
 if (!function_exists('rs_sub_fix_key')) {
     // (3.6) The key in a "fix and send it again" link for submission <id>.
@@ -130,6 +131,17 @@ function hub_watch_row(array $f, bool $tagStore = false): string {
     $acts = [];
     if ($f['hidden'] && $f['hid']) $acts[] = '<button type="button" class="small primary" data-act="watch_unhide">Put it back on the store</button>';
     if ($f['state'] === 'moved' && $f['link'] !== '') $acts[] = '<button type="button" class="small primary" data-act="watch_move" data-to="' . h($f['link']) . '">Point it to ' . h(mb_strimwidth($f['link'], 0, 40, '…')) . '</button>';
+    // (4.10) Emergency backup: offered when there's a copy and it wasn't a takedown.
+    $bk = $f['store'] === 'pc' ? rs_bk_row($f['id']) : null;
+    $bkNote = '';
+    if ($bk && $bk['files']) {
+        if ((int)$bk['active']) {
+            $acts[] = '<button type="button" class="small" data-act="watch_unbackup">Back to the repo</button>';
+            $bkNote = '<span class="sh-wpill sh-ok">On emergency backup</span>';
+        } elseif (!in_array($f['state'], RS_BK_NO_TAKEDOWN, true)) {
+            array_unshift($acts, '<button type="button" class="small primary" data-act="watch_backup" data-confirm="Click again to switch it">Use emergency backup (' . h($bk['version'] ?: $bk['tag']) . ')</button>');
+        }
+    }
     $acts[] = '<button type="button" class="small" data-watch-move>New repo</button>';
     if (!$f['hidden']) $acts[] = '<button type="button" class="small sh-w-hide" data-act="watch_hide" data-confirm="Click again to hide it">Hide from store</button>';
     $acts[] = '<button type="button" class="small" data-act="watch_check">Check again</button>';
@@ -138,7 +150,7 @@ function hub_watch_row(array $f, bool $tagStore = false): string {
         . hub_tile($f['name'], $f['icon'])
         . '<div class="sh-wrow-main"><div class="sh-wrow-t"><b>' . h($f['name']) . '</b>'
         . ($tagStore ? '<span class="sh-src">' . h(RS_STORES[$f['store']] ?? $f['store']) . '</span>' : '')
-        . '<span class="sh-wpill sh-' . h($f['level']) . '">' . h($f['label']) . '</span>' . ($f['hidden'] ? '<span class="sh-wpill sh-wait">Hidden</span>' : '') . '</div>'
+        . '<span class="sh-wpill sh-' . h($f['level']) . '">' . h($f['label']) . '</span>' . ($f['hidden'] ? '<span class="sh-wpill sh-wait">Hidden</span>' : '') . $bkNote . '</div>'
         . '<a class="sh-link" href="' . h($web) . '" target="_blank" rel="noopener noreferrer">' . h(rs_repo_key($f['host'], $f['repo'])) . ' ' . HUB_IC['ext'] . '</a>'
         . '<p>' . h($f['why']) . ($f['state'] === 'dmca' && $f['link'] !== '' ? ' <a href="' . h($f['link']) . '" target="_blank" rel="noopener noreferrer">Read the notice</a>' : '') . '</p>'
         . '<small class="muted">' . ($since ? 'Since ' . h(rs_date('M j, g:i a', $since)) . ' · ' : '') . 'checked ' . h(rs_hub_ago_long(rs_hub_ts($f['checked']))) . '</small>'
@@ -627,6 +639,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'watch_unhide':
             case 'watch_move':
             case 'watch_ok':
+            case 'watch_backup':
+            case 'watch_unbackup':
             case 'watch_check': {
                 [$wStore] = rs_watch_item($item);
                 if (!rs_hub_store_ok($wStore)) throw new RuntimeException('That listing is in a store you don\'t work on.');
@@ -635,6 +649,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 elseif ($act === 'watch_unhide') $res['msg'] = rs_watch_unhide($item);
                 elseif ($act === 'watch_move') $res['msg'] = rs_watch_move($item, (string)($_POST['to'] ?? ''));
                 elseif ($act === 'watch_ok') $res['msg'] = rs_watch_ack($item);
+                elseif ($act === 'watch_backup' || $act === 'watch_unbackup') {
+                    [$bStore, $bId] = rs_watch_item($item);
+                    if ($bStore !== 'pc') throw new RuntimeException('Emergency backup is for PC recomps.');
+                    $res['msg'] = $act === 'watch_backup' ? rs_bk_activate($bId) : rs_bk_deactivate($bId);
+                }
                 else {
                     [, $wId, $wx] = rs_watch_item($item);
                     $row = rs_watch_check_one($wStore, $wId);

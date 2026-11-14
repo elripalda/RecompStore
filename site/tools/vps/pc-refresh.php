@@ -74,6 +74,13 @@ try {
     $tw = rs_trend_maybe();
     if ($tw !== '') echo gmdate('c') . ' trending: ' . $tw . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' trending: ' . $e->getMessage() . "\n"; }
+// (4.10) Emergency backup: picks games (most played / all, per its settings) and starts a copying run
+// in the background when a tracked game has a new update or was asked for.
+try {
+    require_once 'admin/inc/backup.php';
+    $bk = rs_bk_maybe();
+    if ($bk !== '') echo gmdate('c') . ' backup: ' . $bk . "\n";
+} catch (Throwable $e) { echo gmdate('c') . ' backup: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
 // launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.

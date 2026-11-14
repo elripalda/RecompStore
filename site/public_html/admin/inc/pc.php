@@ -1417,6 +1417,9 @@ function rs_pc_catalog(): array {
             'genre' => isset(RS_PC_GENRES[$a['genre']]) ? $a['genre'] : 'other', 'media' => rs_pc_media_links((string)$a['media']),
             'issues' => (int)$a['issues'], 'releases' => (int)$a['releases'], 'first' => (string)$a['first']];
         if ($a['dev'] !== '') $e['dev'] = $a['dev'];
+        // (4.10) Switched to its emergency backup: downloads come from /api/backup.php.
+        if (!function_exists('rs_bk_catalog_entry')) require_once __DIR__ . '/backup.php';
+        $e = rs_bk_catalog_entry($e);
         // (4.7) Several games in one recomp: a tile per game in RecompLauncher.
         if ($pg = rs_pc_games_entry($a)) $e['games'] = $pg;
         if (!empty($players[$a['id']])) $e['players'] = $players[$a['id']]; // (4.7) PCs, last 90 days

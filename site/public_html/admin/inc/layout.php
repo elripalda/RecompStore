@@ -131,7 +131,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         'Stores' => [
             ['pc.php', 'PC recomps', 'pc', [
                 ['pc.php', 'Recomps', $pcAt('')], ['pc.php?view=found', 'Found on GitHub', $pcAt('found')], ['pc.php?view=reports', 'Player reports', $pcAt('reports')],
-                ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null]], 0],
+                ['titles.php', 'Versions', null], ['boot.php', 'Boot profiles', null], ['achievements.php', 'Achievements', null], ['pc-banner.php', 'Banner', null], ['ai.php', 'AI check', null], ['backup.php', 'Emergency backup', null]], 0],
             ['index.php', 'PS5 games', 'ps5', [
                 ['index.php', 'Games', fn() => in_array($here, ['index.php', 'edit.php'], true)], ['discover.php', 'Discover', null], ['collections.php', 'Collections', null],
                 ['beta.php', 'Beta', fn() => in_array($here, ['beta.php', 'beta-upload.php'], true)], ['feedback.php', 'Feedback', null], ['import.php', 'Import', null],
