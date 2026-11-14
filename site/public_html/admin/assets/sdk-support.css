@@ -167,3 +167,12 @@
 @media (max-width:760px){.prq-steps,.prq-facts{grid-template-columns:1fr}}
 
 .prq-p-add{background:rgba(52,242,232,.14);color:var(--cyan-ink)}
+
+/* (4.10) Release files on a draft */
+.prq-files{margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:14px}
+.prq-files h4{margin:0 0 10px}
+.prq-files ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.prq-files li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 8px;border-radius:8px;font-size:13px;color:var(--muted)}
+.prq-files li.on{background:rgba(95,227,161,.08);color:var(--ink)}
+.prq-files li .mono{overflow-wrap:anywhere}
+.prq-files p{margin:8px 0 0}

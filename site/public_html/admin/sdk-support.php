@@ -440,18 +440,34 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
             $inGame = $has === true && empty($f['used']) && (($f['hook'] ?? null) === false
                 || (!array_key_exists('hook', $f) && preg_match('/only in the in-game|in-game (settings )?menu|didn\'t see the settings file key or a command-line option|no (command-line )?(flag|option|key) for it/i', (string)($f['how'] ?? '') . ' ' . (string)($f['why'] ?? ''))));
             if ($inGame) $has = 'game';
-            $cls = $has === true ? 'ok' : ($has === false || $has === 'game' ? ($notNeeded || $has === 'game' ? 'no' : ($isGame ? 'bad' : 'no')) : 'wait'); ?>
+            // (4.10) A tick means it's in the json (or this pull request adds it); there but unused gets none.
+            $inJson = $has === true && (!empty($f['used']) || !empty($f['added']) || str_starts_with(trim((string)($f['how'] ?? '')), 'Added in this pull request'));
+            if ($has === true && !$inJson) $has = 'unused';
+            $cls = $has === true ? 'ok' : ($has === 'unused' ? 'wait' : ($has === false || $has === 'game' ? ($notNeeded || $has === 'game' ? 'no' : ($isGame ? 'bad' : 'no')) : 'wait')); ?>
           <li class="prq-s-<?= $cls ?>"><span class="prq-s-i"><?= $has === true ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : ($has === false && $isGame ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>' : '–') ?></span>
             <span><b><?= h((string)$f['what']) ?><?php // (4.10) What this pull request does with it
                 $added = !empty($f['added']) || str_starts_with(trim((string)($f['how'] ?? '')), 'Added in this pull request');
-                if ($has === true && $added): ?> <span class="pill prq-p-add">Feature added with this PR</span><?php elseif ($has === true && !empty($f['used'])): ?> <span class="pill ok">Flag exists, added to json</span><?php elseif ($has === true): ?> <span class="pill">Flag exists, not in json</span><?php elseif ($has === 'game'): ?> <span class="pill">In-game only, nothing to pair with the json</span><?php elseif ($notNeeded): ?> <span class="pill">Not needed</span><?php elseif ($has === false): ?> <span class="pill warn">Missing, not in this PR</span><?php endif; ?></b>
-            <small><?= h(trim((string)($f['how'] ?? '')) !== '' ? (string)$f['how'] : ($has === false ? (trim((string)($f['why'] ?? '')) !== '' ? (string)$f['why'] : 'Not found') : 'Couldn\'t tell')) ?><?php if (($has === false || ($has === true && empty($f['used']) && !$added)) && trim((string)($f['how'] ?? '')) !== '' && trim((string)($f['why'] ?? '')) !== ''): ?> · <?= h((string)$f['why']) ?><?php endif; ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($f['where'] ?? '')); if ($w !== ''): ?> · <?= $w ?><?php endif; ?></small></span></li>
+                if ($has === true && $added): ?> <span class="pill prq-p-add">Feature added with this PR</span><?php elseif ($has === true && !empty($f['used'])): ?> <span class="pill ok">Flag exists, added to json</span><?php elseif ($has === 'unused'): ?> <span class="pill warn">Flag exists, not in json</span><?php elseif ($has === 'game'): ?> <span class="pill">In-game only, nothing to pair with the json</span><?php elseif ($notNeeded): ?> <span class="pill">Not needed</span><?php elseif ($has === false): ?> <span class="pill warn">Missing, not in this PR</span><?php endif; ?></b>
+            <small><?= h(trim((string)($f['how'] ?? '')) !== '' ? (string)$f['how'] : ($has === false ? (trim((string)($f['why'] ?? '')) !== '' ? (string)$f['why'] : 'Not found') : 'Couldn\'t tell')) ?><?php if (($has === false || $has === 'unused') && trim((string)($f['how'] ?? '')) !== '' && trim((string)($f['why'] ?? '')) !== ''): ?> · <?= h((string)$f['why']) ?><?php endif; ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($f['where'] ?? '')); if ($w !== ''): ?> · <?= $w ?><?php endif; ?></small></span></li>
         <?php endforeach; ?>
         </ol>
         <?php $pqOpts = array_values(array_filter((array)($pqFound['options'] ?? []), fn($o) => is_array($o) && trim((string)($o['flag'] ?? '')) !== '')); if ($pqOpts): ?>
         <h4 class="prq-h4b">Command-line options it reads <span class="muted small"><?= count($pqOpts) ?></span></h4>
         <dl class="prq-facts"><?php foreach ($pqOpts as $o): ?><div><dt class="mono"><?= h((string)$o['flag']) ?></dt><dd><?= h((string)($o['does'] ?? '')) ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($o['where'] ?? '')); if ($w !== ''): ?><span class="prq-where small"><?= $w ?></span><?php endif; ?></dd></div><?php endforeach; ?></dl>
         <?php endif; ?>
+      </div>
+      <?php endif; ?>
+      <?php // (4.10) The files of its newest release, and which one the launcher uses for each system.
+        $pqRel = null; try { $pqRel = rs_pc_release_for($qa); } catch (Throwable $e) { }
+        if ($pqRel && !empty($pqRel['assets'])):
+          $pqUse = ['Windows' => (string)$qa['asset_win'], 'Linux' => (string)$qa['asset_linux'], 'Mac' => (string)rs_pc_mac_ok((string)$qa['asset_mac'])]; ?>
+      <div class="prq-files">
+        <h4>Release files <span class="muted small"><?= h((string)$pqRel['tag_name']) ?> · what the launcher downloads for each system is marked</span></h4>
+        <ul><?php foreach ((array)$pqRel['assets'] as $as): $an = (string)($as['name'] ?? ''); if ($an === '' || preg_match('/\.(sha256|sha1|md5|sig|asc)$/i', $an)) continue;
+          $tags = []; foreach ($pqUse as $os => $pat) if ($pat !== '' && rs_pattern_matches($pat, $an)) $tags[] = $os; ?>
+          <li class="<?= $tags ? 'on' : '' ?>"><span class="mono"><?= h($an) ?></span><span class="muted small"><?= h(rs_human_size((int)($as['size'] ?? 0))) ?></span><?php foreach ($tags as $tg): ?><span class="pill ok"><?= h($tg) ?></span><?php endforeach; ?></li>
+        <?php endforeach; ?></ul>
+        <?php $pqMiss = array_keys(array_filter($pqUse, fn($p) => $p === '')); if ($pqMiss): ?><p class="muted small">No <?= h(implode(' or ', $pqMiss)) ?> download set on its listing.</p><?php endif; ?>
       </div>
       <?php endif; ?>
       <div class="prq-links small"><a href="https://github.com/<?= h($pq['repo']) ?>" target="_blank" rel="noopener">GitHub ↗</a> · <a href="https://github.com/<?= h($pq['repo']) ?>/releases" target="_blank" rel="noopener">Releases ↗</a> · <a href="https://recomplauncher.com/game/<?= h($qa['id']) ?>" target="_blank" rel="noopener">Its page ↗</a></div>

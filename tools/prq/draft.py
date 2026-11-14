@@ -269,6 +269,9 @@ Answer with one JSON object and nothing else:
   file key it can write, or a fixed folder or file it can point at. A feature that only lives in the game's own
   menus or its own GUI (fullscreen in the in-game settings, say) has "has": true but "hook": false, because
   the launcher can't do anything with it. What we care about is what can be paired with the json.
+  The point of the pull request is to wire up every hook the project has: when "hook" is true and the SDK guide
+  has a field for it, put it in your recomplauncher.json. Leaving a hooked feature out of the json should be
+  rare, and then "why" says exactly what's missing (no field in the SDK for it, or the key's value unknown).
   When "has" is true but "used" is false, give "why": one short line on why your recomplauncher.json doesn't
   use it (the launcher has no field for it, the key names weren't anywhere you could read, it's only in an
   in-game menu...). Before leaving one out, check "config_docs": the key names and flags are often there.
