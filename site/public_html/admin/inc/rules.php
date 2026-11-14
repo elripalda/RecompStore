@@ -114,7 +114,7 @@ function rs_rules_check(string $link): array {
     $key = rs_repo_key($host, (string)$l['repo']);
     $out = ['ok' => true, 'key' => $key, 'link' => rs_host_web($host, (string)$l['repo']), 'reasons' => [], 'options' => [], 'verdict' => 'go', 'name' => basename((string)$l['repo'])];
     foreach (rs_pc_apps(true) as $x) if (strcasecmp(rs_pc_key($x), $key) === 0)
-        return $out + ['app' => $x['id']] + ['verdict' => 'listed', 'reasons' => [['ok', 'Already on RecompLauncher as ' . $x['name'] . (!empty($x['hidden']) ? ' (hidden: ' . rs_pc_hidden_why($x) . ')' : '')]]];
+        return array_merge($out, ['app' => $x['id'], 'verdict' => 'listed', 'reasons' => [['ok', 'Already on RecompLauncher as ' . $x['name'] . (!empty($x['hidden']) ? ' (hidden: ' . rs_pc_hidden_why($x) . ')' : '')]]]);
     $f = rs_pc_read_repo((string)$l['repo'], $host);
     if (empty($f['ok'])) return ['ok' => false, 'verdict' => 'look', 'key' => $key, 'link' => $out['link'], 'reasons' => [['bad', (string)($f['why'] ?? 'The repo couldn\'t be read.')]], 'options' => ['contact']];
     $out['name'] = (string)($f['name'] ?? $out['name']);

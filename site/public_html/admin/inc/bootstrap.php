@@ -1272,10 +1272,9 @@ function rs_inbox_new_count(bool $subs = false): int {
     try {
         rs_inbox_table();
         if ($subs) return (int)rs_db()->query("SELECT COUNT(*) FROM inbox WHERE status = 'new' AND kind = 'submit'")->fetchColumn();
-        // (4.10) What someone has to read: messages, bugs, copyright and source notices, and players' logs
-        // that came with a note in the last two weeks. Logs sent with no note are still on the Logs tab.
-        return (int)rs_db()->query("SELECT COUNT(*) FROM inbox WHERE status = 'new' AND kind <> 'submit'
-            AND (kind <> 'logs' OR (TRIM(body) <> '' AND created > (NOW() - INTERVAL 14 DAY)))")->fetchColumn();
+        // (4.10) What someone has to answer: messages, bug reports, copyright and source notices. Players' logs
+        // (hundreds a week, each with the launcher's own crash summary) have their own count on the Logs tab.
+        return (int)rs_db()->query("SELECT COUNT(*) FROM inbox WHERE status = 'new' AND kind NOT IN ('submit', 'logs')")->fetchColumn();
     } catch (Throwable $e) {
         return 0;
     }

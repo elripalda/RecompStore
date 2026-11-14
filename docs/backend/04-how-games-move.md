@@ -71,4 +71,4 @@ Paste a GitHub, GitLab, SourceForge or Codeberg link (or `owner/name`) into the 
 `layout.php` works them out (`$GLOBALS['rs_nav_counts']`):
 - **Submissions** = cards on the board that need a person + open flags + repo watch alerts. A submission and its draft count once; a submission whose checks are still running, or whose draft was dismissed or shelved, doesn't count. Player requests have their own count on the Requests tab and aren't in this one.
 - **Auto-add** = drafts waiting + requests.
-- **Inbox & logs** (`rs_inbox_new_count`) = messages, bug reports, copyright and source notices still `new`, plus players' logs that came with a note in the last 14 days. Logs sent with no note stay on the Logs tab without adding to the count.
+- **Inbox & logs** (`rs_inbox_new_count`) = messages, bug reports, copyright and source notices still `new`. Players' logs (hundreds a week, each carrying the launcher's own crash summary) only count on the Logs tab.
