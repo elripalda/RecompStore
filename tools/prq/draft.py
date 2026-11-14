@@ -192,6 +192,14 @@ def context(p):
             pick = next((a for a in assets if a["name"].lower().endswith(".zip") and "source" not in a["name"].lower()), None)
         if pick and pick["name"].lower().endswith(".zip"):
             inside, inside_of = zip_listing(pick.get("browser_download_url"), pick.get("size", 0)), pick["name"]
+    # (4.10) Docs about its settings and command line (runtime/docs/CONFIG.md, docs/usage.md...): the key
+    # names and flags often live there, not in the README, and without them a feature can't go in the json.
+    config_docs = {}
+    doc_rx = re.compile(r"(^|/)[^/]*(config|settings|options|usage|command.?line|cli|args|launch|controls|keybind)[^/]*\.(md|txt|ini|toml|ya?ml)$", re.I)
+    for path in sorted((x for x in paths if doc_rx.search(x) and not re.search(r"(^|/)(third_?party|extern(al)?|vendor|deps|node_modules)/", x, re.I)), key=lambda x: x.count("/"))[:4]:
+        c = gh(f"/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}", "application/vnd.github.raw")
+        if c:
+            config_docs[path] = c[:8000]
     open_prs = gh(f"/repos/{repo}/pulls?state=open&per_page=50") or []
     return {
         "info": {"description": info.get("description"), "archived": info.get("archived"), "default_branch": branch,
@@ -201,6 +209,7 @@ def context(p):
         "releases": releases, "inside_download": {"file": inside_of, "names": inside},
         "open_pull_requests": [{"title": x.get("title"), "body": (x.get("body") or "")[:300]} for x in open_prs[:30]],
         "command_line": cli_hints(repo, branch, paths),
+        "config_docs": config_docs,
         "_branch": branch,
     }
 
@@ -256,6 +265,10 @@ Answer with one JSON object and nothing else:
   built-in launcher or picker, a setup or build step). "has": true, false or null when you couldn't tell.
   "how": the flag, settings key, file or folder, and what it takes. "where": file:line (or the README section)
   you saw it in. "used": whether your recomplauncher.json uses it.
+  When "has" is true but "used" is false, give "why": one short line on why your recomplauncher.json doesn't
+  use it (the launcher has no field for it, the key names weren't anywhere you could read, it's only in an
+  in-game menu...). Before leaving one out, check "config_docs": the key names and flags are often there.
+  If what you need is there, use it.
   When "has" is false, also give "needed" (true or false) and "why" (one short line). "needed": false when this
   project simply doesn't need it, like a setup or prepare step for a game that reads the ROM or disc file
   directly, or a game location for one that ships everything it needs. "why" says why it isn't needed, or, when
