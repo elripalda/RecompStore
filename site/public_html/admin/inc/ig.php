@@ -49,6 +49,23 @@ function rs_ig_tables(): void {
     foreach (['auto TINYINT NOT NULL DEFAULT 1', 'region VARCHAR(60) NOT NULL DEFAULT \'\'', 'stock TINYINT NOT NULL DEFAULT 1',
         'fetched DATETIME NULL', 'fetch_err VARCHAR(160) NOT NULL DEFAULT \'\''] as $col)
         $db->exec('ALTER TABLE ig_listings ADD COLUMN IF NOT EXISTS ' . $col);
+    // (4.9) A game's Instant Gaming links, one per region it's sold in, each with the countries its key works in.
+    $db->exec('CREATE TABLE IF NOT EXISTS ig_offers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        listing VARCHAR(80) NOT NULL,
+        url VARCHAR(500) NOT NULL,
+        region VARCHAR(60) NOT NULL DEFAULT \'\',
+        countries TEXT NOT NULL,
+        unknown_names TEXT NOT NULL,
+        price_eur DECIMAL(8,2) NOT NULL,
+        old_eur DECIMAL(8,2) NULL,
+        stock TINYINT NOT NULL DEFAULT 1,
+        fetched DATETIME NULL,
+        fetch_err VARCHAR(160) NOT NULL DEFAULT \'\',
+        created DATETIME NOT NULL,
+        UNIQUE KEY one (listing, url(191)),
+        KEY listing (listing)
+    ) CHARACTER SET utf8mb4');
     $done = true;
 }
 
@@ -138,32 +155,51 @@ function rs_ig_for_app(string $appId): ?array {
     return null;
 }
 
-// (4.9) What an Instant Gaming product page says: its name, platform, region, price, the price before
-// the discount, currency and whether it's in stock. Read from the page's own markup (the price it sells
-// at is in <meta itemprop="price">). -> [ok, why, name, platform, region, price, old, currency, stock]
+// (4.9) What an Instant Gaming product page says: name, platform, region, price and the price before the
+// discount (both in euros, the store's own base), stock, and the countries its key works in
+// (window.countriesAvailability). Its currency table (window.currencies: each currency's rate from euros
+// and how it's written) is kept too, so a visitor's price is worked out exactly the way the store does it.
 function rs_ig_read(string $url): array {
+    require_once __DIR__ . '/countries.php';
     $url = rs_ig_clean_url($url);
     if ($url === '') return ['ok' => false, 'why' => 'That isn\'t a game page on instant-gaming.com.'];
-    $r = rs_http($url, ['timeout' => 20, 'max' => 3000000, 'headers' => ['Accept-Language: en-US,en;q=0.8', 'Accept: text/html',
+    $r = rs_http($url . '?currency=EUR', ['timeout' => 20, 'max' => 3000000, 'headers' => ['Accept-Language: en-US,en;q=0.8', 'Accept: text/html',
         'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36']]);
     if ((int)$r['status'] !== 200) return ['ok' => false, 'why' => 'Instant Gaming didn\'t answer (' . (int)$r['status'] . '). Try again in a minute.'];
     $h = (string)$r['body'];
     $meta = function (string $prop) use ($h): string {
         return preg_match('~<meta[^>]+itemprop="' . preg_quote($prop, '~') . '"[^>]+content="([^"]*)"~i', $h, $m) ? html_entity_decode($m[1], ENT_QUOTES) : '';
     };
-    $price = $meta('price');
-    if (!is_numeric($price) || (float)$price <= 0) return ['ok' => false, 'why' => 'Couldn\'t find a price on that page. Is it a product page (not search or a category)?'];
-    $cur = strtoupper($meta('priceCurrency')) ?: 'USD';
+    // The price in euros: data-price-eur on the price, whatever currency the page came in.
+    $eur = preg_match('~itemprop="price"[^>]*data-price-eur="([0-9.]+)"~', $h, $m) ? (float)$m[1] : 0.0;
+    $shown = (float)$meta('price'); $shownCur = strtoupper($meta('priceCurrency')) ?: 'EUR';
+    $rates = [];
+    if (preg_match('~window\.currencies\s*=\s*(\{.*?\});\s*window~s', $h, $m) && is_array($cj = json_decode($m[1], true))) {
+        foreach ($cj as $code => $c) {
+            if (!preg_match('/^[A-Z]{3}$/', (string)$code) || !is_numeric($c['tx'] ?? null) || (float)$c['tx'] <= 0) continue;
+            $rates[$code] = ['tx' => (float)$c['tx'], 'fmt' => html_entity_decode((string)($c['format'] ?? '%s'), ENT_QUOTES | ENT_HTML5),
+                'dec' => (string)($c['decimal_separator'] ?? '.'), 'th' => (string)($c['thousand_separator'] ?? '')];
+        }
+    }
+    if ($eur <= 0 && $shown > 0) $eur = $shownCur === 'EUR' ? $shown : (isset($rates[$shownCur]) ? round($shown / $rates[$shownCur]['tx'], 2) : 0.0);
+    if ($eur <= 0) return ['ok' => false, 'why' => 'Couldn\'t find a price on that page. Is it a product page (not search or a category)?'];
     $stock = !preg_match('~OutOfStock|SoldOut|Discontinued~i', $meta('availability'));
-    // The price before the discount: the "retail" figure in the product's own price box.
+    // The price before the discount: the "retail" figure in the product's own price box, in the page's currency.
     $old = null;
     if (preg_match('~class="discounts".{0,1500}?class="retail"[^>]*>(.{0,400}?)</div>~s', $h, $m)
         && preg_match('/([0-9]+(?:[.,][0-9]{1,2})?)/', trim(strip_tags($m[1])), $n)) {
         $n = (float)str_replace(',', '.', $n[1]);
-        if ($n > (float)$price) $old = round($n, 2);
+        $nEur = $shownCur === 'EUR' ? $n : (isset($rates[$shownCur]) ? $n / $rates[$shownCur]['tx'] : 0);
+        if ($nEur > $eur) $old = round($nEur, 2);
     }
-    // Name and platform from its breadcrumb (Nintendo > Switch 2 > The Legend of Zelda: ...), region from
-    // its title ("Buy X - Switch 2 - Latin America").
+    // Where the key works. Every name must be one we know: a name we can't place is listed, never guessed.
+    $codes = []; $unknown = [];
+    if (preg_match('~window\.countriesAvailability\s*=\s*(\[.*?\]);~s', $h, $m) && is_array($list = json_decode($m[1], true))) {
+        foreach ($list as $cn) {
+            $k = preg_replace('/[^a-z0-9]/', '', strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string)$cn) ?: (string)$cn));
+            if (isset(RS_COUNTRY_NAMES[$k])) $codes[RS_COUNTRY_NAMES[$k]] = true; else $unknown[] = (string)$cn;
+        }
+    }
     $name = ''; $plat = '';
     if (preg_match_all('~"position":(\d+),"item":\{"@id":"[^"]*","name":"([^"]*)"~', $h, $m, PREG_SET_ORDER)) {
         $crumbs = array_map(fn($x) => json_decode('"' . $x[2] . '"') ?? $x[2], $m);
@@ -175,32 +211,111 @@ function rs_ig_read(string $url): array {
     if ($name === '' && $parts) $name = $parts[0];
     $region = count($parts) >= 3 ? (string)end($parts) : '';
     if ($plat === '' && count($parts) >= 2) $plat = $parts[1];
+    if ($rates) rs_set_setting('ig_rates', json_encode($rates, JSON_UNESCAPED_UNICODE));
     return ['ok' => true, 'why' => '', 'name' => mb_substr($name, 0, 160), 'platform' => mb_substr($plat, 0, 60), 'region' => mb_substr($region, 0, 60),
-        'price' => round((float)$price, 2), 'old' => $old, 'currency' => in_array($cur, ['USD', 'EUR', 'GBP'], true) ? $cur : 'USD', 'stock' => $stock];
+        'eur' => round($eur, 2), 'old_eur' => $old, 'stock' => $stock, 'countries' => array_keys($codes), 'unknown' => $unknown];
 }
 
-// (4.9) Prices follow Instant Gaming: every listing set to auto is read again when it's older than $age
-// seconds. Only price, discount, currency and stock change; the name and platform line stay yours.
-function rs_ig_refresh(int $age = 3 * 3600, int $max = 40): array {
+// IG's currency table (from the last page read): code => [tx (from euros), fmt ("$%s"), dec, th].
+function rs_ig_rates(): array {
+    $r = json_decode((string)rs_setting('ig_rates', ''), true);
+    return is_array($r) && $r ? $r : ['EUR' => ['tx' => 1.0, 'fmt' => "%s\u{a0}€", 'dec' => '.', 'th' => ''], 'USD' => ['tx' => 1.105, 'fmt' => '$%s', 'dec' => '.', 'th' => '']];
+}
+
+// A euro price in a currency, worked out and written the way Instant Gaming does it.
+function rs_ig_money(float $eur, string $cur, array $rates): string {
+    $c = $rates[$cur] ?? $rates['USD'] ?? ['tx' => 1.0, 'fmt' => '%s', 'dec' => '.', 'th' => ''];
+    $v = round($eur * (float)$c['tx'], 2);
+    return str_replace('&nbsp;', "\u{a0}", str_replace('%s', number_format($v, 2, $c['dec'] ?: '.', $c['th']), $c['fmt']));
+}
+
+// The currency Instant Gaming shows a visitor from a country (ISO 3166 code).
+function rs_ig_currency_for(string $cc, array $rates): string {
+    require_once __DIR__ . '/countries.php';
+    $cur = RS_COUNTRY_CURRENCY[$cc] ?? 'USD';
+    return isset($rates[$cur]) ? $cur : (isset($rates['USD']) ? 'USD' : 'EUR');
+}
+
+// Save what a page said onto one of a game's links.
+function rs_ig_offer_store(string $listing, string $url, array $x): void {
+    rs_ig_tables();
+    rs_db()->prepare('INSERT INTO ig_offers (listing, url, region, countries, unknown_names, price_eur, old_eur, stock, fetched, fetch_err, created)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), \'\', UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE region = VALUES(region), countries = VALUES(countries), unknown_names = VALUES(unknown_names), price_eur = VALUES(price_eur),
+        old_eur = VALUES(old_eur), stock = VALUES(stock), fetched = VALUES(fetched), fetch_err = \'\'')
+        ->execute([$listing, $url, $x['region'], json_encode($x['countries']), json_encode($x['unknown'], JSON_UNESCAPED_UNICODE), $x['eur'], $x['old_eur'], $x['stock'] ? 1 : 0]);
+}
+
+function rs_ig_offers(?string $listing = null): array {
+    rs_ig_tables();
+    if ($listing === null) return rs_db()->query('SELECT * FROM ig_offers ORDER BY listing, id')->fetchAll();
+    $st = rs_db()->prepare('SELECT * FROM ig_offers WHERE listing = ? ORDER BY id');
+    $st->execute([$listing]);
+    return $st->fetchAll();
+}
+
+// (4.9) Prices follow Instant Gaming: every link is read again once it's older than $age seconds (price,
+// discount, stock and the countries it works in). A link that can't be read keeps its last numbers and
+// says so; one that fails for a day stops showing, so a dead page never sends anyone anywhere.
+function rs_ig_refresh(int $age = 600, int $max = 80): array {
     rs_ig_tables();
     $db = rs_db();
-    $st = $db->prepare('SELECT app_id, url FROM ig_listings WHERE auto = 1 AND (fetched IS NULL OR fetched < UTC_TIMESTAMP() - INTERVAL ? SECOND) ORDER BY fetched IS NULL DESC, fetched LIMIT ' . (int)$max);
+    $st = $db->prepare('SELECT id, listing, url FROM ig_offers WHERE fetched IS NULL OR fetched < UTC_TIMESTAMP() - INTERVAL ? SECOND ORDER BY fetched LIMIT ' . (int)$max);
     $st->execute([$age]);
     $done = 0; $bad = 0;
     foreach ($st->fetchAll() as $row) {
         $x = rs_ig_read((string)$row['url']);
-        if (!$x['ok']) { $db->prepare('UPDATE ig_listings SET fetched = UTC_TIMESTAMP(), fetch_err = ? WHERE app_id = ?')->execute([mb_substr($x['why'], 0, 160), $row['app_id']]); $bad++; continue; }
-        $db->prepare('UPDATE ig_listings SET price = ?, old_price = ?, currency = ?, stock = ?, region = IF(? <> \'\', ?, region), fetched = UTC_TIMESTAMP(), fetch_err = \'\' WHERE app_id = ?')
-            ->execute([$x['price'], $x['old'], $x['currency'], $x['stock'] ? 1 : 0, $x['region'], $x['region'], $row['app_id']]);
-        $done++;
-        usleep(400000);
+        if ($x['ok']) { rs_ig_offer_store((string)$row['listing'], (string)$row['url'], $x); $done++; }
+        else {
+            $db->prepare('UPDATE ig_offers SET fetch_err = ?, stock = IF(fetched < UTC_TIMESTAMP() - INTERVAL 1 DAY, 0, stock) WHERE id = ?')->execute([mb_substr($x['why'], 0, 160), $row['id']]);
+            $bad++;
+        }
+        usleep(300000);
     }
+    if ($done || $bad) rs_ig_cache_write();
     return [$done, $bad];
 }
 
+// (4.9) What /api/ig.php hands out, before it's narrowed to the visitor's country: kept in a file so
+// game pages are answered without the database. Rebuilt whenever a card or a price changes.
+function rs_ig_cache_file(): string { return dirname(__DIR__, 3) . '/recompstore-private/ig-cache.json'; }
+
+function rs_ig_cache_build(): array {
+    $c = rs_ig_cfg();
+    $members = [];
+    try { require_once __DIR__ . '/titles.php'; foreach (rs_titles() as $t) foreach ((array)$t['pc'] as $id) $members['t:' . $t['id']][] = (string)$id; } catch (Throwable $e) { /* no groups */ }
+    $offers = [];
+    foreach (rs_ig_offers() as $o) {
+        if (!(int)$o['stock']) continue;
+        $offers[(string)$o['listing']][] = ['c' => json_decode((string)$o['countries'], true) ?: [], 'eur' => (float)$o['price_eur'],
+            'old' => $o['old_eur'] !== null ? (float)$o['old_eur'] : null, 'url' => (string)$o['url']];
+    }
+    $games = [];
+    foreach (rs_ig_listings() as $r) {
+        $k = (string)$r['app_id'];
+        if ((int)$r['paused'] || empty($offers[$k])) continue;
+        $games[$k] = ['t' => (string)$r['title'], 'p' => (string)$r['platform'], 'tag' => (int)$r['tag'], 'ids' => str_starts_with($k, 't:') ? ($members[$k] ?? []) : [$k], 'offers' => $offers[$k]];
+    }
+    return ['on' => $c['on'], 'round' => $c['round'], 'igr' => $c['igr'], 'price' => $c['price'], 'tag' => $c['tag'], 'tagMin' => $c['tagMin'],
+        'v' => array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn'], 'share' => $x['share']], rs_ig_live_variants($c)),
+        'all' => array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn']], $c['variants']),
+        'rates' => rs_ig_rates(), 'games' => $games, 'at' => time()];
+}
+
+function rs_ig_cache_write(): void {
+    $f = rs_ig_cache_file();
+    @mkdir(dirname($f), 0775, true);
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    if (@file_put_contents($tmp, json_encode(rs_ig_cache_build(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) !== false) @rename($tmp, $f);
+}
+
 // Where a click goes: the product page with our partner code on it.
-function rs_ig_link(string $url, string $igr): string {
-    return $url . (str_contains($url, '?') ? '&' : '?') . 'igr=' . rawurlencode($igr);
+// (4.9) With the visitor's currency, and tagged as ours the way Instant Gaming's partner links are.
+function rs_ig_link(string $url, string $igr, string $cur = ''): string {
+    $q = ['igr' => $igr];
+    if ($cur !== '') $q['currency'] = $cur;
+    $q += ['utm_source' => 'recomplauncher', 'utm_medium' => 'game', 'utm_campaign' => 'link'];
+    return $url . (str_contains($url, '?') ? '&' : '?') . http_build_query($q);
 }
 
 // How much off, in whole percent (0 when there's no older price).
@@ -220,35 +335,6 @@ function rs_ig_shows_deal(array $l, array $c): bool {
 function rs_ig_listings(): array {
     rs_ig_tables();
     return rs_db()->query('SELECT * FROM ig_listings ORDER BY paused, title')->fetchAll();
-}
-
-// What the site needs, for /api/ig.php: the switch, the versions and the listings (paused ones too,
-// so a peek can show them; the site leaves them out otherwise).
-function rs_ig_public(): array {
-    $c = rs_ig_cfg();
-    $sym = ['USD' => '$', 'EUR' => '€', 'GBP' => '£'];
-    $l = [];
-    // (4.9) A game's card goes on every version of it; a recomp's own card wins over its game's.
-    $members = [];
-    try {
-        require_once __DIR__ . '/titles.php';
-        foreach (rs_titles() as $t) $members['t:' . $t['id']] = (array)$t['pc'];
-    } catch (Throwable $e) { /* no groups */ }
-    $rows = rs_ig_listings();
-    usort($rows, fn($x, $y) => (str_starts_with((string)$y['app_id'], 't:') ? 1 : 0) <=> (str_starts_with((string)$x['app_id'], 't:') ? 1 : 0));
-    foreach ($rows as $r) {
-        $deal = rs_ig_shows_deal($r, $c);
-        $cur = $sym[$r['currency']] ?? '$';
-        $fmt = fn($v) => $v === null || (float)$v <= 0 ? '' : ($r['currency'] === 'EUR' ? number_format((float)$v, 2, ',', '') . ' €' : $cur . number_format((float)$v, 2));
-        $card = ['t' => (string)$r['title'], 'p' => (string)$r['platform'],
-            'price' => $c['price'] ? $fmt($r['price']) : '', 'old' => $c['price'] && $deal ? $fmt($r['old_price']) : '',
-            'pct' => $c['price'] && $deal ? rs_ig_pct($r['price'], $r['old_price']) : 0, 'off' => (bool)$r['paused'] || !(int)($r['stock'] ?? 1)];
-        $key = (string)$r['app_id'];
-        foreach (str_starts_with($key, 't:') ? ($members[$key] ?? []) : [$key] as $id) $l[$id] = $card;
-    }
-    $v = array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn'], 'share' => $x['share']], rs_ig_live_variants($c));
-    $all = array_map(fn($x) => ['id' => $x['id'], 'place' => $x['place'], 'btn' => $x['btn']], $c['variants']);
-    return ['on' => $c['on'], 'round' => $c['round'], 'v' => $v, 'all' => $all, 'l' => $l];
 }
 
 // One view or click for a listing under a version, in this round.

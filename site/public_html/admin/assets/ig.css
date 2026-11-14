@@ -84,3 +84,13 @@
 .ig-form label.check{flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px}
 .ig-form input[data-ig-money][readonly]{opacity:.7}
 .ig-inline button{flex:none}
+.ig-urls{align-items:flex-start}
+.ig-urls textarea{flex:1;min-width:0;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.ig-urlbtns{display:flex;flex-direction:column;gap:8px;flex:none}
+.ig-readt{width:100%;border-collapse:collapse;font-size:13px;margin:0 0 8px}
+.ig-readt td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:top}
+.ig-offers{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.ig-offers li{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.ig-cc summary{cursor:pointer;font-size:13px}
+.ig-cc p{margin:6px 0 0}
+@media (max-width:760px){.ig-offers li{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}

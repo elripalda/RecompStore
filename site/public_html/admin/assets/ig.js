@@ -1,6 +1,6 @@
 // RecompStore admin (4.8): Sponsors > Instant Gaming. (4.9) The add/edit form: search a game (every
-// version of it gets the card), paste its Instant Gaming page and Read it (name, platform, price, stock),
-// and see the link with the partner code. Find it opens Instant Gaming's search for the game.
+// version of it gets the card), paste its Instant Gaming pages (one per region) and Read them: each page's
+// region, price, stock and the countries its key works in, and which countries the card will show in.
 (function () {
   'use strict';
   var games = [];
@@ -15,8 +15,8 @@
 
   var form = document.getElementById('edit');
   if (!form) return;
-  var app = form.elements.app_id, title = form.elements.title, find = form.querySelector('[data-ig-find]'), hint = form.querySelector('[data-ig-hint]');
-  var igr = form.getAttribute('data-igr') || 'recomp', min = parseInt(form.getAttribute('data-tagmin'), 10) || 0, tagOn = form.getAttribute('data-tagon') === '1';
+  var app = form.elements.app_id, title = form.elements.title, plat = form.elements.platform, find = form.querySelector('[data-ig-find]');
+  var igr = form.getAttribute('data-igr') || 'recomp';
   var q = form.querySelector('[data-ig-q]'), list = form.querySelector('[data-ig-results]'), chosen = form.querySelector('[data-ig-chosen]');
   var byKey = {};
   games.forEach(function (g) { byKey[g.k] = g; });
@@ -26,7 +26,7 @@
     var g = byKey[app.value], s = (g ? g.n : '') || title.value || '';
     if (find) find.href = 'https://www.instant-gaming.com/en/search/?q=' + encodeURIComponent(s.trim()) + '&igr=' + encodeURIComponent(igr);
   }
-  function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
   function pick(g) {
     app.value = g.k; q.value = g.n; list.hidden = true;
     chosen.textContent = '';
@@ -60,59 +60,56 @@
     if (!app.value) { e.preventDefault(); if (q) { q.focus(); q.setCustomValidity('Pick the game from the search.'); q.reportValidity(); q.setCustomValidity(''); } }
   });
 
-  // Read it: what the Instant Gaming page says, straight into the form.
-  var readBtn = form.querySelector('[data-ig-read]'), out = form.querySelector('[data-ig-read-out]'), auto = form.querySelector('[data-ig-auto]');
-  function money() { var on = auto && auto.checked; form.querySelectorAll('[data-ig-money]').forEach(function (m) { m.readOnly = on; }); form.elements.currency.disabled = false; }
-  if (auto) { auto.addEventListener('change', money); money(); }
-  function read() {
-    var url = form.elements.url.value.trim();
-    if (!url) return;
-    out.className = 'span2 ig-read-out'; out.textContent = 'Reading the page…';
-    readBtn.disabled = true;
+  // Read them: each page, one after another, into a small table, then which countries are covered.
+  var readBtn = form.querySelector('[data-ig-read]'), out = form.querySelector('[data-ig-read-out]'), urls = form.elements.urls;
+  var csrf = (form.querySelector('input[name=csrf]') || {}).value || '';
+  function readOne(u) {
     var fd = new FormData();
-    fd.append('action', 'read'); fd.append('url', url); fd.append('csrf', form.elements.csrf.value);
-    fetch('instant-gaming.php', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (x) {
-      readBtn.disabled = false;
-      if (!x.ok) { out.className = 'span2 ig-read-out warn'; out.textContent = x.why; return; }
-      if (!title.value.trim() || title.dataset.auto === '1') { title.value = x.name; title.dataset.auto = '1'; }
-      if (!form.elements.platform.value.trim() || form.elements.platform.dataset.auto === '1') { form.elements.platform.value = x.platform; form.elements.platform.dataset.auto = '1'; }
-      form.elements.region.value = x.region || '';
-      form.elements.price.value = x.price ? x.price.toFixed(2) : '';
-      form.elements.old_price.value = x.old ? x.old.toFixed(2) : '';
-      form.elements.currency.value = x.currency;
-      out.textContent = '';
-      out.appendChild(document.createTextNode(x.name + (x.platform ? ' · ' + x.platform : '') + (x.region ? ' · ' + x.region : '') + ' · ' + (x.stock ? 'in stock' : 'out of stock (the card stays hidden until it\'s back)') + '. Clicks go to '));
-      var a = el('a', 'mono', x.link); a.href = x.link; a.target = '_blank'; a.rel = 'noopener'; out.appendChild(a);
-      if (x.region && !/united states|usa|north america|global|worldwide/i.test(x.region)) { out.appendChild(el('br')); out.appendChild(el('span', 'warn', 'This key is for ' + x.region + '. Check it works where your players are, or pick that game\'s other region on Instant Gaming.')); }
-      say();
-    }).catch(function () { readBtn.disabled = false; out.className = 'span2 ig-read-out warn'; out.textContent = 'Couldn\'t reach the site. Try again.'; });
+    fd.append('action', 'read'); fd.append('url', u); fd.append('csrf', csrf);
+    return fetch('instant-gaming.php', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).catch(function () { return { ok: false, why: 'Couldn\'t reach the site. Try again.' }; });
+  }
+  function read() {
+    var links = urls.value.split(/\s+/).map(function (s) { return s.trim(); }).filter(function (s) { return /^https:\/\/(www\.)?instant-gaming\.com\//i.test(s); });
+    if (!links.length) return;
+    out.textContent = 'Reading ' + links.length + ' page' + (links.length === 1 ? '' : 's') + '…';
+    readBtn.disabled = true;
+    var res = [], i = 0;
+    (function next() {
+      if (i >= links.length) { readBtn.disabled = false; show(links, res); return; }
+      readOne(links[i]).then(function (x) { res.push(x); i++; next(); });
+    })();
+  }
+  function show(links, res) {
+    out.textContent = '';
+    var tbl = el('table', 'ig-readt'), cov = {}, curs = {}, firstOk = null, bad = 0;
+    res.forEach(function (x, n) {
+      var tr = el('tr');
+      if (!x.ok) { bad++; tr.appendChild(el('td', 'warn', links[n].replace(/^https:\/\/(www\.)?instant-gaming\.com\/[a-z]{2}\//, '') + ': ' + x.why)); tr.firstChild.colSpan = 4; tbl.appendChild(tr); return; }
+      firstOk = firstOk || x;
+      x.countries.forEach(function (c) { cov[c] = true; });
+      (x.curs || []).forEach(function (c) { curs[c] = true; });
+      tr.appendChild(el('td', '', x.region || 'Region not given'));
+      tr.appendChild(el('td', '', x.countries.length + ' countr' + (x.countries.length === 1 ? 'y' : 'ies') + (x.unknown.length ? ' (' + x.unknown.length + ' names not placed: ' + x.unknown.join(', ') + ')' : '')));
+      tr.appendChild(el('td', '', x.usd + (x.old_usd ? ' (was ' + x.old_usd + ')' : '')));
+      tr.appendChild(el('td', x.stock ? '' : 'warn', x.stock ? 'In stock' : 'Out of stock'));
+      if (!x.countries.length) tr.lastChild.textContent = 'Its page doesn\'t list countries: it can\'t be shown';
+      tbl.appendChild(tr);
+    });
+    out.appendChild(tbl);
+    if (firstOk) {
+      if (!title.value.trim() || title.dataset.auto === '1') { title.value = firstOk.name; title.dataset.auto = '1'; }
+      if (!plat.value.trim() || plat.dataset.auto === '1') { plat.value = firstOk.platform; plat.dataset.auto = '1'; }
+      var n = Object.keys(cov).length, big = ['US', 'CA', 'GB', 'DE', 'FR', 'ES', 'IT', 'MX', 'BR', 'AU'];
+      var miss = big.filter(function (c) { return !cov[c]; });
+      var p = el('p', 'small');
+      p.textContent = 'The card shows in ' + n + ' countr' + (n === 1 ? 'y' : 'ies') + ', in ' + Object.keys(curs).join(', ') + ', and nowhere else.' + (miss.length ? ' Not covered (add another region\'s page to cover them): ' + miss.join(', ') + '.' : '');
+      out.appendChild(p);
+      var a = el('p', 'small mono'); a.textContent = 'A click from the US goes to: ' + firstOk.link; out.appendChild(a);
+    }
+    if (bad) out.appendChild(el('p', 'small warn', 'Fix or remove the pages that couldn\'t be read before saving.'));
   }
   if (readBtn) readBtn.addEventListener('click', read);
-  form.elements.url.addEventListener('change', read);
+  urls.addEventListener('change', read);
   title.addEventListener('input', function () { title.dataset.auto = ''; });
-  form.elements.platform.addEventListener('input', function () { form.elements.platform.dataset.auto = ''; });
-
-  function num(v) { v = String(v || '').replace(',', '.').trim(); var n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; }
-  function say() {
-    var p = num(form.elements.price.value), o = num(form.elements.old_price.value), mode = form.elements.tag.value;
-    hint.textContent = '';
-    hint.className = 'span2 ig-hint';
-    if (!p) { hint.textContent = 'No price: the button will say See price.'; return; }
-    if (!o || o <= p) { hint.textContent = 'No discount: the card shows just the price.'; return; }
-    var pct = Math.round((o - p) / o * 100);
-    if (!tagOn) { hint.textContent = pct + '% off. Discount tags are off for every card, so it shows just the price.'; return; }
-    if (mode === '2') { hint.textContent = pct + '% off. Its tag is set to never show.'; return; }
-    if (mode === '1' && pct < min) {
-      hint.className = 'span2 ig-hint warn';
-      hint.textContent = 'Only ' + pct + '% off, and the tag is set to always show. A tag this small can look like noise. ';
-      var b = document.createElement('button');
-      b.type = 'button'; b.className = 'small'; b.textContent = 'Use the rule instead';
-      b.addEventListener('click', function () { form.elements.tag.value = '0'; say(); });
-      hint.appendChild(b);
-      return;
-    }
-    hint.textContent = pct + '% off. ' + (mode === '1' || pct >= min ? 'The tag and the old price show.' : 'Under ' + min + '%, so the tag and the old price stay hidden.');
-  }
-  ['price', 'old_price', 'tag'].forEach(function (n) { form.elements[n].addEventListener('input', say); form.elements[n].addEventListener('change', say); });
-  say();
+  plat.addEventListener('input', function () { plat.dataset.auto = ''; });
 })();

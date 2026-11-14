@@ -62,10 +62,10 @@ try {
         }
     }
 } catch (Throwable $e) { echo gmdate('c') . ' forgejo min: ' . $e->getMessage() . "\n"; }
-// (4.9) Instant Gaming cards follow the site: price, discount and stock read again every 3 hours.
+// (4.9) Instant Gaming cards follow the store: each link's price, stock and countries read again every 10 minutes.
 try {
     require_once 'admin/inc/ig.php';
-    [$ok, $bad] = rs_ig_refresh(3 * 3600, 40);
+    [$ok, $bad] = rs_ig_refresh(600, 80);
     if ($ok || $bad) echo gmdate('c') . ' instant gaming: read ' . $ok . ($bad ? ', ' . $bad . ' failed' : '') . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' instant gaming: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
