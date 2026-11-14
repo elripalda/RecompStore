@@ -318,6 +318,75 @@
           "minimum": 1,
           "default": 300,
           "description": "Seconds."
+        },
+        "options": {
+          "type": "array",
+          "description": "Ticks shown on the setup screen before this step runs (RecompLauncher 0.90 Beta 46 and newer; older launchers ignore it). When the player ticks one, its args are added after the step's own. Anything downloaded under a company's license needs \"license\": the player accepts it by ticking, and those ticks always start off.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "args"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,40}$"
+              },
+              "label": {
+                "type": "string",
+                "description": "The tick's name, like NVIDIA DLSS."
+              },
+              "note": {
+                "type": "string",
+                "description": "One short line under it."
+              },
+              "args": {
+                "$ref": "#/definitions/args"
+              },
+              "os": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "windows",
+                    "linux",
+                    "macos"
+                  ]
+                },
+                "description": "Only shown on these systems."
+              },
+              "gpu": {
+                "enum": [
+                  "nvidia",
+                  "amd"
+                ],
+                "description": "Only shown when the PC has this brand of graphics card (nvidia: an RTX card)."
+              },
+              "default": {
+                "type": "boolean",
+                "description": "Starts ticked. Ignored when there's a license."
+              },
+              "license": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "url"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": false
