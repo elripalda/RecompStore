@@ -129,6 +129,9 @@ function rs_prq_sync_repo_files(int $secs = 40): array {
     $t = microtime(true);
     $ids = array_column(rs_db()->query("SELECT DISTINCT app_id FROM pc_prq WHERE status = 'sent'")->fetchAll(), 'app_id');
     foreach (rs_sdk_marks() as $id => $m) if (($m['kind'] ?? '') === 'pr') $ids[] = (string)$id;
+    // (4.12) And any game whose developer put the file in their repo themselves: many close our pull
+    // request and add the commits on their own, which no queue row or mark says.
+    foreach (rs_sdk_checks() as $id => $c) if (is_array($c['v']) && ($c['v']['has'] ?? '') === 'repo') $ids[] = (string)$id;
     $n = ['looked' => 0, 'synced' => 0, 'bad' => 0];
     foreach (array_values(array_unique(array_map('strval', $ids))) as $id) {
         if (microtime(true) - $t > $secs) break;

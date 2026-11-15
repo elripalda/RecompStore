@@ -30,6 +30,9 @@ function rs_sdk_pr_state(array $a, string $url): string {
     $r = rs_http(rs_gh_api() . '/repos/' . $a['repo'] . '/pulls/' . $m[1], ['github' => true, 'timeout' => 8, 'max' => 2000000]);
     $j = $r['status'] === 200 ? json_decode($r['body'], true) : null;
     $st = is_array($j) ? (!empty($j['merged_at']) ? 'merged' : (string)($j['state'] ?? '')) : '';
+    // (4.12) Merged or closed since we last looked: look for their file again on the next run instead
+    // of up to a week later (a developer who closes it often commits the file themselves).
+    if ($st !== '' && $st !== 'open' && (!$c || $c['v'] !== $st)) rs_db()->prepare('DELETE FROM kv_cache WHERE k IN (?, ?)')->execute(['sdk:' . $a['id'], 'prqsync:' . $a['id']]);
     if ($st !== '') rs_kv_put($k, $st);
     return $st;
 }
