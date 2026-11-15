@@ -529,10 +529,27 @@ function rs_play_scores(): array {
         if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
     }
 }
+// (4.11) A version as players and releases write it, for matching: "v0.1.1", "0.1.1" and "V0.1.1" are one.
+function rs_play_ver_key(string $v): string {
+    $v = strtolower(trim($v));
+    $v = (string)preg_replace('/^(version|ver\.?)\s*/', '', $v);
+    return (string)preg_replace('/^v(?=\d)/', '', $v);
+}
+// The release out now for each recomp and PS5 app, as ver keys (its version and its tag): [kind => [app => [key, ...]]].
+function rs_play_current_versions(): array {
+    $out = ['pc' => [], 'ps5' => []];
+    try {
+        if (!function_exists('rs_pc_apps')) require_once __DIR__ . '/pc.php';
+        foreach (rs_pc_apps(false) as $a) $out['pc'][$a['id']] = array_values(array_unique(array_filter([rs_play_ver_key((string)($a['version'] ?? '')), rs_play_ver_key((string)($a['ok_tag'] ?? ''))])));
+        if (function_exists('rs_games')) foreach (rs_games(false) as $g) $out['ps5'][$g['id']] = array_values(array_filter([rs_play_ver_key((string)($g['version'] ?? ''))]));
+    } catch (Throwable $e) { /* scores still work without it */ }
+    return $out;
+}
+
 function rs_play_scores_make(): array {
     $now = time();
     $acc = [];
-    $st = rs_db()->query('SELECT kind, app, account_id, verdict, sys, progress, fps, problems, gpu, fix, note, helpful, updated FROM play_reports WHERE hidden = 0');
+    $st = rs_db()->query('SELECT kind, app, account_id, verdict, sys, version, progress, fps, problems, gpu, fix, note, helpful, updated FROM play_reports WHERE hidden = 0');
     while ($r = $st->fetch()) {
         $k = $r['kind']; $a = $r['app'];
         $pts = rs_play_points($r); $w = rs_play_weight($r, $now);
@@ -544,8 +561,12 @@ function rs_play_scores_make(): array {
         if ($r['sys'] !== '') { $s = &$e['sys'][$r['sys']]; $s ??= [0.0, 0.0, 0]; $s[0] += $pts * $w; $s[1] += $w; $s[2]++; unset($s); }
         foreach (array_keys(rs_play_problems_decode((string)$r['problems'])) as $p) $e['pr'][$p] = ($e['pr'][$p] ?? 0) + 1;
         if ($age <= 30) { $e['n30']++; $e['new'][0] += $pts; $e['new'][1]++; } else { $e['old'][0] += $pts; $e['old'][1]++; }
+        // (4.11) Per version the player said they played, for the latest release's own score.
+        $vk = rs_play_ver_key((string)$r['version']);
+        if ($vk !== '') { $x = &$e['ver'][$vk]; $x ??= [0.0, 0.0, 0, ['runs' => 0, 'issues' => 0, 'broken' => 0]]; $x[0] += $pts * $w; $x[1] += $w; $x[2]++; if (isset($x[3][$r['verdict']])) $x[3][$r['verdict']]++; unset($x); }
         unset($e);
     }
+    $cur = rs_play_current_versions();
     // A Bayesian average: a version with few reports leans toward the middle until more come in.
     $prior = 60.0; $pw = 1.5;
     $out = [];
@@ -556,8 +577,21 @@ function rs_play_scores_make(): array {
         $pr = [];
         foreach (array_slice($e['pr'], 0, 4, true) as $p => $n) $pr[$p] = round($n / $e['n'], 2);
         $trend = ($e['new'][1] >= 2 && $e['old'][1] >= 2) ? (int)round($e['new'][0] / $e['new'][1] - $e['old'][0] / $e['old'][1]) : 0;
-        $out[$k][$a] = ['score' => (int)round(($e['sw'] + $prior * $pw) / ($e['w'] + $pw)), 'n' => $e['n'], 'verdicts' => $e['v'],
+        $all = (int)round(($e['sw'] + $prior * $pw) / ($e['w'] + $pw));
+        $row = ['score' => $all, 'all' => $all, 'n' => $e['n'], 'verdicts' => $e['v'],
             'sys' => $sys, 'problems' => $pr, 'recent' => $e['n30'], 'trend' => $trend];
+        // (4.11) Like an app store: the latest release has its own score, and once 3 players have
+        // reported on it, it counts for more of the main score (55% at 3 reports, up to 75%). Older
+        // reports never go away; they just count for less once a newer release has reports.
+        $cv = $cur[$k][$a] ?? [];
+        foreach ($cv as $vk) if (isset($e['ver'][$vk])) {
+            [$sw, $w, $n, $vv] = $e['ver'][$vk];
+            $cs = (int)round(($sw + $prior * $pw) / ($w + $pw));
+            $row['cur'] = ['version' => $vk, 'score' => $cs, 'n' => $n, 'verdicts' => $vv];
+            if ($n >= 3 && $n < $e['n']) { $wt = min(0.75, 0.4 + 0.05 * $n); $row['score'] = (int)round($wt * $cs + (1 - $wt) * $all); }
+            break;
+        }
+        $out[$k][$a] = $row;
     }
     return $out;
 }

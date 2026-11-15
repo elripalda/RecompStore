@@ -3405,3 +3405,11 @@ a.get-pc .get-ico{width:16px;height:16px;flex:none}body[data-platform=pc] a.get-
 .pc-ez{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;border-radius:999px;font:700 11.5px/1 Figtree,sans-serif;color:#0B1220;background:#34F2E8;box-shadow:0 4px 14px -4px rgba(0,0,0,.6);white-space:nowrap}
 .pc-ez svg{width:12px;height:12px;flex:none}
 .pc-flags.both .pc-ez{width:24px;padding:0;justify-content:center}
+
+/* (4.11) This version / All versions under the score */
+.pr-vers{display:grid;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08)}
+.pr-vline{display:grid;grid-template-columns:1fr auto auto;align-items:baseline;gap:10px;font-size:13px}
+.pr-vline span{color:rgba(255,255,255,.72)}
+.pr-vline b{font:800 15px/1 Figtree,sans-serif}
+.pr-vline b.great{color:#5fe3a1}.pr-vline b.good{color:#34F2E8}.pr-vline b.mixed{color:#ffc773}.pr-vline b.rough{color:#ffa45c}.pr-vline b.bad{color:#ff8a8a}.pr-vline b.few{color:rgba(255,255,255,.5)}
+.pr-vline small{color:rgba(255,255,255,.5);min-width:88px;text-align:right}

@@ -258,6 +258,18 @@ try {
         $px = array_filter($list, fn($x) => !empty($x['proton']));
         $fbBody = ['ok' => true, 'counts' => ['runs' => $c['runs'] ?? 0, 'issues' => $c['issues'] ?? 0, 'broken' => $c['broken'] ?? 0], 'items' => $items,
             'proton' => ['n' => count($px), 'runs' => count(array_filter($px, fn($x) => $x['verdict'] === 'runs'))]];
+        // (4.11) The release out now on its own (like an app store's "this version"): its version and
+        // how its reports split. Every report still counts in 'counts'.
+        if (function_exists('rs_play_ver_key')) {
+            $keys = array_values(array_unique(array_filter([rs_play_ver_key((string)($app['version'] ?? '')), rs_play_ver_key((string)($app['tag'] ?? ''))])));
+            if ($keys) {
+                $lc = ['runs' => 0, 'issues' => 0, 'broken' => 0];
+                $vst = rs_db()->prepare('SELECT version, verdict, COUNT(*) n FROM pc_feedback WHERE app = ? AND hidden = 0 GROUP BY version, verdict');
+                $vst->execute([$app['id']]);
+                foreach ($vst->fetchAll() as $vr) if (in_array(rs_play_ver_key((string)$vr['version']), $keys, true) && isset($lc[$vr['verdict']])) $lc[$vr['verdict']] += (int)$vr['n'];
+                $fbBody['latest'] = ['version' => (string)($app['version'] ?? ''), 'counts' => $lc];
+            }
+        }
         // (4.1) A copy for the next minute's askers (answered at the top, before the site loads).
         $fbDir = dirname(RS_PUBLIC) . '/recompstore-private/pc-fb';
         if (!is_dir($fbDir)) @mkdir($fbDir, 0755, true);

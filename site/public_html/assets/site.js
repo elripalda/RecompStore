@@ -7095,6 +7095,10 @@
       <p class="pr-who-note muted small" data-cta-note></p>
     </section>`;
     const $ = (s) => box.querySelector(s);
+    // (4.11) A version as players and releases write it: "v0.1.1" and "0.1.1" are one.
+    const verKey = (v) => String(v || '').trim().toLowerCase().replace(/^(version|ver\.?)\s*/, '').replace(/^v(?=\d)/, '');
+    const curKey = verKey(a.version);
+    const onLatest = (x) => curKey !== '' && verKey(x.version) === curKey;
     const summary = (sc, items) => {
       const el = $('[data-sum]');
       if (!sc || !sc.n) {
@@ -7119,7 +7123,11 @@
       el.innerHTML = `<div class="pr-top">
           <div class="pr-score"><p class="pr-num"><b>${sc.n >= 3 ? sc.score : '–'}</b><span>/100</span></p>
             <p class="pr-word ${tone}">${sc.n >= 3 ? t(PLAY_TONE_WORD[scoreTone(sc.score)]) : t('Not enough reports yet')}</p>
-            <p class="pr-sub">${esc(tf('From {n}.', { n: tn(sc.n, '1 report', '{n} reports') }))} ${t('Newer reports count more.')}${sc.trend >= 8 ? ' ' + t('Getting better lately.') : sc.trend <= -8 ? ' ' + t('Getting worse lately.') : ''}</p></div>
+            <p class="pr-sub">${esc(tf('From {n}.', { n: tn(sc.n, '1 report', '{n} reports') }))} ${sc.cur && sc.cur.n >= 3 && sc.cur.n < sc.n ? t('The latest version counts most.') : t('Newer reports count more.')}${sc.trend >= 8 ? ' ' + t('Getting better lately.') : sc.trend <= -8 ? ' ' + t('Getting worse lately.') : ''}</p>
+            ${curKey ? `<div class="pr-vers">${sc.cur
+              ? `<div class="pr-vline"><span>${esc(tf('This version ({v})', { v: 'v' + curKey }))}</span><b class="${sc.cur.n >= 3 ? scoreTone(sc.cur.score) : 'few'}">${sc.cur.n >= 3 ? sc.cur.score : '–'}</b><small>${esc(sc.cur.n >= 3 ? tn(sc.cur.n, '1 report', '{n} reports') : tn(sc.cur.n, '1 report so far', '{n} reports so far'))}</small></div>`
+              : `<div class="pr-vline"><span>${esc(tf('This version ({v})', { v: 'v' + curKey }))}</span><b class="few">–</b><small>${t('No reports yet')}</small></div>`}
+              ${sc.cur && sc.cur.n >= sc.n ? '' : `<div class="pr-vline"><span>${t('All versions')}</span><b class="${scoreTone(sc.all != null ? sc.all : sc.score)}">${sc.all != null ? sc.all : sc.score}</b><small>${esc(tn(sc.n, '1 report', '{n} reports'))}</small></div>`}</div>` : ''}</div>
           <div class="pr-dist"><div class="pr-bar3">${v.runs ? `<i class="great" style="flex:${v.runs}"></i>` : ''}${v.issues ? `<i class="mixed" style="flex:${v.issues}"></i>` : ''}${v.broken ? `<i class="bad" style="flex:${v.broken}"></i>` : ''}</div>
             ${vrow('runs', 'great', 'Plays great')}${vrow('issues', 'mixed', 'Has problems')}${vrow('broken', 'bad', "Won't run")}</div>
         </div>
@@ -7131,7 +7139,8 @@
         ${fixes.length ? `<div class="pr-fixes"><h3>${t('Fixes players found')}</h3><ol>${fixes.map((x, i) => `<li><span class="pr-fix-n">${i + 1}</span><div><p dir="auto">${esc(x.fix)}</p><small>${esc([x.user || t('Guest'), sysName(x.sys), x.gpu].filter(Boolean).join(' · '))}</small></div>${x.helpful ? `<small class="pr-fix-h">${esc(tn(x.helpful, '1 found it helpful', '{n} found it helpful'))}</small>` : '<span></span>'}</li>`).join('')}</ol></div>` : ''}`;
       const keys = pc ? PLAY_PC_SYS.map(([k]) => k).filter((k) => all.some((x) => x.sys === k)) : [...new Set(all.map((x) => x.sys).filter(Boolean))];
       $('[data-bar]').hidden = all.length < 2;
-      $('[data-sysf]').innerHTML = [['', t('All'), all.length], ...keys.map((k) => [k, pc ? pName(PLAY_PC_SYS, k) : pName(PLAY_FW, k), all.filter((x) => x.sys === k).length])]
+      const nLatest = all.filter(onLatest).length;
+      $('[data-sysf]').innerHTML = [['', t('All'), all.length], ...(nLatest && nLatest < all.length ? [['@latest', tf('v{v}', { v: curKey }), nLatest]] : []), ...keys.map((k) => [k, pc ? pName(PLAY_PC_SYS, k) : pName(PLAY_FW, k), all.filter((x) => x.sys === k).length])]
         .map(([k, l, c]) => `<button type="button" data-k="${esc(k)}" aria-pressed="${k === sysFilter}" class="${k === sysFilter ? 'on' : ''}">${esc(l)} <span>${fmtNum(c)}</span></button>`).join('');
     };
     const itemHTML = (x) => {
@@ -7169,7 +7178,7 @@
         needSign = !!j.needSignIn;
         mine = all.find((x) => x.mine) || null;
         summary(j.summary, all);
-        const shown = sysFilter ? all.filter((x) => x.sys === sysFilter) : all;
+        const shown = sysFilter === '@latest' ? all.filter(onLatest) : sysFilter ? all.filter((x) => x.sys === sysFilter) : all;
         $('[data-list]').innerHTML = shown.map(itemHTML).join('');
         $('[data-write]').textContent = mine ? t('Edit your report') : t('Write a report');
         $('[data-cta-note]').innerHTML = j.me ? '' : needSign ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to post a report. You can still post as Anonymous.')}` : `${t('No account needed to post.')} ${acct.on ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to show your name.')}` : ''}`;

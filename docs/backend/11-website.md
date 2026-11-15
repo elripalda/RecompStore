@@ -23,6 +23,15 @@ Every address goes through `page.php` (via `.htaccess`), which returns `index.ht
 - Accounts: `api/account.php`, `api/oauth.php`; comments, likes, player reports: `api/comments.php`, `api/play.php`.
 - Posting needs an account (4.11, Admin > Accounts > Rules, setting `post_need_acct`, on by default): comments, website player reports (`api/play.php`), PC feedback (`api/pc.php?a=feedback`, which RecompLauncher uses) and the older launcher reports (`api/launcher.php?a=report`) answer 401 when signed out, via `rs_post_need_acct()`. Players can post as Anonymous: `comments.anon`, and `play_reports.show_name` = 0 for reports. Nobody else sees the name. The admin sees the account on Accounts (feedback list and Moderation) and can close it there. A closed account can't sign in or post from the site or the launcher.
 
+## Player scores
+
+`rs_play_scores()` (inc/play.php, kept 5 minutes in `recompstore-private/play-scores.json`) gives each version:
+- `score`, the main number;
+- `all`, every report;
+- `cur`, the release out now on its own: `{version, score, n, verdicts}`, matched on the report's version against the listing's `version` / `ok_tag` (`rs_play_ver_key`, so "v0.1.1" = "0.1.1").
+
+Once the latest release has 3 reports (and older ones exist), `score` blends it: 55% latest at 3 reports, rising 5% a report to 75%. Older reports never go away; they just count less, like an app store's "this version" rating. The game page shows This version / All versions under the score and a filter for the latest version's reports. `api/pc.php?a=feedback` (RecompLauncher's "% plays great") also gives `latest: {version, counts}`.
+
 ## Tiles
 
 A game's tile shows two flags at most (4.11): Easy Setup (`ez` in `pc-catalog-web.json`, from the listing's `support.easy_setup`) and its versions count. With both, they shrink to icons. Great on Deck, handhelds, Complete, Ended, On hold and Setup Required show on the game's page, not on tiles. RecompLauncher's cards follow the same rule from Beta 51.
