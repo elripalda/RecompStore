@@ -128,7 +128,10 @@ function rs_prq_review(array $q): array {
     $why = fn(string $what) => trim((string)($feat[$what]['why'] ?? ''));
     $notNeeded = fn(string $what) => ($feat[$what]['has'] ?? null) === false && ($feat[$what]['needed'] ?? null) === false;
     // Easy Setup
-    if (rs_sdk_easy($j)) $out['gives'][] = ['Easy Setup from the player\'s copy', 'yes', $added('game location') ? 'through a new option this PR adds to their code' : 'through an option the game already has'];
+    // (Easy Setup that only works with this PR's code changes: the file without them doesn't have it.)
+    $plainJ = is_array($code['plain'] ?? null) ? $code['plain'] : $j;
+    $easyNew = $edits && !rs_sdk_easy($plainJ);
+    if (rs_sdk_easy($j)) $out['gives'][] = ['Easy Setup from the player\'s copy', 'yes', $easyNew || $added('game location') ? 'through what this PR adds to their code (' . (isset($j['prepare']) && !isset($plainJ['prepare']) ? 'a new setup step' : 'a new option') . '), so only once they merge it' : 'through an option the game already has'];
     elseif ($notNeeded('game location')) $out['gives'][] = ['Easy Setup from the player\'s copy', 'na', 'not needed: ' . ($why('game location') ?: 'the game needs nothing from the player')];
     else { $out['gives'][] = ['Easy Setup from the player\'s copy', 'no', $why('game location') ?: 'the game has no way to be handed the player\'s copy yet']; $out['warns'][] = 'No Easy Setup: players still set the game up by hand.'; }
     // Setup step
