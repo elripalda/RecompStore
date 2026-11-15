@@ -15,7 +15,7 @@
 
   // A PC listing's Media section.
   const edEl = document.getElementById('media-editor');
-  if (edEl && window.MediaEditor) {
+  if (edEl && typeof MediaEditor !== 'undefined') {
     const d = data(edEl), csrf = edEl.dataset.csrf;
     MediaEditor.mount(edEl, {
       console: d.console, title: d.title, art: d.art || {}, design: d.design || null,
@@ -29,7 +29,7 @@
 
   // Auto-fill Media for Easy Setup games.
   const af = document.getElementById('media-autofill');
-  if (af && window.MediaEditor) {
+  if (af && typeof MediaEditor !== 'undefined') {
     const d = data(af), csrf = af.dataset.csrf;
     const go = af.querySelector('[data-af-go]'), stop = af.querySelector('[data-af-stop]'), redo = af.querySelector('[data-af-redo]');
     const bar = af.querySelector('[data-af-bar]'), note = af.querySelector('[data-af-note]');
@@ -59,7 +59,7 @@
 
   // Cover Labels (Settings, owner only).
   const cl = document.getElementById('cover-labels');
-  if (cl && window.CoverLabels) {
+  if (cl && typeof CoverLabels !== 'undefined') {
     const d = data(cl), csrf = cl.dataset.csrf;
     CoverLabels.mount(cl, {
       consoles: d.consoles || [], labels: d.labels || {},
