@@ -37,16 +37,39 @@ function rs_md_sgdb_file(int $imgId, string $listing): string {
 }
 
 // Image bytes (PNG, JPEG or WebP) saved as they are into /media, so PNG transparency stays. -> '/media/<name>'
-function rs_md_store_bytes(string $bytes, string $prefix, int $max, array $types = ['png', 'jpg', 'webp'], int $maxW = 0): string {
+function rs_md_store_bytes(string $bytes, string $prefix, int $max, array $types = ['png', 'jpg', 'webp'], int $maxW = 0, bool $checkOnly = false): string {
     if (strlen($bytes) > $max) throw new RuntimeException('That picture is too big (' . round($max / 1048576) . ' MB at most).');
     $info = @getimagesizefromstring($bytes);
     $ext = match ($info['mime'] ?? '') { 'image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', default => '' };
     if ($ext === '' || !in_array($ext, $types, true)) throw new RuntimeException('Use a ' . strtoupper(implode(', ', $types)) . ' picture.');
     if ($maxW && (int)$info[0] > $maxW) throw new RuntimeException('That picture is wider than ' . $maxW . ' px.');
+    if ($checkOnly) return '';
     if (!is_dir(RS_MEDIA)) mkdir(RS_MEDIA, 0755, true);
     $name = preg_replace('/[^a-z0-9-]+/', '-', strtolower($prefix)) . '-' . substr(hash('sha256', $bytes), 0, 10) . '.' . $ext;
     if (!is_file(RS_MEDIA . '/' . $name) && file_put_contents(RS_MEDIA . '/' . $name, $bytes) === false) throw new RuntimeException('Could not save the picture.');
     return '/media/' . $name;
+}
+
+// (4.11) A Cover Label drawn on a full cover-size canvas (like a 1200x1800 overlay with the band at the
+// top): the see-through rows under the band are cut off, so the label is only as tall as what shows.
+// Otherwise the editor and the launcher take the whole canvas as the label, and Push Cover Down pushes
+// the cover right out of view. The top is kept, so the band stays where it was drawn. -> PNG bytes
+function rs_md_trim_label(string $bytes): string {
+    if (!function_exists('imagecreatefromstring')) return $bytes;
+    $im = @imagecreatefromstring($bytes);
+    if (!$im) return $bytes;
+    $w = imagesx($im); $h = imagesy($im);
+    if (!imageistruecolor($im)) imagepalettetotruecolor($im);
+    $last = -1;
+    for ($y = $h - 1; $y >= 0 && $last < 0; $y--)
+        for ($x = 0; $x < $w; $x += 2) if (((imagecolorat($im, $x, $y) >> 24) & 0x7F) < 120) { $last = $y; break; }
+    if ($last < 0 || $last >= $h - 2) { imagedestroy($im); return $bytes; } // nothing see-through below it
+    $out = imagecreatetruecolor($w, $last + 1);
+    imagealphablending($out, false); imagesavealpha($out, true);
+    imagecopy($out, $im, 0, 0, 0, 0, $w, $last + 1);
+    ob_start(); imagepng($out, null, 7); $png = (string)ob_get_clean();
+    imagedestroy($im); imagedestroy($out);
+    return $png !== '' ? $png : $bytes;
 }
 
 // The SteamGridDB game for a listing, remembered on it once found (sgdb_game).

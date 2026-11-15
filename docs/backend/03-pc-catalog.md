@@ -81,7 +81,7 @@ Three guards keep it steady. A version rated under 50 from 5 reports or more is 
 - `img`: passes listing art from other sites through for the editor's canvas.
 - `save`: checked by `rs_md_clean`; a proxied picture becomes its `/media` file.
 - `publish`.
-- `labels-upload` and `labels-save` (owner only).
+- `labels-upload` and `labels-save` (owner only). A label drawn on a full cover-size canvas (a 1200×1800 overlay) has its see-through rows below the band cut off on upload (`rs_md_trim_label`), so it's only as tall as what shows and Push Cover Down works.
 
 The code is in `inc/mediadesign.php`.
 

@@ -107,7 +107,9 @@ try {
             if (!preg_match('/^[a-z0-9_-]{1,24}$/', $con)) $out(400, ['error' => 'Which console?']);
             $f = $_FILES['file'] ?? null;
             if (!$f || ($f['error'] ?? 1) !== UPLOAD_ERR_OK) $out(400, ['error' => 'The file didn\'t arrive.']);
-            $out(200, ['url' => rs_md_store_bytes((string)file_get_contents($f['tmp_name']), 'label-' . $con, 5 << 20, ['png', 'webp'], 3000)]);
+            $raw = (string)file_get_contents($f['tmp_name']);
+            rs_md_store_bytes($raw, 'label-check', 5 << 20, ['png', 'webp'], 3000, true); // type, size and width checks only
+            $out(200, ['url' => rs_md_store_bytes(rs_md_trim_label($raw), 'label-' . $con, 8 << 20, ['png', 'webp'], 3000)]);
         }
         $labels = rs_md_labels_clean(is_array($body['labels'] ?? null) ? $body['labels'] : []);
         rs_set_setting('cover_labels', (string)json_encode((object)$labels, JSON_UNESCAPED_SLASHES));
