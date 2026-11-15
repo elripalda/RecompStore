@@ -1,7 +1,7 @@
 <?php
 // RecompStore website (3.0): comments on a game's page.
 //   GET  ?game=pc:<id>|ps5:<id>[&sort=helpful|new] -> {ok, comments[], count}
-//   POST a=post game body [parent] turnstile -> {ok, comments[]}
+//   POST a=post game body [parent] [anon] turnstile -> {ok, comments[]} (anon: shown as Anonymous; the admin still sees who)
 //   POST a=helpful id on | a=report id reason | a=remove id
 // Reading is open to everyone; writing needs a signed-in account with a username and a confirmed email.
 declare(strict_types=1);
@@ -63,7 +63,7 @@ try {
         $same = $db->prepare('SELECT COUNT(*) FROM comments WHERE account_id = ? AND game = ? AND body = ? AND created > (UTC_TIMESTAMP() - INTERVAL 1 DAY)');
         $same->execute([$id, $game, $body]);
         if ((int)$same->fetchColumn()) rs_cme(422, 'You already posted that.');
-        $db->prepare('INSERT INTO comments (game, account_id, parent_id, body, created) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())')->execute([$game, $id, $parent, $body]);
+        $db->prepare('INSERT INTO comments (game, account_id, parent_id, body, created, anon) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)')->execute([$game, $id, $parent, $body, empty($in['anon']) ? 0 : 1]);
         rs_cmo(200, ['ok' => true, 'comments' => rs_cm_list($game, $me), 'count' => rs_cm_count($game)]);
     }
 

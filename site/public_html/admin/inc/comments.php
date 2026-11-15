@@ -41,6 +41,8 @@ function rs_cm_tables(): void {
         created DATETIME NOT NULL,
         PRIMARY KEY (comment_id, account_id)
     ) CHARACTER SET utf8mb4');
+    // (4.11) Posted as Anonymous: the name is hidden from everyone but the admin.
+    try { $db->query('SELECT anon FROM comments LIMIT 0'); } catch (Throwable $e) { $db->exec('ALTER TABLE comments ADD COLUMN anon TINYINT NOT NULL DEFAULT 0'); }
     $done = true;
 }
 
@@ -94,11 +96,17 @@ function rs_cm_list(string $game, ?array $me, string $sort = 'helpful'): array {
     $badges = [];
     $shape = function (array $r) use ($me, $voted, $game, &$badges): array {
         $gone = $r['aid'] === null;
+        $mine = $me && (int)$r['account_id'] === (int)$me['id'];
+        // Anonymous: no name, picture or badge for anyone but its author.
+        if (!empty($r['anon']) && !$mine && !$gone) return ['id' => (int)$r['id'], 'user' => 'Anonymous', 'anon' => true, 'badge' => '', 'avatar' => '',
+            'body' => $r['removed'] ? '' : (string)$r['body'], 'removed' => (bool)$r['removed'], 'held' => (bool)$r['hidden'],
+            'created' => gmdate('c', strtotime((string)$r['created'] . ' UTC')), 'helpful' => (int)$r['helpful'],
+            'mine' => false, 'voted' => isset($voted[(int)$r['id']]), 'replies' => []];
         if (!$gone && !isset($badges[$r['aid']])) $badges[$r['aid']] = rs_cm_badge(['id' => (int)$r['aid'], 'username_lc' => $r['username_lc'], 'github_id' => $r['github_id'], 'email' => $r['email'], 'email_ok' => $r['email_ok']], $game);
         return ['id' => (int)$r['id'], 'user' => $gone ? null : (string)$r['username'], 'badge' => $gone ? '' : $badges[$r['aid']], 'avatar' => $gone ? '' : rs_acct_avatar_url(['avatar' => $r['avatar']]),
             'body' => $r['removed'] ? '' : (string)$r['body'], 'removed' => (bool)$r['removed'], 'held' => (bool)$r['hidden'],
             'created' => gmdate('c', strtotime((string)$r['created'] . ' UTC')), 'helpful' => (int)$r['helpful'],
-            'mine' => $me && (int)$r['account_id'] === (int)$me['id'], 'voted' => isset($voted[(int)$r['id']]), 'replies' => []];
+            'mine' => $mine, 'anon' => !empty($r['anon']), 'voted' => isset($voted[(int)$r['id']]), 'replies' => []];
     };
     $top = []; $kids = [];
     foreach ($rows as $r) if ($r['parent_id'] === null) $top[(int)$r['id']] = $shape($r); else $kids[(int)$r['parent_id']][] = $shape($r);

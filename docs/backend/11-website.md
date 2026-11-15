@@ -21,6 +21,7 @@ Every address goes through `page.php` (via `.htaccess`), which returns `index.ht
 - `api/ig.php` for the Instant Gaming card, `api/spons.php` for sponsor spots, `api/notes.php` for team notes.
 - `api/backup.php` for the download buttons of a game switched to its emergency backup.
 - Accounts: `api/account.php`, `api/oauth.php`; comments, likes, player reports: `api/comments.php`, `api/play.php`.
+- Posting needs an account (4.11, Admin > Accounts > Rules, setting `post_need_acct`, on by default): comments, website player reports (`api/play.php`), PC feedback (`api/pc.php?a=feedback`, which RecompLauncher uses) and the older launcher reports (`api/launcher.php?a=report`) answer 401 when signed out, via `rs_post_need_acct()`. Players can post as Anonymous: `comments.anon`, and `play_reports.show_name` = 0 for reports. Nobody else sees the name. The admin sees the account on Accounts (feedback list and Moderation) and can close it there. A closed account can't sign in or post from the site or the launcher.
 
 ## Pictures
 

@@ -87,6 +87,10 @@ function rs_acct_preview(): bool {
 }
 function rs_acct_live(): bool { return rs_setting('acct_on', '0') === '1'; }
 function rs_acct_on(): bool { return rs_acct_live() || rs_acct_preview(); }
+// (4.11) Reports, feedback and comments need a signed-in account (Admin > Accounts). Players can still
+// post as Anonymous; the admin sees the account behind every post and can close it.
+function rs_post_need_acct(): bool { return rs_acct_on() && rs_setting('post_need_acct', '1') === '1'; }
+const RS_POST_SIGN_IN = 'Sign in to post. You can still post as Anonymous.';
 
 // Each way to sign in, and whether its keys are in.
 function rs_acct_providers(): array {

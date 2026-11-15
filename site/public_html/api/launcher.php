@@ -138,6 +138,7 @@ try {
         rs_rl_more_tables();
         if ($a === 'hello') { rs_rl_hello($install, $acc, $in); rs_rl_out(200, []); }
         if ($a === 'events') rs_rl_out(200, ['kept' => rs_rl_events($install, (array)($in['events'] ?? []))]);
+        if (!$acc && rs_post_need_acct()) rs_rl_err(401, 'Sign in to your RecompLauncher account to send a report. Your name isn\'t shown with it.');
         $app = (string)($in['app'] ?? '');
         if (!rs_rl_app($app)) rs_rl_err(404, 'That recomp isn\'t on RecompLauncher.');
         $verdict = (string)($in['verdict'] ?? '');

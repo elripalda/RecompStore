@@ -6672,7 +6672,7 @@
   function acctComments(box, key) {
     let sort = 'helpful', list = [], token = '';
     const me = acct.me;
-    const author = (c) => (c.user ? `<b>${esc(c.user)}</b>${c.badge === 'dev' ? `<span class="cm-badge">${t('Developer')}</span>` : c.badge === 'team' ? `<span class="cm-badge team">RecompStore</span>` : ''}` : `<b class="muted">${t('deleted user')}</b>`);
+    const author = (c) => (c.anon && !c.mine ? `<b>${t('Anonymous')}</b>` : c.user ? `<b>${esc(c.user)}</b>${c.badge === 'dev' ? `<span class="cm-badge">${t('Developer')}</span>` : c.badge === 'team' ? `<span class="cm-badge team">RecompStore</span>` : ''}${c.anon ? `<span class="cm-held">${t('Others see Anonymous')}</span>` : ''}` : `<b class="muted">${t('deleted user')}</b>`);
     const linkify = (s) => esc(s).replace(/\b(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1" target="_blank" rel="nofollow noopener ugc">$1</a>').replace(/\n/g, '<br>');
     const one = (c, reply) => `<article class="cm${reply ? ' reply' : ''}${c.held ? ' held' : ''}" data-id="${c.id}">
         <div class="cm-av" aria-hidden="true">${c.avatar ? `<img src="${esc(c.avatar)}" alt="" width="36" height="36" loading="lazy">` : c.user ? esc(c.user.slice(0, 1).toUpperCase()) : '·'}</div>
@@ -6687,7 +6687,7 @@
         </div></article>${(c.replies || []).map((r) => one(r, true)).join('')}`;
     const formHTML = (parent) => !me ? `<p class="cm-signin"><a class="btn" href="${acctSignHref()}" data-fx>${t('Sign in to comment')}</a></p>`
       : !me.emailOk ? `<p class="muted">${t('Confirm your email to comment. The link is in the email we sent you.')}</p>`
-      : `<form class="cm-form" data-parent="${parent || ''}" novalidate><textarea name="body" rows="${parent ? 2 : 3}" maxlength="2000" placeholder="${parent ? t('Write a reply') : t('What works, what doesn\'t, settings that helped')}" required></textarea><div class="acct-ts" data-ts hidden></div><div class="form-row"><button class="btn primary" type="submit">${parent ? t('Reply') : t('Post')}</button>${parent ? `<button class="btn" type="button" data-cancel>${t('Cancel')}</button>` : ''}<span class="status" role="status"></span></div></form>`;
+      : `<form class="cm-form" data-parent="${parent || ''}" novalidate><textarea name="body" rows="${parent ? 2 : 3}" maxlength="2000" placeholder="${parent ? t('Write a reply') : t('What works, what doesn\'t, settings that helped')}" required></textarea><div class="acct-ts" data-ts hidden></div><div class="form-row"><button class="btn primary" type="submit">${parent ? t('Reply') : t('Post')}</button><label class="pr-check cm-anon"><input type="checkbox" name="anon"> ${t('Post as Anonymous')}</label>${parent ? `<button class="btn" type="button" data-cancel>${t('Cancel')}</button>` : ''}<span class="status" role="status"></span></div></form>`;
     const draw = (count) => {
       box.innerHTML = `<section class="glass cm-box"><div class="cm-head"><h2>${t('Comments')}${count ? ` <span>${fmtNum(count)}</span>` : ''}</h2>
         ${list.length > 1 ? `<div class="cm-sort" role="group"><button type="button" data-sort="helpful" aria-pressed="${sort === 'helpful'}">${t('Most helpful')}</button><button type="button" data-sort="new" aria-pressed="${sort === 'new'}">${t('Newest')}</button></div>` : ''}</div>
@@ -6704,7 +6704,7 @@
         const body = form.body.value.trim();
         if (body.length < 2) { say(st, t('Write a little more.'), 'bad'); return; }
         say(st, t('Posting…'));
-        cmApi({ a: 'post', game: key, body, parent: form.dataset.parent || null, turnstile: token }).then((j) => {
+        cmApi({ a: 'post', game: key, body, parent: form.dataset.parent || null, anon: !!(form.anon && form.anon.checked), turnstile: token }).then((j) => {
           if (!j.ok) {
             say(st, j.error, 'bad');
             if (j.needCheck && ts) { ts.hidden = false; acctTurnstile(ts, (x) => { token = x; if (x) form.requestSubmit(); }); }
@@ -7075,7 +7075,7 @@
     if (!box) return;
     const pc = kind === 'pc';
     const sysName = (k) => (pc ? pName(PLAY_PC_SYS, k) : tf('Firmware {fw}', { fw: pName(PLAY_FW, k) })) || k;
-    let sort = 'helpful', sysFilter = '', mine = null, tsToken = '', all = [];
+    let sort = 'helpful', sysFilter = '', mine = null, tsToken = '', all = [], needSign = false;
     box.innerHTML = `<section class="glass play-box${pc ? '' : ' play-ps5'}">
       <header class="pr-head"><h2>${t('Player reports')}</h2><button type="button" class="btn primary pr-write" data-write>${t('Write a report')}</button></header>
       ${pc && a.report_url ? `<p class="pr-howto"><a href="${esc(a.report_url)}" target="_blank" rel="noopener">${t('How To Report Bugs For This Game')}<span aria-hidden="true">↗</span></a></p>` : ''}
@@ -7160,17 +7160,20 @@
         if (!j.ok) { $('[data-sum]').innerHTML = `<p class="muted">${esc(j.error || t('Reports can\'t be shown right now.'))}</p>`; return; }
         if (j.turnstile && !acct.ts) acct.ts = j.turnstile;
         all = j.items || [];
+        needSign = !!j.needSignIn;
         mine = all.find((x) => x.mine) || null;
         summary(j.summary, all);
         const shown = sysFilter ? all.filter((x) => x.sys === sysFilter) : all;
         $('[data-list]').innerHTML = shown.map(itemHTML).join('');
         $('[data-write]').textContent = mine ? t('Edit your report') : t('Write a report');
-        $('[data-cta-note]').innerHTML = j.me ? '' : `${t('No account needed to post.')} ${acct.on ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to show your name.')}` : ''}`;
+        $('[data-cta-note]').innerHTML = j.me ? '' : needSign ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to post a report. You can still post as Anonymous.')}` : `${t('No account needed to post.')} ${acct.on ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to show your name.')}` : ''}`;
       }).catch(() => { if (box.isConnected) $('[data-sum]').innerHTML = `<p class="muted">${t('Reports can\'t be shown right now.')}</p>`; });
     const opts = (list, val, none) => `${none ? `<option value="">${esc(none)}</option>` : ''}${list.map(([k, l]) => `<option value="${esc(String(k))}"${String(val) === String(k) ? ' selected' : ''}>${esc(t(l))}</option>`).join('')}`;
     const openForm = (force) => {
       const fb = $('[data-form-box]');
       if (fb.firstElementChild && !force) { fb.innerHTML = ''; return; }
+      // (4.11) Signed in only: a way to sign in instead of the form.
+      if (needSign && !acct.me) { fb.innerHTML = `<div class="pr-form pr-signin"><p>${t('Sign in to post a report. You can still post as Anonymous: your name isn\'t shown.')}</p><a class="btn primary" href="${acctSignHref()}" data-fx>${t('Sign in')}</a></div>`; return; }
       const saved = playSysSaved();
       const m = mine || {};
       const st = { sys: m.sys || (pc ? (saved.sys || ({ windows: 'windows', linux: 'linux', macos: 'macos' }[myOS()] || 'windows')) : (saved.fw || '')), problems: Object.assign({}, m.problems || {}) };
@@ -7210,7 +7213,7 @@
         </div>
         <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
         <div class="pr-form-foot">
-          <div class="pr-ident">${acct.me ? `<label class="pr-check"><input type="checkbox" name="show_name"${m.user === undefined || m.user ? ' checked' : ''}> ${tf('Post as {name}', { name: `<b>${esc(acct.me.username || '')}</b>` })}</label>`
+          <div class="pr-ident">${acct.me ? `<label class="pr-check"><input type="checkbox" name="show_name"${m.user === undefined || m.user ? ' checked' : ''}> ${tf('Post as {name}', { name: `<b>${esc(acct.me.username || '')}</b>` })} <span class="muted small">${t('(untick to post as Anonymous)')}</span></label>`
             : `<p class="muted small">${t('Posting as a guest.')} ${acct.on ? `<a href="${acctSignHref()}" data-fx>${t('Sign in')}</a> ${t('to show your name.')}` : ''}</p><div class="acct-ts" data-ts></div>`}</div>
           <div class="pr-btns"><button type="button" class="btn ghost" data-cancel>${t('Cancel')}</button><button class="btn primary" type="submit">${mine ? t('Save report') : t('Post report')}</button></div>
         </div>

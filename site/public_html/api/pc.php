@@ -263,6 +263,8 @@ try {
     }
     if ($a === 'feedback' && $post) {
         if ($s('website', 100) !== '') rs_pc_out(200, ['ok' => true]); // the hidden field: a bot
+        // (4.11) Signed in only, when the admin says so (RecompLauncher shows this text as it is).
+        if (rs_post_need_acct() && !rs_pc_me(true)) rs_pc_out(401, ['ok' => false, 'error' => 'Sign in to your RecompLauncher account to send a report. Your name isn\'t shown with it.', 'needSignIn' => true]);
         $verdict = $s('verdict', 8);
         if (!isset(RS_PC_VERDICTS[$verdict])) rs_pc_out(422, ['ok' => false, 'error' => 'Pick how it plays.']);
         $sys = $s('sys', 12);

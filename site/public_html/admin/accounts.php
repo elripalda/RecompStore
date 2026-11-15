@@ -52,6 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach (['google', 'discord', 'github'] as $p) if (isset($_POST['form_' . $p])) rs_set_setting('acct_' . $p . '_on', !empty($_POST['on_' . $p]) ? '1' : '0');
             if (isset($_POST['form_discord'])) rs_set_setting('acct_dc_redirect_done', !empty($_POST['on_discord']) ? '1' : '');
             if (isset($_POST['form_rules'])) rs_set_setting('acct_dev_2fa', !empty($_POST['dev_2fa']) ? '1' : '0');
+            if (isset($_POST['form_rules'])) rs_set_setting('post_need_acct', !empty($_POST['post_need_acct']) ? '1' : '0');
             $c = trim((string)rs_setting('acct_contact', ''));
             if ($c !== '' && !filter_var($c, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('The contact email isn\'t an email address.');
             rs_log('accounts', 'keys');
@@ -325,6 +326,7 @@ rs_head('Accounts', true, ['assets/accounts.css']);
   </div>
   <input type="hidden" name="form_rules" value="1">
   <label class="check"><input type="checkbox" name="dev_2fa" value="1"<?= rs_setting('acct_dev_2fa', '1') === '1' ? ' checked' : '' ?>> Developers can't turn two-step sign-in off once it's on</label>
+  <label class="check"><input type="checkbox" name="post_need_acct" value="1"<?= rs_setting('post_need_acct', '1') === '1' ? ' checked' : '' ?>> Reports, feedback and comments need an account (website and RecompLauncher). Players can still post as Anonymous; you see who it was here.</label>
   <div class="actions"><button class="primary" name="spot" value="rules">Save</button></div>
 </section>
 </form>
@@ -429,9 +431,9 @@ rs_head('Accounts', true, ['assets/accounts.css']);
       <td><span class="pill <?= $f['verdict'] === 'runs' ? 'ok' : ($f['verdict'] === 'issues' ? 'warn' : 'bad') ?>"><?= h(RS_PLAY_VERDICTS[$f['verdict']] ?? '') ?></span></td>
       <td class="small"><?= h($f['kind'] === 'pc' ? (RS_PLAY_PC_SYS[$f['sys']] ?? $f['sys']) : 'PS5 ' . (RS_PS5_FW[$f['sys']] ?? $f['sys'])) ?><?= $f['version'] !== '' ? ' · v' . h((string)$f['version']) : '' ?></td>
       <td class="small"><?= h(implode(', ', array_map(fn($k) => RS_PLAY_PROBLEMS[$k] . ' (' . RS_PLAY_SEVERITY[$probs[$k]] . ')', array_keys($probs)))) ?><?= $f['fix'] !== '' ? '<br><b>Helped:</b> ' . h((string)$f['fix']) : '' ?><?= $f['note'] !== '' ? '<br>' . h((string)$f['note']) : '' ?></td>
-      <td class="small"><?= $f['username'] ? h((string)$f['username']) : ($f['source'] === 'pcfb' ? 'RecompLauncher' : 'Guest') ?></td>
+      <td class="small"><?= $f['username'] ? h((string)$f['username']) . (!(int)$f['show_name'] ? ' <span class="muted">(as Anonymous)</span>' : '') : ($f['source'] === 'pcfb' ? 'RecompLauncher guest' : 'Guest') ?></td>
       <td class="small"><?= h(rs_date('M j', strtotime((string)$f['updated'] . ' UTC'))) ?></td>
-      <td><form method="post"><?= $csrf ?><input type="hidden" name="id" value="<?= (int)$f['id'] ?>"><input type="hidden" name="action" value="<?= $f['hidden'] ? 'fb-show' : 'fb-hide' ?>"><button><?= $f['hidden'] ? 'Show' : 'Hide' ?></button></form></td></tr>
+      <td><form method="post"><?= $csrf ?><input type="hidden" name="id" value="<?= (int)$f['id'] ?>"><input type="hidden" name="action" value="<?= $f['hidden'] ? 'fb-show' : 'fb-hide' ?>"><button><?= $f['hidden'] ? 'Show' : 'Hide' ?></button></form><?php if ($f['account_id'] !== null): ?><form method="post" onsubmit="return confirm('Close <?= h(addslashes((string)($f['username'] ?? 'this account'))) ?>? They\'re signed out and can\'t sign in or post.')"><?= $csrf ?><input type="hidden" name="id" value="<?= (int)$f['account_id'] ?>"><input type="hidden" name="action" value="ban"><button class="danger">Close account</button></form><?php endif; ?></td></tr>
   <?php endforeach; ?>
   </tbody></table>
   <?php endif; ?>
@@ -444,7 +446,7 @@ rs_head('Accounts', true, ['assets/accounts.css']);
   <div class="ac-queue">
   <?php foreach ($queue as $c): ?>
     <article class="ac-cm<?= $c['hidden'] ? ' held' : '' ?>">
-      <div class="ac-cm-meta"><b><?= h($c['username'] ?? 'deleted user') ?></b> on <a href="<?= h($gameUrl((string)$c['game'])) ?>" target="_blank" rel="noopener"><?= h($gameName((string)$c['game'])) ?></a> · <?= h(rs_date('M j, g:i a', strtotime((string)$c['created'] . ' UTC'))) ?>
+      <div class="ac-cm-meta"><b><?= h($c['username'] ?? 'deleted user') ?></b><?= !empty($c['anon']) ? ' <span class="muted">(as Anonymous)</span>' : '' ?> on <a href="<?= h($gameUrl((string)$c['game'])) ?>" target="_blank" rel="noopener"><?= h($gameName((string)$c['game'])) ?></a> · <?= h(rs_date('M j, g:i a', strtotime((string)$c['created'] . ' UTC'))) ?>
         <?= $c['hidden'] ? '<span class="pill bad">Hidden</span>' : '' ?> <span class="pill warn"><?= (int)$c['reports'] ?> <?= (int)$c['reports'] === 1 ? 'report' : 'reports' ?><?= isset($reasons[(int)$c['id']]) ? ': ' . h(implode(', ', $reasons[(int)$c['id']])) : '' ?></span></div>
       <p class="ac-cm-body"><?= nl2br(h((string)$c['body'])) ?></p>
       <div class="ac-acts">

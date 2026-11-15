@@ -68,7 +68,7 @@ try {
             $sc = rs_play_scores()[$kind][$id] ?? null;
             rs_pl_out(200, ['ok' => true, 'summary' => $sc, 'items' => $items,
                 'me' => $me ? ['user' => (string)$me['username'], 'avatar' => rs_acct_avatar_url($me)] : null,
-                'turnstile' => !$me && rs_acct_turnstile_ready() ? rs_acct_turnstile_site() : '']);
+                'turnstile' => !$me && rs_acct_turnstile_ready() ? rs_acct_turnstile_site() : '', 'needSignIn' => !$me && rs_post_need_acct()]);
         }
         if ($a === 'versions') {
             $t = rs_title($s('title', 64));
@@ -112,6 +112,7 @@ try {
 
     if ($a === 'post') {
         if ($s('website', 100) !== '') rs_pl_out(200, ['ok' => true]); // the hidden field: a bot
+        if (!$me && rs_post_need_acct()) rs_pl_out(401, ['ok' => false, 'error' => RS_POST_SIGN_IN, 'needSignIn' => true]);
         $kind = $s('kind', 4); $id = $s('id', 64);
         if (!rs_pl_version($kind, $id)) rs_pl_out(404, ['ok' => false, 'error' => 'That isn\'t in the store.']);
         $verdict = $s('verdict', 8);
