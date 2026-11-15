@@ -159,8 +159,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (str_starts_with((string)($_POST['action'] ?? ''), 'chk_')) {
         // (4.11) Check a game: check again, test drafts (models side by side), and what to do with one.
         $act = (string)$_POST['action'];
-        $a = rs_pc_app($id);
+        // (4.12) A submission not on RecompLauncher yet (id sub-<inbox id>): test drafts only.
+        $chkSubPost = preg_match('/^sub-(\d+)$/', $id, $sm) ? (int)$sm[1] : 0;
+        $a = $chkSubPost ? null : rs_pc_app($id);
         try {
+            if ($chkSubPost) {
+                if ($act === 'chk_test') {
+                    $models = array_values(array_intersect((array)($_POST['models'] ?? []), ['haiku', 'sonnet', 'opus', 'haiku+sonnet', 'sonnet+opus']));
+                    if (!$models) throw new RuntimeException('Tick at least one model.');
+                    if (!rs_prq_sub_pick($chkSubPost)) throw new RuntimeException('That submission isn\'t a PC recomp on GitHub, so the drafter can\'t read it.');
+                    rs_prq_dry_start(['sub-' . $chkSubPost], $models);
+                    rs_flash('Making its recomplauncher.json with ' . count($models) . ' model' . (count($models) === 1 ? '' : 's') . '. Each takes a few minutes and shows up below. Nothing is sent.');
+                } elseif ($act === 'chk_dry_delete') { rs_prq_dry_delete((string)($_POST['name'] ?? '')); rs_flash('Deleted.'); }
+                header('Location: sdk-support.php?tab=check&sub=' . $chkSubPost); exit;
+            }
             if (!$a) throw new RuntimeException('Pick a recomp first.');
             if ($act === 'chk_fresh') { rs_sdk_health($a, true); rs_pc_sdk_check($a, true, true); rs_flash('Checked again.'); }
             elseif ($act === 'chk_test') {
@@ -185,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_sdk_health($a, true);
                 rs_flash('RecompLauncher uses this file for ' . $a['name'] . ' now (our profile), until the developer ships their own.');
             } elseif ($act === 'chk_dry_delete') { rs_prq_dry_delete((string)($_POST['name'] ?? '')); rs_flash('Deleted.'); }
-        } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
+        } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); if ($chkSubPost) { header('Location: sdk-support.php?tab=check&sub=' . $chkSubPost); exit; } }
         header('Location: sdk-support.php?tab=check' . ($a ? '&app=' . rawurlencode($a['id']) : '')); exit;
     } elseif (($_POST['action'] ?? '') === 'prq_queue') {
         $ids = array_filter(array_map('trim', explode(',', (string)($_POST['ids'] ?? ''))));

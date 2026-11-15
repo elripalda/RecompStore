@@ -198,6 +198,16 @@
       send(bfd).then(function (j) { busy(selbar, false); if (j.ok) picked = {}; done(j); selDraw(); });
       return;
     }
+    // (4.12) The check mark for VirusTotal's minor flags: marked fine (green) or taken back.
+    var vtok = t.closest('[data-vtok]');
+    if (vtok) {
+      e.preventDefault();
+      var vfd = new FormData();
+      vfd.append('action', 'vt_ok'); vfd.append('item', vtok.closest('[data-item]').getAttribute('data-item')); vfd.append('on', vtok.getAttribute('data-vtok'));
+      vtok.classList.toggle('on'); vtok.classList.add('busy');
+      send(vfd).then(function (j) { vtok.classList.remove('busy'); if (!j.ok) vtok.classList.toggle('on'); done(j); });
+      return;
+    }
     var card = t.closest('.sh-card[data-item], .sh-hrow[data-item]');
     if (card && selecting && card.matches('.sh-card[data-item^="job:"]')) { var k = card.getAttribute('data-item'); if (picked[k]) delete picked[k]; else picked[k] = true; selDraw(); return; }
     if (card && selecting) { toast('Only drafts can be picked. Submissions are handled one by one.'); return; }

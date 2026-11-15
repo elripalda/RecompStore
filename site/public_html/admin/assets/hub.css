@@ -42,6 +42,10 @@ img.sh-ico{background:#0f1216}
 .sh-by.big{font-size:13.5px;color:var(--soft);white-space:normal}.sh-by.big.ver b{color:var(--cyan-ink);font-weight:600}
 .sh-ver{display:inline-flex;color:var(--cyan);flex:none}.sh-ver svg{width:15px;height:15px}
 .sh-flagged{color:var(--flag);display:inline-flex;flex:none}.sh-flagged svg{width:16px;height:16px}
+.sh-vtok{flex:none;margin-left:auto;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:1.5px solid var(--warn,#e0a526);color:var(--warn,#e0a526);background:transparent;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.sh-vtok svg{width:14px;height:14px}.sh-vtok:hover{background:color-mix(in srgb,var(--warn,#e0a526) 16%,transparent)}
+.sh-vtok.on{background:var(--ok,#2fbf71);border-color:var(--ok,#2fbf71);color:#06121a}.sh-vtok.on:hover{filter:brightness(1.1)}.sh-vtok.busy{opacity:.55;pointer-events:none}
+.sh-flagged+.sh-vtok{margin-left:6px}
 .sh-note{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:5px 8px;border-radius:7px;min-width:0}
 .sh-note>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sh-note i{width:7px;height:7px;border-radius:50%;flex:none;background:currentColor}

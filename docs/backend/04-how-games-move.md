@@ -43,6 +43,10 @@ One row per project with every player's ask under it. **Check it** runs the rule
 
 **Publish** on a draft (`rs_auto_publish`) shows the listing and publishes it. A file VirusTotal flagged keeps it hidden until someone decides on the Security page.
 
+Minor VirusTotal flags (yellow) put a round check on the card. Clicking it (`vt_ok` in `hub.php`) marks that release fine: kv `vtok:<md5 of repo|tag>` with who and when (`rs_hub_vtok`), logged under security. A draft whose only warning was those flags then reads **Ready to publish** (`rs_hub_job_state`). A new release needs a new look.
+
+The drawer's **Make its recomplauncher.json** opens Launcher support > Check a game for the submission (`?tab=check&sub=<id>`), see `08-sdk-and-pr-queue.md`.
+
 ## Submissions (the board)
 
 PC: **New** → (Approve and check) → **Checking** (Auto-add's run) → **Ready to publish** → (Publish) → live, off the board.

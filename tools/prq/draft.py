@@ -917,7 +917,8 @@ def body_text(p, what, d, code=None, doc=None, plain=None, ctx=None):
     """The pull request's description, in the shape of the hand-made ones."""
     doc = doc if doc is not None else d.get("recomplauncher_json")
     have, missing = feature_list(doc, d, code, plain, ctx)
-    lines = [f"Hi! This makes {p['name']} installable from [RecompLauncher](https://recomplauncher.com), where it's already listed: {p['page']}.", "",
+    where = "." if p.get("unlisted") else f", where it's already listed: {p['page']}."
+    lines = [f"Hi! This makes {p['name']} installable from [RecompLauncher](https://recomplauncher.com){where}", "",
              "## What it adds for players"] + [f"- {x}" for x in have]
     if missing:
         lines += ["", "## Not in this pull request yet"] + [f"- {x}" for x in missing]

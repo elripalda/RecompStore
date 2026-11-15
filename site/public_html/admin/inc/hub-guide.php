@@ -26,6 +26,8 @@ $doc = [
         'Publish (on Ready to publish): puts it live on RecompLauncher. Click twice to be sure.',
         'Run again: starts the checks over (for one that stopped or that the developer updated).',
         'Remove: takes the draft off the board. If it came from a submission, the submission goes back to New.',
+        'The round check on a card (top right) shows when VirusTotal found minor flags (1 or 2 engines, common for unsigned programs). Look at the reports, then click it: it turns green, and with everything else good the draft reads Ready to publish. It counts for that release only; click again to take it back.',
+        'Make its recomplauncher.json (in the drawer): opens Launcher support for that submission, where the drafter writes its file before you approve it. Copy or download it, and once it\'s on RecompLauncher use it for its listing.',
         'The ••• menu has Mark done without an email (duplicates, spam), Move to the other store, and more.',
     ]],
     ['Talking to developers', [

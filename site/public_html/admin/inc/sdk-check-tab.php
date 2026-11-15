@@ -10,7 +10,22 @@ $chkA = $chkId !== '' ? rs_pc_app($chkId) : null;
 $chkApps = array_values(array_filter(rs_pc_apps(true), fn($x) => (string)$x['repo'] !== ''));
 usort($chkApps, fn($x, $y) => strcasecmp((string)$x['name'], (string)$y['name']));
 $chkHealth = $chkA ? rs_sdk_health($chkA) : null;
-$chkTests = rs_prq_dry_list($chkA ? (string)$chkA['id'] : '', $chkA ? 30 : 20);
+// (4.12) A submission sent over from Submissions (?sub=<inbox id>): its recomplauncher.json made before
+// it's approved. Test runs for it are kept as sub-<id>; once it's a listing they show on its page too.
+$chkSubId = $chkA ? 0 : (int)($_GET['sub'] ?? 0);
+$chkSub = $chkSubId ? rs_prq_sub_pick($chkSubId) : null;
+$chkSubApp = $chkSubId ? rs_prq_sub_app($chkSubId) : null;
+$chkSubOf = [];  // test-run id => the submission's listing (or null while it's a submission)
+if ($chkSub) $chkTests = rs_prq_dry_list('sub-' . $chkSubId, 30);
+else {
+    $chkTests = rs_prq_dry_list($chkA ? (string)$chkA['id'] : '', $chkA ? 30 : 20);
+    if ($chkA) {
+        $sq = rs_db()->prepare("SELECT DISTINCT sub_id FROM pc_auto WHERE app_id = ? AND sub_id > 0");
+        try { $sq->execute([(string)$chkA['id']]); foreach ($sq->fetchAll(PDO::FETCH_COLUMN) as $sid) $chkTests = array_merge($chkTests, rs_prq_dry_list('sub-' . (int)$sid, 10)); } catch (Throwable $e) { /* none */ }
+        usort($chkTests, fn($x, $y) => (int)($y['finished'] ?? $y['started'] ?? 0) <=> (int)($x['finished'] ?? $x['started'] ?? 0));
+    }
+}
+foreach ($chkTests as $t) if (preg_match('/^sub-(\d+)$/', (string)$t['id'], $m)) $chkSubOf[(string)$t['id']] = $chkA ?: ($chkSubId === (int)$m[1] ? $chkSubApp : rs_prq_sub_app((int)$m[1]));
 $chkRunning = count(array_filter($chkTests, fn($r) => ($r['status'] ?? '') === 'running'));
 $chkModelName = function (string $m): string {
     $n = fn(string $x) => str_contains($x, 'opus') ? 'Opus' : (str_contains($x, 'haiku') ? 'Haiku' : (str_contains($x, 'sonnet') ? 'Sonnet' : $x));
@@ -31,6 +46,37 @@ $chkSource = ['release' => ['The developer\'s own file, from their release', 'ok
   </form>
   <p class="muted small">What players get for one game, what's wrong and how to fix it, and where it is in the PR queue. Not on RecompLauncher yet? <a href="sdk-support.php?tab=lookup">Look up its GitHub repo</a>.</p>
 </section>
+
+<?php if ($chkSubId && !$chkSub): ?>
+<section class="card"><p class="muted">That submission isn't a PC recomp on GitHub (or it's gone), so the drafter can't make a file for it.</p></section>
+<?php elseif ($chkSub): ?>
+<section class="card chk-head">
+  <div class="chk-title">
+    <h2><?= h((string)$chkSub['name']) ?></h2>
+    <p class="small"><a href="<?= h(rs_host_web('', (string)$chkSub['repo'])) ?>" target="_blank" rel="noopener"><?= h((string)$chkSub['repo']) ?> ↗</a> · <a href="hub.php">Back to Submissions</a></p>
+    <p class="chk-src"><?php if ($chkSubApp): ?>Now on RecompLauncher as <span class="pill blue"><?= h((string)$chkSubApp['name']) ?></span> <a class="btn small" href="sdk-support.php?tab=check&amp;app=<?= h(rawurlencode((string)$chkSubApp['id'])) ?>">Check its listing</a><?php else: ?><span class="pill">A submission, not on RecompLauncher yet</span><?php endif; ?></p>
+  </div>
+</section>
+<section class="card chk-next">
+  <h3>Its recomplauncher.json, before it's approved</h3>
+  <p>The drafter reads their project and writes the file: Easy Setup from the player's own copy, how to start it, settings, saves and logs. Nothing is sent. Copy or download it to look it over or send it to the developer, and once it's approved, use it for its listing from here or from its page.</p>
+</section>
+<section class="card chk-draft" id="chk-draft">
+  <h3>Make it with <span class="muted small">one model is enough; tick more to compare</span></h3>
+  <form method="post" class="chk-draft-f"><?= $csrf ?><input type="hidden" name="id" value="sub-<?= (int)$chkSubId ?>">
+    <fieldset class="chk-models"><legend class="small">Draft with</legend>
+      <label><input type="checkbox" name="models[]" value="haiku"> <b>Haiku</b> <small class="muted">cheapest</small></label>
+      <label><input type="checkbox" name="models[]" value="sonnet" checked> <b>Sonnet</b> <small class="muted">balanced</small></label>
+      <label><input type="checkbox" name="models[]" value="opus"> <b>Opus</b> <small class="muted">strongest</small></label>
+      <label><input type="checkbox" name="models[]" value="haiku+sonnet"> <b>Haiku reads, Sonnet codes</b> <small class="muted">mixed</small></label>
+    </fieldset>
+    <div class="chk-draft-btns">
+      <button class="btn primary" name="action" value="chk_test"<?= rs_prq_now_ready() ? '' : ' disabled title="Add the Anthropic API key in PR queue > Setup first"' ?>>Make the file</button>
+    </div>
+    <p class="muted small">It takes a few minutes; what it cost shows with it and goes on <a href="ai-usage.php">AI usage</a>.</p>
+  </form>
+</section>
+<?php endif; ?>
 
 <?php if ($chkA && $chkHealth): $src = $chkSource[$chkHealth['source']] ?? $chkSource['none']; $rel = $chkHealth['release']; ?>
 <section class="card chk-head">
@@ -118,15 +164,15 @@ if ($nSt === 'drafting' && strtotime((string)$nq['updated'] . ' UTC') < time() -
 </section>
 <?php endif; ?>
 
-<section class="card chk-tests"<?= $chkRunning ? ' data-running="' . $chkRunning . '"' : '' ?> data-app="<?= h($chkA ? (string)$chkA['id'] : '') ?>">
-  <h3><?= $chkA ? 'Test drafts' : 'Latest test drafts' ?> <?php if ($chkRunning): ?><span class="muted small"><span class="sdk-spin" aria-hidden="true"></span> <?= $chkRunning ?> working</span><?php endif; ?></h3>
-  <?php if (!$chkTests): ?><p class="muted"><?= $chkA ? 'None yet. Run one above.' : 'None yet. Pick a recomp above.' ?></p><?php endif; ?>
-  <?php foreach ($chkTests as $t): $ta = $chkA ?: rs_pc_app((string)$t['id']); $d = (array)($t['draft'] ?? []); $st = (string)($t['status'] ?? '');
+<section class="card chk-tests"<?= $chkRunning ? ' data-running="' . $chkRunning . '"' : '' ?> data-app="<?= h($chkA ? (string)$chkA['id'] : ($chkSub ? 'sub-' . $chkSubId : '')) ?>">
+  <h3><?= $chkA || $chkSub ? 'Test drafts' : 'Latest test drafts' ?> <?php if ($chkRunning): ?><span class="muted small"><span class="sdk-spin" aria-hidden="true"></span> <?= $chkRunning ?> working</span><?php endif; ?></h3>
+  <?php if (!$chkTests): ?><p class="muted"><?= $chkA || $chkSub ? 'None yet. Run one above.' : 'None yet. Pick a recomp above.' ?></p><?php endif; ?>
+  <?php foreach ($chkTests as $t): $tSub = array_key_exists((string)$t['id'], $chkSubOf); $ta = $tSub ? $chkSubOf[(string)$t['id']] : ($chkA ?: rs_pc_app((string)$t['id'])); $d = (array)($t['draft'] ?? []); $st = (string)($t['status'] ?? '');
       $mName = $chkModelName((string)$t['model']) . ((string)($t['code_model'] ?? '') !== '' && $t['code_model'] !== $t['model'] ? ' reads, ' . $chkModelName((string)$t['code_model']) . ' codes' : '');
       $code = is_array($d['code'] ?? null) ? $d['code'] : null; ?>
   <details class="chk-t chk-t-<?= h($st) ?>">
     <summary>
-      <span class="chk-t-name"><strong><?= h($mName) ?></strong><?php if (!$chkA && $ta): ?><span class="muted small"><a href="sdk-support.php?tab=check&amp;app=<?= h(rawurlencode((string)$ta['id'])) ?>"><?= h((string)$ta['name']) ?></a></span><?php endif; ?></span>
+      <span class="chk-t-name"><strong><?= h($mName) ?></strong><?php if ($tSub && ($chkA || !$chkSub)): ?><span class="muted small">made while it was a submission</span><?php endif; ?><?php if (!$chkA && !$chkSub && $ta): ?><span class="muted small"><a href="sdk-support.php?tab=check&amp;app=<?= h(rawurlencode((string)$ta['id'])) ?>"><?= h((string)$ta['name']) ?></a></span><?php endif; ?></span>
       <span class="chk-t-st small"><?= $st === 'running' ? '<span class="sdk-spin" aria-hidden="true"></span> Drafting…' : ($st === 'done' ? ($code ? 'Done, with code changes' : 'Done') : ($st === 'skipped' ? 'Skipped' : ($st === 'stopped' ? 'Stopped' : 'Didn\'t finish'))) ?></span>
       <span class="chk-t-cost small"><?= $st === 'running' ? '' : h($chkUsd((float)$t['cost'])) . ' · ' . (int)$t['calls'] . ' calls' . ($t['secs'] !== null ? ' · ' . (int)ceil($t['secs'] / 60) . ' min' : '') ?></span>
       <span class="chk-t-when muted small"><?= h(gmdate('M j, H:i', (int)($t['finished'] ?? $t['started'] ?? time()))) ?></span>
@@ -134,7 +180,7 @@ if ($nSt === 'drafting' && strtotime((string)$nq['updated'] . ' UTC') < time() -
     <?php if ($st === 'skipped' || $st === 'failed'): ?><p class="small <?= $st === 'failed' ? 'bad' : '' ?>"><?= h((string)($d['skip_reason'] ?? $d['error'] ?? '')) ?></p><?php endif; ?>
     <?php if ($st === 'done'): ?>
       <?php if (trim((string)($d['note'] ?? '')) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$d['note'])) ?></p><?php endif; ?>
-      <?= rs_prq_found_html(is_array($d['found'] ?? null) ? $d['found'] : null, (string)($ta['repo'] ?? '')) ?>
+      <?= rs_prq_found_html(is_array($d['found'] ?? null) ? $d['found'] : null, (string)($ta['repo'] ?? ($chkSub['repo'] ?? ''))) ?>
       <?php if ($code && !empty($code['edits'])): ?>
       <div class="prq-code"><h4>Code changes <span class="muted small">adds <?= h(implode(', ', array_map('strval', (array)($code['adds'] ?? [])))) ?></span></h4>
         <?php foreach ((array)($code['explain'] ?? []) as $ex): ?><p class="small">• <?= h((string)$ex) ?></p><?php endforeach; ?>
@@ -142,7 +188,15 @@ if ($nSt === 'drafting' && strtotime((string)$nq['updated'] . ' UTC') < time() -
       </div>
       <?php endif; ?>
       <details class="chk-doc"><summary class="small">Pull request text</summary><pre class="chk-body"><?= h((string)($d['body'] ?? '')) ?></pre></details>
-      <details class="chk-doc"><summary class="small">recomplauncher.json</summary><pre class="mono"><?= h((string)json_encode($d['json'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?></pre></details>
+      <?php $tJson = (string)json_encode($d['json'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>
+      <details class="chk-doc"<?= !$ta ? ' open' : '' ?>><summary class="small">recomplauncher.json</summary><pre class="mono"><?= h($tJson) ?></pre>
+        <div class="chk-t-btns"><button type="button" class="btn small" data-copy-json>Copy it</button><a class="btn small" download="recomplauncher.json" href="data:application/json;charset=utf-8,<?= rawurlencode($tJson . "\n") ?>">Download it</a></div></details>
+      <?php if (!$ta): ?>
+      <form method="post" class="chk-t-btns"><?= $csrf ?><input type="hidden" name="id" value="<?= h((string)$t['id']) ?>"><input type="hidden" name="name" value="<?= h((string)$t['name']) ?>">
+        <span class="muted small">Once it's approved and on RecompLauncher, it can be used for its listing or go in the PR queue.</span>
+        <button class="btn danger" name="action" value="chk_dry_delete">Delete</button>
+      </form>
+      <?php endif; ?>
       <?php if ($ta): $why = 'We made a recomplauncher.json for ' . $ta['name'] . ' so RecompLauncher can set it up from the player\'s own copy, with its settings, saves and logs. If you put it in your release zip, next to the program, the launcher reads it from each release:' . "\n\n" . json_encode($d['json'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); $cl = rs_pc_contact_links($ta, $why); ?>
       <form method="post" class="chk-t-btns"><?= $csrf ?><input type="hidden" name="id" value="<?= h((string)$ta['id']) ?>"><input type="hidden" name="name" value="<?= h((string)$t['name']) ?>">
         <button class="btn primary" name="action" value="chk_dry_queue" title="Into the PR queue, where it's looked over and sent like any other">Put in the PR queue</button>
@@ -163,6 +217,14 @@ $chkLines = is_file($chkLog) ? array_slice(file($chkLog, FILE_IGNORE_NEW_LINES) 
 if ($chkLines): ?>
 <details class="card chk-log"><summary><b>Drafter log</b> <span class="muted small">the last <?= count($chkLines) ?> lines of the test runs</span></summary><pre class="mono"><?= h(implode("\n", $chkLines)) ?></pre></details>
 <?php endif; ?>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest && e.target.closest('[data-copy-json]');
+  if (!b) return;
+  var pre = b.closest('details').querySelector('pre');
+  (navigator.clipboard ? navigator.clipboard.writeText(pre.textContent) : Promise.reject()).then(function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy it'; }, 1500); }, function () { var r = document.createRange(); r.selectNodeContents(pre); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); b.textContent = 'Press Ctrl+C'; });
+});
+</script>
 <?php if ($chkRunning): ?>
 <script>
 (function () {

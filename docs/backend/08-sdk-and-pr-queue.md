@@ -50,3 +50,7 @@ Pull requests that add RecompLauncher support (recomplauncher.json and the READM
 Rules for the PR text (in draft.py's prompt): plain and friendly, no mention of AI, tools or models, and it never claims the code was built or tested. A project that already has a RecompLauncher PR (ours or anyone's, open or closed) is skipped.
 
 The PR body follows the hand-made ones: What it adds for players, Not in this pull request yet, The code changes, Things that would make your recomp better, For the developer, What's RecompLauncher?. The first two lists are worked out from the json itself, never from the model's claims: installs and updates, Easy Setup (with a setup step, through an existing option, an option added here, not needed, or missing), settings, saves, logs, exit codes, mods, the badge, and whether `recomplauncher.json` reaches the release.
+
+## A submission's file before it's approved
+
+`sdk-support.php?tab=check&sub=<inbox id>` (linked from the Submissions drawer) runs test drafts for a PC submission on GitHub that isn't a listing yet. `rs_prq_sub_pick` turns the submission into a pick with id `sub-<id>` (`unlisted`, so the PR text doesn't link a page). Its runs are files like any test run (`sub-<id>__model__time.json`): copy or download the json there. Once Auto-add has made its listing (`rs_prq_sub_app`, from `pc_auto.sub_id`), the runs also show on the listing's Check page, where "Use as our profile" and "Put in the PR queue" work (`rs_prq_dry_to_queue` moves a `sub-` draft to the listing's id).

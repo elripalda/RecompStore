@@ -299,9 +299,35 @@ function rs_hub_jobs(): array {
     }
     return $out;
 }
+// (4.12) VirusTotal's minor flags (yellow: 1 or 2 engines, common for unsigned programs) that someone looked
+// at and marked fine, per release (repo + tag), so a new release gets its own look. kv vtok:<md5>.
+function rs_hub_vtok_k(string $repoKey, string $tag): string { return 'vtok:' . md5(strtolower($repoKey) . '|' . $tag); }
+function rs_hub_vtok(string $repoKey, string $tag): ?array {
+    if ($repoKey === '' || $tag === '') return null;
+    $c = rs_kv_get(rs_hub_vtok_k($repoKey, $tag));
+    $v = $c ? json_decode((string)$c['v'], true) : null;
+    return is_array($v) && !empty($v['by']) ? $v : null;
+}
+function rs_hub_vt_minor(string $repoKey, string $tag): bool {
+    if ($repoKey === '' || $tag === '' || !function_exists('rs_vt_release')) return false;
+    [$rows, $v] = rs_vt_release($repoKey, $tag);
+    return $rows && $v === 'yellow';
+}
+// The release a card's VirusTotal flags are about: ['k' => repo key, 't' => tag], or null.
+function rs_hub_item_vt(string $item): ?array {
+    if (preg_match('/^job:(\d+)$/', $item, $m) && ($j = rs_auto_get((int)$m[1]))) return ['k' => (string)$j['repo_key'], 't' => (string)$j['tag']];
+    if (preg_match('/^sub:(\d+)$/', $item, $m) && ($s = rs_hub_sub((int)$m[1]))) {
+        $c = rs_hub_checks_kept([(int)$m[1]])[(int)$m[1]][0] ?? null;
+        $tag = (string)($c['latest']['tag'] ?? '');
+        $d = $s[1];
+        return $tag !== '' && (string)($d['repo'] ?? '') !== '' ? ['k' => rs_repo_key(rs_host_norm((string)($d['host'] ?? '')), (string)$d['repo']), 't' => $tag] : null;
+    }
+    return null;
+}
 // A draft's state for its card and drawer: [col, note [state, text], stuck, vt [state, note]].
 function rs_hub_job_state(array $j): array {
     $vt = ($j['steps']['vt']['s'] ?? '') === 'skip' ? ['skip', (string)($j['steps']['vt']['n'] ?? '')] : rs_auto_vt($j);
+    if ($vt[0] === 'warn' && str_contains($vt[1], 'minor flag') && ($vok = rs_hub_vtok((string)$j['repo_key'], (string)$j['tag']))) $vt = ['ok', $vt[1] . '. ' . $vok['by'] . ' looked: likely a false positive'];
     $stuck = in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) < time() - RS_AUTO_STUCK;
     if ($j['status'] === 'failed' || $stuck) return ['check', ['bad', $stuck ? 'Stopped. Run it again' : rs_hub_fail_note((string)$j['notes'])], $stuck, $vt];
     if ($j['status'] === 'queued') return ['check', ['run', 'In line to start'], false, $vt];
@@ -315,7 +341,7 @@ function rs_hub_job_state(array $j): array {
         return ['check', ['run', ($at !== '' ? $at : 'Finishing') . ' · ' . $n . ' of ' . count(RS_AUTO_STEPS)], false, $vt];
     }
     // Ready: Claude's verdict, with the live VirusTotal state on top.
-    $note = match ($j['verdict']) { 'good' => ['ok', 'Looks good'], 'skip' => ['bad', 'Checks say don\'t list it'], default => ['warn', 'Look first'] };
+    $note = match ($j['verdict']) { 'good' => ['ok', 'Ready to publish'], 'skip' => ['bad', 'Checks say don\'t list it'], default => ['warn', 'Look first'] };
     if ($vt[0] === 'bad') $note = ['bad', 'VirusTotal flagged it'];
     elseif ($vt[0] === 'run') $note = ['run', 'VirusTotal checking'];
     elseif ($vt[0] === 'warn' && $note[0] === 'ok') $note = ['warn', 'Look first: ' . rs_hub_short($vt[1])];
@@ -400,17 +426,26 @@ function rs_hub_board(string $store): array {
             $note = $c[0]['note'];
             if ($c[1] > RS_HUB_CHECK_AGE || ($note[0] === 'run' && $c[1] > 90)) $need[] = $sid;
         } else $need[] = $sid;
+        // (4.12) Minor VirusTotal flags: the check mark on the card.
+        $subVt = null;
+        if ($c && str_contains((string)($c[0]['steps']['safe'][1] ?? ''), 'minor flag') && (string)($c[0]['latest']['tag'] ?? '') !== '' && (string)($d['repo'] ?? '') !== '') {
+            $vk = rs_repo_key(rs_host_norm((string)($d['host'] ?? '')), (string)$d['repo']);
+            $vo = rs_hub_vtok($vk, (string)$c[0]['latest']['tag']);
+            $subVt = ['ok' => $vo !== null, 'by' => (string)($vo['by'] ?? '')];
+        }
         $cols[$r['col']][] = [
             'key' => 'sub:' . $sid, 'name' => (string)($d['name'] ?? 'Untitled'), 'dev' => (string)($d['author'] ?? ''), 'verified' => !empty($d['verified']),
             'acct' => !empty($d['account']), 'src' => !empty($d['resubmitted']) && $r['col'] === 'new' ? 'Sent again' : 'Submission',
             'con' => $store === 'pc' ? rs_hub_con((string)($d['origin'] ?? '')) : rs_hub_cat((string)($d['category'] ?? '')),
-            'when' => rs_hub_ts((string)$r['created']), 'note' => $note, 'icon' => $icon($sid), 'pre' => in_array($sid, $need, true),
+            'when' => rs_hub_ts((string)$r['created']), 'note' => $note, 'icon' => $icon($sid), 'pre' => in_array($sid, $need, true), 'vt' => $subVt,
             'flag' => !empty($flags['sub:' . $sid]), 'notes' => (int)($notes['sub:' . $sid] ?? 0),
             'q' => mb_strtolower(($d['name'] ?? '') . ' ' . ($d['author'] ?? '') . ' ' . ($d['repo'] ?? '') . ' ' . ($d['account_name'] ?? '')),
         ];
     }
     foreach ($jobs as $j) {
         [$col, $note] = rs_hub_job_state($j);
+        $jvo = rs_hub_vt_minor((string)$j['repo_key'], (string)$j['tag']) ? rs_hub_vtok((string)$j['repo_key'], (string)$j['tag']) : false;
+        $jobVt = $jvo === false ? null : ['ok' => $jvo !== null, 'by' => (string)($jvo['by'] ?? '')];
         $a = $j['app_id'] !== '' ? rs_pc_app($j['app_id']) : null;
         // (4.10) Another developer's version of the same game is no reason to hold one back: more choice is better.
         $sub = !empty($j['sub_id']) ? ($subById[(int)$j['sub_id']]['d'] ?? null) : null;
@@ -422,7 +457,7 @@ function rs_hub_board(string $store): array {
             'key' => 'job:' . (int)$j['id'], 'name' => $name !== '' ? $name : preg_replace('#^https?://(www\.)?#', '', (string)$j['link']),
             'dev' => $sub !== null ? (string)($sub['author'] ?? '') : ($src === 'Link' ? 'Added by ' . (string)$j['who'] : ''), 'verified' => $sub !== null && !empty($sub['verified']),
             'acct' => $sub !== null && !empty($sub['account']), 'src' => $src, 'con' => $con, 'when' => rs_hub_ts((string)$j['created']), 'note' => $note,
-            'icon' => (string)($a['icon'] ?? '') !== '' ? (string)$a['icon'] : ($sub !== null ? $icon((int)$j['sub_id']) : ''), 'pre' => false,
+            'icon' => (string)($a['icon'] ?? '') !== '' ? (string)$a['icon'] : ($sub !== null ? $icon((int)$j['sub_id']) : ''), 'pre' => false, 'vt' => $jobVt,
             'flag' => !empty($flags[$item]), 'notes' => (int)($notes[$item] ?? 0),
             'q' => mb_strtolower($name . ' ' . ($sub['author'] ?? '') . ' ' . $j['repo_key']),
         ];
@@ -464,7 +499,7 @@ function rs_hub_sig(): string {
     $s = '';
     try {
         foreach (rs_db()->query("SELECT id, status, MD5(data) m FROM inbox WHERE kind = 'submit' AND status <> 'done' ORDER BY id") as $r) $s .= $r['id'] . $r['status'] . $r['m'] . '|';
-        foreach (rs_hub_jobs() as $j) $s .= $j['id'] . $j['status'] . md5(json_encode($j['steps'])) . implode('', rs_auto_vt($j)) . '|';
+        foreach (rs_hub_jobs() as $j) $s .= $j['id'] . $j['status'] . md5(json_encode($j['steps'])) . implode('', rs_auto_vt($j)) . (rs_hub_vtok((string)$j['repo_key'], (string)$j['tag']) ? 'v' : '') . '|';
         rs_hub_tables();
         $s .= rs_db()->query('SELECT CONCAT(COUNT(*), MAX(id)) FROM hub_notes')->fetchColumn() . rs_db()->query("SELECT CONCAT(COUNT(*), MAX(id), SUM(status = 'open')) FROM hub_flags")->fetchColumn();
     } catch (Throwable $e) { /* nothing to compare */ }

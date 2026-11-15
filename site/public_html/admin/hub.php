@@ -60,7 +60,8 @@ function hub_card(array $c): string {
     return '<button type="button" class="sh-card' . ($c['flag'] ? ' flagged' : '') . '" data-item="' . h($c['key']) . '" data-q="' . h($c['q']) . '" data-v="' . ($c['verified'] ? 1 : 0) . '" data-s="' . h($st) . '" data-f="' . ($c['flag'] ? 1 : 0) . '"' . ($c['pre'] ? ' data-pre="' . (int)substr($c['key'], 4) . '"' : '') . '>'
         . '<span class="sh-card-top">' . hub_tile($c['name'], $c['icon']) . '<span class="sh-card-t"><b>' . h($c['name']) . '</b><span class="sh-by' . ($c['verified'] ? ' ver' : '') . '">'
         . ($c['verified'] ? '<span class="sh-ver" title="Verified developer">' . HUB_IC['ver'] . '</span>' : '') . h($dev) . '</span></span>'
-        . ($c['flag'] ? '<span class="sh-flagged" title="Flagged for the owner">' . HUB_IC['flag'] . '</span>' : '') . '</span>'
+        . ($c['flag'] ? '<span class="sh-flagged" title="Flagged for the owner">' . HUB_IC['flag'] . '</span>' : '')
+        . (!empty($c['vt']) ? '<span class="sh-vtok' . ($c['vt']['ok'] ? ' on' : '') . '" role="button" data-vtok="' . ($c['vt']['ok'] ? '0' : '1') . '" title="' . h($c['vt']['ok'] ? 'VirusTotal\'s minor flags: ' . $c['vt']['by'] . ' looked, likely a false positive. Click to take it back' : 'VirusTotal: minor flags (1 or 2 engines, common for unsigned programs). Looked at the reports? Click to mark it fine') . '">' . HUB_IC['check'] . '</span>' : '') . '</span>'
         . '<span class="sh-note sh-' . h($st) . '">' . ($st === 'run' ? HUB_IC['spin'] : '<i></i>') . '<span>' . h($note) . '</span></span>'
         . '<span class="sh-card-foot"><span class="sh-src">' . h($c['src']) . '</span>' . ($c['dev'] !== '' && $c['con'] !== '' ? '<span class="sh-con">' . h($c['con']) . '</span>' : '')
         . ($c['notes'] ? '<span class="sh-nn" title="Team notes">' . HUB_IC['msg'] . (int)$c['notes'] . '</span>' : '') . '<span class="sh-when">' . h($c['when'] ? rs_hub_ago($c['when']) : '') . '</span></span>'
@@ -594,6 +595,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_log('hub', 'soon', (string)$a['name']);
                 $res['msg'] = $a['name'] . ' is on Coming Soon now. When they put out a release with files, it shows on the Dashboard.';
                 $res['close'] = true;
+                break;
+            }
+            case 'vt_ok': {
+                // (4.12) Minor VirusTotal flags looked at: marked fine (or taken back) for this release.
+                $about($item);
+                $rv = rs_hub_item_vt($item);
+                if (!$rv || !rs_hub_vt_minor($rv['k'], $rv['t'])) throw new RuntimeException('Only a release with minor VirusTotal flags (yellow) can be marked fine.');
+                $on = (string)($_POST['on'] ?? '1') === '1';
+                rs_kv_put(rs_hub_vtok_k($rv['k'], $rv['t']), $on ? (string)json_encode(['by' => rs_me_name(), 'at' => gmdate('c')]) : '{}');
+                rs_log('security', $rv['k'], ($on ? 'VirusTotal minor flags marked fine for ' : 'VirusTotal OK taken back for ') . $rv['t']);
+                $res['msg'] = $on ? 'Marked fine. With everything else good, it reads Ready to publish.' : 'Taken back.';
                 break;
             }
             case 'vt_tell': {

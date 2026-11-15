@@ -232,14 +232,40 @@ function rs_prq_review(array $q): array {
 function rs_prq_dry_dir(): string { return dirname(rs_prq_script()) . '/dry'; }
 function rs_prq_dry_picks(array $appIds): array {
     $res = [];
-    foreach (array_slice($appIds, 0, 10) as $id) if ($a = rs_pc_app((string)$id)) if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') $res[] = rs_prq_pick_row($a, 'asked');
+    foreach (array_slice($appIds, 0, 10) as $id) {
+        if (preg_match('/^sub-(\d+)$/', (string)$id, $m)) { if ($p = rs_prq_sub_pick((int)$m[1])) $res[] = $p; continue; }
+        if ($a = rs_pc_app((string)$id)) if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') $res[] = rs_prq_pick_row($a, 'asked');
+    }
     return $res;
+}
+// (4.12) A PC submission that isn't on RecompLauncher yet, as a test-run pick (id sub-<inbox id>), so its
+// recomplauncher.json can be made before it's approved. Only GitHub projects (the drafter reads GitHub).
+function rs_prq_sub_pick(int $sid): ?array {
+    $st = rs_db()->prepare("SELECT data FROM inbox WHERE id = ? AND kind = 'submit'");
+    $st->execute([$sid]);
+    $d = json_decode((string)($st->fetchColumn() ?: ''), true);
+    if (!is_array($d) || ($d['platform'] ?? '') !== 'pc' || trim((string)($d['repo'] ?? '')) === '') return null;
+    if (rs_host_norm((string)($d['host'] ?? '')) !== '') return null;
+    $as = array_filter(array_map('strval', (array)($d['assets'] ?? [])));
+    return [
+        'id' => 'sub-' . $sid, 'pick' => 'asked', 'repo' => (string)$d['repo'], 'name' => (string)($d['name'] ?? basename((string)$d['repo'])),
+        'game' => (string)($d['game'] ?? $d['name'] ?? ''), 'console' => (string)($d['origin'] ?? ''), 'page' => 'https://recomplauncher.com', 'unlisted' => true,
+        'assets' => array_intersect_key($as, array_flip(['win', 'linux', 'mac'])), 'needs' => (string)($d['needs'] ?? ''),
+        'setup_required' => !empty($d['setup_required']), 'setup_steps' => (string)($d['setup_steps'] ?? ''), 'our_profile' => null, 'downloads' => 0,
+    ];
+}
+// (4.12) The listing a submission became (through Auto-add), or null while it's still a submission.
+function rs_prq_sub_app(int $sid): ?array {
+    $st = rs_db()->prepare("SELECT app_id FROM pc_auto WHERE sub_id = ? AND app_id <> '' ORDER BY id DESC LIMIT 1");
+    try { $st->execute([$sid]); $id = (string)($st->fetchColumn() ?: ''); } catch (Throwable $e) { $id = ''; }
+    return $id !== '' ? rs_pc_app($id) : null;
 }
 // Starts one test run per model (models are RS_AI_MODELS keys; 'sonnet+opus' = Sonnet reads, Opus writes the code).
 function rs_prq_dry_start(array $appIds, array $models): int {
     require_once __DIR__ . '/aiuse.php';
     if (!rs_prq_now_ready()) throw new RuntimeException('Add the Anthropic API key in Setup first.');
-    $ids = array_values(array_filter(array_map('strval', array_slice(array_unique($appIds), 0, 10)), fn($id) => ($a = rs_pc_app($id)) && (string)$a['repo'] !== '' && rs_pc_host($a) === ''));
+    $ids = array_values(array_filter(array_map('strval', array_slice(array_unique($appIds), 0, 10)), fn($id) => preg_match('/^sub-(\d+)$/', $id, $m)
+        ? rs_prq_sub_pick((int)$m[1]) !== null : (($a = rs_pc_app($id)) && (string)$a['repo'] !== '' && rs_pc_host($a) === '')));
     if (!$ids) throw new RuntimeException('Pick a recomp whose project is on GitHub.');
     $dir = rs_prq_dry_dir();
     if (!is_dir($dir) && !@mkdir($dir, 0775, true)) throw new RuntimeException('Couldn\'t make the folder for test runs.');
@@ -298,6 +324,12 @@ function rs_prq_dry_to_queue(string $name): string {
     $d = $r['draft'];
     unset($d['usage']); // (counted when the test ran)
     $d['pick'] = 'asked';
+    // (4.12) Made while it was a submission: it goes in under the listing it became.
+    if (preg_match('/^sub-(\d+)$/', (string)($d['id'] ?? ''), $m)) {
+        $sa = rs_prq_sub_app((int)$m[1]);
+        if (!$sa) return 'It isn\'t on RecompLauncher yet. Approve it first, then put this in the PR queue.';
+        $d['id'] = (string)$sa['id'];
+    }
     $s = rs_prq_draft_save($d);
     if (!$s['ok']) return (string)($s['error'] ?? 'Couldn\'t save it.');
     if (($s['kept'] ?? '') !== '') return 'It already has a pull request (' . $s['kept'] . '), so the queue kept that one.';

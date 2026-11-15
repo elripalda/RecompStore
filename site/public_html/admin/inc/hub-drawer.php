@@ -345,6 +345,11 @@ if ($job && empty($shelved)) {
         }
     }
 }
+// (4.12) Launcher support: its recomplauncher.json, made before it's approved (or for its listing).
+if ($pcSide && empty($shelved) && rs_can_page('sdk-support.php')) {
+    $lsHref = $subId > 0 && $d !== null ? 'sdk-support.php?tab=check&sub=' . $subId : ($app ? 'sdk-support.php?tab=check&app=' . rawurlencode((string)$app['id']) : '');
+    if ($lsHref !== '' && $host === '') echo '<div class="sh-d-contact"><span>RecompLauncher file</span><a class="btn small" href="' . h($lsHref) . '" target="_blank" rel="noopener">Make its recomplauncher.json</a></div>';
+}
 echo '<div class="sh-d-foot main" data-item="' . h($job ? 'job:' . (int)$job['id'] : $item) . '">';
 if ($job && $shelved) {
     // (4.9) Dismissed: back on the board, or gone for good.
