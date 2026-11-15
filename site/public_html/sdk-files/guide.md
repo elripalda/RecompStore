@@ -395,6 +395,17 @@ everyone's copy has to be made again, change `"version"` in `prepare` (any text,
 
 Players whose setup was done with a different version run the step again. Leave it out until you need it.
 
+**A build players already have.** If players can also build the game with your own launcher, list a file
+your step leaves behind once it has finished, in `"done"`. When all of them are there, RecompLauncher
+(Beta 51 and newer) counts the step as done and starts the game without asking for the copy again, so a
+player who built it your way first doesn't build it twice:
+
+```json
+"prepare": { "program": ["yourgame.exe"], "args": ["--prepare", "--game", "{game}"], "done": ["{home}/Games/YourGame/prepared.bin"] }
+```
+
+The same words work as elsewhere: `{home}`, `{local}`, `{install}`.
+
 ### `game.dumps`: known good copies
 
 ```json
