@@ -385,6 +385,16 @@ settings are written. It runs again whenever the player changes their copy.
 - Exit with 0 when it worked. Anything else shows as a failed setup, with your exit code.
 - Write what you make to the same place your launcher would, so both stay in step.
 
+**When players must run it again.** Players set up once. A launcher update, or changes to anything else in
+your file, never ask them to set up again. When an update of yours changes what the step makes, so
+everyone's copy has to be made again, change `"version"` in `prepare` (any text, like `"2"`):
+
+```json
+"prepare": { "program": ["yourgame.exe"], "args": ["--prepare", "--game", "{game}"], "version": "2" }
+```
+
+Players whose setup was done with a different version run the step again. Leave it out until you need it.
+
 ### `game.dumps`: known good copies
 
 ```json

@@ -24,7 +24,7 @@ Only `format` is required. Everything else is optional, and the launcher ignores
 | `folders` | 2 | Named places; `saves` and `logs` are used by the launcher |
 | `actions` | 2 | Buttons: `id`, `label`, `help`, `open` or `clear` |
 | `exit_codes` | 2 | Exit code (as a string) to the message shown |
-| `prepare` | 3 | Your setup step: `program`, `args`, `label`, `timeout` |
+| `prepare` | 3 | Your setup step: `program`, `args`, `label`, `timeout`, `options` (ticks before it runs), `version` (change it when players must run it again) |
 | `inputs` | 3 | Named discs, DLC and updates; shared Switch/Wii U keys; NVIDIA's DLSS file (`"shared": "nvidia.dlss"`, role `runtime`, Beta 37 and newer) |
 
 The full schema, with every value checked, is at https://recomplauncher.com/schema/recomplauncher.json.
