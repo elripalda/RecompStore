@@ -41,6 +41,8 @@
     pc: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     ps5: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9h11a3.5 3.5 0 0 1 3.4 4.3l-.8 3.4a2.2 2.2 0 0 1-3.9.8L14.6 15H9.4l-1.6 2.5a2.2 2.2 0 0 1-3.9-.8l-.8-3.4A3.5 3.5 0 0 1 6.5 9z"/><path d="M8 11.5v2M7 12.5h2"/></svg>',
     check: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    clip: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 20a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.6 7.4"/></svg>',
+    file: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>',
   };
   const PLAT = { pc: () => t('PC recomps'), ps5: () => t('PS5 apps') };
 
@@ -418,10 +420,69 @@
     return Object.keys(ROOMS).filter((r) => !['pc', 'ps5'].includes(r) || !p.length || p.includes(r));
   };
   const roomUnread = (r) => { const u = (S.me.account.unread || {}); return r === 'dm' ? Number(u.dm || 0) : Number((u.rooms || {})[r] || 0); };
-  const bubble = (m) => `<div class="hx-msg${m.mine ? ' mine' : ''}${m.team ? ' team' : ''}">
-      ${m.mine ? '' : `<span class="hx-msg-pic">${m.pic ? `<img src="${esc(m.pic)}" alt="" width="34" height="34">` : `<span>${esc(String(m.who || '?').slice(0, 1).toUpperCase())}</span>`}</span>`}
-      <div class="hx-msg-body"><span class="hx-msg-who">${m.mine ? esc(t('You')) : (m.slug ? `<a href="/dev/${encodeURIComponent(m.slug)}">${esc(m.who)}</a>` : esc(m.who))}${m.team ? ` <span class="tag info">${esc(t('Team'))}</span>` : ''}</span>
-        <p>${linkify(m.body)}</p><span class="hx-msg-when">${esc(when(m.at))}${m.mine && m.lounge ? ` · <button type="button" class="linkish" data-del="${m.id}">${esc(t('Delete'))}</button>` : ''}</span></div></div>`;
+  // (4.12) Files with a message, the day between messages, and the Lounge read like a Discord channel:
+  // a picture and a name once, then that person's next messages under it.
+  const fileUrl = (f) => '/api/dev.php?a=msg-file&f=' + encodeURIComponent(f.t);
+  const mb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+  const filesHtml = (list) => (list && list.length ? `<div class="hx-files">${list.map((f) => (f.kind === 'image'
+    ? `<a class="hx-img" href="${fileUrl(f)}" target="_blank" rel="noopener"><img src="${fileUrl(f)}" alt="${esc(f.name)}" loading="lazy"></a>`
+    : f.kind === 'video' ? `<video class="hx-vid" src="${fileUrl(f)}" controls preload="metadata"></video>`
+      : `<a class="hx-file" href="${fileUrl(f)}"><span class="hx-file-ic" aria-hidden="true">${ICON.file}</span><span><b>${esc(f.name)}</b><small>${esc(mb(f.size))}</small></span></a>`)).join('')}</div>` : '');
+  const dayKey = (iso) => { const d = new Date(iso); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
+  const dayName = (iso) => {
+    const d = new Date(iso), now = new Date(), y = new Date(now.getTime() - 86400000);
+    if (dayKey(iso) === dayKey(now.toISOString())) return t('Today');
+    if (dayKey(iso) === dayKey(y.toISOString())) return t('Yesterday');
+    try { return d.toLocaleDateString(lang(), d.getFullYear() === now.getFullYear() ? { weekday: 'long', month: 'long', day: 'numeric' } : { month: 'long', day: 'numeric', year: 'numeric' }); } catch (e) { return d.toDateString(); }
+  };
+  const clock = (iso) => { try { return new Date(iso).toLocaleTimeString(lang(), { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+  const avatar = (m, cls) => (m.team ? `<span class="${cls} team">R</span>` : m.pic ? `<img class="${cls}" src="${esc(m.pic)}" alt="" loading="lazy">` : `<span class="${cls}">${esc(String(m.who || '?').slice(0, 1).toUpperCase())}</span>`);
+  // The conversation with the team: bubbles, by day.
+  const dmHtml = (list) => {
+    let out = '', day = '', prev = null;
+    list.forEach((m) => {
+      if (m.deleted) return;
+      const k = dayKey(m.at);
+      if (k !== day) { out += `<div class="hx-day"><span>${esc(dayName(m.at))}</span></div>`; day = k; prev = null; }
+      const cont = prev && prev.mine === m.mine && new Date(m.at) - new Date(prev.at) < 300000;
+      out += `<div class="hx-msg${m.mine ? ' mine' : ' team'}${cont ? ' cont' : ''}">${m.mine ? '' : `<span class="hx-msg-pic">${cont ? '' : avatar(m, 'hx-pic-i')}</span>`}
+        <div class="hx-msg-body">${!m.mine && !cont ? `<span class="hx-msg-who">${esc(t('RecompStore team'))}</span>` : ''}${m.body ? `<p>${linkify(m.body)}</p>` : ''}${filesHtml(m.files)}<span class="hx-msg-when">${esc(clock(m.at))}</span></div></div>`;
+      prev = m;
+    });
+    return out;
+  };
+  // A Lounge channel.
+  const loungeHtml = (list) => {
+    let out = '', day = '', prev = null;
+    list.forEach((m) => {
+      const k = dayKey(m.at);
+      if (k !== day) { out += `<div class="hx-day"><span>${esc(dayName(m.at))}</span></div>`; day = k; prev = null; }
+      const same = prev && prev.team === m.team && prev.who === m.who && prev.slug === m.slug && new Date(m.at) - new Date(prev.at) < 420000;
+      const name = m.mine ? esc(m.who) : (m.slug ? `<a href="/dev/${encodeURIComponent(m.slug)}">${esc(m.who)}</a>` : esc(m.who));
+      out += `<div class="hx-dc${same ? ' cont' : ''}">${same ? `<time class="hx-dc-side">${esc(clock(m.at))}</time>` : avatar(m, 'hx-dc-av')}
+        <div class="hx-dc-body">${same ? '' : `<div class="hx-dc-head"><b class="hx-dc-name${m.team ? ' team' : ''}">${name}</b>${m.team ? `<span class="hx-dc-tag">${esc(t('Team'))}</span>` : m.verified ? `<span class="hx-dc-tag ver">${esc(t('Verified'))}</span>` : ''}<time>${esc(dayName(m.at) + ' · ' + clock(m.at))}</time></div>`}
+          ${m.body ? `<div class="hx-dc-text">${linkify(m.body)}</div>` : ''}${filesHtml(m.files)}</div>
+        ${m.mine ? `<div class="hx-dc-tools"><button type="button" data-del="${m.id}">${esc(t('Delete'))}</button></div>` : ''}</div>`;
+      prev = m;
+    });
+    return out;
+  };
+  // A soft two-note ping when something new comes in while the page is open.
+  let actx = null;
+  const ping = () => {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      [[880, 0], [1320, 0.09]].forEach(([f, d]) => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, actx.currentTime + d);
+        g.gain.exponentialRampToValueAtTime(0.07, actx.currentTime + d + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + d + 0.25);
+        o.connect(g).connect(actx.destination); o.start(actx.currentTime + d); o.stop(actx.currentTime + d + 0.3);
+      });
+    } catch (e) { /* no sound is fine */ }
+  };
+  const FILE_OK = /\.(png|jpe?g|gif|webp|mp4|webm|mov|txt|log|json|ini|toml|cfg|zip|7z)$/i;
   const msgsPane = (pane, room) => {
     clearInterval(S.poll);
     const approved = S.me.account.status === 'approved';
@@ -430,10 +491,11 @@
     const dm = room === 'dm';
     const chan = (r) => `<button type="button" class="hx-chan${r === room ? ' on' : ''}" data-room="${r}"${r === room ? ' aria-current="true"' : ''}>${r === 'dm' ? `<span class="hx-chan-ico">${ICON.check.replace('M5 12.5l4.5 4.5L19 7.5', 'M4 6h16v10H8l-4 4z')}</span>${esc(t('The RecompStore team'))}` : `<span class="hx-hash">#</span>${esc(ROOMS[r].name)}`}<span class="hx-dot"${roomUnread(r) ? '' : ' hidden'}>${roomUnread(r) || ''}</span></button>`;
     pane.innerHTML = `
-      <section class="glass hx-msgs${approved ? ' hx-chat' : ''}">
+      <section class="glass hx-msgs${approved ? ' hx-chat' : ''}${dm ? ' hx-is-dm' : ' hx-is-room'}">
         ${approved ? `<aside class="hx-chans">
+          <div class="hx-server"><b>${esc(t('Developer Lounge'))}</b><small>${esc(t('Every approved developer'))}</small></div>
           <span class="hx-side-h">${esc(t('Direct'))}</span>${chan('dm')}
-          <span class="hx-side-h">${esc(t('Lounge'))}</span>${myRooms().map(chan).join('')}
+          <span class="hx-side-h">${esc(t('Channels'))}</span>${myRooms().map(chan).join('')}
         </aside>` : ''}
         <div class="hx-chat-main">
           <div class="hx-msgs-top">
@@ -442,18 +504,34 @@
           </div>
           <div class="hx-flow" aria-live="polite"><p class="muted">${esc(t('Loading…'))}</p></div>
           <form class="hx-send" novalidate>
-            <textarea name="body" rows="3" maxlength="4000" placeholder="${esc(dm ? t('Write to the RecompStore team…') : tf('Write in #{room}…', { room: ROOMS[room].name }))}" aria-label="${esc(t('Message'))}"></textarea>
-            <div class="hx-send-row"><span class="status" role="status"></span><button class="btn primary" type="submit">${esc(dm ? t('Send') : t('Post'))}</button></div>
+            <div class="hx-chips" hidden></div>
+            <div class="hx-box">
+              <button type="button" class="hx-attach" title="${esc(t('Add pictures, a short video or a log (up to 15 MB each)'))}" aria-label="${esc(t('Attach files'))}">${ICON.clip}</button>
+              <input type="file" multiple hidden accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.mov,.txt,.log,.json,.ini,.toml,.cfg,.zip,.7z">
+              <textarea name="body" rows="1" maxlength="4000" placeholder="${esc(dm ? t('Write to the RecompStore team…') : tf('Message #{room}', { room: ROOMS[room].name }))}" aria-label="${esc(t('Message'))}"></textarea>
+              <button class="btn primary hx-sendbtn" type="submit">${esc(dm ? t('Send') : t('Post'))}</button>
+            </div>
+            <div class="hx-send-row"><span class="hx-hint">${esc(t('Enter to send · Shift+Enter for a new line · pictures, videos and logs up to 15 MB'))}</span><span class="status" role="status"></span></div>
           </form>
         </div>
       </section>`;
     const flow = pane.querySelector('.hx-flow'), f = pane.querySelector('.hx-send'), st = f.querySelector('.status');
+    const ta = f.body, fileIn = f.querySelector('input[type=file]'), chips = f.querySelector('.hx-chips'), zone = pane.querySelector('.hx-chat-main');
+    let files = [], sig = '', newest = 0, first = true;
     const paint = (list) => {
       if (!flow.isConnected) return;
-      const atEnd = flow.scrollHeight - flow.scrollTop - flow.clientHeight < 40;
-      flow.innerHTML = list.length ? list.map((m) => bubble(Object.assign({ lounge: !dm }, m))).join('')
-        : `<p class="muted hx-empty">${esc(dm ? t('No messages yet. Say hello: we read every one.') : t('Nothing here yet. Start the conversation.'))}</p>`;
-      if (atEnd || !flow.dataset.seen) flow.scrollTop = flow.scrollHeight;
+      const s = JSON.stringify(list.map((m) => [m.id, m.deleted]));
+      // Something new from someone else: a ping (not on the first load, not for your own).
+      const top = list.reduce((a, m) => (m.mine ? a : Math.max(a, m.id)), 0);
+      if (!first && top > newest && !document.hidden) ping();
+      newest = Math.max(newest, top);
+      first = false;
+      if (s === sig) return;
+      sig = s;
+      const atEnd = flow.scrollHeight - flow.scrollTop - flow.clientHeight < 60;
+      flow.innerHTML = list.length ? (dm ? dmHtml(list) : loungeHtml(list))
+        : `<div class="hx-empty">${dm ? '' : '<span class="hx-hash big">#</span>'}<b>${esc(dm ? t('Say hello') : tf('Welcome to #{room}', { room: ROOMS[room].name }))}</b><p class="muted">${esc(dm ? t('No messages yet. Say hello: we read every one.') : t('Nothing here yet. Start the conversation.'))}</p></div>`;
+      if (atEnd || !flow.dataset.seen) { flow.scrollTop = flow.scrollHeight; flow.querySelectorAll('img').forEach((i) => i.addEventListener('load', () => { flow.scrollTop = flow.scrollHeight; }, { once: true })); }
       flow.dataset.seen = '1';
       flow.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => post('lounge-delete', { id: Number(b.dataset.del), room }).then((res) => { if (res.ok) paint(res.posts); else say(st, res); })));
     };
@@ -471,19 +549,49 @@
       seen();
     });
     load();
-    S.poll = setInterval(() => { if (!flow.isConnected) { clearInterval(S.poll); return; } if (!document.hidden) load(); }, 30000);
+    // New messages show up by themselves while the page is open.
+    S.poll = setInterval(() => { if (!flow.isConnected) { clearInterval(S.poll); return; } if (!document.hidden) load(); }, 6000);
     pane.querySelectorAll('[data-room]').forEach((b) => b.addEventListener('click', () => { if (approved) setUrl('tab=messages' + (b.dataset.room !== 'dm' ? '&room=' + b.dataset.room : '')); msgsPane(pane, b.dataset.room); }));
-    f.body.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) f.requestSubmit(); });
+    // The composer: grows as you type, Enter sends, files as chips (attach, paste or drop).
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'; };
+    ta.addEventListener('input', grow);
+    const drawChips = () => {
+      chips.hidden = !files.length;
+      chips.innerHTML = files.map((x, i) => `<span class="hx-chip">${x.type.startsWith('image/') ? `<img src="${URL.createObjectURL(x)}" alt="">` : `<span class="hx-chip-ic">${ICON.file}</span>`}<span>${esc(x.name)}</span><small>${esc(mb(x.size))}</small><button type="button" data-unchip="${i}" aria-label="${esc(t('Remove'))}">×</button></span>`).join('');
+    };
+    const bad = (text) => { st.textContent = text; st.className = 'status bad'; };
+    const add = (list) => {
+      for (const x of list) {
+        if (!FILE_OK.test(x.name)) { bad(tf('{name}: only pictures, short videos, logs and text files, or ZIP and 7z.', { name: x.name })); continue; }
+        if (x.size > 15 * 1024 * 1024) { bad(tf('{name} is over 15 MB.', { name: x.name })); continue; }
+        if (files.length >= 4) { bad(t('Up to 4 files a message.')); break; }
+        files.push(x);
+      }
+      drawChips();
+    };
+    f.querySelector('.hx-attach').addEventListener('click', () => fileIn.click());
+    fileIn.addEventListener('change', () => { add(fileIn.files); fileIn.value = ''; });
+    chips.addEventListener('click', (e) => { const b = e.target.closest('[data-unchip]'); if (b) { files.splice(Number(b.dataset.unchip), 1); drawChips(); } });
+    ta.addEventListener('paste', (e) => { const fl = [...((e.clipboardData && e.clipboardData.files) || [])]; if (fl.length) { e.preventDefault(); add(fl); } });
+    zone.addEventListener('dragover', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); zone.classList.add('hx-drop'); } });
+    zone.addEventListener('dragleave', (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('hx-drop'); });
+    zone.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); zone.classList.remove('hx-drop'); add(e.dataTransfer.files); } });
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); f.requestSubmit(); } });
     f.addEventListener('submit', (e) => {
       e.preventDefault();
-      const body = f.body.value.trim();
-      if (!body) { f.body.focus(); return; }
+      const body = ta.value.trim();
+      if (!body && !files.length) { ta.focus(); return; }
       const btn = f.querySelector('button[type=submit]');
       btn.disabled = true;
-      post(dm ? 'msg' : 'lounge-post', dm ? { body } : { body, room }).then((res) => {
+      st.textContent = files.length ? t('Sending…') : ''; st.className = 'status';
+      const fd = new FormData();
+      fd.append('a', dm ? 'msg' : 'lounge-post'); fd.append('body', body);
+      if (!dm) fd.append('room', room);
+      files.forEach((x) => fd.append('files[]', x, x.name));
+      fetch('/api/dev.php', { method: 'POST', credentials: 'same-origin', body: fd }).then((r) => r.json()).catch(fail).then((res) => {
         btn.disabled = false;
         if (!res.ok) { say(st, res); return; }
-        f.body.value = '';
+        ta.value = ''; grow(); files = []; drawChips();
         st.textContent = '';
         paint(dm ? res.msgs : res.posts);
         flow.scrollTop = flow.scrollHeight;

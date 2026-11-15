@@ -99,8 +99,10 @@ dialog.hx-modal[open]{animation:pop .35s cubic-bezier(.2,.85,.2,1) both}
 .hx-msgs-top h2{margin:0 0 4px;font-size:22px}
 .hx-msgs-top p{margin:8px 0 0;font-size:15px}
 .hub-page .hx-rooms{display:inline-flex}
-.hx-flow{height:min(56vh,560px);overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px;overscroll-behavior:contain}
-.hx-empty{margin:auto;text-align:center}
+.hx-flow{height:min(60vh,620px);overflow-y:auto;padding:12px 22px 14px;display:flex;flex-direction:column;overscroll-behavior:contain}
+.hx-empty{margin:auto;text-align:center;display:grid;justify-items:center;gap:4px}
+.hx-empty b{font-size:20px}
+.hx-hash.big{font-size:34px;width:60px;height:60px;border-radius:50%;display:grid;place-items:center;background:rgba(244,248,252,.08);margin:0}
 .hx-msg{display:flex;gap:10px;align-items:flex-end;max-width:min(78%,680px)}
 .hx-msg.mine{align-self:flex-end;flex-direction:row-reverse}
 .hx-msg-pic{width:34px;height:34px;border-radius:50%;overflow:hidden;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#3b6cff,#8a4bff);font:700 15px Sora,sans-serif}
@@ -116,11 +118,73 @@ dialog.hx-modal[open]{animation:pop .35s cubic-bezier(.2,.85,.2,1) both}
 .hx-msg-body p a{color:var(--cyan)}
 .hx-msg-when{font-size:12px;color:var(--muted)}
 .hx-msg-when .linkish{font-size:12px;padding:0;color:var(--muted)}
-.hx-send{display:flex;flex-direction:column;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--line);margin:0}
-.hx-send textarea{width:100%;resize:vertical;min-height:72px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(11,18,32,.6);color:var(--frost);font:inherit;font-size:15px}
-.hx-send-row{display:flex;align-items:center;justify-content:flex-end;gap:14px}
-.hx-send-row .status{flex:1;margin:0}
-.hx-send-row .btn{min-width:120px}
+.hx-send{display:flex;flex-direction:column;gap:6px;padding:10px 18px 14px;border-top:1px solid var(--line);margin:0}
+.hx-box{display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 8px;border-radius:18px;border:1px solid var(--line);background:rgba(11,18,32,.6)}
+.hx-box:focus-within{border-color:rgba(52,242,232,.55)}
+.hx-send textarea{flex:1;width:auto;min-height:42px;max-height:220px;resize:none;padding:10px 4px;border:0;border-radius:0;background:transparent;color:var(--frost);font:inherit;font-size:15px;line-height:1.45;outline:0;box-shadow:none}
+.hx-attach{flex:none;width:42px;height:42px;padding:0;border:0;border-radius:12px;background:none;color:var(--muted);display:grid;place-items:center;cursor:pointer}
+.hx-attach:hover{color:var(--cyan);background:rgba(244,248,252,.06)}
+.hx-sendbtn{flex:none;min-height:42px;padding:8px 20px}
+.hx-send-row{display:flex;align-items:center;gap:14px}
+.hx-hint{font-size:12px;color:var(--muted)}
+.hx-send-row .status{margin:0 0 0 auto;font-size:13px}
+.hx-chips{display:flex;flex-wrap:wrap;gap:6px}
+.hx-chips[hidden]{display:none}
+.hx-chip{display:inline-flex;align-items:center;gap:7px;padding:4px 6px 4px 4px;border-radius:10px;border:1px solid var(--line);background:rgba(244,248,252,.05);font-size:13px;max-width:260px}
+.hx-chip img{width:32px;height:32px;border-radius:7px;object-fit:cover}
+.hx-chip-ic{display:grid;place-items:center;width:32px;height:32px;color:var(--cyan)}
+.hx-chip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hx-chip small{color:var(--muted);flex:none}
+.hx-chip button{border:0;background:rgba(244,248,252,.08);color:var(--frost);width:24px;height:24px;border-radius:6px;cursor:pointer;line-height:1}
+.hx-chat-main{position:relative}
+.hx-chat-main.hx-drop::after{content:"Drop to attach";position:absolute;inset:8px;display:grid;place-items:center;border:2px dashed var(--cyan);border-radius:16px;background:rgba(5,9,16,.75);color:var(--cyan);font:700 18px Figtree,sans-serif;z-index:3}
+/* (4.12) By day, grouped, with files */
+.hx-day{display:flex;align-items:center;gap:12px;margin:16px 0 6px;color:var(--muted);font-size:12px;font-weight:600}
+.hx-day::before,.hx-day::after{content:"";flex:1;height:1px;background:var(--line)}
+.hx-msg{margin-top:10px}
+.hx-msg.cont{margin-top:3px}
+.hx-msg-pic .hx-pic-i{width:34px;height:34px;display:grid;place-items:center;object-fit:cover;color:#fff}
+.hx-msg.cont .hx-msg-pic{background:none}
+.hx-msg.mine.cont .hx-msg-body{border-top-right-radius:6px}
+.hx-msg.team.cont .hx-msg-body{border-top-left-radius:6px}
+.hx-msg-when{display:block;text-align:end;font-size:11.5px}
+.hx-files{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px}
+.hx-img{display:block;border-radius:12px;overflow:hidden;max-width:340px;border:1px solid var(--line);background:rgba(244,248,252,.04)}
+.hx-img img{display:block;max-width:100%;max-height:320px;object-fit:contain}
+.hx-vid{display:block;max-width:380px;width:100%;max-height:320px;border-radius:12px;background:#000}
+.hx-file{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(5,9,16,.35);color:var(--frost);text-decoration:none;max-width:320px}
+.hx-file:hover{border-color:var(--cyan)}
+.hx-file-ic{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:rgba(52,242,232,.12);color:var(--cyan);flex:none}
+.hx-file span{display:grid;min-width:0}
+.hx-file b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hx-file small{font-size:12px;color:var(--muted)}
+/* (4.12) The Lounge, like a Discord channel */
+.hx-is-room .hx-flow{padding:6px 0 14px}
+.hx-is-room .hx-day{margin:16px 22px 4px}
+.hx-dc{position:relative;display:flex;gap:14px;padding:6px 22px 2px;margin-top:10px}
+.hx-dc.cont{margin-top:0;padding-top:1px}
+.hx-dc:hover{background:rgba(244,248,252,.035)}
+.hx-dc-av{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#3b6cff,#8a4bff);color:#fff;font:700 16px Sora,sans-serif}
+.hx-dc-av.team{background:var(--cyan);color:#06121a}
+.hx-dc-side{width:40px;flex:none;text-align:end;font-size:10.5px;color:var(--muted);padding-top:3px;visibility:hidden}
+.hx-dc.cont:hover .hx-dc-side{visibility:visible}
+.hx-dc-body{flex:1;min-width:0}
+.hx-dc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hx-dc-name{font-size:15px}
+.hx-dc-name a{color:var(--frost)}
+.hx-dc-name.team{color:var(--cyan)}
+.hx-dc-head time{font-size:12px;color:var(--muted)}
+.hx-dc-tag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--cyan);color:#06121a;text-transform:uppercase;letter-spacing:.03em}
+.hx-dc-tag.ver{background:#5865f2;color:#fff}
+.hx-dc-text{line-height:1.5;overflow-wrap:anywhere;color:rgba(244,248,252,.86);font-size:15px}
+.hx-dc-text a{color:var(--cyan)}
+.hx-dc-tools{position:absolute;right:18px;top:-12px;display:none}
+.hx-dc:hover .hx-dc-tools{display:block}
+.hx-dc-tools button{border:1px solid var(--line);background:#141c2b;color:var(--frost);border-radius:8px;padding:3px 10px;font-size:12.5px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.hx-dc-tools button:hover{border-color:#ff8a80;color:#ff8a80}
+.hx-server{display:grid;gap:2px;padding:0 10px 14px;margin:0 -10px 6px;border-bottom:1px solid var(--line)}
+.hx-server b{font-size:15px}
+.hx-server small{font-size:12px;color:var(--muted)}
 .hx-wait-msgs{margin-top:16px}
 .hx-wait-msgs .hx-flow{height:min(40vh,380px)}
 
@@ -141,7 +205,7 @@ dialog.hx-modal[open]{animation:pop .35s cubic-bezier(.2,.85,.2,1) both}
 }
 
 /* (3.1) Lounge channels, like a Discord server */
-.hx-chans{display:flex;flex-direction:column;gap:2px;padding:16px 10px;border-inline-end:1px solid var(--line);background:rgba(5,9,16,.35)}
+.hx-chans{display:flex;flex-direction:column;gap:2px;padding:16px 10px;min-height:0;overflow-y:auto;border-inline-end:1px solid var(--line);background:rgba(5,9,16,.35)}
 .hx-side-h{display:block;font:700 11px Figtree,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:14px 10px 6px}
 .hx-side-h:first-child{padding-top:0}
 .hx-chan{display:flex;align-items:center;gap:8px;width:100%;text-align:start;padding:9px 10px;border-radius:10px;border:0;background:none;color:var(--muted);font:600 15px Figtree,sans-serif;cursor:pointer}
@@ -250,7 +314,8 @@ dialog.hx-modal[open]{animation:pop .35s cubic-bezier(.2,.85,.2,1) both}
 @media (max-width:760px){
   .hx-msgs.hx-chat{grid-template-columns:1fr}
   .hx-chans{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;padding:10px;border-inline-end:0;border-bottom:1px solid var(--line);gap:6px}
-  .hx-chans .hx-side-h{display:none}
+  .hx-chans .hx-side-h,.hx-server{display:none}
+  .hx-hint{display:none}
   .hx-chan{width:auto;flex:none;white-space:nowrap}
   .hx-docs-intro{flex-direction:column;align-items:flex-start}
   .hx-doc-list a{flex-wrap:wrap}

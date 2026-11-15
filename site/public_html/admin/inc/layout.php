@@ -218,12 +218,14 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
     <div class="find-pop" hidden></div>
   </div>
   <span class="grow"></span>
+  <?php $myDev = function_exists('rs_msg_my_dev') ? rs_msg_my_dev() : null; if ($myDev): ?><a class="btn pin-this dev-switch" href="dev-switch.php" target="_blank" rel="noopener" title="Open the developer dashboard as <?= h((string)($myDev['name'] ?: $myDev['gh_login'])) ?>, to see what developers see"><?= rs_icon('dev') ?><span>Dev dashboard</span></a><?php endif; ?>
   <button type="button" class="pin-this" data-pin-this data-href="<?= h(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) . (($_SERVER['QUERY_STRING'] ?? '') !== '' && isset($_GET['view']) ? '?view=' . rawurlencode((string)$_GET['view']) : '')) ?>" data-label="<?= h($crumb[1]) ?>"><?= rs_icon('pin') ?><span>Pin</span></button>
   <details class="me-menu">
     <summary><span class="me-av" aria-hidden="true"><?= h($first) ?></span><span class="me-name"><?= h(rs_me_name()) ?></span><span class="role-chip role-<?= h((string)($me['role'] ?? '')) ?>"><?= h(RS_ROLES[$me['role'] ?? ''] ?? '') ?></span></summary>
     <div class="me-pop">
       <div class="me-head"><strong><?= h(rs_me_name()) ?></strong><span class="muted small"><?= h(RS_ROLES[$me['role'] ?? ''] ?? '') ?> · <?= h(implode(' + ', array_map(fn($s) => RS_STORES[$s], $me['stores_list'] ?? []))) ?></span></div>
       <a href="account.php"><?= rs_icon('user') ?>My account</a>
+      <?php if (!empty($myDev)): ?><a href="dev-switch.php" target="_blank" rel="noopener"><?= rs_icon('dev') ?>My developer dashboard</a><?php endif; ?>
       <?php if (rs_can_page('team.php')): ?><a href="team.php"><?= rs_icon('team') ?>Team</a><?php endif; ?>
       <form method="post" action="account.php" class="me-theme"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="theme"><input type="hidden" name="back" value="<?= h((string)($_SERVER['REQUEST_URI'] ?? '')) ?>">
         <span class="muted small">Look</span>

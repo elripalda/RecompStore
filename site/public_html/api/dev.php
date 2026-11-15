@@ -31,9 +31,10 @@
 //   GET  a=claim-find q              -> apps and recomps by name, to claim one their GitHub doesn't show
 //   POST a=claim app note            -> "this one's mine": theirs by GitHub goes on their page at once, else it waits for the admin
 //   GET  a=msgs                      -> {ok, msgs} their messages with the RecompStore team (read when fetched)
-//   POST a=msg body                  -> a message to the team
+//   POST a=msg body [files[]]        -> a message to the team ((4.12) multipart with up to 4 files: pictures, videos, logs; 15 MB each)
+//   GET  a=msg-file f                -> (4.12) a file from their conversation or a Lounge channel they can read
 //   GET  a=lounge                    -> {ok, posts} the room every approved developer shares
-//   POST a=lounge-post body room | a=lounge-delete id   (3.1: room = general, showcase, pc, ps5)
+//   POST a=lounge-post body room [files[]] | a=lounge-delete id   (3.1: room = general, showcase, pc, ps5)
 //   GET  a=docs | a=doc slug         -> (3.1) developer docs for what they make
 //   (3.9) Player reports on their PC recomps:
 //   GET  a=pc-reports                -> {ok, reports[]} newest first, with specs, version, log, answers (marks them seen)
@@ -231,6 +232,14 @@ try {
     // ---- Signed in from here on -------------------------------------------------------------
     $acc = rs_dev_current();
     if (!$acc) rs_dev_out(200, ['ok' => true, 'account' => null, 'ready' => rs_dev_ready(), 'mailReady' => rs_mail_ready()]);
+    // (4.12) A file sent with a message: theirs with the team, or in a Lounge channel they can read.
+    if ($a === 'msg-file') {
+        $f = rs_msg_file_get((string)($in['f'] ?? ''));
+        $ok = $f && (($f['channel'] === 'dm' && (int)$f['account_id'] === (int)$acc['id'] && !(int)$f['deleted'])
+            || ($f['channel'] === 'lounge' && $acc['status'] === 'approved' && !(int)$f['deleted'] && in_array((string)$f['room'], rs_dev_rooms_for($acc), true)));
+        if (!$ok) { http_response_code(404); header('Content-Type: text/plain'); exit('That file isn\'t here.'); }
+        rs_msg_file_send($f);
+    }
     $db->prepare('UPDATE dev_accounts SET last_seen = NOW() WHERE id = ?')->execute([$acc['id']]);
     $approved = $acc['status'] === 'approved';
     $apps = rs_dev_apps($acc);
@@ -359,7 +368,8 @@ try {
     }
     // (3.0) Messages with the RecompStore team: open to every account, so they can ask before they're in.
     if ($a === 'msgs') {
-        $db->prepare("UPDATE dev_messages SET read_dev = 1 WHERE channel = 'dm' AND account_id = ? AND from_admin = 1")->execute([$acc['id']]);
+        // (4.12) When they first saw each of the team's messages, for the team's "Seen".
+        $db->prepare("UPDATE dev_messages SET read_dev = 1, read_dev_at = COALESCE(read_dev_at, NOW()) WHERE channel = 'dm' AND account_id = ? AND from_admin = 1 AND (read_dev = 0 OR read_dev_at IS NULL)")->execute([$acc['id']]);
         rs_dev_out(200, ['ok' => true, 'msgs' => rs_dev_dm((int)$acc['id'])]);
     }
     if ($a === 'msg' && $post) {
@@ -368,7 +378,7 @@ try {
         $mine->execute([$acc['id']]);
         if ((int)$mine->fetchColumn() >= ($acc['status'] === 'approved' ? 30 : 10)) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of messages in an hour. Try again a bit later.']);
         rs_rate_hit('devmsg');
-        try { rs_dev_msg_add('dm', (int)$acc['id'], false, (string)($in['body'] ?? '')); } catch (RuntimeException $e) { rs_dev_out(200, ['ok' => false, 'error' => $e->getMessage()]); }
+        try { rs_dev_msg_add('dm', (int)$acc['id'], false, (string)($in['body'] ?? ''), 'general', rs_msg_files_check($_FILES['files'] ?? null)); } catch (RuntimeException $e) { rs_dev_out(200, ['ok' => false, 'error' => $e->getMessage()]); }
         rs_log('developers', 'message', rs_dev_label($acc) . ' sent a message');
         rs_dev_out(200, ['ok' => true, 'msgs' => rs_dev_dm((int)$acc['id'])]);
     }
@@ -807,7 +817,7 @@ try {
         $mine->execute([$acc['id']]);
         if ((int)$mine->fetchColumn() >= 20) rs_dev_out(200, ['ok' => false, 'error' => 'That\'s a lot of posts in an hour. Try again a bit later.']);
         rs_rate_hit('devlounge');
-        try { $nid = rs_dev_msg_add('lounge', (int)$acc['id'], false, (string)($in['body'] ?? ''), $room); } catch (RuntimeException $e) { rs_dev_out(200, ['ok' => false, 'error' => $e->getMessage()]); }
+        try { $nid = rs_dev_msg_add('lounge', (int)$acc['id'], false, (string)($in['body'] ?? ''), $room, rs_msg_files_check($_FILES['files'] ?? null)); } catch (RuntimeException $e) { rs_dev_out(200, ['ok' => false, 'error' => $e->getMessage()]); }
         rs_dev_room_seen($acc, $room, $nid);
         rs_dev_out(200, ['ok' => true, 'room' => $room, 'posts' => rs_dev_lounge((int)$acc['id'], $room)]);
     }

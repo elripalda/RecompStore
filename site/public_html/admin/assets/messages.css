@@ -1,34 +1,170 @@
-/* (3.0) Messages with developers */
-.msg-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;align-items:start}
-.msg-list{padding:10px;max-height:72vh;overflow:auto}
-.msg-who{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;color:var(--frost);text-decoration:none}
-.msg-who:hover{background:rgba(var(--ink-rgb),.06)}
-.msg-who.on{background:rgba(var(--ink-rgb),.12)}
-.msg-who-words{flex:1;min-width:0;display:grid}
-.msg-who-words strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.msg-who-words .muted{font-size:13px}
-.msg-pic{width:36px;height:36px;border-radius:50%;flex:none;object-fit:cover}
-.msg-letter{display:grid;place-items:center;background:linear-gradient(135deg,var(--cyan),#377bb6);color:var(--on-accent);font:700 16px Sora,sans-serif}
-.msg-head{display:flex;align-items:center;gap:14px;margin:0 0 14px}
-.msg-head h2{margin:0}
-.msg-head .pill{margin-left:6px}
-.msg-flow{display:flex;flex-direction:column;gap:10px;max-height:56vh;overflow:auto;padding:4px 2px 12px}
+/* (4.12) Messages with developers: the inbox (Waiting for reply, Dismissed, New message), a conversation
+   with files and "Seen", and the Lounge like a Discord channel. */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---- The inbox ---------------------------------------------------------------------------------- */
+.mx{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:stretch;height:calc(100vh - 250px);min-height:540px}
+.mx-side{position:relative;display:flex;flex-direction:column;padding:0;overflow:hidden;min-height:0}
+.mx-side-top{display:flex;align-items:center;gap:8px;padding:12px 12px 8px}
+.mx-seg{display:flex;flex:1;gap:2px;padding:3px;border-radius:12px;background:rgba(var(--ink-rgb),.06)}
+.mx-seg a{flex:1;text-align:center;padding:7px 8px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--soft);text-decoration:none;white-space:nowrap}
+.mx-seg a span{margin-left:4px;font-weight:500;color:var(--muted);font-size:12px}
+.mx-seg a.on{background:var(--surface);color:var(--frost);box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.mx-new{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 12px;border-radius:10px;font-weight:600;font-size:13.5px;background:var(--cyan);color:var(--on-accent);border:0}
+.mx-new:hover{filter:brightness(1.08);background:var(--cyan)}
+.mx-find{padding:0 12px 8px}
+.mx-find input{width:100%;min-height:36px;padding:7px 12px;border-radius:10px;font-size:14px}
+.mx-waitline{margin:0 14px 6px;font-size:12.5px;color:#ffc857}
+.mx-list{flex:1;overflow-y:auto;padding:4px 8px 10px;overscroll-behavior:contain}
+.mx-row{display:flex;align-items:flex-start;gap:11px;padding:10px;border-radius:12px;color:var(--frost);text-decoration:none;position:relative}
+.mx-row+.mx-row{margin-top:2px}
+.mx-row:hover{background:rgba(var(--ink-rgb),.05)}
+.mx-row.on{background:rgba(52,242,232,.10);box-shadow:inset 3px 0 0 var(--cyan)}
+.mx-row.quiet{opacity:.75}
+.mx-row-av{position:relative;flex:none}
+.mx-dot{position:absolute;right:-1px;top:-1px;width:11px;height:11px;border-radius:50%;background:var(--cyan);border:2px solid var(--panel)}
+.mx-row-main{flex:1;min-width:0;display:grid;gap:2px}
+.mx-row-top{display:flex;align-items:baseline;gap:8px}
+.mx-row-top b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14.5px}
+.mx-row-top time{flex:none;font-size:12px;color:var(--muted)}
+.mx-row-prev{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mx-row.unread .mx-row-top b,.mx-row.unread .mx-row-prev{color:var(--frost);font-weight:650}
+.mx-row .count{align-self:center}
+.mx-wait{justify-self:start;display:inline-flex;align-items:center;gap:5px;margin-top:3px;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:650;color:#ffc857;background:rgba(255,200,87,.12);border:1px solid rgba(255,200,87,.3)}
+.mx-wait::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.mx-wait.big{font-size:12.5px;padding:4px 10px;margin:0}
+.mx-sub{display:flex;justify-content:space-between;margin:14px 10px 6px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.mx-empty{margin:18px 12px;color:var(--muted);font-size:14px;text-align:center}
+.mx-side-foot{padding:8px 12px 12px;border-top:1px solid var(--line);margin:0;text-align:center}
+.mx-side-foot .link{font-size:12.5px;color:var(--muted)}
+.mx-av{width:36px;height:36px;border-radius:50%;object-fit:cover;flex:none;display:block}
+.mx-row .mx-av{width:40px;height:40px}
+.mx-letter{display:grid;place-items:center;background:linear-gradient(135deg,var(--cyan),#377bb6);color:var(--on-accent);font:700 15px Sora,sans-serif}
+.mx-newpop{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--panel)}
+.mx-newpop[hidden]{display:none}
+.mx-newpop-top{display:flex;align-items:center;justify-content:space-between}
+.mx-newpop input{width:100%;min-height:40px;border-radius:10px}
+.mx-newpop-list{flex:1;overflow-y:auto}
+.mx-x{min-height:32px;width:32px;padding:0;border-radius:8px;font-size:20px;line-height:1}
+
+/* ---- A conversation --------------------------------------------------------------------------- */
+.mx-main{display:flex;flex-direction:column;padding:0;overflow:hidden;min-height:0;position:relative}
+.mx-main.drop::after,.dc-main.drop::after{content:"Drop to attach";position:absolute;inset:8px;display:grid;place-items:center;border:2px dashed var(--cyan);border-radius:14px;background:rgba(var(--bg-rgb),.75);color:var(--cyan);font-weight:700;font-size:18px;z-index:4}
+.mx-pick{flex:1;display:grid;place-items:center}
+.mx-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.mx-head .mx-av{width:44px;height:44px}
+.mx-head-t{flex:1;min-width:0}
+.mx-head h2{margin:0;font-size:18px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mx-head h2 .pill{font-size:11.5px}
+.mx-head-act{display:flex;align-items:center;gap:10px}
+.mx-head-act form{margin:0}
+.mx-flow{flex:1;overflow-y:auto;padding:16px 18px 8px;display:flex;flex-direction:column;overscroll-behavior:contain}
+.mx-hello{margin:auto;text-align:center;display:grid;justify-items:center;gap:6px}
+.mx-hello .mx-av{width:64px;height:64px}
+.mx-day{display:flex;align-items:center;gap:12px;margin:14px 0 8px;color:var(--muted);font-size:12px;font-weight:600}
+.mx-day::before,.mx-day::after{content:"";flex:1;height:1px;background:var(--line)}
+.mx-msg{display:flex;align-items:flex-end;gap:8px;max-width:min(78%,720px);margin-top:10px}
+.mx-msg.cont{margin-top:3px}
+.mx-msg.team{align-self:flex-end}
+.mx-msg-av{width:32px;flex:none}
+.mx-msg-av .mx-av{width:32px;height:32px}
+.mx-bub{padding:9px 13px 7px;border-radius:18px 18px 18px 5px;background:rgba(var(--ink-rgb),.08);border:1px solid var(--line);min-width:0}
+.mx-msg.cont:not(.team) .mx-bub{border-top-left-radius:5px}
+.mx-msg.team .mx-bub{border-radius:18px 18px 5px 18px;background:rgba(52,242,232,.13);border-color:rgba(52,242,232,.32)}
+.mx-msg.team.cont .mx-bub{border-top-right-radius:5px}
+.mx-bub p{margin:0 0 3px;line-height:1.5;overflow-wrap:anywhere}
+.mx-bub p a{color:var(--cyan-ink)}
+.mx-meta{display:flex;justify-content:flex-end;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
+.mx-tick{letter-spacing:-2px;font-size:11px;color:var(--muted)}
+.mx-tick.seen{color:var(--cyan-ink)}
+.mx-receipt{align-self:flex-end;margin:3px 4px 0;font-size:11.5px;color:var(--muted)}
+.mx-files{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 4px}
+.mx-img{display:block;border-radius:12px;overflow:hidden;max-width:320px;border:1px solid var(--line);background:rgba(var(--ink-rgb),.05)}
+.mx-img img{display:block;max-width:100%;max-height:300px;object-fit:contain}
+.mx-vid{display:block;max-width:360px;max-height:300px;border-radius:12px;background:#000}
+.mx-file{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(var(--bg-rgb),.35);color:var(--frost);text-decoration:none;max-width:320px}
+.mx-file:hover{border-color:var(--cyan)}
+.mx-file-ic{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:rgba(52,242,232,.12);color:var(--cyan-ink);flex:none}
+.mx-file span{display:grid;min-width:0}
+.mx-file b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mx-file small{font-size:12px;color:var(--muted)}
+
+/* ---- The composer (Developers and Lounge) -------------------------------------------------------- */
+.mx-send{margin:0;padding:10px 16px 12px;border-top:1px solid var(--line);display:grid;gap:6px}
+.mx-box{display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 8px;border-radius:16px;border:1px solid var(--line);background:rgba(var(--bg-rgb),.55)}
+.mx-box:focus-within{border-color:rgba(52,242,232,.55)}
+.mx-box textarea{flex:1;min-height:40px;max-height:220px;resize:none;border:0;background:transparent;padding:9px 4px;font:inherit;font-size:15px;line-height:1.45;box-shadow:none;outline:0}
+.mx-attach{flex:none;width:40px;height:40px;min-height:40px;padding:0;border-radius:12px;display:grid;place-items:center;color:var(--soft);background:transparent;border:0}
+.mx-attach:hover{color:var(--cyan-ink);background:rgba(var(--ink-rgb),.06)}
+.mx-sendbtn{flex:none;min-height:40px;padding:8px 18px;border-radius:12px}
+.mx-under{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:13px}
+.mx-under .check{font-size:13px}
+.mx-under .doc-pick{min-height:32px;padding:4px 10px;font-size:13px;max-width:220px}
+.mx-hint{color:var(--muted);font-size:12px}
+.mx-status{margin-left:auto;font-size:13px;color:var(--muted)}
+.mx-status.bad{color:#ff8a80}
+.mx-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mx-chips[hidden]{display:none}
+.mx-chip{display:inline-flex;align-items:center;gap:7px;padding:4px 6px 4px 4px;border-radius:10px;border:1px solid var(--line);background:rgba(var(--ink-rgb),.05);font-size:13px;max-width:260px}
+.mx-chip img{width:32px;height:32px;border-radius:7px;object-fit:cover}
+.mx-chip i{font-style:normal;width:32px;text-align:center}
+.mx-chip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mx-chip small{color:var(--muted);flex:none}
+.mx-chip button{min-height:24px;width:24px;padding:0;border-radius:6px;line-height:1;font-size:16px}
+
+/* ---- The Lounge, like a Discord channel ------------------------------------------------------- */
+.dc{display:grid;grid-template-columns:240px minmax(0,1fr);height:calc(100vh - 250px);min-height:540px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
+.dc-chans{background:rgba(var(--bg-rgb),.55);border-right:1px solid var(--line);padding:0 8px 12px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.dc-server{display:grid;gap:2px;padding:16px 8px 14px;margin:0 -8px 8px;border-bottom:1px solid var(--line)}
+.dc-server b{font-size:15px}
+.dc-server small{color:var(--muted);font-size:12px}
+.dc-cat{padding:10px 8px 4px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.dc-chan{display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:8px;color:var(--soft);text-decoration:none;font-weight:550;font-size:14.5px}
+.dc-chan:hover{background:rgba(var(--ink-rgb),.06);color:var(--frost)}
+.dc-chan.on{background:rgba(var(--ink-rgb),.11);color:var(--frost)}
+.dc-hash{color:var(--muted);font-weight:500;font-size:18px;line-height:1}
+.dc-hash.big{font-size:24px}
+.dc-n{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.dc-main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.dc-top{display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line);min-height:52px}
+.dc-top b{font-size:16px}
+.dc-topic{color:var(--muted);font-size:13.5px;padding-left:12px;margin-left:4px;border-left:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc-flow{flex:1;overflow-y:auto;padding:8px 0 14px;overscroll-behavior:contain}
+.dc-hello{padding:24px 18px;display:grid;gap:4px}
+.dc-hello .dc-hash{font-size:40px;width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:rgba(var(--ink-rgb),.08)}
+.dc-hello b{font-size:22px}
+.dc-day{display:flex;align-items:center;gap:10px;margin:16px 18px 4px;color:var(--muted);font-size:12px;font-weight:600}
+.dc-day::before,.dc-day::after{content:"";flex:1;height:1px;background:var(--line)}
+.dc-msg{position:relative;display:flex;gap:14px;padding:6px 18px 2px;margin-top:10px}
+.dc-msg.cont{margin-top:0;padding-top:1px}
+.dc-msg:hover{background:rgba(var(--ink-rgb),.035)}
+.dc-msg.gone{opacity:.55}
+.dc-av{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#3b6cff,#8a4bff);color:#fff;font:700 16px Sora,sans-serif}
+.dc-av.team{background:var(--cyan);color:var(--on-accent)}
+.dc-side{width:40px;flex:none;text-align:right;font-size:10.5px;color:var(--muted);padding-top:3px;visibility:hidden}
+.dc-msg.cont:hover .dc-side{visibility:visible}
+.dc-body{flex:1;min-width:0}
+.dc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.dc-name{font-size:15px}
+.dc-name.team{color:var(--cyan-ink)}
+.dc-head time{font-size:12px;color:var(--muted)}
+.dc-tag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--cyan);color:var(--on-accent);text-transform:uppercase;letter-spacing:.03em}
+.dc-tag.ver{background:#5865f2;color:#fff}
+.dc-text{line-height:1.5;overflow-wrap:anywhere;color:var(--soft);font-size:15px}
+.dc-text a{color:var(--cyan-ink)}
+.dc-note{font-size:12px;color:#ffc857;margin-top:2px}
+.dc-tools{position:absolute;right:16px;top:-12px;margin:0;display:none}
+.dc-msg:hover .dc-tools{display:block}
+.dc-tools button{min-height:28px;padding:3px 10px;font-size:12.5px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.dc-send{border-top:0;padding:0 16px 14px}
+
+/* (3.1) Send to all, doc links */
+.msg-send-btns{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto}
+.msg-send-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .msg-bubble{max-width:78%;align-self:flex-start;padding:12px 14px;border-radius:16px;background:rgba(var(--ink-rgb),.07);border:1px solid var(--line)}
 .msg-bubble.team{align-self:flex-end;background:rgba(52,242,232,.12);border-color:rgba(52,242,232,.3)}
-.msg-bubble.gone{opacity:.5}
 .msg-bubble p{margin:0 0 6px;overflow-wrap:anywhere}
 .msg-bubble .muted{font-size:13px}
-.msg-mod{display:inline}
-.msg-mod .link{font-size:13px;margin-left:8px}
-.msg-send{display:grid;gap:10px;margin-top:12px}
-.msg-send-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.msg-thread.lounge .msg-bubble{max-width:100%;align-self:stretch}
-@media (max-width:860px){.msg-layout{grid-template-columns:1fr}.msg-list{max-height:none}}
-
-/* (3.1) Channels, Send to all, doc links */
-.room-chips{margin:0 0 14px}
-.room-chips a .muted{margin-left:4px;font-size:12px}
-.msg-send-btns{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto}
 .doc-pick{max-width:260px;min-height:42px;height:auto;padding:8px 12px}
 .cast{margin:0 0 16px}
 .cast h2{margin:0 0 6px}
@@ -43,4 +179,21 @@
 .cast-pick small{color:var(--muted)}
 .cast-note{margin:0;font-size:13px}
 .cast-old{max-width:100%;align-self:stretch;margin:0 0 10px}
+
+:root[data-theme=light] .mx-wait,:root[data-theme=light] .mx-waitline{color:#9a6a00}
+:root[data-theme=light] .mx-wait{background:#fff6dc;border-color:#f0d58a}
+:root[data-theme=light] .mx-msg.team .mx-bub{background:#e3fbf9;border-color:#a9ece7}
+:root[data-theme=light] .dc-name.team,:root[data-theme=light] .mx-tick.seen{color:#0a8f88}
+
+@media (max-width:900px){
+  .mx{grid-template-columns:1fr;height:auto}
+  .mx-side{max-height:46vh}
+  .mx-main{height:72vh}
+  .dc{grid-template-columns:1fr;height:78vh}
+  .dc-chans{flex-direction:row;overflow-x:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line)}
+  .dc-server,.dc-cat{display:none}
+  .dc-chan{flex:none}
+  .mx-msg{max-width:92%}
+  .dc-topic{display:none}
+}
 @media (max-width:700px){.cast-who{grid-template-columns:1fr}}

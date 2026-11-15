@@ -118,6 +118,28 @@ function rs_dev_tables(): void {
     if (rs_col_missing($db, 'dev_accounts', 'lounge_rooms')) {
         $db->exec("ALTER TABLE dev_accounts ADD COLUMN lounge_rooms VARCHAR(255) NOT NULL DEFAULT ''");
     }
+    // (4.12) When a developer first saw the team's message (the team's read receipt; developers never see
+    // when the team read theirs), and the files sent with a message (inc/devmsg.php).
+    if (rs_col_missing($db, 'dev_messages', 'read_dev_at')) $db->exec('ALTER TABLE dev_messages ADD COLUMN read_dev_at DATETIME NULL');
+    if (rs_col_missing($db, 'dev_messages', 'files')) $db->exec('ALTER TABLE dev_messages ADD COLUMN files TEXT NULL');
+    // (4.12) A conversation the team put away (Dismissed), until the developer writes again.
+    $db->exec('CREATE TABLE IF NOT EXISTS dev_threads (
+        account_id INT PRIMARY KEY,
+        dismissed TINYINT NOT NULL DEFAULT 0,
+        dismissed_at DATETIME NULL
+    ) CHARACTER SET utf8mb4');
+    $db->exec('CREATE TABLE IF NOT EXISTS dev_msg_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        token CHAR(32) NOT NULL UNIQUE,
+        msg_id INT NOT NULL,
+        name VARCHAR(160) NOT NULL,
+        mime VARCHAR(80) NOT NULL,
+        kind VARCHAR(8) NOT NULL,
+        size INT NOT NULL,
+        path VARCHAR(255) NOT NULL,
+        created DATETIME NOT NULL,
+        INDEX (msg_id)
+    ) CHARACTER SET utf8mb4');
     // (3.1) Developer docs: Markdown pages for approved developers, for PC, PS5 or everyone.
     $db->exec('CREATE TABLE IF NOT EXISTS dev_docs (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -927,7 +949,8 @@ function rs_dev_msg_row(array $r, array $names): array {
     $who = (int)$r['from_admin'] ? null : ($names[(int)$r['account_id']] ?? null);
     return ['id' => (int)$r['id'], 'body' => $r['deleted'] ? '' : (string)$r['body'], 'deleted' => (bool)$r['deleted'], 'team' => (bool)$r['from_admin'],
         'who' => $who ? $who['name'] : 'RecompStore', 'pic' => $who ? $who['pic'] : '', 'slug' => $who ? $who['slug'] : '', 'verified' => $who ? $who['verified'] : true,
-        'mine' => false, 'at' => gmdate('c', (int)strtotime((string)$r['created'] . ' UTC'))];
+        'mine' => false, 'at' => gmdate('c', (int)strtotime((string)$r['created'] . ' UTC')),
+        'files' => $r['deleted'] ? [] : rs_msg_files_of($r)];
 }
 
 // Names and pictures of developers, by account.
@@ -962,14 +985,19 @@ function rs_dev_lounge(int $meId, string $room = 'general', int $limit = 150): a
     return array_map(fn($r) => array_merge(rs_dev_msg_row($r, $names), ['mine' => $meId > 0 && !(int)$r['from_admin'] && (int)$r['account_id'] === $meId]), $rows);
 }
 
-function rs_dev_msg_add(string $channel, int $accId, bool $fromAdmin, string $body, string $room = 'general'): int {
+function rs_dev_msg_add(string $channel, int $accId, bool $fromAdmin, string $body, string $room = 'general', array $files = []): int {
     $body = trim(str_replace("\r\n", "\n", $body));
-    if ($body === '') throw new RuntimeException('Write something first.');
+    if ($body === '' && !$files) throw new RuntimeException('Write something first.');
     if (mb_strlen($body) > RS_DEV_MSG_MAX) throw new RuntimeException('That\'s too long. Keep it under ' . RS_DEV_MSG_MAX . ' characters.');
     $db = rs_db();
     $db->prepare('INSERT INTO dev_messages (channel, room, account_id, from_admin, body, created, read_dev, read_admin) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)')
        ->execute([$channel, $channel === 'lounge' ? $room : 'general', $accId, $fromAdmin ? 1 : 0, $body, $fromAdmin ? 0 : 1, $fromAdmin ? 1 : 0]);
-    return (int)$db->lastInsertId();
+    $id = (int)$db->lastInsertId();
+    // (4.12) Files checked by rs_msg_files_check, kept with the message.
+    if ($files) rs_msg_files_store($id, $files);
+    // (4.12) A new message brings a dismissed conversation back.
+    if ($channel === 'dm') $db->prepare('UPDATE dev_threads SET dismissed = 0 WHERE account_id = ?')->execute([$accId]);
+    return $id;
 }
 
 // Unread for a developer: the team's messages to them, and lounge posts since they last looked.
@@ -1081,3 +1109,4 @@ function rs_dev_claims_waiting(): int {
     } catch (Throwable $e) { return 0; }
 }
 
+require_once __DIR__ . '/devmsg.php';

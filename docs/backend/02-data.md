@@ -20,7 +20,7 @@ Tables create themselves the first time their code runs (`CREATE TABLE IF NOT EX
 | Submissions | `inbox`, `inbox_files`, `inbox_pictures`, `inbox_reports`, `hub_flags`, `hub_notes` | Everything sent in (submissions, bug reports), flags for the owner, team notes on cards. |
 | Titles | `titles`, `title_reservations` | One game, many versions. |
 | Checks | `vt_files`, `repo_watch`, `repo_watch_log`, `listing_health` | VirusTotal, the repo watch, PS5 listing health. See [05-checks.md](05-checks.md). |
-| Developers | `developers`, `dev_accounts`, `dev_sessions`, `dev_claims`, `dev_changes`, `dev_messages`, `dev_invites`, `dev_docs`, `dev_broadcasts` | See [06-developers.md](06-developers.md). |
+| Developers | `developers`, `dev_accounts`, `dev_sessions`, `dev_claims`, `dev_changes`, `dev_messages`, `dev_threads`, `dev_msg_files`, `dev_invites`, `dev_docs`, `dev_broadcasts` | See [06-developers.md](06-developers.md). |
 | Player accounts | `accounts`, `account_sessions`, `account_tokens`, `account_tries`, `account_saved`, `account_names_held`, `acct_deleted_days` | Sign-in with Google, Discord, GitHub or email. |
 | Launcher | `launcher_devices`, `launcher_builds`, `launcher_links`, `launcher_share`, `launcher_sends`, `launcher_beta`, `launcher_beta_wave`, `cloud_saves`, `rl_events`, `rl_installs`, `rl_launch_dl` | PCs signed in, builds, beta waves, cloud saves (files on B2). |
 | Launcher stats | `lstat_installs`, `lstat_sessions`, `lstat_days`, `lstat_totals` | Anonymous: an install is a keyed hash. Play sessions per game feed Trending. Sessions are kept 90 days. |
