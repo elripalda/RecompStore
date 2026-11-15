@@ -51,7 +51,7 @@ If you add a field the launcher should read: add it in `rs_pc_catalog()`, decide
 - downloads 30, against the game's most downloaded version (1/100 of it or less scores 0);
 - launcher features from the catalog's `support`: Easy Setup 12, settings 8, saves 3, copy check 2. A feature from our profile instead of the developer's own file counts 70%.
 
-A version rated under 50 from 5 reports or more is only picked when every version is. Versions not out yet are left out. The weights are the `RS_REC_*` constants. The admin page shows each version's score. Changes go out on the next Publish (or catalog write).
+A version rated under 50 from 5 reports or more is only picked when every version is. Versions not out yet are left out. The weights are the `RS_REC_*` constants. The admin page shows each version's score. `titles[].why` gives the reason in a few words ("Easy Setup · Most downloaded · 76% from players"; empty when pinned). The website shows it on the Recommended tag, and the launcher in its version notes. Changes go out on the next Publish (or catalog write).
 
 ## The 30-minute refresh
 

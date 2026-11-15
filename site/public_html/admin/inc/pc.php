@@ -1727,6 +1727,8 @@ function rs_pc_web_copy(array $cat): array {
     unset($cat['apps_min'], $cat['boot_all']);
     foreach ($cat['apps'] as &$a) {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
+        // (4.11) Easy Setup is one of the two flags a tile shows (with its versions count).
+        if (!empty($a['support']['easy_setup'])) $a['ez'] = 1;
         // (4.9) Only what lists, tiles, rows and search use. A game's page asks for the rest of its
         // entry (api/pc.php?a=app) when it opens, so phones no longer download and read 2.5 MB of
         // descriptions, setup steps and file checksums for 1,700 games on every page.

@@ -143,6 +143,25 @@ function rs_title_pick(array $t, array $pcApps, array $ps5Ids, array $recent): s
     return $ps5Ids ? 'ps5:' . $ps5Ids[0] : '';
 }
 
+// (4.11) Why a version is Recommended, in a few words for the website and the launcher:
+// "Easy Setup · Settings in the launcher · Most downloaded · 76% from players". '' when pinned.
+function rs_title_rec_why(string $pick, array $t, array $pcApps, array $recent): string {
+    if ($t['pick'] !== '' || !str_starts_with($pick, 'pc:')) return '';
+    $id = substr($pick, 3);
+    $a = $pcApps[$id] ?? null;
+    if (!$a) return '';
+    $sup = isset($a['support']) && is_array($a['support']) ? $a['support'] : (function_exists('rs_pc_support') ? rs_pc_support($a) : []);
+    $out = [];
+    if (!empty($sup['easy_setup'])) $out[] = 'Easy Setup';
+    if (!empty($sup['settings'])) $out[] = 'Settings in the launcher';
+    $top = true;
+    foreach ($t['pc'] as $o) if ($o !== $id && isset($pcApps[$o]) && (int)($pcApps[$o]['downloads'] ?? 0) > (int)($a['downloads'] ?? 0)) $top = false;
+    if ($top && (int)($a['downloads'] ?? 0) > 0) $out[] = 'Most downloaded';
+    $c = $recent[$id] ?? [];
+    if (($c['n'] ?? 0) >= 3) $out[] = round((float)$c['score']) . '% from players';
+    return implode(' · ', $out);
+}
+
 // Every version's score, best first, the ones not out yet left out: [id => [total, rating, downloads, features]].
 function rs_title_rec_scores(array $pcIds, array $pcApps, array $recent): array {
     $ids = array_values(array_filter($pcIds, fn($id) => empty($pcApps[$id]['soon'])));
@@ -188,7 +207,8 @@ function rs_title_catalog(array &$apps): array {
         foreach ($pcIds as $id) $apps[$byId[$id]]['title'] = $t['id'];
         $out[] = [
             'id' => $t['id'], 'name' => $t['name'], 'origin' => $t['origin'],
-            'pick' => rs_title_pick($t, array_intersect_key($listed, array_flip($pcIds)), $ps5Ids, $recent),
+            'pick' => $pick = rs_title_pick($t, array_intersect_key($listed, array_flip($pcIds)), $ps5Ids, $recent),
+            'why' => rs_title_rec_why($pick, $t, $listed, $recent),
             'pc' => $pcIds,
             'ps5' => array_map(fn($id) => [
                 'id' => $id, 'name' => (string)$ps5[$id]['name'], 'author' => (string)$ps5[$id]['author'],

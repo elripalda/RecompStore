@@ -23,6 +23,10 @@ Every address goes through `page.php` (via `.htaccess`), which returns `index.ht
 - Accounts: `api/account.php`, `api/oauth.php`; comments, likes, player reports: `api/comments.php`, `api/play.php`.
 - Posting needs an account (4.11, Admin > Accounts > Rules, setting `post_need_acct`, on by default): comments, website player reports (`api/play.php`), PC feedback (`api/pc.php?a=feedback`, which RecompLauncher uses) and the older launcher reports (`api/launcher.php?a=report`) answer 401 when signed out, via `rs_post_need_acct()`. Players can post as Anonymous: `comments.anon`, and `play_reports.show_name` = 0 for reports. Nobody else sees the name. The admin sees the account on Accounts (feedback list and Moderation) and can close it there. A closed account can't sign in or post from the site or the launcher.
 
+## Tiles
+
+A game's tile shows two flags at most (4.11): Easy Setup (`ez` in `pc-catalog-web.json`, from the listing's `support.easy_setup`) and its versions count. With both, they shrink to icons. Great on Deck, handhelds, Complete, Ended, On hold and Setup Required show on the game's page, not on tiles. RecompLauncher's cards follow the same rule from Beta 51.
+
 ## Pictures
 
 Everything in `/media`. `api/thumb.php?f=<file>&w=<width>` makes and keeps smaller copies (widths 160, 256, 320, 400, 640, 960; anything else fails). `.htaccess` serves an existing thumbnail straight from disk without running PHP.

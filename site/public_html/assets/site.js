@@ -2427,12 +2427,8 @@
   const SVG_DECK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="7" width="19" height="10" rx="3"/><circle cx="17" cy="12" r="1.6"/><path d="M6 12h3M7.5 10.5v3"/></svg>';
   const onDeck = (id) => { const sc = window.rsPlaySc; const x = sc && sc.pc && sc.pc[id]; const d = x && x.sys && x.sys.deck; return !!(d && d.n >= 3 && d.score >= 80); };
   const deckBadge = (id) => (onDeck(id) ? `<span class="pc-deck-b" title="${esc(t('Great on Deck: Steam Deck players say it plays great'))}">${SVG_DECK}${t('Deck')}</span>` : '');
-  const deckMarks = (root) => (root || document).querySelectorAll('a.pc-tile[href^="/pc/game/"]').forEach((el) => {
-    const p = el.querySelector('.pc-poster');
-    if (!p || p.querySelector('.pc-deck-b')) return;
-    const b = deckBadge(decodeURIComponent(el.getAttribute('href').slice(9)));
-    if (b) p.insertAdjacentHTML('beforeend', b);
-  });
+  // (4.11) Tiles no longer show Great on Deck (the game's page does).
+  const deckMarks = () => {};
   const playVerdicts = (m) => { const o = {}; Object.keys(m || {}).forEach((k) => { o[k] = m[k].verdicts || {}; }); return o; };
   const pcCountsLoad = () => (pcCounts ? Promise.resolve(pcCounts) : playScores().then((sc) => (pcCounts = playVerdicts(sc.pc))));
   const VERDICTS = { runs: N_('Plays great'), issues: N_('Has problems'), broken: N_("Won't run") };
@@ -2498,11 +2494,21 @@
     if (scrollY > y) scrollTo({ top: Math.max(0, y), behavior: reduced ? 'auto' : 'smooth' });
   };
   const pcPoster = (a) => `<a class="pc-tile" href="/pc/game/${encodeURIComponent(a.id)}">
-      <span class="pc-poster">${osBadges(a)}${lifeBadge(a)}${deckBadge(a.id)}${a.setup_required ? `<span class="pc-setup-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 1-5-5L9 2l3 3-2 2-3-3L5.3 5.7"/></svg>${t('Setup Required')}</span>` : ''}${versionsChip(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
+      <span class="pc-poster">${osBadges(a)}${tileFlags(a)}${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy" decoding="async">` : `<span class="pc-poster-fb"${a.hero ? ` style="background-image:url('${cssUrl(a.hero)}')"` : ''}>${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" loading="lazy">` : `<b>${esc((a.name || '?').slice(0, 2))}</b>`}</span>`}</span>
       <strong class="pc-name pc-fit" dir="auto" title="${esc(a.name)}"${fitAttrs(a.name, shortName(a.name).toLowerCase() === String(a.game || '').toLowerCase() ? '' : shortName(a.name))}>${esc(a.name)}</strong>
       <small class="pc-game pc-fit" dir="auto"${a.game && a.game !== a.name ? ` title="${esc(a.game)}"${fitAttrs(a.game, shortGame(a.game))}>${esc(a.game)}` : '>&nbsp;'}</small>
       ${consoleTag(a.origin)}${a.stars ? `<span class="pc-stars" aria-label="${esc(tn(a.stars, '1 star on GitHub', '{n} stars on GitHub'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.8 6.6 19.8l1.2-6.1-4.5-4.2 6.1-.7z"/></svg>${esc(starCount(a.stars))}</span>` : ''}</a>`;
   const versionsChip = (a) => { const tt = pcTitleOf('pc', a.id); const n = tt ? titleVersions(tt) : 0; return n > 1 ? `<span class="pc-vers">${esc(tn(n, '1 version', '{n} versions'))}</span>` : ''; };
+  // (4.11) A tile shows two flags at most: Easy Setup and its versions count. With both, they shrink
+  // to icons. Deck, handheld, Complete, Ended and Setup Required are on the game's page instead.
+  const tileFlags = (a) => {
+    const tt = pcTitleOf('pc', a.id), n = tt ? titleVersions(tt) : 0, ez = !!a.ez, vs = n > 1;
+    if (!ez && !vs) return '';
+    const both = ez && vs;
+    const ezB = ez ? `<span class="pc-ez" title="${esc(t('Easy Setup'))}" aria-label="${esc(t('Easy Setup'))}">${SVG_EZ}${both ? '' : `<span>${t('Easy Setup')}</span>`}</span>` : '';
+    const vsB = vs ? `<span class="pc-vers" title="${esc(tn(n, '1 version', '{n} versions'))}">${esc(both ? fmtNum(n) : tn(n, '1 version', '{n} versions'))}</span>` : '';
+    return `<span class="pc-flags${both ? ' both' : ''}">${ezB}${vsB}</span>`;
+  };
   // (4.10) Trending: the launcher's weekly chart (/trending.json, out every Friday). Its entries that are on
   // the list, with their recomp, and how each moved since last week.
   const trendItems = () => (!pcTrend || !pcCat ? [] : pcTrend.entries.map((e) => ({ e, a: (pcCat.apps || []).find((x) => x.id === e.id) || (pcCat.all || []).find((x) => x.id === e.id) })).filter((x) => x.a && !x.a.soon));
@@ -2529,7 +2535,7 @@
     const iconOf = (r) => (r.kind === 'pc' ? r.a.icon || r.a.cover : r.p.icon) || '';
     const row = (r) => {
       const on = r === cur;
-      const rec = isRec(r) ? `<span class="vr-rec">${t('Recommended')}</span>` : '';
+      const rec = isRec(r) ? `<span class="vr-rec"${tt.why ? ` title="${esc(tt.why)}"` : ''}>${t('Recommended')}</span>` : '';
       const pic = iconOf(r) ? `<img class="vr-ico" src="${esc(iconOf(r))}" alt="" width="44" height="44" loading="lazy" decoding="async">` : '<span class="vr-ico"></span>';
       const chev = '<svg class="vr-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
       if (r.kind === 'pc') {
