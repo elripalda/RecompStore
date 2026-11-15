@@ -12,7 +12,7 @@ const RS_AI_PRICES = ['opus' => ['in' => 4, 'out' => 20, 'cr' => 0.2, 'cw' => 5]
 const RS_AI_PRICE_NAMES = ['opus' => 'Opus', 'sonnet' => 'Sonnet', 'haiku' => 'Haiku', 'haiku_long' => 'Haiku, prompts over 100k tokens'];
 // What each feature does with AI by default. 'off' = rules only (inc/rules.php).
 const RS_AI_FEATURES = [
-    'autoadd' => ['Auto-add page text', 'off', ['off', 'haiku', 'sonnet']],
+    'autoadd' => ['Auto-add page text', 'haiku', ['off', 'haiku', 'sonnet']], // (4.12) Haiku: the rules alone wrote rough pages
     'scout' => ['Daily scout sorting', 'off', ['off', 'haiku', 'sonnet']],
     'translate' => ['Translating players\' notes', 'haiku', ['off', 'haiku', 'sonnet']],
     'prq' => ['PR drafter: reading the project and writing the json', 'sonnet', ['off', 'haiku', 'sonnet', 'opus']],

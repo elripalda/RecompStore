@@ -63,6 +63,42 @@ function rs_rules_title(string $md): string {
     return '';
 }
 
+// (4.12) A name as people would write it: no version numbers, no "- native recompilation" tail, and a repo
+// name ("muscle-march-recomp") turned into words ("Muscle March Recomp").
+function rs_rules_clean_name(string $t): string {
+    $t = trim(preg_replace(['/!\[[^\]]*\]\([^)]*\)/', '/<[^>]+>/', '/[*_`]/', '/[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]/u'], '', $t));
+    // The tail goes, but what it was stays as one word ("Contra ReBirth - native recompilation" -> "Contra ReBirth Recomp").
+    $kind = '';
+    $t = (string)preg_replace_callback('/\s*[-–—:|]\s*(an?\s+)?(unofficial\s+)?(native|static|full)?\s*(pc\s+)?(recompilation|recompiled|recomp|decompilation|decomp|port)(\s+(project|for (the )?pc|for windows))?\.?$/i',
+        function ($m) use (&$kind) { $w = strtolower($m[5]); $kind = str_starts_with($w, 'decomp') ? 'Decomp' : ($w === 'port' ? 'PC Port' : 'Recomp'); return ''; }, $t);
+    $t = (string)preg_replace('/\s*[\[(]?\b(v|ver\.?|version\s*)?\d+(\.\d+){1,3}([-.]?(alpha|beta|rc|wip)[\w.]*)?[\])]?\s*$/i', '', $t);
+    $t = (string)preg_replace('/\s*[\[(](wip|work in progress|alpha|beta)[\])]\s*$/i', '', $t);
+    if (!str_contains($t, ' ') && preg_match('/[-_]/', $t)) $t = (string)preg_replace('/[-_]+/', ' ', $t);
+    if ($t !== '' && $t === mb_strtolower($t)) $t = ucwords($t);
+    $t = (string)preg_replace(['/\bRecomp\b/i', '/\bPc\b/', '/\bRe\b$/'], ['Recomp', 'PC', 'RE'], $t);
+    $t = trim($t, " \t-–—:|");
+    if ($kind !== '' && $t !== '' && !preg_match('/\b(recomp\w*|decomp\w*|port|pc)\b/i', $t)) $t .= ' ' . $kind;
+    return $t;
+}
+
+// (4.12) The game a README says it's a recomp or port of ("a native PC port of Muscle March for the Wii").
+function rs_rules_game_from(string $text): string {
+    $t = preg_replace(['/\[([^\]]+)\]\([^)]*\)/', '/[*_`]/'], ['$1', ''], $text);
+    $rx = '/\b(?:recompilation|recomp|decompilation|decomp|port|reimplementation|remake)\s+of\s+(?:the\s+)?(?:(?:original|classic|(?:xbox\s*360|xbla|wii\s*u?|gamecube|n64|nintendo\s*64|ps[1-5]|playstation\s*\d?|psp|snes|nes|gba|game\s*boy(?:\s*advance)?|ds|3ds|switch|saturn|dreamcast|genesis|mega\s*drive|cd-?i|arcade))\s+)*(?:game\s+|title\s+)?["“]?([A-Z0-9][^".,;!\n(]{1,70}?)["”]?(?=\s+(?:for|on|from|by|to|that|which|using|with|\(|released)\b|[.,;!\n(]|$)/iu';
+    if (preg_match($rx, (string)$t, $m)) {
+        $g = trim($m[1], " \t\"'“”");
+        if (mb_strlen($g) >= 3 && !preg_match('/^(the|a|an|this|that|it|its|my|our)$/i', $g)) return $g;
+    }
+    return '';
+}
+
+// A game title that's clearly not one: too short, a stray word, the repo's own name.
+function rs_rules_game_ok(string $g, string $repo): bool {
+    $g = trim($g, " \t'\"");
+    if (mb_strlen($g) < 3 || preg_match('/^(the|a|an|this|game|pc|port|recomp)$/i', $g)) return false;
+    return strcasecmp(preg_replace('/[^a-z0-9]/i', '', $g), preg_replace('/[^a-z0-9]/i', '', basename($repo))) !== 0;
+}
+
 // Recomp, emulator, tool, mod, fan game? -> ['kind' => recomp|emulator|tool|fan|unsure, 'why' => line]
 function rs_rules_kind(string $name, string $desc, string $readme, array $topics = []): array {
     $head = $name . ' ' . $desc . ' ' . implode(' ', $topics);
@@ -80,11 +116,16 @@ function rs_rules_kind(string $name, string $desc, string $readme, array $topics
 function rs_rules_fill(array $a, array $f, string $readme, array $names = [], array $sub = []): array {
     $paras = rs_rules_paragraphs($readme);
     $desc = (string)($f['description'] ?? '');
-    $title = trim((string)($sub['name'] ?? '')) ?: rs_rules_title($readme);
-    if ($title === '') $title = ucwords(trim(preg_replace('/[-_]+/', ' ', (string)preg_replace('/(^|[-_])(pc|port|recomp|decomp)$/i', '', basename((string)$a['repo'])))));
-    $game = trim((string)($sub['game'] ?? ''));
-    if ($game === '') $game = trim((string)($f['game'] ?? ''));
-    if ($game === '') $game = trim((string)preg_replace('/\s*[:\-–(]\s*(pc|native|recomp\w*|decomp\w*|port|re)\b.*$/i', '', $title));
+    $title = rs_rules_clean_name(trim((string)($sub['name'] ?? '')) ?: rs_rules_title($readme));
+    if ($title === '') $title = rs_rules_clean_name(basename((string)$a['repo']));
+    // (4.12) The game: what the developer said, then what the README says it's a port of, then the
+    // finder's guess or the name without "Recomp", each only when it reads like a real title.
+    $repo = (string)$a['repo'];
+    $cands = [trim((string)($sub['game'] ?? '')), rs_rules_game_from($desc . "\n" . implode("\n", array_slice($paras, 0, 4))), trim((string)($f['game'] ?? '')),
+        trim((string)preg_replace('/\s*([:\-–(]\s*)?\b(pc|native|recomp\w*|decomp\w*|port|re|reborn|rebuild)\b.*$/i', '', $title))];
+    $game = '';
+    foreach ($cands as $c) if ($c !== '' && rs_rules_game_ok($c, $repo)) { $game = $c; break; }
+    if ($game !== '' && $game === mb_strtolower($game)) $game = ucwords($game);
     $origin = (string)($sub['origin'] ?? '');
     if (!isset(RS_PC_ORIGINS[$origin])) $origin = rs_rules_origin($title . ' ' . $desc . ' ' . implode(' ', array_slice($paras, 0, 3)));
     if (!isset(RS_PC_ORIGINS[$origin]) && isset(RS_PC_ORIGINS[(string)($f['origin'] ?? '')])) $origin = (string)$f['origin'];
