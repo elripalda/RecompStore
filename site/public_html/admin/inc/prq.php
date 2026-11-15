@@ -106,6 +106,55 @@ function rs_prq_run(array $appIds): int {
     rs_log('sdk', 'prq', 'Draft now: ' . implode(', ', $ids));
     return count($ids);
 }
+// ---- (4.11) Before sending: what a draft gives players, what's missing, and what stops it going out ------------
+// -> ['level' => ok|warn|bad, 'blockers' => [..], 'warns' => [..], 'gives' => [[name, yes|no|na, how]], 'new' => bool]
+// A blocker means it can't be sent (the server refuses too): a file that isn't JSON, fails the launcher's rules,
+// or has nothing to start. Warnings are shown in the review and the Send confirmation.
+function rs_prq_review(array $q): array {
+    require_once __DIR__ . '/sdkcheck.php';
+    $j = json_decode((string)($q['json'] ?? ''), true);
+    $found = (string)($q['found'] ?? '') !== '' ? (json_decode((string)$q['found'], true) ?: []) : [];
+    $code = (string)($q['code'] ?? '') !== '' ? (json_decode((string)$q['code'], true) ?: []) : [];
+    $feat = [];
+    foreach ((array)($found['features'] ?? []) as $f) if (is_array($f) && isset($f['what'])) $feat[strtolower((string)$f['what'])] = $f;
+    $new = (int)($found['v'] ?? 0) >= 411 || isset($feat['release packaging']);
+    $out = ['level' => 'ok', 'blockers' => [], 'warns' => [], 'gives' => [], 'new' => $new];
+    if (!is_array($j)) { $out['blockers'][] = 'The recomplauncher.json isn\'t valid JSON. Fix it under "Edit the text and the file", or make a new draft.'; $out['level'] = 'bad'; return $out; }
+    if (($schema = rs_sdk_schema()) !== null)
+        foreach (array_slice(rs_json_schema_errors(json_decode((string)$q['json']), $schema), 0, 5) as [$path, $msg]) $out['blockers'][] = 'The launcher would reject the file: ' . $path . ' ' . $msg . '.';
+    if (!isset($j['start'])) $out['blockers'][] = 'The file doesn\'t say which program to start ("start").';
+    $edits = !empty($code['edits']);
+    $added = fn(string $what) => !empty($feat[$what]['added']) || str_starts_with(trim((string)($feat[$what]['how'] ?? '')), 'Added in this pull request');
+    $why = fn(string $what) => trim((string)($feat[$what]['why'] ?? ''));
+    $notNeeded = fn(string $what) => ($feat[$what]['has'] ?? null) === false && ($feat[$what]['needed'] ?? null) === false;
+    // Easy Setup
+    if (rs_sdk_easy($j)) $out['gives'][] = ['Easy Setup from the player\'s copy', 'yes', $added('game location') ? 'through a new option this PR adds to their code' : 'through an option the game already has'];
+    elseif ($notNeeded('game location')) $out['gives'][] = ['Easy Setup from the player\'s copy', 'na', 'not needed: ' . ($why('game location') ?: 'the game needs nothing from the player')];
+    else { $out['gives'][] = ['Easy Setup from the player\'s copy', 'no', $why('game location') ?: 'the game has no way to be handed the player\'s copy yet']; $out['warns'][] = 'No Easy Setup: players still set the game up by hand.'; }
+    // Setup step
+    if (isset($j['prepare'])) $out['gives'][] = ['Setup step', 'yes', (string)($j['prepare']['label'] ?? '') . ($added('setup or build step') ? ' (a new --prepare this PR adds)' : '')];
+    elseif (!empty($feat['setup or build step']['has']) && ($feat['setup or build step']['needed'] ?? null) !== false) { $out['gives'][] = ['Setup step', 'no', $why('setup or build step') ?: 'it has one, but the launcher can\'t run it yet']; $out['warns'][] = 'Its setup step isn\'t in this PR, so players run it themselves.'; }
+    else $out['gives'][] = ['Setup step', 'na', 'not needed'];
+    // Settings, saves, logs
+    $labels = array_values(array_filter(array_map(fn($x) => is_array($x) ? (string)($x['label'] ?? '') : '', (array)($j['settings'] ?? []))));
+    $out['gives'][] = ['Settings in the launcher', $labels ? 'yes' : 'no', $labels ? implode(', ', array_slice($labels, 0, 4)) . (count($labels) > 4 ? ' and ' . (count($labels) - 4) . ' more' : '') : ($why('settings file') ?: 'none found')];
+    $first = function ($v) { foreach ((array)$v as $x) { $p = is_array($x) ? (string)($x['path'] ?? '') : (string)$x; if ($p !== '') return $p; } return ''; };
+    $sv = $first($j['saves'] ?? []) ?: $first($j['folders']['saves'] ?? []);
+    $out['gives'][] = ['Save backups', $sv !== '' ? 'yes' : 'no', $sv !== '' ? $sv : ($why('saves') ?: 'where saves go wasn\'t found')];
+    $lg = $first($j['folders']['logs'] ?? []);
+    $out['gives'][] = ['Logs with crash reports', $lg !== '' ? 'yes' : 'no', $lg !== '' ? $lg : ($why('logs') ?: 'no log file found')];
+    // Does the file reach players? Only from the release.
+    $pack = (array)($code['packaging'] ?? []);
+    if ($edits && !empty($pack['done'])) $out['gives'][] = ['The file ships in every release', 'yes', (string)($pack['how'] ?? 'a copy line this PR adds')];
+    else { $out['gives'][] = ['The file ships in every release', 'no', 'the developer has to copy it into their release zip (the PR says where)']; }
+    $out['gives'][] = ['"Get it on RecompLauncher" badge', 'yes', 'added to the README'];
+    if (!$new) $out['warns'][] = 'Made by the old drafter. Make a new draft first: the new one finds setup steps and the release copy line.';
+    if ($edits) $out['warns'][] = 'It changes their code (' . count((array)$code['edits']) . ' edit' . (count((array)$code['edits']) === 1 ? '' : 's') . '). Nobody has built it, so read the changes; the PR asks them to build before merging.';
+    if (trim((string)($q['note'] ?? '')) !== '') $out['warns'][] = 'Read the drafter\'s notes: they say what it wasn\'t sure of.';
+    $out['level'] = $out['blockers'] ? 'bad' : (array_filter($out['gives'], fn($g) => $g[0] === 'Easy Setup from the player\'s copy' && $g[1] === 'no') || !$new ? 'warn' : 'ok');
+    return $out;
+}
+
 // ---- (4.11) Test runs (Launcher support > Check a game) ------------------------------------------------------
 // The drafter run on chosen recomps with a chosen model, its drafts written to files instead of the queue, so
 // models can be compared and a draft looked at before anything is saved or sent. Each run's cost still goes on

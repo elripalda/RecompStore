@@ -164,7 +164,8 @@
       + '<div class="kv"><span>README</span><span>' + esc(readmeTxt) + '</span></div>'
       + '<div class="kv"><span>Downloads</span><span>' + fmt(r.dl) + ' · #' + r.rank + '</span></div>'
       + (mk ? '<div class="kv"><span>Marked</span><span>' + esc(mk.who) + ', ' + esc(mk.at) + (r.state === 'no' && mk.url ? ' · <a href="' + esc(mk.url) + '" target="_blank" rel="noopener">where ↗</a>' : '') + '</span></div>' : '')
-      + '<div class="sdk-side-acts">' + main + more.join('') + '</div>';
+      // (4.11) Everything about this game in one place: what players get, its drafts, the next step.
+      + '<div class="sdk-side-acts"><a class="btn primary wide" href="sdk-support.php?tab=check&amp;app=' + encodeURIComponent(r.id) + '">Open its page: what players get, drafts, next step</a>' + main.replace('btn primary', 'btn') + more.join('') + '</div>';
     if (r.state === 'locked') {
       h += '<form class="sdk-issue-link" data-act="mark_issue"><label>Posted it? Paste its link<input name="url" required placeholder="https://github.com/' + esc(r.repo) + '/issues/…" spellcheck="false"></label><button class="btn">Save</button></form>';
     }

@@ -959,7 +959,7 @@ def merge_found(d, code, doc=None, plain=None):
         rows.append({"what": "Release packaging", "has": True, "used": True, "added": True, "how": str(pack.get("how", ""))})
     names = {r["what"].lower() for r in rows}
     feats = rows + [x for x in feats if str(x.get("what", "")).lower() not in names]
-    return {"features": feats[:16], "options": opts[:40]}
+    return {"features": feats[:16], "options": opts[:40], "v": 411}  # (4.11) which drafter made it
 
 
 def draft_one(p, todo, spec, validator):

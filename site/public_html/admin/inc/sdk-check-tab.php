@@ -29,7 +29,7 @@ $chkSource = ['release' => ['The developer\'s own file, from their release', 'ok
     <datalist id="chk-apps"><?php foreach ($chkApps as $x): ?><option value="<?= h((string)$x['id']) ?>"><?= h((string)$x['name']) ?></option><?php endforeach; ?></datalist>
     <button class="btn primary">Check it</button>
   </form>
-  <p class="muted small">What the launcher really uses for the game, checked against the launcher's own rules, its download and what players report. Then draft its <code>recomplauncher.json</code> with the model you pick: a test draft is only shown here, never saved to the queue or sent.</p>
+  <p class="muted small">What players get for one game, what's wrong and how to fix it, and where it is in the PR queue. Not on RecompLauncher yet? <a href="sdk-support.php?tab=lookup">Look up its GitHub repo</a>.</p>
 </section>
 
 <?php if ($chkA && $chkHealth): $src = $chkSource[$chkHealth['source']] ?? $chkSource['none']; $rel = $chkHealth['release']; ?>
@@ -45,6 +45,34 @@ $chkSource = ['release' => ['The developer\'s own file, from their release', 'ok
     <span class="muted small">Checked <?= h(gmdate('M j, H:i', (int)$chkHealth['at'])) ?> UTC</span>
     <button class="btn" name="action" value="chk_fresh">Check again</button>
   </form>
+</section>
+
+<?php // (4.11) The one thing to do next for this game, from where it is in the PR queue and what players get.
+$nq = rs_db()->prepare('SELECT * FROM pc_prq WHERE app_id = ? OR repo = ? ORDER BY id DESC LIMIT 1');
+$nq->execute([(string)$chkA['id'], (string)$chkA['repo']]);
+$nq = $nq->fetch(PDO::FETCH_ASSOC) ?: null;
+$nMark = rs_sdk_marks()[(string)$chkA['id']] ?? null;
+$nSt = $nq ? (string)$nq['status'] : '';
+if ($nSt === 'drafting' && strtotime((string)$nq['updated'] . ' UTC') < time() - RS_PRQ_STUCK) $nSt = 'todo';
+[$nTitle, $nText, $nBtns] = match (true) {
+    $nSt === 'draft' => ['A draft is ready for you', 'It\'s written and waiting in the PR queue. Nothing has been sent. Look it over there, then send it.', [['Review it in the PR queue', 'sdk-support.php?tab=queue&show=ready#q-' . (int)$nq['id'], true]]],
+    $nSt === 'drafting' => ['Being drafted now', 'It shows up in the PR queue under Ready for you in a few minutes.', [['Open the PR queue', 'sdk-support.php?tab=queue&show=drafting', false]]],
+    $nSt === 'todo' => ['Waiting to be drafted', (string)$nq['error'] !== '' ? 'The last try didn\'t work: ' . $nq['error'] : 'It\'s drafted at the next 7:23 run, or press Draft now in the PR queue.', [['Open it in the PR queue', 'sdk-support.php?tab=queue&show=waiting', true]]],
+    $nSt === 'outbox' => ['Going out', 'You pressed Send. It goes out within the hour (5 an hour).', [['See the line', 'sdk-support.php?tab=queue&show=going', false]]],
+    $nSt === 'sent' => ['Pull request sent: up to the developer', 'Nothing to do unless they reply, or it needs a redraft.', [['Open the pull request ↗', (string)$nq['pr_url'], true]]],
+    $nSt === 'skipped' => ['Skipped', 'No pull request for this game. ' . (trim((string)$nq['note']) !== '' ? mb_substr((string)$nq['note'], 0, 160) : ''), [['See it under Skipped', 'sdk-support.php?tab=queue&show=skipped', false]]],
+    ($nMark['kind'] ?? '') === 'no' => ['The developer doesn\'t want a pull request', 'Our profile can still give players the features. Run a test draft below and use it as our profile.', []],
+    $chkHealth['source'] === 'release' => ['Done: the developer ships their own file', 'Players get it with every release. Check the list below for anything missing.', []],
+    default => ['Make a draft', 'There\'s no draft for it yet. Draft it for the PR queue, or run test drafts below to compare models first.', []],
+};
+?>
+<section class="card chk-next">
+  <h3>Next step: <?= h($nTitle) ?></h3>
+  <p><?= h($nText) ?></p>
+  <?php if ($nBtns || $nTitle === 'Make a draft'): ?><div class="chk-next-btns">
+    <?php foreach ($nBtns as [$bl, $bh, $bp]): ?><a class="btn<?= $bp ? ' primary' : '' ?>" href="<?= h($bh) ?>"<?= str_starts_with($bh, 'http') ? ' target="_blank" rel="noopener"' : '' ?>><?= h($bl) ?></a><?php endforeach; ?>
+    <?php if ($nTitle === 'Make a draft'): ?><form method="post"><?= $csrf ?><input type="hidden" name="id" value="<?= h((string)$chkA['id']) ?>"><button class="btn primary" name="action" value="chk_queue">Draft it for the PR queue</button></form><a class="btn" href="#chk-draft">Test drafts first</a><?php endif; ?>
+  </div><?php endif; ?>
 </section>
 
 <section class="card">
@@ -72,8 +100,8 @@ $chkSource = ['release' => ['The developer\'s own file, from their release', 'ok
   <?php endforeach; ?>
 </section>
 
-<section class="card chk-draft">
-  <h3>Draft it</h3>
+<section class="card chk-draft" id="chk-draft">
+  <h3>Test drafts <span class="muted small">try models side by side; nothing is saved to the queue or sent</span></h3>
   <form method="post" class="chk-draft-f"><?= $csrf ?><input type="hidden" name="id" value="<?= h((string)$chkA['id']) ?>">
     <fieldset class="chk-models"><legend class="small">Test draft with</legend>
       <label><input type="checkbox" name="models[]" value="haiku"> <b>Haiku</b> <small class="muted">cheapest</small></label>
