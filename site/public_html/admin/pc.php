@@ -104,6 +104,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // (4.0) Why it can't be listed yet (no Windows build...): only you see it, and it
             // puts the recomp under Not compatible instead of Hidden.
             $a['blocked_why'] = mb_substr(trim(str_replace(["\r", "\n"], ' ', (string)($_POST['blocked_why'] ?? ''))), 0, 200);
+            // (4.12) Downloads from before a move (a repo or releases that are gone): added to GitHub's count.
+            $carry = max(0, min(100000000, (int)preg_replace('/\D/', '', (string)($_POST['dl_carry'] ?? '0'))));
+            if ($carry !== (int)($a['dl_carry'] ?? 0)) { $a['downloads'] = max(0, (int)$a['downloads'] - (int)($a['dl_carry'] ?? 0)) + $carry; $a['dl_carry'] = $carry; }
             // (4.7) Replaced by another listing (a stale mirror, a project that moved to a new listing): players
             // who have this one are offered the other in RecompLauncher. Only while this one is hidden.
             $rb = trim((string)($_POST['replaced_by'] ?? ''));
@@ -441,6 +444,7 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     </script>
     <label>Labels<input name="tags" value="<?= h($a['tags']) ?>" maxlength="120" placeholder="Recomp, 4K, Mods"><small>Shown as pills on its page, comma between.</small></label>
  <?php if ((string)$a['repo'] === ''): ?><label>Where to follow it<input name="follow" value="<?= h((string)($a['follow'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://x.com/dev/status/…"><small>No repo yet: the Coming soon page links here (the developer's post or page). https only.</small></label><?php endif; ?>
+    <label>Downloads from before a move<input name="dl_carry" type="number" min="0" step="1" value="<?= (int)($a['dl_carry'] ?? 0) ?>"><small>When its releases were lost (a deleted repo or account), the downloads it had before. Added to GitHub's count from now on. 0 for none.</small></label>
     <label>How to report bugs<input name="report_url" value="<?= h((string)($a['report_url'] ?? '')) ?>" maxlength="300" class="mono" placeholder="https://github.com/owner/name/issues/new/choose"><small>The developer's own page for bug reports. Shown next to the report form. https only.</small></label>
     <label>Project status<select name="status"><option value="">Active</option><option value="complete"<?= ($a['status'] ?? '') === 'complete' ? ' selected' : '' ?>>Feature complete (finished)</option><option value="paused"<?= ($a['status'] ?? '') === 'paused' ? ' selected' : '' ?>>On hold</option><option value="ended"<?= ($a['status'] ?? '') === 'ended' ? ' selected' : '' ?>>Ended (no more updates)</option></select><small><?= !empty($a['archived']) ? 'Archived on GitHub, so it shows as ended unless you pick Feature complete.' : 'Feature complete: finished, never shown as abandoned or quiet. On hold or Ended show a label on its tile and page. Archived GitHub projects show as ended by themselves.' ?></small></label>
     <label>Status note<input name="status_note" value="<?= h((string)($a['status_note'] ?? '')) ?>" maxlength="200" placeholder="The developer moved on to the sequel."><small>Optional. A short line shown under the label, ideally the developer's own words.</small></label>

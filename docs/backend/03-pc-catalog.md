@@ -10,7 +10,7 @@ Each PC recomp is one row in `pc_apps`; all its fields are a JSON object in `dat
 - `name`, `game` (the original game), `origin` (console), `genre`, `tags`, `blurb`, `adds` (what this version adds), `description`
 - `repo`, `host` (`''` GitHub, `gitlab`, `sourceforge`, `forgejo`): where its releases come from. `rs_pc_key($a)` gives the repo key everything else files it under (`owner/name`, or `gitlab.com/group/project`).
 - `asset_win`, `asset_linux`, `asset_mac`: which release file is the download for each system. A pattern: `*` stands for the part that changes each release (`MyRecomp-*-win-x64.zip`). `rs_pc_pattern($name, $tag)` makes one from a file name.
-- `version`, `released`, `size`, `downloads`, `stars`: from GitHub, kept fresh by the 30-minute job.
+- `version`, `released`, `size`, `downloads`, `stars`: from GitHub, kept fresh by the 30-minute job. `downloads` adds `dl_carry` (set on the edit page, "Downloads from before a move"): the count a recomp had before its releases were lost with a deleted repo or account.
 - `icon`, `cover`, `hero`, `logo`: pictures in `/media`.
 - `dev`: the developer's slug (see [06-developers.md](06-developers.md)); `author`: repo owner.
 - `hidden`, `soon` (Coming soon), `featured`, `live_at` (when it first went live), `status` (`complete`, `paused`, `ended`)

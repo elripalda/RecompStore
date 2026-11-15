@@ -1986,7 +1986,7 @@ function rs_pc_refresh_github(float $seconds, int $fresh = 1800, string $only = 
         if (empty($r['ok']) || $r['version'] === '') { rs_pc_save($a); continue; }
         if (!empty($r['license'])) $a['license'] = (string)$r['license'];
         $a['issues'] = (int)($r['issues'] ?? 0); $a['releases'] = (int)($r['releases'] ?? 0); $a['first'] = (string)($r['first'] ?? '');
-        $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'];
+        $a['stars'] = (int)$r['stars']; $a['downloads'] = (int)$r['downloads'] + (int)($a['dl_carry'] ?? 0); // (4.12) plus any from before a move
         // (3.8) A new release goes out at once when security checks are off, the first time a recomp is
         // seen, or when it's the release that's out already; otherwise it's held until it's checked.
         // (3.8) The newest release that has one of this recomp's files: a release with only a Switch,
