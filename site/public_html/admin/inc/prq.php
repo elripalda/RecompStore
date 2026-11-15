@@ -118,6 +118,7 @@ function rs_prq_dry_picks(array $appIds): array {
 }
 // Starts one test run per model (models are RS_AI_MODELS keys; 'sonnet+opus' = Sonnet reads, Opus writes the code).
 function rs_prq_dry_start(array $appIds, array $models): int {
+    require_once __DIR__ . '/aiuse.php';
     if (!rs_prq_now_ready()) throw new RuntimeException('Add the Anthropic API key in Setup first.');
     $ids = array_values(array_filter(array_map('strval', array_slice(array_unique($appIds), 0, 10)), fn($id) => ($a = rs_pc_app($id)) && (string)$a['repo'] !== '' && rs_pc_host($a) === ''));
     if (!$ids) throw new RuntimeException('Pick a recomp whose project is on GitHub.');
