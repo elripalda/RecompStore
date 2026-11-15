@@ -186,8 +186,11 @@ function rs_sdk_health_feats(array $a, ?array $j, array $h, ?array $names): arra
         $sup = rs_pc_support($a);
         $how = $h['source'] === 'ours_old' ? 'From our older profile.' : '';
         $set('start', $h['source'] === 'ours_old' ? 'ok' : 'warn', $how ?: 'The launcher guesses the program to start.', $how ? '' : 'Draft it, then Use as our profile, or ask the developer for a recomplauncher.json.');
-        foreach (['easy' => 'easy_setup', 'settings' => 'settings', 'saves' => 'saves', 'prepare' => 'prepare', 'verify' => 'verified'] as $key => $s)
-            $set($key, !empty($sup[$s]) ? 'ok' : ($key === 'prepare' ? 'off' : 'bad'), !empty($sup[$s]) ? $how : 'Not set up.', !empty($sup[$s]) ? '' : 'Comes with a recomplauncher.json: Draft it.');
+        foreach (['easy' => 'easy_setup', 'settings' => 'settings', 'saves' => 'saves', 'prepare' => 'prepare', 'verify' => 'verified'] as $key => $s) {
+            if (!empty($sup[$s])) $set($key, 'ok', $how);
+            elseif ($key === 'prepare') $set($key, 'off', 'None, or not known without a recomplauncher.json.');
+            else $set($key, 'bad', 'Not set up.', 'Comes with a recomplauncher.json: Draft it.');
+        }
         $set('logs', 'bad', 'Not set up.', 'Comes with a recomplauncher.json: Draft it.');
     } else {
         $prog = (array)($j['start']['program'] ?? []);

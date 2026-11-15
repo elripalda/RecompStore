@@ -11,7 +11,7 @@ How the website and admin behind recompstore.com and recomplauncher.com work, so
 | [05-checks.md](05-checks.md) | VirusTotal, ClamAV, repo watch, the download check, moved repos, AI labels |
 | [06-developers.md](06-developers.md) | Developer accounts, claims, the dev hub, changes they suggest, messages |
 | [07-launcher-api.md](07-launcher-api.md) | Every endpoint RecompLauncher calls, and what each returns |
-| [08-sdk-and-pr-queue.md](08-sdk-and-pr-queue.md) | SDK support, boot profiles, the PR drafter |
+| [08-sdk-and-pr-queue.md](08-sdk-and-pr-queue.md) | Launcher support (Check a game, test drafts), boot profiles, the PR drafter |
 | [09-background-jobs.md](09-background-jobs.md) | Cron jobs, the GitHub Action, what runs on page loads |
 | [10-extras.md](10-extras.md) | Trending, Emergency backup, Instant Gaming, sponsors, achievements |
 | [11-website.md](11-website.md) | The public site: one page app, page.php, caches, Cloudflare |

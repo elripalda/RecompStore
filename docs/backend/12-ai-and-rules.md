@@ -18,13 +18,14 @@ Easy Setup and launcher settings (Auto-add steps 7 and 8) need Claude; without i
 | Auto-add page text | `autoadd` | off (rules) |
 | Daily scout sorting | `scout` | off (rules) |
 | Translating players' notes | `translate` | Haiku |
-| PR drafter | `prq` | Sonnet |
+| PR drafter: reading the project and writing the json | `prq` | Sonnet |
+| PR drafter: code changes | `prqcode` | Sonnet |
 | **Write the page with AI** on a draft | `ondemand` | Haiku |
 
-`rs_ai_model_for($feature)` gives the model id or `''` for off. Settings are in the `ai_cfg` setting (modes, daily budget, prices per million tokens).
+Models: Haiku, Sonnet and Opus 5.5 (`RS_AI_MODELS`). `rs_ai_model_for($feature)` gives the model id or `''` for off. Settings are in the `ai_cfg` setting (modes, daily budget, prices per million tokens).
 
 ## Counting and the budget
 
-Every call goes through `rs_ai_json` (or the PR drafter's own client, which sends its totals back through `api/prq.php`). Before a call, `rs_ai_budget_ok()` throws once today's spend (UTC) reaches the budget (default $3, 0 = no limit). After a call, `rs_ai_record` adds its tokens to `ai_usage` (day, feature, model, calls, tokens in, out, cache read, cache write). Costs are worked out from those tokens and the prices on the page, so they're an estimate; the Anthropic console has the bill. Counting started on Nov 14, 2026.
+Every call goes through `rs_ai_json` (or the PR drafter's own client, which sends its totals back through `api/prq.php`). Before a call, `rs_ai_budget_ok()` throws once today's spend (UTC) reaches the budget (default $3, 0 = no limit; set to no limit on Nov 14, 2026 while the drafter is tested). After a call, `rs_ai_record` adds its tokens to `ai_usage` (day, feature, model, calls, tokens in, out, cache read, cache write). Costs are worked out from those tokens and the prices (`RS_AI_PRICES`, from Anthropic's pricing page in Nov 2026: Opus $4/$20, Sonnet $2/$10, Haiku $0.10/$0.50 per million tokens in/out, Haiku $0.50/$2.50 for a prompt over 100,000 tokens, recorded as `<model>:long`; prices saved on the page win), so they're an estimate; the Anthropic console has the bill. Counting started on Nov 14, 2026.
 
 The page shows today, 7 and 30 days, the budget left, the last 14 days and each feature's spend, and holds the switch for starting Auto-add as soon as a PC submission arrives (`sub_autostart`).
