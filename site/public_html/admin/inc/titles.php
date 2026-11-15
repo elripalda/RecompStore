@@ -111,10 +111,13 @@ const RS_REC_RATING = 45;        // the players' score (0-100), 3 reports or mor
 const RS_REC_DOWNLOADS = 30;     // against the game's most downloaded version: 1/100 of it or less is 0
 const RS_REC_FEATS = ['easy_setup' => 12, 'settings' => 8, 'saves' => 3, 'verified' => 2];
 const RS_REC_OURS = 0.7;         // a feature from our profile instead of the developer's own file
+const RS_REC_UNRATED = 40;       // the rating used with fewer than 3 reports: a little under the middle
+const RS_REC_PROVEN = 5;         // reports that make a version proven; an unproven one never beats a proven one
+const RS_REC_KEEP = 8;           // the Recommended version keeps it until another scores this much more
 
 // One version's Recommended score and its parts: [total, rating, downloads, features].
 function rs_title_rec_score(array $a, array $c, int $maxDl): array {
-    $rating = ($c['n'] ?? 0) >= 3 ? max(0.0, min(100.0, (float)$c['score'])) : 50.0;
+    $rating = ($c['n'] ?? 0) >= 3 ? max(0.0, min(100.0, (float)$c['score'])) : (float)RS_REC_UNRATED;
     $dl = (int)($a['downloads'] ?? 0);
     $share = $maxDl > 0 && $dl > 0 ? max(0.0, min(1.0, 1 + log10($dl / $maxDl) / 2)) : 0.0;
     $sup = isset($a['support']) && is_array($a['support']) ? $a['support'] : (function_exists('rs_pc_support') ? rs_pc_support($a) : []);
@@ -129,17 +132,26 @@ function rs_title_rec_score(array $a, array $c, int $maxDl): array {
 }
 
 // Which version is Recommended: the pinned one, else the PC recomp with the best score above
-// (rating, downloads and features together). One players rate badly (under 50 from 5 reports or
-// more) is only picked when every version is.
+// (rating, downloads and features together), with three guards so it doesn't jump around:
+// - one players rate badly (under 50 from 5 reports or more) is only picked when every version is;
+// - one with fewer than 5 reports never beats one with 5 or more (a single report can't move it);
+// - the version Recommended now ($prev, from the published catalog) keeps it until another scores
+//   RS_REC_KEEP more.
 // $pcApps: id => app as listed. $ps5Ids: the PS5 members that are shown.
-function rs_title_pick(array $t, array $pcApps, array $ps5Ids, array $recent): string {
+function rs_title_pick(array $t, array $pcApps, array $ps5Ids, array $recent, string $prev = ''): string {
     $pcIds = array_values(array_filter($t['pc'], fn($id) => isset($pcApps[$id])));
     if ($t['pick'] !== '') {
         [$k, $id] = array_pad(explode(':', $t['pick'], 2), 2, '');
         if (($k === 'pc' && in_array($id, $pcIds, true)) || ($k === 'ps5' && in_array($id, $ps5Ids, true))) return $t['pick'];
     }
     $out = rs_title_rec_scores($pcIds, $pcApps, $recent);
-    if ($out) return 'pc:' . array_key_first($out);
+    if ($out) {
+        $lead = (string)array_key_first($out);
+        $was = str_starts_with($prev, 'pc:') ? substr($prev, 3) : '';
+        if ($was !== '' && $was !== $lead && isset($out[$was]) && rs_title_rec_tier($was, $recent, $out) === rs_title_rec_tier($lead, $recent, $out)
+            && $out[$lead][0] - $out[$was][0] < RS_REC_KEEP) return "pc:$was";
+        return "pc:$lead";
+    }
     return $ps5Ids ? 'ps5:' . $ps5Ids[0] : '';
 }
 
@@ -168,16 +180,23 @@ function rs_title_rec_scores(array $pcIds, array $pcApps, array $recent): array 
     if (!$ids) $ids = $pcIds;
     $maxDl = 0;
     foreach ($ids as $id) $maxDl = max($maxDl, (int)($pcApps[$id]['downloads'] ?? 0));
-    $bad = fn($id) => ($recent[$id]['n'] ?? 0) >= 5 && (float)($recent[$id]['score'] ?? 0) < 50;
-    $ok = array_values(array_filter($ids, fn($id) => !$bad($id)));
     $out = [];
     foreach ($ids as $id) $out[$id] = rs_title_rec_score($pcApps[$id], $recent[$id] ?? [], $maxDl);
-    uksort($out, function ($x, $y) use ($out, $ok, $pcApps) {
-        $gx = in_array($x, $ok, true); $gy = in_array($y, $ok, true);
-        if ($gx !== $gy) return $gx ? -1 : 1;
+    uksort($out, function ($x, $y) use ($out, $pcApps, $recent) {
+        $tx = rs_title_rec_tier($x, $recent, $out); $ty = rs_title_rec_tier($y, $recent, $out);
+        if ($tx !== $ty) return $tx <=> $ty;
         return [$out[$y][0], (int)($pcApps[$y]['downloads'] ?? 0)] <=> [$out[$x][0], (int)($pcApps[$x]['downloads'] ?? 0)];
     });
     return $out;
+}
+// Which group a version sorts in: 0 proven (5+ reports), 1 not proven yet, 2 rated badly. With no
+// proven version in the game, they're all one group.
+function rs_title_rec_tier(string $id, array $recent, array $all): int {
+    $n = (int)($recent[$id]['n'] ?? 0);
+    if ($n >= RS_REC_PROVEN && (float)($recent[$id]['score'] ?? 0) < 50) return 2;
+    $anyProven = false;
+    foreach (array_keys($all) as $o) if ((int)($recent[$o]['n'] ?? 0) >= RS_REC_PROVEN && (float)($recent[$o]['score'] ?? 0) >= 50) { $anyProven = true; break; }
+    return $anyProven && $n < RS_REC_PROVEN ? 1 : 0;
 }
 
 // pc-catalog.json's titles (games with two versions or more), and missing art filled in from
@@ -190,6 +209,9 @@ function rs_title_catalog(array &$apps): array {
     $ps5 = [];
     foreach (rs_games(false) as $g) $ps5[$g['id']] = $g;
     $recent = rs_title_recent_counts();
+    // (4.11) What's Recommended now, so a close call doesn't flip it back and forth.
+    $prevPick = [];
+    if (defined('RS_PC_CATALOG') && is_file(RS_PC_CATALOG)) foreach ((array)(json_decode((string)@file_get_contents(RS_PC_CATALOG), true)['titles'] ?? []) as $pt) $prevPick[(string)($pt['id'] ?? '')] = (string)($pt['pick'] ?? '');
     $out = [];
     foreach (rs_titles() as $t) {
         $pcIds = array_values(array_filter($t['pc'], fn($id) => isset($byId[$id])));
@@ -207,7 +229,7 @@ function rs_title_catalog(array &$apps): array {
         foreach ($pcIds as $id) $apps[$byId[$id]]['title'] = $t['id'];
         $out[] = [
             'id' => $t['id'], 'name' => $t['name'], 'origin' => $t['origin'],
-            'pick' => $pick = rs_title_pick($t, array_intersect_key($listed, array_flip($pcIds)), $ps5Ids, $recent),
+            'pick' => $pick = rs_title_pick($t, array_intersect_key($listed, array_flip($pcIds)), $ps5Ids, $recent, $prevPick[$t['id']] ?? ''),
             'why' => rs_title_rec_why($pick, $t, $listed, $recent),
             'pc' => $pcIds,
             'ps5' => array_map(fn($id) => [

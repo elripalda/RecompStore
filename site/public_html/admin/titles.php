@@ -66,6 +66,8 @@ foreach (rs_pc_apps() as $a) $pcApps[$a['id']] = $a;
 $ps5 = [];
 foreach (rs_games() as $g) $ps5[$g['id']] = $g;
 $recent = rs_title_recent_counts();
+$pubPick = [];
+if (defined('RS_PC_CATALOG') && is_file(RS_PC_CATALOG)) foreach ((array)(json_decode((string)@file_get_contents(RS_PC_CATALOG), true)['titles'] ?? []) as $pt) $pubPick[(string)($pt['id'] ?? '')] = (string)($pt['pick'] ?? '');
 $suggest = rs_title_suggestions();
 $inTitle = ['pc' => [], 'ps5' => []];
 foreach ($titles as $t) { foreach ($t['pc'] as $id) $inTitle['pc'][$id] = $t['name']; foreach ($t['ps5'] as $id) $inTitle['ps5'][$id] = $t['name']; }
@@ -134,7 +136,7 @@ rs_head('Versions', true, ['assets/titles.css']);
   <?php foreach ($titles as $t):
     $pcShown = array_filter($t['pc'], fn($id) => isset($pcApps[$id]) && !$pcApps[$id]['hidden']);
     $ps5Shown = array_values(array_filter($t['ps5'], fn($id) => isset($ps5[$id]) && empty($ps5[$id]['hidden'])));
-    $auto = rs_title_pick(array_merge($t, ['pick' => '']), array_intersect_key($pcApps, array_flip($pcShown)), $ps5Shown, $recent);
+    $auto = rs_title_pick(array_merge($t, ['pick' => '']), array_intersect_key($pcApps, array_flip($pcShown)), $ps5Shown, $recent, $pubPick[$t['id']] ?? '');
     $recScore = rs_title_rec_scores(array_values($pcShown), $pcApps, $recent);
     $total = count($t['pc']) + count($t['ps5']);
     $needArt = array_filter($t['ps5'], fn($id) => isset($ps5[$id]) && ($ps5[$id]['icon'] === '' || $ps5[$id]['hero'] === ''));
@@ -150,7 +152,7 @@ rs_head('Versions', true, ['assets/titles.css']);
         <table class="tt-table">
           <thead><tr><th>Recommended</th><th>Version</th><th>Players</th><th></th></tr></thead>
           <tbody>
-            <tr><td><label class="check"><input type="radio" name="pick" value=""<?= $t['pick'] === '' ? ' checked' : '' ?>> Automatic</label></td><td colspan="3" class="muted small">Right now: <?= h($auto === '' ? 'none shown yet' : (str_starts_with($auto, 'pc:') ? ($pcApps[substr($auto, 3)]['name'] ?? $auto) : ($ps5[substr($auto, 4)]['name'] ?? $auto))) ?>. Scored out of 100: players' rating 45, downloads 30, Easy Setup 12, settings 8, saves 3, copy check 2.</td></tr>
+            <tr><td><label class="check"><input type="radio" name="pick" value=""<?= $t['pick'] === '' ? ' checked' : '' ?>> Automatic</label></td><td colspan="3" class="muted small">Right now: <?= h($auto === '' ? 'none shown yet' : (str_starts_with($auto, 'pc:') ? ($pcApps[substr($auto, 3)]['name'] ?? $auto) : ($ps5[substr($auto, 4)]['name'] ?? $auto))) ?>. Scored out of 100: players' rating 45 (under 3 reports counts as 40%), downloads 30, Easy Setup 12, settings 8, saves 3, copy check 2. One with under 5 reports never beats one with 5 or more, and the current pick keeps it until another scores 8 more.</td></tr>
             <?php foreach ($t['pc'] as $id): $a = $pcApps[$id] ?? null; ?>
             <tr<?= !$a || $a['hidden'] ? ' class="dim"' : '' ?>>
               <td><label class="check"><input type="radio" name="pick" value="pc:<?= h($id) ?>"<?= $t['pick'] === "pc:$id" ? ' checked' : '' ?>> Pin</label></td>

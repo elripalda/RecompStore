@@ -55,7 +55,7 @@ Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked 
 - downloads 30, against the game's most downloaded version (1/100 of it or less scores 0);
 - launcher features from the catalog's `support`: Easy Setup 12, settings 8, saves 3, copy check 2. A feature from our profile instead of the developer's own file counts 70%.
 
-A version rated under 50 from 5 reports or more is only picked when every version is. Versions not out yet are left out. The weights are the `RS_REC_*` constants. The admin page shows each version's score. `titles[].why` gives the reason in a few words ("Easy Setup · Most downloaded · 76% from players"; empty when pinned). The website shows it on the Recommended tag, and the launcher in its version notes. Changes go out on the next Publish (or catalog write).
+Three guards keep it steady. A version rated under 50 from 5 reports or more is only picked when every version is. A version with fewer than 5 reports never beats one with 5 or more, and under 3 reports its rating counts as 40. The version Recommended now (read from the published catalog) keeps it until another scores 8 more (`RS_REC_KEEP`). Versions not out yet are left out. The weights are the `RS_REC_*` constants. The admin page shows each version's score. `titles[].why` gives the reason in a few words ("Easy Setup · Most downloaded · 76% from players"; empty when pinned). The website shows it on the Recommended tag, and the launcher in its version notes. Changes go out on the next Publish (or catalog write).
 
 ## The 30-minute refresh
 
