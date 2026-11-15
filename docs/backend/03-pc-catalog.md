@@ -44,7 +44,7 @@ If you add a field the launcher should read: add it in `rs_pc_catalog()`, decide
 
 ## Checked files in the catalog
 
-Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked downloads with `scan`: `green`, `yellow`, `red` or `pending`. A `yellow` file the team okayed on the hub (the VirusTotal check mark) also has `reviewed: true`. The launcher and website can show it as checked by the team instead of as a warning (launcher from Beta 51).
+Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked downloads with `scan`: `green`, `yellow`, `red` or `pending`. A `yellow` file the team okayed also has `reviewed: true`: on the hub (the VirusTotal check mark) for new games, or on Security > Minor flags to okay for releases already out. The okay is kept per release in kv `vtok:<md5(repo key|tag)>` (`rs_vt_okd`, `rs_vt_ok_mark`). The launcher and website can show it as checked by the team instead of as a warning (launcher from Beta 51).
 
 ## Titles (one game, many versions)
 

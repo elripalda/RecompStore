@@ -57,6 +57,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($act === 'approve') { rs_vt_release_go($app, 'approved'); rs_flash($app['name'] . ' ' . ($app['pending']['version'] ?: $app['pending']['tag']) . ' is out.', 'ok'); }
             else { rs_vt_block($app); rs_flash($app['name'] . ' stays on the version before. That release won\'t be offered.', 'ok'); }
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([rs_pc_key($app), $app['pending']['tag']]);
+        } elseif ($act === 'minor-ok' || $act === 'minor-ok-all') {
+            // (4.11) Minor flags looked at: players see these releases as Verified updates.
+            $n = 0;
+            foreach (rs_vt_minor_live() as [$ma, $mt]) {
+                if ($act === 'minor-ok' && ($ma['id'] !== (string)($_POST['id'] ?? '') || $mt !== (string)($_POST['tag'] ?? ''))) continue;
+                rs_vt_ok_mark(rs_pc_key($ma), $mt, rs_me_name());
+                rs_log('security', $ma['id'], 'minor flags okayed on ' . $mt);
+                $n++;
+            }
+            rs_flash($n === 1 ? 'Okayed. Players see it as a Verified update.' : 'Okayed ' . $n . '. Players see them as Verified updates.', 'ok');
         } elseif ($act === 'release-clean') {
             // (4.1) Every held update that's checked and clean (green or yellow) goes out now, without waiting out its hold.
             $out = [];
@@ -188,6 +198,25 @@ rs_head('Security', true, ['assets/vt.css']);
         <?php elseif ($f['source'] === 'submission'): ?><a class="button" href="hub.php#<?= h(preg_replace('/^m(\d+)$/', 'sub:$1', (string)$f['ref'])) ?>">Open submission</a><?php endif; ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="seen"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><button class="ghost">Mark seen</button></form>
       </div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+</section>
+
+<?php $minor = rs_vt_minor_live(); ?>
+<section class="card" id="minor">
+  <div class="vt-head"><h2>Minor flags to okay <span class="pill<?= $minor ? ' warn' : '' ?>"><?= count($minor) ?></span></h2>
+    <?php if (count($minor) > 1): ?><div class="vt-acts"><form method="post" onsubmit="return confirm('Okay all <?= count($minor) ?>? Players will see them as Verified updates.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="minor-ok-all"><button>Okay all (<?= count($minor) ?>)</button></form></div><?php endif; ?></div>
+  <p class="muted">Releases that are out with 1 or 2 flags, usually unsigned programs. RecompLauncher shows them as "Checking" until you look. Once you okay one, players see a Verified update.</p>
+  <?php if (!$minor): ?><p class="vt-empty">Nothing to look at.</p><?php else: ?>
+  <div class="vt-list">
+    <?php foreach ($minor as [$ma, $mt, $mf, $me, $ml]): ?>
+    <div class="vt-row yellow">
+      <div class="vt-what"><strong><?= h($ma['name']) ?></strong><small><?= h($ma['repo']) ?> · <?= h($mt) ?></small></div>
+      <div class="vt-src"><span class="vt-chip">Out now</span></div>
+      <div class="vt-res"><?= rs_vt_badge_html(['yellow', $mf . ' of ' . $me, $ml]) ?></div>
+      <div class="vt-acts"><form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="minor-ok"><input type="hidden" name="id" value="<?= h($ma['id']) ?>"><input type="hidden" name="tag" value="<?= h($mt) ?>"><button>Looks fine</button></form></div>
     </div>
     <?php endforeach; ?>
   </div>

@@ -226,11 +226,13 @@ try {
             }
         }
         // (4.11) A few engines flagged it and the team okayed it on the hub: said so on each such file.
-        if ($full && $files && ($okd = rs_kv_get('vtok:' . md5(strtolower(rs_pc_key($full)) . '|' . $tag))) && !empty(json_decode((string)$okd['v'], true)['by']))
+        if ($full && $files && rs_vt_okd(rs_pc_key($full), $tag))
             foreach ($files as &$f) if ($f['verdict'] === 'yellow') $f['reviewed'] = true;
         unset($f);
         // A check still running is asked about again soon; a finished one stays as it is.
-        rs_pc_out(200, ['ok' => true, 'tag' => $tag, 'files' => $files], $files && !$waiting ? 3600 : 120);
+        // A minor flag nobody has okayed yet is asked about again in 10 minutes, so an okay shows soon.
+        $unokd = (bool)array_filter($files, fn($f) => $f['verdict'] === 'yellow' && empty($f['reviewed']));
+        rs_pc_out(200, ['ok' => true, 'tag' => $tag, 'files' => $files], $files && !$waiting ? ($unokd ? 600 : 3600) : 120);
     }
     if ($a === 'readme' && !$post) {
         $rh = rs_host_norm((string)($app['host'] ?? '')); // (3.9) GitHub or GitLab

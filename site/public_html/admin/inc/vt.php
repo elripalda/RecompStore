@@ -583,6 +583,33 @@ function rs_vt_block(array $a): void {
     rs_log('security', $a['id'], 'blocked ' . $a['blocked_tag']);
 }
 
+// (4.11) A release the team looked at and okayed despite a few minor flags (kv vtok:<md5>, the same
+// key the hub's check mark uses). Players see it as a Verified update.
+function rs_vt_okd(string $repoKey, string $tag): bool {
+    $c = rs_kv_get('vtok:' . md5(strtolower($repoKey) . '|' . $tag));
+    return $c && !empty(json_decode((string)$c['v'], true)['by']);
+}
+function rs_vt_ok_mark(string $repoKey, string $tag, string $by): void {
+    rs_kv_put('vtok:' . md5(strtolower($repoKey) . '|' . $tag), (string)json_encode(['by' => $by !== '' ? $by : 'admin', 'at' => gmdate('c')]));
+}
+// The releases out now with minor flags (yellow) nobody has okayed yet: [[app, tag, found, engines, link]].
+function rs_vt_minor_live(): array {
+    rs_vt_tables();
+    $flagged = [];
+    foreach (rs_db()->query("SELECT DISTINCT repo, tag FROM vt_files WHERE status = 'done' AND malicious + suspicious > 0")->fetchAll() as $r) $flagged[strtolower((string)$r['repo']) . '|' . $r['tag']] = true;
+    $out = [];
+    foreach (rs_pc_apps(false) as $a) {
+        $tag = (string)($a['ok_tag'] ?? '');
+        if ($tag === '' || (string)$a['repo'] === '' || !isset($flagged[strtolower(rs_pc_key($a)) . '|' . $tag])) continue;
+        [$rows, $v] = rs_vt_release(rs_pc_key($a), $tag);
+        if ($v !== 'yellow' || rs_vt_okd(rs_pc_key($a), $tag)) continue;
+        $f = 0; $e = 0; $link = '';
+        foreach ($rows as $r) if ((int)$r['malicious'] + (int)$r['suspicious'] > $f) { $f = (int)$r['malicious'] + (int)$r['suspicious']; $e = (int)$r['engines']; $link = rs_vt_link($r); }
+        $out[] = [$a, $tag, $f, $e, $link];
+    }
+    return $out;
+}
+
 // For the catalog: the checked files of the release that's out, so the launcher can match them.
 function rs_vt_catalog_files(array $a): array {
     $tag = (string)($a['ok_tag'] ?? '');
@@ -596,8 +623,7 @@ function rs_vt_catalog_files(array $a): array {
         $out[$k] = ['name' => (string)$r['name'], 'sha256' => (string)$r['sha256'], 'scan' => $r['status'] === 'done' ? rs_vt_verdict($r) : 'pending'];
     // (4.11) A few engines flagged it and the team looked and okayed it (the hub's check mark): said
     // so, for the launcher and the website to show it as checked rather than as a warning.
-    $okd = rs_kv_get('vtok:' . md5(strtolower(rs_pc_key($a)) . '|' . $tag));
-    if ($okd && !empty(json_decode((string)$okd['v'], true)['by'])) foreach ($out as &$f) if ($f['scan'] === 'yellow') $f['reviewed'] = true;
+    if (rs_vt_okd(rs_pc_key($a), $tag)) foreach ($out as &$f) if ($f['scan'] === 'yellow') $f['reviewed'] = true;
     unset($f);
     return $out;
 }
