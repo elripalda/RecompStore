@@ -270,7 +270,11 @@ function rs_pc_assets(array $assets, array &$flags): array {
         if (!preg_match('/\.(zip|7z|rar|exe|msi|tar\.gz|tgz|appimage|dmg|flatpak)$/', $l)) continue;
         // (4.8) Whole words only: "ios" used to match inside Wario's Woods and BioShock, so their builds
         // were skipped and Auto-add said there was no download.
-        if (preg_match('/(^|[^a-z0-9])(ps5|ps4|prospero|switch2?|nx|nsp|xci|android|apk|aab|ios|ipa|vita|source|source-?code|src|debug|symbols|pdb)([^a-z0-9]|$)/', $l)
+        // (4.12) A console name doesn't rule out a file that also names a PC system: a PS4 port's
+        // Windows build is "Deadpool-PS4-PORT-portable-windows.zip".
+        $pcNamed = (bool)preg_match('/(windows|win64|win32|(^|[-_. ])win([-_. ]|$)|linux|appimage|macos|darwin)/', $l);
+        if (preg_match('/(^|[^a-z0-9])(source|source-?code|src|debug|symbols|pdb|nsp|xci|apk|aab|ipa)([^a-z0-9]|$)/', $l)
+            || (!$pcNamed && preg_match('/(^|[^a-z0-9])(ps5|ps4|prospero|switch2?|nx|android|ios|vita)([^a-z0-9]|$)/', $l))
             || preg_match('/\.(apk|ipa|nsp|xci|nro|vpk|pdb)$/', $l)) continue;
         // Not the game itself: an add-on, an upscaler pack, a mod or texture pack, a soundtrack, a
         // dedicated server, an SDK, a patch (but a "patcher" can be the game's own way in).
