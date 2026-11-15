@@ -129,6 +129,12 @@ $chkSource = ['release' => ['The developer\'s own file, from their release', 'ok
   </details>
   <?php endforeach; ?>
 </section>
+<?php // (4.11) The drafter's own log for test runs: what it's doing right now, and why one didn't finish.
+$chkLog = rs_prq_dry_dir() . '/run.log';
+$chkLines = is_file($chkLog) ? array_slice(file($chkLog, FILE_IGNORE_NEW_LINES) ?: [], -60) : [];
+if ($chkLines): ?>
+<details class="card chk-log"><summary><b>Drafter log</b> <span class="muted small">the last <?= count($chkLines) ?> lines of the test runs</span></summary><pre class="mono"><?= h(implode("\n", $chkLines)) ?></pre></details>
+<?php endif; ?>
 <?php if ($chkRunning): ?>
 <script>
 (function () {

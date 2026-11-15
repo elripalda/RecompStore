@@ -205,5 +205,7 @@
 .chk-t>*:not(summary){margin-left:12px;margin-right:12px}.chk-t[open]{padding-bottom:12px}
 .chk-t-name{display:flex;flex-direction:column;min-width:0}.chk-t-failed .chk-t-st,.chk-t-stopped .chk-t-st{color:var(--bad)}
 .chk-t-btns{margin-top:12px}
+/* (the drafter's log) */
+.chk-log summary{cursor:pointer}.chk-log pre{margin:10px 0 0;padding:10px;border:1px solid var(--line);border-radius:8px;max-height:420px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word}
 @media (max-width:900px){.chk-models{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:760px){.chk-feats{grid-template-columns:1fr}.chk-t>summary{grid-template-columns:1fr 1fr}}
