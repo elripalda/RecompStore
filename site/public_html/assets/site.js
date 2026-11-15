@@ -2262,6 +2262,13 @@
     if (pick.startsWith('pc:') && here.some((a) => a.id === pick.slice(3))) return pick.slice(3);
     return here.slice().sort((x, y) => (y.downloads || 0) - (x.downloads || 0))[0].id;
   };
+  // (4.11) A console's recomps: each game once, as its version for that console (the Recommended one
+  // when that's for this console). A game whose Recommended version is for another console still
+  // shows under each console it has a version for.
+  const pcOnConsole = (o) => {
+    const on = ((pcCat && pcCat.listed) || []).filter((a) => a.origin === o);
+    return on.filter((a) => { const tt = pcTitleOf('pc', a.id); return !tt || pcLeadOf(tt, on) === a.id; });
+  };
   const titleVersions = (tt) => (tt.pc || []).filter((id) => ((pcCat && pcCat.listed) || []).some((a) => a.id === id)).length + (tt.ps5 || []).length;
   const pcById = (id) => (pcCat ? pcCat.all.find((a) => a.id === id) : null);
   // (4.7) Recomps that carry several games (a trilogy, a bundle): what each includes, and which of them
@@ -3122,7 +3129,7 @@
     let page = pcPageFromUrl(), consOpen = false;
     // (4.1) Consoles, most recomps first. A short row with the biggest ones; the rest open in an even grid.
     const conCount = {};
-    pcCat.apps.forEach((a) => { conCount[a.origin] = (conCount[a.origin] || 0) + 1; });
+    (pcCat.origins || []).forEach((o) => { const n = pcOnConsole(o.id).length; if (n) conCount[o.id] = n; });
     const consoles = (pcCat.origins || []).filter((o) => conCount[o.id]).sort((x, y) => (x.id === 'other') - (y.id === 'other') || conCount[y.id] - conCount[x.id]);
     const CON_TOP = 5;
     const genresHere = Object.keys(PC_GENRES).filter((k) => pcCat.apps.some((a) => (a.genre || 'other') === k));
@@ -3149,13 +3156,13 @@
     const draw = (animate, fresh) => {
       if (fresh) page = 1;
       const q = fold(input.value.trim());
-      const list = pcCat.apps.filter((a) => (!genre || (a.genre || 'other') === genre) && (!origin || a.origin === origin) && (!tag || (a.tags || []).includes(tag))
+      const list = (origin ? pcOnConsole(origin) : pcCat.apps).filter((a) => (!genre || (a.genre || 'other') === genre) && (!origin || a.origin === origin) && (!tag || (a.tags || []).includes(tag))
         && (!q || fold([a.name, a.game, a.author, originName(a.origin), t(PC_GENRES[a.genre || 'other']), ...(a.tags || [])].join(' ')).includes(q)));
       const tagbar = view.querySelector('[data-tagbar]');
       tagbar.innerHTML = tag ? `<button type="button" class="pc-tagchip" data-untag aria-label="${esc(tf('Stop showing only {tag}', { tag }))}"><span>${esc(t('Tag'))}</span><b>${esc(tag)}</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>` : '';
       const un = tagbar.querySelector('[data-untag]');
       if (un) un.addEventListener('click', () => { tag = ''; const u = new URL(location.href); u.searchParams.delete('tag'); history.replaceState(history.state, '', u.pathname + u.search); routed = location.href; draw(true, true); });
-      setCount(pcVersions(list));
+      setCount(origin ? list.length : pcVersions(list));
       const pages = Math.max(1, Math.ceil(list.length / PC_PER_PAGE));
       if (page > pages) page = pages;
       const part = list.slice((page - 1) * PC_PER_PAGE, page * PC_PER_PAGE);
@@ -3368,7 +3375,7 @@
   function pcConsoles() {
     pcTitle = `${t('Consoles')} · RecompLauncher`;
     const byDl = (x, y) => (y.downloads || 0) - (x.downloads || 0);
-    const list = (pcCat.origins || []).map((o) => ({ id: o.id, apps: pcCat.apps.filter((a) => a.origin === o.id).sort(byDl) })).filter((o) => o.apps.length)
+    const list = (pcCat.origins || []).map((o) => ({ id: o.id, apps: pcOnConsole(o.id).sort(byDl) })).filter((o) => o.apps.length)
       .sort((x, y) => y.apps.length - x.apps.length);
     // Cards in even rows: as many across as divides them evenly.
     const n = list.length;
