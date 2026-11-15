@@ -102,6 +102,36 @@ const RS_SDK_HEALTH_FEATS = [
 
 // -> ['at', 'source' (release|ours|ours_old|none), 'docs' => [where => text], 'release' => [...], 'schema' => [where => errors],
 //     'feats' => [key => ['state' => ok|warn|bad|off, 'how', 'fix']], 'players' => [...]]
+// The file names in the Windows download of the release players install (null when it isn't a zip or
+// can't be read). Used before following a developer's file: its start.program has to be in there.
+function rs_sdk_release_names(array $a): ?array {
+    try {
+        $rel = (string)$a['repo'] !== '' ? rs_pc_release_for($a) : null;
+        $pat = trim((string)$a['asset_win']);
+        foreach ($rel ? (array)$rel['assets'] : [] as $f) {
+            if ($pat === '' || !rs_pattern_matches($pat, (string)$f['name'])) continue;
+            if (!preg_match('/\.zip$/i', (string)$f['name'])) return null;
+            $z = rs_zip_directory((string)$f['browser_download_url'], (int)$f['size']);
+            return !empty($z['entries']) ? array_keys((array)$z['entries']) : null;
+        }
+    } catch (Throwable $e) { /* unknown */ }
+    return null;
+}
+
+// Whether a start.program list names something in the download: true / false, or null when it can't be told.
+function rs_sdk_program_in(array $prog, ?array $names): ?bool {
+    if ($names === null) return null;
+    $known = false;
+    foreach ($prog as $p) {
+        $p = (string)$p;
+        if ($p === '' || str_contains($p, '{')) continue;
+        $known = true;
+        $p = ltrim(str_replace('\\', '/', $p), './');
+        foreach ($names as $n) if (strcasecmp($n, $p) === 0 || preg_match('#^[^/]+/' . preg_quote($p, '#') . '$#i', $n)) return true;
+    }
+    return $known ? false : null;
+}
+
 function rs_sdk_health(array $a, bool $fresh = false): array {
     $k = 'sdkhealth:' . $a['id'];
     if (!$fresh && ($c = rs_kv_get($k)) && $c['age'] < 6 * 3600 && is_array($x = json_decode($c['v'], true))) return $x;
