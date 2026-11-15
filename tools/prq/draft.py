@@ -545,6 +545,10 @@ The todo can ask for:
   follow the project's own pattern. It prints lines like "progress 0.4 Unpacking files" (a number from 0 to 1,
   then a few words) as it goes, exits 0 when the game is ready, and exits non-zero with one line on stderr when it
   isn't. Keep the project's own default for where the game is made, or use an output folder option it has already.
+  A setup wizard, import screen or builder window with no command today is exactly what this is for: the point
+  of the change is to add that command. Follow its button to the function that does the work (ask for those
+  files with need_files) and call it. Don't skip it just because the project has no command-line path yet; skip
+  only when that function needs something only the window can give (and say what in "notes").
 - "packaging": one line in the release or packaging script (a Makefile dist target, a package or build script)
   that copies recomplauncher.json from the repo root next to the program in the release zip, and to the AppDir root
   for an AppImage. Never edit files under .github/workflows (they can't be sent): if the release is only made in a
@@ -766,6 +770,17 @@ def code_pass(spec, p, ctx, doc, draft, validator):
         existing = d.get("existing") if isinstance(d.get("existing"), dict) and d["existing"].get("how") else None
         pack = d.get("packaging") if isinstance(d.get("packaging"), dict) else {}
         notes = (d.get("notes") or "").strip()
+        # (4.11) A todo item left undone needs a reason: in the tests a silent skip was the code step being timid
+        # (the same model added the command when asked from a slightly different report).
+        if attempt < 2:
+            done = {"game": has_game_option(new_doc or doc), "prepare": isinstance((new_doc or doc).get("prepare"), dict),
+                    "packaging": bool(pack.get("done") or str(pack.get("ask", "")).strip())}
+            silent = [t for t in todo if not done.get(t)]
+            if silent and not notes:
+                print(f"code pass {p['repo']}: asked again, skipped {', '.join(silent)} without a reason")
+                msgs += [{"role": "assistant", "content": m.group(0)},
+                         {"role": "user", "content": "You left out " + ", ".join(silent) + " without saying why. Make it (follow the screen's button to the function that does the work), or say in \"notes\" exactly what stops it. Answer with the whole JSON object again."}]
+                continue
         if not edits:
             # (4.10) No code needed when it already reads the game's location: the file uses that option.
             if existing and new_doc is not None and has_game_option(new_doc):
