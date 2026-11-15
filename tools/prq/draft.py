@@ -498,7 +498,7 @@ def ask(spec, p, ctx, fix=None):
     if fix:
         msgs += [{"role": "assistant", "content": fix["prev"]},
                  {"role": "user", "content": "That recomplauncher.json doesn't pass the schema:\n" + fix["errors"] + "\nFix it and answer with the whole JSON object again."}]
-    body = {"model": MODEL, "max_tokens": 16000,
+    body = {"model": MODEL, "max_tokens": 24000,
             "system": [{"type": "text", "text": SYSTEM + spec, "cache_control": {"type": "ephemeral"}}],
             "messages": msgs}
     for attempt in range(3):
@@ -733,7 +733,7 @@ def code_pass(spec, p, ctx, doc, draft, validator):
     msgs = [{"role": "user", "content": "Make what the todo asks for, or use what the project already has.\n\n" + json.dumps(user, ensure_ascii=False)}]
     asked_files = False
     for attempt in range(3):
-        body = {"model": CODE_MODEL or MODEL, "max_tokens": 16000, "system": [{"type": "text", "text": CODE_SYSTEM + "\n\nTHE SDK GUIDE:\n" + spec, "cache_control": {"type": "ephemeral"}}], "messages": msgs}
+        body = {"model": CODE_MODEL or MODEL, "max_tokens": 32000, "system": [{"type": "text", "text": CODE_SYSTEM + "\n\nTHE SDK GUIDE:\n" + spec, "cache_control": {"type": "ephemeral"}}], "messages": msgs}
         for wait in (0, 20, 40, 60):  # (the model busy or rate-limited: a few drafts run side by side)
             if wait:
                 time.sleep(wait)
@@ -752,8 +752,16 @@ def code_pass(spec, p, ctx, doc, draft, validator):
         except ValueError:
             d = None
         if not isinstance(d, dict):
-            print(f"code pass {p['repo']}: no JSON in the answer")
-            return None
+            # (4.11) A long change can run past the answer's length, or slip in the JSON: asked once more for it
+            # whole, instead of the draft quietly going out without its code.
+            cut = jj.get("stop_reason") == "max_tokens"
+            print(f"code pass {p['repo']}: no JSON in the answer" + (" (cut off at the length limit)" if cut else "") + ("; asking again" if attempt < 2 else ""))
+            if attempt >= 2:
+                return None
+            msgs += [{"role": "assistant", "content": text[-20000:] or "(empty)"},
+                     {"role": "user", "content": ("That answer was cut off before the end. " if cut else "That answer wasn't one valid JSON object. ")
+                      + "Send the whole JSON object again, and only that: keep each find text short (just enough to be unique) and leave out any edit you aren't sure of."}]
+            continue
         want = [x for x in (d.get("need_files") or []) if isinstance(x, str)]
         if want and not asked_files:
             # (4.11) Following the path from the screen to the function that does the work: the files it asked for.
