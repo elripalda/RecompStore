@@ -594,6 +594,11 @@ function rs_vt_catalog_files(array $a): array {
     $sys = ['windows' => $a['asset_win'], 'linux' => $a['asset_linux'], 'macos' => $a['asset_mac']];
     foreach ($st->fetchAll() as $r) foreach ($sys as $k => $p) if ($p !== '' && rs_pattern_matches($p, (string)$r['name']))
         $out[$k] = ['name' => (string)$r['name'], 'sha256' => (string)$r['sha256'], 'scan' => $r['status'] === 'done' ? rs_vt_verdict($r) : 'pending'];
+    // (4.11) A few engines flagged it and the team looked and okayed it (the hub's check mark): said
+    // so, for the launcher and the website to show it as checked rather than as a warning.
+    $okd = rs_kv_get('vtok:' . md5(strtolower(rs_pc_key($a)) . '|' . $tag));
+    if ($okd && !empty(json_decode((string)$okd['v'], true)['by'])) foreach ($out as &$f) if ($f['scan'] === 'yellow') $f['reviewed'] = true;
+    unset($f);
     return $out;
 }
 

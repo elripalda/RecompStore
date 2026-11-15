@@ -42,6 +42,10 @@ Each entry in `apps` is built in `rs_pc_catalog()` from the listing. Hidden list
 
 If you add a field the launcher should read: add it in `rs_pc_catalog()`, decide whether the website's light copy needs it (`rs_pc_web_copy()` strips the heavy ones), and note it in [07-launcher-api.md](07-launcher-api.md).
 
+## Checked files in the catalog
+
+Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked downloads with `scan`: `green`, `yellow`, `red` or `pending`. A `yellow` file the team okayed on the hub (the VirusTotal check mark) also has `reviewed: true`. The launcher and website can show it as checked by the team instead of as a warning (launcher from Beta 51).
+
 ## Titles (one game, many versions)
 
 `inc/titles.php`. A title is the game; every listing built from it is a version under it. `rs_titles_autogroup()` groups new ones on Publish. The site shows a game once in lists and lets you pick the version on its page. Trending and Emergency backup work per listing (each version on its own).
