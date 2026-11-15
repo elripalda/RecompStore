@@ -20,7 +20,7 @@ recompstore.com (the PS5 store's site) and recomplauncher.com (RecompLauncher, t
 
 ## The server
 
-- A Hostinger VPS: Apache 2.4 (so `.htaccess` rewrites work) with PHP 8.3 FPM, MariaDB. `public_html/.user.ini` raises PHP's upload limits (16 MB a file, 40 MB a request) for message files. Cloudflare sits in front of both domains.
+- A Hostinger VPS: Apache 2.4 (so `.htaccess` rewrites work) with PHP 8.3 FPM, MariaDB. PHP's upload limits are set in `/etc/php/8.3/fpm/conf.d` (600 MB, for launcher and beta uploads); message files stop at 15 MB on their own. Cloudflare sits in front of both domains.
 - Web root: `/var/www/recompstore/public_html`. Files run as `www-data`.
 - Next to it, outside the web root:
   - `recompstore-config.php` database login and other secrets (read by bootstrap.php)
