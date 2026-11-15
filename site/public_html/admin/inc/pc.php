@@ -1826,7 +1826,16 @@ function rs_pc_heal_assets(array $a, array $r): array {
     foreach (['win' => 'asset_win', 'linux' => 'asset_linux', 'mac' => 'asset_mac'] as $sys => $k) {
         $p = trim((string)$a[$k]);
         $new = (string)($r['assets'][$sys] ?? '');
-        if ($p === '' || $new === '') continue;
+        if ($new === '') continue;
+        // (4.12) No file for this system yet, and now the release has one (a developer adding Linux or Mac
+        // builds later): it's picked up instead of staying Windows only. A Mac file still has to be one the
+        // launcher on Mac can use.
+        if ($p === '') {
+            if (!in_array($new, $names, true) || ($sys === 'mac' && rs_pc_mac_why($new) !== '')) continue;
+            $np = rs_pc_pattern($new, (string)$latest['tag_name']);
+            if ($np !== '') { $a[$k] = $np; rs_log('pc-asset', $a['id'], "$sys: added $np"); }
+            continue;
+        }
         $hit = false;
         foreach ($names as $n) if (rs_pattern_matches($p, $n)) { $hit = true; break; }
         if ($hit || !in_array($new, $names, true)) continue; // the new name has to be in that same release
