@@ -92,7 +92,11 @@ function rs_rules_fill(array $a, array $f, string $readme, array $names = [], ar
     $long = trim((string)($sub['description'] ?? '')) ?: implode("\n\n", array_slice($paras, 0, 3));
     $kind = rs_rules_kind($title, $desc, $readme, (array)($f['topics'] ?? []));
     $concerns = [];
-    $gameFiles = array_values(array_filter($names, fn($n) => preg_match(RS_RULES_GAMEFILE, (string)$n) && !preg_match('/(^|\/)(lib|bin|data\/shaders?)\//i', (string)$n)));
+    // (4.12) A .md is a Mega Drive ROM only when it doesn't read like the project's own notes (README.md,
+    // CHANGELOG.md, THIRD_PARTY_NOTICES.md, anything in docs/).
+    $doc = fn(string $n) => preg_match('/\.md$/i', $n) && (preg_match('#(^|/)docs?/#i', $n) || preg_match('/^[A-Z0-9_\-. ]+\.md$/', basename($n))
+        || preg_match('/readme|change|license|licence|notice|contribut|credit|install|guide|faq|todo|history|security/i', basename($n)));
+    $gameFiles = array_values(array_filter($names, fn($n) => preg_match(RS_RULES_GAMEFILE, (string)$n) && !preg_match('/(^|\/)(lib|bin|data\/shaders?)\//i', (string)$n) && !$doc((string)$n)));
     if ($gameFiles) $concerns[] = 'Ships what looks like game data: ' . implode(', ', array_slice(array_map('basename', $gameFiles), 0, 3));
     if ($kind['kind'] !== 'recomp') $concerns[] = $kind['why'];
     $tags = [];
