@@ -3,3 +3,6 @@
 #media-autofill .actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .af-track{height:6px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin:14px 0 8px}
 .af-track i{display:block;height:100%;width:0;background:#34F2E8;transition:width .2s}
+/* (4.11) Push Cover Down keeps the top of the art (its title) in view and trims the bottom instead.
+   The launcher gets the same line (app.css .poster/.tv-poster.cvl-push) so the preview matches. */
+.cle-cover.cvl-push>img:not(.cvl){object-position:center top}

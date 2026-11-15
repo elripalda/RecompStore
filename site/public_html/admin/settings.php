@@ -427,7 +427,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-rs_head('Settings', true, ['assets/media/media-art.css', 'assets/media/media-editor.css']);
+rs_head('Settings', true, ['assets/media/media-art.css', 'assets/media/media-editor.css', 'assets/media/admin-media.css']);
 ?>
 <section class="head-row"><div><h1>Settings</h1></div><a class="btn" href="log.php">Change log</a></section>
 <?php
