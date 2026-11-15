@@ -104,8 +104,33 @@ function rs_title_recent_counts(): array {
     return $out;
 }
 
-// Which version is Recommended: the pinned one, else the PC recomp players rate best
-// (3 reports or more), else the most downloaded.
+// (4.11) How Recommended weighs a version, out of 100. The rating alone can be pushed up by a few
+// reports, so downloads and the launcher features players get (Easy Setup above all) count too.
+// Features the developer made in their own recomplauncher.json count in full; ours count a bit less.
+const RS_REC_RATING = 45;        // the players' score (0-100), 3 reports or more, else a middle 50
+const RS_REC_DOWNLOADS = 30;     // against the game's most downloaded version: 1/100 of it or less is 0
+const RS_REC_FEATS = ['easy_setup' => 12, 'settings' => 8, 'saves' => 3, 'verified' => 2];
+const RS_REC_OURS = 0.7;         // a feature from our profile instead of the developer's own file
+
+// One version's Recommended score and its parts: [total, rating, downloads, features].
+function rs_title_rec_score(array $a, array $c, int $maxDl): array {
+    $rating = ($c['n'] ?? 0) >= 3 ? max(0.0, min(100.0, (float)$c['score'])) : 50.0;
+    $dl = (int)($a['downloads'] ?? 0);
+    $share = $maxDl > 0 && $dl > 0 ? max(0.0, min(1.0, 1 + log10($dl / $maxDl) / 2)) : 0.0;
+    $sup = isset($a['support']) && is_array($a['support']) ? $a['support'] : (function_exists('rs_pc_support') ? rs_pc_support($a) : []);
+    $feat = 0.0;
+    foreach (RS_REC_FEATS as $k => $pts) {
+        $by = (string)($sup[$k] ?? '');
+        if ($by === 'dev') $feat += $pts;
+        elseif ($by !== '') $feat += $pts * RS_REC_OURS;
+    }
+    $r = RS_REC_RATING * $rating / 100; $d = RS_REC_DOWNLOADS * $share;
+    return [$r + $d + $feat, $r, $d, $feat];
+}
+
+// Which version is Recommended: the pinned one, else the PC recomp with the best score above
+// (rating, downloads and features together). One players rate badly (under 50 from 5 reports or
+// more) is only picked when every version is.
 // $pcApps: id => app as listed. $ps5Ids: the PS5 members that are shown.
 function rs_title_pick(array $t, array $pcApps, array $ps5Ids, array $recent): string {
     $pcIds = array_values(array_filter($t['pc'], fn($id) => isset($pcApps[$id])));
@@ -113,16 +138,27 @@ function rs_title_pick(array $t, array $pcApps, array $ps5Ids, array $recent): s
         [$k, $id] = array_pad(explode(':', $t['pick'], 2), 2, '');
         if (($k === 'pc' && in_array($id, $pcIds, true)) || ($k === 'ps5' && in_array($id, $ps5Ids, true))) return $t['pick'];
     }
-    $best = ''; $bestScore = -1.0;
-    foreach ($pcIds as $id) {
-        $c = $recent[$id] ?? ['score' => 0, 'n' => 0];
-        if ($c['n'] < 3) continue;
-        if ($c['score'] > $bestScore) { $best = $id; $bestScore = $c['score']; }
-    }
-    if ($best !== '') return "pc:$best";
-    usort($pcIds, fn($x, $y) => (int)$pcApps[$y]['downloads'] <=> (int)$pcApps[$x]['downloads']);
-    if ($pcIds) return 'pc:' . $pcIds[0];
+    $out = rs_title_rec_scores($pcIds, $pcApps, $recent);
+    if ($out) return 'pc:' . array_key_first($out);
     return $ps5Ids ? 'ps5:' . $ps5Ids[0] : '';
+}
+
+// Every version's score, best first, the ones not out yet left out: [id => [total, rating, downloads, features]].
+function rs_title_rec_scores(array $pcIds, array $pcApps, array $recent): array {
+    $ids = array_values(array_filter($pcIds, fn($id) => empty($pcApps[$id]['soon'])));
+    if (!$ids) $ids = $pcIds;
+    $maxDl = 0;
+    foreach ($ids as $id) $maxDl = max($maxDl, (int)($pcApps[$id]['downloads'] ?? 0));
+    $bad = fn($id) => ($recent[$id]['n'] ?? 0) >= 5 && (float)($recent[$id]['score'] ?? 0) < 50;
+    $ok = array_values(array_filter($ids, fn($id) => !$bad($id)));
+    $out = [];
+    foreach ($ids as $id) $out[$id] = rs_title_rec_score($pcApps[$id], $recent[$id] ?? [], $maxDl);
+    uksort($out, function ($x, $y) use ($out, $ok, $pcApps) {
+        $gx = in_array($x, $ok, true); $gy = in_array($y, $ok, true);
+        if ($gx !== $gy) return $gx ? -1 : 1;
+        return [$out[$y][0], (int)($pcApps[$y]['downloads'] ?? 0)] <=> [$out[$x][0], (int)($pcApps[$x]['downloads'] ?? 0)];
+    });
+    return $out;
 }
 
 // pc-catalog.json's titles (games with two versions or more), and missing art filled in from

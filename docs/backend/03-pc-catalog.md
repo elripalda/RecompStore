@@ -46,6 +46,13 @@ If you add a field the launcher should read: add it in `rs_pc_catalog()`, decide
 
 `inc/titles.php`. A title is the game; every listing built from it is a version under it. `rs_titles_autogroup()` groups new ones on Publish. The site shows a game once in lists and lets you pick the version on its page. Trending and Emergency backup work per listing (each version on its own).
 
+**Recommended** (`titles[].pick`, read by both the website and the launcher): the version pinned on Admin > Games with versions, else the best score out of 100 from `rs_title_rec_scores()`:
+- players' rating 45 (from 3 reports, else 50);
+- downloads 30, against the game's most downloaded version (1/100 of it or less scores 0);
+- launcher features from the catalog's `support`: Easy Setup 12, settings 8, saves 3, copy check 2. A feature from our profile instead of the developer's own file counts 70%.
+
+A version rated under 50 from 5 reports or more is only picked when every version is. Versions not out yet are left out. The weights are the `RS_REC_*` constants. The admin page shows each version's score. Changes go out on the next Publish (or catalog write).
+
 ## The 30-minute refresh
 
 `pc-refresh.php` (cron) calls `rs_pc_refresh_github()`: for each listing not checked in the last 30 minutes, reads its repo and newest release, updates version, size, downloads, stars and features, and runs the download check (`rs_pc_dl_check`) and the weekly "moved?" check. It saves the listing; the site changes on the next Publish. See [09-background-jobs.md](09-background-jobs.md) for everything else that job does.

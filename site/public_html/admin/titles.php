@@ -135,6 +135,7 @@ rs_head('Versions', true, ['assets/titles.css']);
     $pcShown = array_filter($t['pc'], fn($id) => isset($pcApps[$id]) && !$pcApps[$id]['hidden']);
     $ps5Shown = array_values(array_filter($t['ps5'], fn($id) => isset($ps5[$id]) && empty($ps5[$id]['hidden'])));
     $auto = rs_title_pick(array_merge($t, ['pick' => '']), array_intersect_key($pcApps, array_flip($pcShown)), $ps5Shown, $recent);
+    $recScore = rs_title_rec_scores(array_values($pcShown), $pcApps, $recent);
     $total = count($t['pc']) + count($t['ps5']);
     $needArt = array_filter($t['ps5'], fn($id) => isset($ps5[$id]) && ($ps5[$id]['icon'] === '' || $ps5[$id]['hero'] === ''));
   ?>
@@ -149,12 +150,12 @@ rs_head('Versions', true, ['assets/titles.css']);
         <table class="tt-table">
           <thead><tr><th>Recommended</th><th>Version</th><th>Players</th><th></th></tr></thead>
           <tbody>
-            <tr><td><label class="check"><input type="radio" name="pick" value=""<?= $t['pick'] === '' ? ' checked' : '' ?>> Best rated</label></td><td colspan="3" class="muted small">Right now: <?= h($auto === '' ? 'none shown yet' : (str_starts_with($auto, 'pc:') ? ($pcApps[substr($auto, 3)]['name'] ?? $auto) : ($ps5[substr($auto, 4)]['name'] ?? $auto))) ?></td></tr>
+            <tr><td><label class="check"><input type="radio" name="pick" value=""<?= $t['pick'] === '' ? ' checked' : '' ?>> Automatic</label></td><td colspan="3" class="muted small">Right now: <?= h($auto === '' ? 'none shown yet' : (str_starts_with($auto, 'pc:') ? ($pcApps[substr($auto, 3)]['name'] ?? $auto) : ($ps5[substr($auto, 4)]['name'] ?? $auto))) ?>. Scored out of 100: players' rating 45, downloads 30, Easy Setup 12, settings 8, saves 3, copy check 2.</td></tr>
             <?php foreach ($t['pc'] as $id): $a = $pcApps[$id] ?? null; ?>
             <tr<?= !$a || $a['hidden'] ? ' class="dim"' : '' ?>>
               <td><label class="check"><input type="radio" name="pick" value="pc:<?= h($id) ?>"<?= $t['pick'] === "pc:$id" ? ' checked' : '' ?>> Pin</label></td>
               <td><span class="tt-chip"><em>PC</em><?= $a ? '<a href="pc.php?edit=' . h(rawurlencode($id)) . '#edit">' . h($a['name']) . '</a>' : h($id) . ' (gone)' ?></span><small class="muted"><?= $a ? h(($a['author'] ?: '?') . ' · ' . ($a['version'] ?: 'no release') . ($a['hidden'] ? ' · hidden' : '')) : '' ?></small></td>
-              <td class="small"><?= h($verdicts($id)) ?></td>
+              <td class="small"><?= h($verdicts($id)) ?><?php if (isset($recScore[$id])): [$tot, $rr, $dd, $ff] = $recScore[$id]; ?><br><span class="muted" title="Rating <?= round($rr) ?> + downloads <?= round($dd) ?> + features <?= round($ff) ?>">Score <?= round($tot) ?> (rating <?= round($rr) ?>, downloads <?= round($dd) ?>, features <?= round($ff) ?>)</span><?php endif; ?></td>
               <td><button form="rm-<?= h($t['id'] . '-pc-' . $id) ?>" class="linkish">Take out</button></td>
             </tr>
             <?php endforeach; ?>
