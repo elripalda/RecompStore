@@ -353,6 +353,13 @@ function rs_hub_job_state(array $j): array {
     if ($note[0] === 'warn' && $note[1] === 'Look first' && trim((string)$j['notes']) !== '') $note[1] = 'Look first: ' . rs_hub_short((string)strtok(trim((string)$j['notes']), "\n"));
     return ['ready', $note, false, $vt];
 }
+// (4.12) The open draft (checking or ready to publish) for a submission's project, or null.
+function rs_hub_open_draft_for(?array $d): ?array {
+    if (!$d || (string)($d['repo'] ?? '') === '') return null;
+    $st = rs_db()->prepare("SELECT id, status, sub_id FROM pc_auto WHERE repo_key = ? AND status IN ('queued', 'running', 'review') ORDER BY id DESC LIMIT 1");
+    $st->execute([rs_repo_key(rs_host_norm((string)($d['host'] ?? '')), (string)$d['repo'])]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
 // (4.9) Why a draft didn't finish, for its card: the reason when there is one, so a listing that's
 // already there (hidden) doesn't read like something to run again and again.
 function rs_hub_fail_note(string $notes): string {

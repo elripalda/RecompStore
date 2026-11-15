@@ -399,7 +399,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rj = rs_auto_get($jid);
                 $ra = $rj ? rs_pc_app((string)$rj['app_id']) : null;
                 rs_log('hub', 'replace', $ra ? (string)$ra['name'] : (string)$jid);
-                $res['msg'] = 'Approved. It\'s replacing ' . ($ra ? $ra['name'] : 'the listing') . ': the download, virus scans, art and its page are checked again, then it\'s on Ready to publish.';
+                $kept = (string)($GLOBALS['rs_auto_replace_kept'] ?? '');
+                $res['msg'] = $kept === 'review' ? 'Its draft is checked and on Ready to publish already. Press Publish there.'
+                    : ($kept !== '' ? 'Its draft is being checked right now. It\'s on Ready to publish when that\'s done.'
+                    : 'Approved. It\'s replacing ' . ($ra ? $ra['name'] : 'the listing') . ': the download, virus scans, art and its page are checked again, then it\'s on Ready to publish.');
                 $res['open'] = 'job:' . $jid;
                 break;
             }

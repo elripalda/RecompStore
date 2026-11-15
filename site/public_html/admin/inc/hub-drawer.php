@@ -383,6 +383,9 @@ if ($job && $shelved) {
     if ($noRel) {
         echo '<button class="primary" data-act="soon" data-confirm="Click again to put it on Coming Soon">Add to Coming Soon</button>';
         $more[] = '<button type="button" data-act="approve" data-confirm="There\'s no release. Click again to approve anyway">Approve and check anyway</button>';
+    } elseif ($pcSide && str_starts_with((string)($chk['steps']['new'][2] ?? ''), 'Listed already') && ($oj = rs_hub_open_draft_for($d))) {
+        // (4.12) Its project already has a draft (an earlier submission of it): open that one.
+        echo '<button class="primary" data-act="replace">' . ($oj['status'] === 'review' ? 'Open its draft (ready to publish)' : 'Open its draft (being checked)') . '</button>';
     } elseif ($pcSide && str_starts_with((string)($chk['steps']['new'][2] ?? ''), 'Listed already')) {
         // (4.12) Its repo is a hidden or Coming Soon listing: approve it into that listing.
         echo '<button class="primary" data-act="replace" data-confirm="' . h('Click again to replace ' . preg_replace('/^Listed already as (.+?)( \((hidden|on Coming Soon)\))?\. .*$/', '$1', (string)$chk['steps']['new'][1]) . ' with this one') . '">Approve and replace</button>';

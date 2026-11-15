@@ -91,7 +91,9 @@ function rs_auto_start(string $link, string $who, bool $launch = true, int $subI
     $st = rs_db()->prepare("SELECT id FROM pc_auto WHERE repo_key = ? AND status IN ('queued', 'running', 'review') ORDER BY id DESC LIMIT 1");
     $st->execute([$key]);
     if ($had = (int)$st->fetchColumn()) {
-        if ($subId) rs_db()->prepare('UPDATE pc_auto SET sub_id = ? WHERE id = ?')->execute([$subId, $had]);
+        // (4.12) Only taken over by a newer submission (a higher id): an older one asking again never
+        // takes the draft back from the one that's waiting on it.
+        if ($subId) rs_db()->prepare('UPDATE pc_auto SET sub_id = ? WHERE id = ? AND (sub_id = 0 OR sub_id IS NULL OR sub_id < ?)')->execute([$subId, $had, $subId]);
         return $had;
     }
     rs_db()->prepare('INSERT INTO pc_auto (link, repo_key, who, sub_id, steps, created, updated) VALUES (?, ?, ?, ?, ?, NOW(), NOW())')
@@ -159,7 +161,22 @@ function rs_auto_replace(string $link, string $who, int $subId = 0, int $jobId =
     $x = rs_auto_listed(rs_repo_key($l['host'], $l['repo']));
     if (!$x) throw new RuntimeException('Nothing from that repo is listed, so there\'s nothing to replace. Approve it as usual.');
     if (!rs_auto_replaceable($x)) throw new RuntimeException($x['name'] . ' is live on RecompLauncher, so it isn\'t replaced. Edit it on PC recomps instead.');
-    if (!$jobId) $jobId = rs_auto_start($link, $who, false, $subId);
+    $GLOBALS['rs_auto_replace_kept'] = '';
+    if (!$jobId) {
+        // An open draft for this repo already (an earlier submission of it, or a run that's finished): this
+        // submission takes it over and the older submission is closed as sent again, so the two never pass
+        // the draft back and forth. A finished draft isn't run again: it's ready to publish.
+        $st = rs_db()->prepare("SELECT id, sub_id, status, app_id FROM pc_auto WHERE repo_key = ? AND status IN ('queued', 'running', 'review') ORDER BY id DESC LIMIT 1");
+        $st->execute([rs_repo_key($l['host'], $l['repo'])]);
+        if ($open = $st->fetch(PDO::FETCH_ASSOC)) {
+            rs_auto_sub_takeover((int)$open['id'], (int)$open['sub_id'], $subId);
+            if ($open['status'] !== 'review' || (string)$open['app_id'] === (string)$x['id']) { $GLOBALS['rs_auto_replace_kept'] = (string)$open['status']; return (int)$open['id']; }
+            $jobId = (int)$open['id'];
+        } else $jobId = rs_auto_start($link, $who, false, $subId);
+    } else {
+        $j0 = rs_auto_get($jobId);
+        if ($j0) rs_auto_sub_takeover($jobId, (int)$j0['sub_id'], $subId);
+    }
     $job = rs_auto_get($jobId);
     if (!$job) throw new RuntimeException('That draft is gone.');
     if (in_array($job['status'], ['queued', 'running'], true) && strtotime((string)$job['updated'] . ' UTC') > time() - RS_AUTO_STUCK && ($job['steps'] ?? [])) throw new RuntimeException('It\'s being checked right now. Wait for it to finish.');
@@ -169,6 +186,16 @@ function rs_auto_replace(string $link, string $who, int $subId = 0, int $jobId =
     rs_log('pc', $x['id'], 'Approve and replace: filled in again from ' . ($subId ? 'submission ' . $subId : 'draft ' . $jobId));
     rs_auto_launch($jobId);
     return $jobId;
+}
+// (4.12) A newer submission of the same project takes over its draft; the older one is done (sent again).
+function rs_auto_sub_takeover(int $jobId, int $oldSub, int $newSub): void {
+    if (!$newSub || $oldSub === $newSub) return;
+    if ($oldSub) {
+        $st = rs_db()->prepare("UPDATE inbox SET status = 'done' WHERE id = ? AND status <> 'done'");
+        $st->execute([$oldSub]);
+        if ($st->rowCount()) rs_log('submission-done', (string)$oldSub, 'sent again as submission ' . $newSub);
+    }
+    rs_db()->prepare('UPDATE pc_auto SET sub_id = ? WHERE id = ?')->execute([$newSub, $jobId]);
 }
 function rs_auto_dir(): string {
     $d = dirname(RS_PUBLIC) . '/recompstore-private/auto';
