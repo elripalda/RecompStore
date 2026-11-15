@@ -153,7 +153,7 @@ function rs_head(string $title, bool $nav = true, array $css = []): void {
         ],
         'Launcher' => [
             ['launcher.php', 'Launcher', 'rocket', [['launcher.php', 'Overview', fn() => in_array($here, ['launcher.php', 'launcher-upload.php'], true)], ['launcher-stats.php', 'Live stats', null], ['launcher-beta.php', 'Beta', null]], 0],
-            ['sdk-support.php', 'SDK support', 'dev', [], 0],
+            ['sdk-support.php', 'Launcher support', 'dev', [], 0],
         ],
         'Insights' => [
             ['analytics.php', 'Analytics', 'chart', [['analytics.php', 'Analytics', fn() => in_array($here, ['analytics.php', 'stats.php', 'app-stats.php'], true)], ['status.php', 'Server health', fn() => in_array($here, ['status.php', 'diag-db.php'], true)], ['statcard.php', 'Stats card', null]], 0],
@@ -280,7 +280,7 @@ function rs_pins(): array {
     $uid = (int)($_SESSION['uid'] ?? (rs_me()['id'] ?? 0));
     $raw = rs_setting('pins_' . $uid, '');
     $list = $raw !== '' ? json_decode((string)$raw, true) : [['href' => 'hub.php', 'label' => 'Submissions'], ['href' => 'roadmap.php', 'label' => 'Roadmap'],
-        ['href' => 'sdk-support.php', 'label' => 'SDK support'], ['href' => 'inbox.php?show=logs', 'label' => 'Player logs'], ['href' => 'players.php', 'label' => 'Find a player']];
+        ['href' => 'sdk-support.php', 'label' => 'Launcher support'], ['href' => 'inbox.php?show=logs', 'label' => 'Player logs'], ['href' => 'players.php', 'label' => 'Find a player']];
     $out = [];
     foreach ((array)$list as $p) {
         $href = (string)($p['href'] ?? '');

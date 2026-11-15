@@ -4,14 +4,20 @@
 // it's used up. Page: Settings > AI usage (admin/ai-usage.php).
 declare(strict_types=1);
 
-const RS_AI_MODELS = ['sonnet' => 'claude-sonnet-5-5', 'haiku' => 'claude-haiku-5-5'];
+const RS_AI_MODELS = ['opus' => 'claude-opus-5-5', 'sonnet' => 'claude-sonnet-5-5', 'haiku' => 'claude-haiku-5-5'];
+// (4.11) Prices per million tokens (in, out, cache read, 5-minute cache write), from Anthropic's pricing page
+// (Nov 2026). Haiku costs more once one prompt is over 100,000 tokens; those calls are recorded as "<model>:long".
+const RS_AI_PRICES = ['opus' => ['in' => 4, 'out' => 20, 'cr' => 0.2, 'cw' => 5], 'sonnet' => ['in' => 2, 'out' => 10, 'cr' => 0.1, 'cw' => 2.5],
+    'haiku' => ['in' => 0.1, 'out' => 0.5, 'cr' => 0.01, 'cw' => 0.125], 'haiku_long' => ['in' => 0.5, 'out' => 2.5, 'cr' => 0.05, 'cw' => 0.625]];
+const RS_AI_PRICE_NAMES = ['opus' => 'Opus', 'sonnet' => 'Sonnet', 'haiku' => 'Haiku', 'haiku_long' => 'Haiku, prompts over 100k tokens'];
 // What each feature does with AI by default. 'off' = rules only (inc/rules.php).
 const RS_AI_FEATURES = [
     'autoadd' => ['Auto-add page text', 'off', ['off', 'haiku', 'sonnet']],
     'scout' => ['Daily scout sorting', 'off', ['off', 'haiku', 'sonnet']],
     'translate' => ['Translating players\' notes', 'haiku', ['off', 'haiku', 'sonnet']],
-    'prq' => ['PR drafter', 'sonnet', ['off', 'haiku', 'sonnet']],
-    'ondemand' => ['"Write it with AI" on a draft', 'haiku', ['off', 'haiku', 'sonnet']],
+    'prq' => ['PR drafter: reading the project and writing the json', 'sonnet', ['off', 'haiku', 'sonnet', 'opus']],
+    'prqcode' => ['PR drafter: code changes', 'sonnet', ['haiku', 'sonnet', 'opus']],
+    'ondemand' => ['"Write it with AI" on a draft', 'haiku', ['off', 'haiku', 'sonnet', 'opus']],
 ];
 
 function rs_ai_tables(): void {
@@ -37,10 +43,10 @@ function rs_ai_cfg(): array {
     $mode = [];
     foreach (RS_AI_FEATURES as $k => [, $def, $allowed]) $mode[$k] = in_array($c['mode'][$k] ?? '', $allowed, true) ? $c['mode'][$k] : $def;
     $price = is_array($c['price'] ?? null) ? $c['price'] : [];
-    // US$ per million tokens: in, out, cache read, cache write. Set to what Anthropic's pricing page says.
-    $p = fn(string $m, array $d) => array_map('floatval', array_replace($d, array_intersect_key((array)($price[$m] ?? []), $d)));
-    return ['mode' => $mode, 'cap' => max(0, (float)($c['cap'] ?? 3)),
-        'price' => ['sonnet' => $p('sonnet', ['in' => 3, 'out' => 15, 'cr' => 0.3, 'cw' => 3.75]), 'haiku' => $p('haiku', ['in' => 1, 'out' => 5, 'cr' => 0.1, 'cw' => 1.25])]];
+    // US$ per million tokens: in, out, cache read, cache write. Saved ones win over RS_AI_PRICES (prices change).
+    $out = [];
+    foreach (RS_AI_PRICES as $m => $d) $out[$m] = array_map('floatval', array_replace($d, array_intersect_key((array)($price[$m] ?? []), $d)));
+    return ['mode' => $mode, 'cap' => max(0, (float)($c['cap'] ?? 3)), 'price' => $out];
 }
 function rs_ai_save_cfg(array $c): void { rs_set_setting('ai_cfg', (string)json_encode($c)); }
 
@@ -50,7 +56,7 @@ function rs_ai_model_for(string $feature): string {
     return RS_AI_MODELS[$m] ?? '';
 }
 function rs_ai_model_key(string $model): string {
-    foreach (RS_AI_MODELS as $k => $id) if ($id === $model || str_contains($model, $k)) return $k;
+    foreach (RS_AI_MODELS as $k => $id) if ($id === $model || str_contains($model, $k)) return $k === 'haiku' && str_ends_with($model, ':long') ? 'haiku_long' : $k;
     return 'sonnet';
 }
 
@@ -60,6 +66,7 @@ function rs_ai_cost(string $model, int $in, int $out, int $cr = 0, int $cw = 0):
 }
 
 function rs_ai_record(string $feature, string $model, array $usage): void {
+    if (str_contains($model, 'haiku') && (int)($usage['input_tokens'] ?? 0) + (int)($usage['cache_read_input_tokens'] ?? 0) + (int)($usage['cache_creation_input_tokens'] ?? 0) > 100000) $model .= ':long';
     try {
         rs_ai_tables();
         rs_db()->prepare('INSERT INTO ai_usage (day, feature, model, calls, tin, tout, tcache_read, tcache_write) VALUES (UTC_DATE(), ?, ?, 1, ?, ?, ?, ?)
@@ -69,8 +76,9 @@ function rs_ai_record(string $feature, string $model, array $usage): void {
     } catch (Throwable $e) { /* counting never stops the work */ }
 }
 
-// Several calls at once (the PR drafter sends a project's total).
+// Several calls at once (the PR drafter sends a project's total). (4.11) A list is one total per model.
 function rs_ai_record_n(string $feature, string $model, array $u): void {
+    if (array_is_list($u)) { foreach ($u as $one) if (is_array($one)) rs_ai_record_n($feature, (string)($one['model'] ?? $model), $one); return; }
     try {
         rs_ai_tables();
         rs_db()->prepare('INSERT INTO ai_usage (day, feature, model, calls, tin, tout, tcache_read, tcache_write) VALUES (UTC_DATE(), ?, ?, ?, ?, ?, ?, ?)

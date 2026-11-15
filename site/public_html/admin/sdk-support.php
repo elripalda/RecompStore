@@ -11,6 +11,8 @@ require __DIR__ . '/inc/layout.php';
 rs_require_login();
 require_once __DIR__ . '/inc/sdk.php'; // (4.6) the data helpers, shared with the PR queue's API
 require_once __DIR__ . '/inc/prq.php'; // (4.6) the PR queue
+require_once __DIR__ . '/inc/prq-view.php'; // (4.11) a draft's feature list
+require_once __DIR__ . '/inc/sdkcheck.php'; // (4.11) Check a game
 
 // One background run at a time, after the answer has gone: the due checks for up to a minute, then
 // the pull requests whose state is over an hour old. The half-hourly job does the same; this only
@@ -86,6 +88,12 @@ if (isset($_GET['doors'])) {
     rs_sdk_json(['ok' => true] + (json_decode((string)$c['v'], true) ?: []));
 }
 
+// (4.11) Check a game: the test drafts' states, so the page reloads when one is in.
+if (isset($_GET['dry_poll'])) {
+    $l = rs_prq_dry_list((string)$_GET['dry_poll'], 30);
+    rs_sdk_json(['ok' => true, 'running' => count(array_filter($l, fn($r) => ($r['status'] ?? '') === 'running')), 'n' => count($l)]);
+}
+
 // (4.7) The PR queue's live status while Draft now runs.
 if (isset($_GET['prq_poll'])) {
     rs_prq_tables();
@@ -148,6 +156,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = 'Checking ' . count($ids) . ' again. The progress shows next to the button.';
         } else { $msg = 'Pick some first.'; $kind = 'err'; }
         $id = '';
+    } elseif (str_starts_with((string)($_POST['action'] ?? ''), 'chk_')) {
+        // (4.11) Check a game: check again, test drafts (models side by side), and what to do with one.
+        $act = (string)$_POST['action'];
+        $a = rs_pc_app($id);
+        try {
+            if (!$a) throw new RuntimeException('Pick a recomp first.');
+            if ($act === 'chk_fresh') { rs_sdk_health($a, true); rs_pc_sdk_check($a, true, true); rs_flash('Checked again.'); }
+            elseif ($act === 'chk_test') {
+                $models = array_values(array_intersect((array)($_POST['models'] ?? []), ['haiku', 'sonnet', 'opus', 'haiku+sonnet', 'sonnet+opus']));
+                if (!$models) throw new RuntimeException('Tick at least one model.');
+                rs_prq_dry_start([$a['id']], $models);
+                rs_flash('Test draft started with ' . count($models) . ' model' . (count($models) === 1 ? '' : 's') . '. Each takes a few minutes and shows up below. Nothing is saved to the queue or sent.');
+            } elseif ($act === 'chk_queue') {
+                rs_prq_queue([$a['id']]);
+                $n = rs_prq_now_ready() ? rs_prq_run([$a['id']]) : 0;
+                rs_flash($n ? 'Drafting it for the PR queue now.' : 'In the PR queue for the next run (or it\'s already drafted there).');
+            } elseif ($act === 'chk_dry_queue') {
+                $why = rs_prq_dry_to_queue((string)($_POST['name'] ?? ''));
+                if ($why !== '') throw new RuntimeException($why);
+                rs_flash('In the PR queue. Look it over there and Send.');
+            } elseif ($act === 'chk_dry_here') {
+                $r = rs_prq_dry_get((string)($_POST['name'] ?? ''));
+                $j = is_array($r['draft']['json'] ?? null) ? $r['draft']['json'] : null;
+                if (!$j) throw new RuntimeException('That test draft has no recomplauncher.json.');
+                $why = rs_prq_use_here($a, $j);
+                if ($why !== '') throw new RuntimeException($why);
+                rs_sdk_health($a, true);
+                rs_flash('RecompLauncher uses this file for ' . $a['name'] . ' now (our profile), until the developer ships their own.');
+            } elseif ($act === 'chk_dry_delete') { rs_prq_dry_delete((string)($_POST['name'] ?? '')); rs_flash('Deleted.'); }
+        } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
+        header('Location: sdk-support.php?tab=check' . ($a ? '&app=' . rawurlencode($a['id']) : '')); exit;
     } elseif (($_POST['action'] ?? '') === 'prq_queue') {
         $ids = array_filter(array_map('trim', explode(',', (string)($_POST['ids'] ?? ''))));
         $n = rs_prq_queue($ids);
@@ -255,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 
-$tab = in_array($_GET['tab'] ?? '', ['queue', 'lookup'], true) ? (string)$_GET['tab'] : 'list';
+$tab = in_array($_GET['tab'] ?? '', ['queue', 'lookup', 'check'], true) ? (string)$_GET['tab'] : 'list';
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 rs_prq_tables();
 $draftN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'draft'")->fetchColumn();
@@ -305,12 +344,12 @@ if ($tab === 'lookup' && mb_strlen($q) >= 2) {
 }
 $sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['PR or issue open', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
 
-rs_head('SDK support', true, ['assets/sdk-support.css']);
+rs_head('Launcher support', true, ['assets/sdk-support.css']);
 ?>
 <section class="sdk-head">
   <div>
-    <h1>SDK support</h1>
-    <p class="muted">Which recomps ship a <code>recomplauncher.json</code> on their own GitHub. Each one without it is a pull request away from Easy Setup.</p>
+    <h1>Launcher support</h1>
+    <p class="muted">What each recomp gets in RecompLauncher, and the <code>recomplauncher.json</code> that gives it Easy Setup, settings, saves and logs: check a game, draft its file, then send it to the developer or use it ourselves.</p>
   </div>
   <?php if ($tab === 'list'): ?>
   <div class="sdk-head-act">
@@ -319,9 +358,10 @@ rs_head('SDK support', true, ['assets/sdk-support.css']);
   </div>
   <?php endif; ?>
 </section>
-<nav class="sdk-tabs" aria-label="SDK support">
+<nav class="sdk-tabs" aria-label="Launcher support">
   <a href="sdk-support.php"<?= $tab === 'list' ? ' class="on" aria-current="page"' : '' ?>>Recomps<?= $listN ? '<span>' . number_format($listN) . '</span>' : '' ?></a>
   <a href="sdk-support.php?tab=queue"<?= $tab === 'queue' ? ' class="on" aria-current="page"' : '' ?>>PR queue<?= $draftN ? '<span class="hot">' . $draftN . '</span>' : '' ?></a>
+  <a href="sdk-support.php?tab=check"<?= $tab === 'check' ? ' class="on" aria-current="page"' : '' ?>>Check a game</a>
   <a href="sdk-support.php?tab=lookup"<?= $tab === 'lookup' ? ' class="on" aria-current="page"' : '' ?>>Look up a repo</a>
 </nav>
 <?php if ($tab === 'list'): ?>
@@ -429,34 +469,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
       <?php if ((string)$pq['error'] !== ''): ?><p class="bad small"><?= h((string)$pq['error']) ?></p><?php endif; ?>
       <?php if ((string)$pq['pr_url'] !== ''): ?><p class="small">Redraft of <a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener">the pull request we sent ↗</a>. Update pull request pushes this file and description to it.</p><?php endif; ?>
       <?php if (trim((string)$pq['note']) !== ''): ?><p class="prq-note small"><strong>Drafter's notes:</strong> <?= nl2br(h((string)$pq['note'])) ?></p><?php endif; ?>
-      <?php $pqFound = (string)($pq['found'] ?? '') !== '' ? json_decode((string)$pq['found'], true) : null; if (is_array($pqFound) && (!empty($pqFound['features']) || !empty($pqFound['options']))): ?>
-      <div class="prq-found">
-        <h4>Features <span class="muted small">what the project has, where, and what this pull request does with each</span></h4>
-        <ol class="prq-steps">
-        <?php foreach ((array)($pqFound['features'] ?? []) as $f): if (!is_array($f) || trim((string)($f['what'] ?? '')) === '') continue;
-            $has = $f['has'] ?? null; $isGame = strtolower(trim((string)$f['what'])) === 'game location';
-            $notNeeded = $has === false && array_key_exists('needed', $f) && $f['needed'] === false; // (4.10)
-            // (4.10) Only in the game's own menus: nothing the launcher can pair with the json, so no tick.
-            $inGame = $has === true && empty($f['used']) && (($f['hook'] ?? null) === false
-                || (!array_key_exists('hook', $f) && preg_match('/only in the in-game|in-game (settings )?menu|didn\'t see the settings file key or a command-line option|no (command-line )?(flag|option|key) for it/i', (string)($f['how'] ?? '') . ' ' . (string)($f['why'] ?? ''))));
-            if ($inGame) $has = 'game';
-            // (4.10) A tick means it's in the json (or this pull request adds it); there but unused gets none.
-            $inJson = $has === true && (!empty($f['used']) || !empty($f['added']) || str_starts_with(trim((string)($f['how'] ?? '')), 'Added in this pull request'));
-            if ($has === true && !$inJson) $has = 'unused';
-            $cls = $has === true ? 'ok' : ($has === 'unused' ? 'wait' : ($has === false || $has === 'game' ? ($notNeeded || $has === 'game' ? 'no' : ($isGame ? 'bad' : 'no')) : 'wait')); ?>
-          <li class="prq-s-<?= $cls ?>"><span class="prq-s-i"><?= $has === true ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' : ($has === false && $isGame ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>' : '–') ?></span>
-            <span><b><?= h((string)$f['what']) ?><?php // (4.10) What this pull request does with it
-                $added = !empty($f['added']) || str_starts_with(trim((string)($f['how'] ?? '')), 'Added in this pull request');
-                if ($has === true && $added): ?> <span class="pill prq-p-add">Feature added with this PR</span><?php elseif ($has === true && !empty($f['used'])): ?> <span class="pill ok">Flag exists, added to json</span><?php elseif ($has === 'unused'): ?> <span class="pill warn">Flag exists, not in json</span><?php elseif ($has === 'game'): ?> <span class="pill">In-game only, nothing to pair with the json</span><?php elseif ($notNeeded): ?> <span class="pill">Not needed</span><?php elseif ($has === false): ?> <span class="pill warn">Missing, not in this PR</span><?php endif; ?></b>
-            <small><?= h(trim((string)($f['how'] ?? '')) !== '' ? (string)$f['how'] : ($has === false ? (trim((string)($f['why'] ?? '')) !== '' ? (string)$f['why'] : 'Not found') : 'Couldn\'t tell')) ?><?php if (($has === false || $has === 'unused') && trim((string)($f['how'] ?? '')) !== '' && trim((string)($f['why'] ?? '')) !== ''): ?> · <?= h((string)$f['why']) ?><?php endif; ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($f['where'] ?? '')); if ($w !== ''): ?> · <?= $w ?><?php endif; ?></small></span></li>
-        <?php endforeach; ?>
-        </ol>
-        <?php $pqOpts = array_values(array_filter((array)($pqFound['options'] ?? []), fn($o) => is_array($o) && trim((string)($o['flag'] ?? '')) !== '')); if ($pqOpts): ?>
-        <h4 class="prq-h4b">Command-line options it reads <span class="muted small"><?= count($pqOpts) ?></span></h4>
-        <dl class="prq-facts"><?php foreach ($pqOpts as $o): ?><div><dt class="mono"><?= h((string)$o['flag']) ?></dt><dd><?= h((string)($o['does'] ?? '')) ?><?php $w = rs_prq_where((string)$pq['repo'], (string)($o['where'] ?? '')); if ($w !== ''): ?><span class="prq-where small"><?= $w ?></span><?php endif; ?></dd></div><?php endforeach; ?></dl>
-        <?php endif; ?>
-      </div>
-      <?php endif; ?>
+      <?= rs_prq_found_html((string)($pq['found'] ?? '') !== '' ? json_decode((string)$pq['found'], true) : null, (string)$pq['repo']) ?>
       <?php // (4.10) The files of its newest release, and which one the launcher uses for each system.
         $pqRel = null; try { $pqRel = rs_pc_release_for($qa); } catch (Throwable $e) { }
         if ($pqRel && !empty($pqRel['assets'])):
@@ -531,6 +544,7 @@ $prqPick = ['new' => 'Just added', 'popular' => 'Popular port', 'asked' => 'Queu
   <?php endif; ?>
 </section>
 <?php endif; ?>
+<?php if ($tab === 'check') require __DIR__ . '/inc/sdk-check-tab.php'; ?>
 <?php if ($tab === 'lookup'): ?>
 <section class="card" id="lookup">
   <h2>Not on RecompLauncher yet?</h2>

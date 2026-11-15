@@ -6,6 +6,8 @@
 //   GET  ?a=todo&ids=  (4.7) Draft now: just these (the ones marked Drafting)
 //   POST ?a=fail       (4.7) {id, error}: it couldn't be drafted, back to waiting with why
 //   POST ?a=touch      (4.10) {ids}: still on these (drafts go a few at a time)
+//   GET  ?a=todo&ids=&dry=1  (4.11) a test run: these recomps as picks, the queue left alone
+//   POST ?a=usage      (4.11) {usage}: a test run's cost, for Settings > AI usage
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/pc.php';
@@ -26,8 +28,10 @@ try {
         $pm = rs_ai_model_for('prq');
         $okBudget = $pm !== '';
         try { rs_ai_budget_ok(); } catch (Throwable $e) { $okBudget = false; }
-        $out(200, ['ok' => true, 'title' => RS_PRQ_TITLE, 'what' => RS_PRQ_WHAT, 'model' => $pm, 'budget_ok' => $okBudget,
-            'picks' => !$okBudget ? [] : ($ids ? rs_prq_by_ids($ids) : rs_prq_targets((int)($_GET['n'] ?? 8)))]);
+        $dry = ($_GET['dry'] ?? '') === '1';
+        if ($dry) { $okBudget = true; try { rs_ai_budget_ok(); } catch (Throwable $e) { $okBudget = false; } }
+        $out(200, ['ok' => true, 'title' => RS_PRQ_TITLE, 'what' => RS_PRQ_WHAT, 'model' => $pm, 'code_model' => rs_ai_model_for('prqcode'), 'budget_ok' => $okBudget,
+            'picks' => !$okBudget ? [] : ($dry ? rs_prq_dry_picks($ids) : ($ids ? rs_prq_by_ids($ids) : rs_prq_targets((int)($_GET['n'] ?? 8))))]);
     }
     if ($a === 'draft' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $raw = (string)file_get_contents('php://input', false, null, 0, 400000);
@@ -41,6 +45,11 @@ try {
         $d = json_decode((string)file_get_contents('php://input', false, null, 0, 20000), true);
         if (is_array($d)) rs_prq_fail((string)($d['id'] ?? ''), (string)($d['error'] ?? ''));
         if (is_array($d['usage'] ?? null)) { require_once dirname(__DIR__) . '/admin/inc/aiuse.php'; rs_ai_record_n('prq', (string)($d['usage']['model'] ?? ''), $d['usage']); }
+        $out(200, ['ok' => true]);
+    }
+    if ($a === 'usage' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $d = json_decode((string)file_get_contents('php://input', false, null, 0, 20000), true);
+        if (is_array($d['usage'] ?? null)) { require_once dirname(__DIR__) . '/admin/inc/aiuse.php'; rs_ai_record_n('prq', '', $d['usage']); }
         $out(200, ['ok' => true]);
     }
     if ($a === 'touch' && $_SERVER['REQUEST_METHOD'] === 'POST') {

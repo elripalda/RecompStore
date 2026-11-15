@@ -106,6 +106,88 @@ function rs_prq_run(array $appIds): int {
     rs_log('sdk', 'prq', 'Draft now: ' . implode(', ', $ids));
     return count($ids);
 }
+// ---- (4.11) Test runs (Launcher support > Check a game) ------------------------------------------------------
+// The drafter run on chosen recomps with a chosen model, its drafts written to files instead of the queue, so
+// models can be compared and a draft looked at before anything is saved or sent. Each run's cost still goes on
+// Settings > AI usage. A test draft can then be put in the PR queue, or used as our own profile.
+function rs_prq_dry_dir(): string { return dirname(rs_prq_script()) . '/dry'; }
+function rs_prq_dry_picks(array $appIds): array {
+    $res = [];
+    foreach (array_slice($appIds, 0, 10) as $id) if ($a = rs_pc_app((string)$id)) if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') $res[] = rs_prq_pick_row($a, 'asked');
+    return $res;
+}
+// Starts one test run per model (models are RS_AI_MODELS keys; 'sonnet+opus' = Sonnet reads, Opus writes the code).
+function rs_prq_dry_start(array $appIds, array $models): int {
+    if (!rs_prq_now_ready()) throw new RuntimeException('Add the Anthropic API key in Setup first.');
+    $ids = array_values(array_filter(array_map('strval', array_slice(array_unique($appIds), 0, 10)), fn($id) => ($a = rs_pc_app($id)) && (string)$a['repo'] !== '' && rs_pc_host($a) === ''));
+    if (!$ids) throw new RuntimeException('Pick a recomp whose project is on GitHub.');
+    $dir = rs_prq_dry_dir();
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true)) throw new RuntimeException('Couldn\'t make the folder for test runs.');
+    $n = 0;
+    foreach (array_slice(array_unique($models), 0, 4) as $m) {
+        [$read, $code] = array_pad(explode('+', (string)$m, 2), 2, '');
+        if (!isset(RS_AI_MODELS[$read]) || ($code !== '' && !isset(RS_AI_MODELS[$code]))) continue;
+        $key = 'prqrun_' . bin2hex(random_bytes(20));
+        $run = array_values(array_filter(json_decode((string)(rs_kv_get('prq_run_keys')['v'] ?? '[]'), true) ?: [], fn($r) => is_array($r) && (int)($r['until'] ?? 0) > time()));
+        $run[] = ['h' => hash('sha256', $key), 'until' => time() + 3600];
+        rs_kv_put('prq_run_keys', (string)json_encode(array_slice($run, -20)));
+        $env = ['PATH' => '/usr/local/bin:/usr/bin:/bin', 'HOME' => dirname($dir), 'LANG' => 'C.UTF-8', 'RS_SITE' => rtrim((string)rs_setting('site_url', 'https://recompstore.com'), '/'), 'RS_PRQ_KEY' => $key,
+            'ANTHROPIC_API_KEY' => rs_secret_get('prq_ai_key'), 'GITHUB_TOKEN' => rs_prq_token(), 'PRQ_IDS' => implode(',', $ids), 'PRQ_COUNT' => (string)count($ids),
+            'PRQ_DRY' => $dir, 'PRQ_MODEL' => RS_AI_MODELS[$read], 'PRQ_MODEL_CODE' => RS_AI_MODELS[$code !== '' ? $code : $read], 'PRQ_WORKERS' => '3'];
+        $p = proc_open('setsid python3 -I ' . escapeshellarg(rs_prq_script()) . ' >> ' . escapeshellarg($dir . '/run.log') . ' 2>&1 &',
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, dirname($dir), $env);
+        if (is_resource($p)) { proc_close($p); $n++; }
+    }
+    if (!$n) throw new RuntimeException('The test run didn\'t start on the server.');
+    rs_log('sdk', 'prq', 'Test run: ' . implode(', ', $ids) . ' with ' . implode(', ', $models));
+    return $n;
+}
+// The test drafts on file, newest first (one recomp's, or all), each with what it cost.
+function rs_prq_dry_list(string $appId = '', int $limit = 60): array {
+    require_once __DIR__ . '/aiuse.php';
+    $out = [];
+    foreach (glob(rs_prq_dry_dir() . '/*.json') ?: [] as $f) {
+        $base = basename($f, '.json');
+        $parts = explode('__', $base);
+        if (count($parts) !== 3 || ($appId !== '' && $parts[0] !== preg_replace('/[^A-Za-z0-9_.-]+/', '-', $appId))) continue;
+        $out[] = ['file' => $base, 'mtime' => (int)filemtime($f)];
+    }
+    usort($out, fn($a, $b) => $b['mtime'] <=> $a['mtime']);
+    $res = [];
+    foreach (array_slice($out, 0, $limit) as $x) if ($r = rs_prq_dry_get($x['file'])) $res[] = $r;
+    return $res;
+}
+function rs_prq_dry_get(string $name): ?array {
+    if (!preg_match('/^[A-Za-z0-9_.+-]+$/', $name)) return null;
+    $f = rs_prq_dry_dir() . '/' . $name . '.json';
+    $j = is_file($f) ? json_decode((string)file_get_contents($f), true) : null;
+    if (!is_array($j)) return null;
+    require_once __DIR__ . '/aiuse.php';
+    $usage = $j['draft']['usage'] ?? [];
+    $usage = is_array($usage) ? (array_is_list($usage) ? $usage : [$usage]) : [];
+    $cost = 0.0; $calls = 0;
+    foreach ($usage as $u) if (is_array($u)) { $cost += rs_ai_cost((string)($u['model'] ?? ''), (int)($u['input_tokens'] ?? 0), (int)($u['output_tokens'] ?? 0), (int)($u['cache_read_input_tokens'] ?? 0), (int)($u['cache_creation_input_tokens'] ?? 0)); $calls += (int)($u['calls'] ?? 0); }
+    // A run that stopped without a word (the server restarted it, say) isn't "running" forever.
+    if (($j['status'] ?? '') === 'running' && time() - (int)filemtime($f) > 1800) $j['status'] = 'stopped';
+    return $j + ['name' => $name, 'cost' => $cost, 'calls' => $calls, 'secs' => isset($j['started'], $j['finished']) ? (int)round((float)$j['finished'] - (float)$j['started']) : null];
+}
+// A test draft into the PR queue, where it's looked over and sent like any other.
+function rs_prq_dry_to_queue(string $name): string {
+    $r = rs_prq_dry_get($name);
+    if (!$r || ($r['status'] ?? '') !== 'done' || !is_array($r['draft'] ?? null)) return 'That test draft isn\'t finished.';
+    $d = $r['draft'];
+    unset($d['usage']); // (counted when the test ran)
+    $d['pick'] = 'asked';
+    $s = rs_prq_draft_save($d);
+    if (!$s['ok']) return (string)($s['error'] ?? 'Couldn\'t save it.');
+    if (($s['kept'] ?? '') !== '') return 'It already has a pull request (' . $s['kept'] . '), so the queue kept that one.';
+    rs_log('sdk', (string)$d['id'], 'Test draft ' . $name . ' put in the PR queue');
+    return '';
+}
+function rs_prq_dry_delete(string $name): void {
+    if (preg_match('/^[A-Za-z0-9_.+-]+$/', $name)) @unlink(rs_prq_dry_dir() . '/' . $name . '.json');
+}
+
 // A pick the drafter couldn't finish: back to waiting, with why.
 function rs_prq_fail(string $appId, string $why): void {
     rs_prq_tables();

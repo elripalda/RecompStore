@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $mode = [];
     foreach (RS_AI_FEATURES as $k => [, , $allowed]) { $v = (string)($_POST['mode'][$k] ?? ''); if (in_array($v, $allowed, true)) $mode[$k] = $v; }
     $price = [];
-    foreach (['sonnet', 'haiku'] as $m) foreach (['in', 'out', 'cr', 'cw'] as $f) $price[$m][$f] = max(0, (float)($_POST['price'][$m][$f] ?? 0));
+    foreach (array_keys(RS_AI_PRICES) as $m) foreach (['in', 'out', 'cr', 'cw'] as $f) $price[$m][$f] = max(0, (float)($_POST['price'][$m][$f] ?? 0));
     rs_ai_save_cfg(['mode' => $mode, 'cap' => max(0, (float)($_POST['cap'] ?? 3)), 'price' => $price]);
     rs_set_setting('sub_autostart', !empty($_POST['sub_autostart']) ? '1' : '0');
     rs_log('settings', 'ai', 'AI usage saved');
@@ -33,7 +33,7 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $days[$r['day']] = ($days[$r['da
 $maxDay = max(array_merge([0.01], array_values($days)));
 $usd = fn(float $v): string => '$' . number_format($v, $v < 10 ? 2 : 0);
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
-$labels = ['off' => 'Off (rules only)', 'haiku' => 'Haiku (cheap)', 'sonnet' => 'Sonnet (best)'];
+$labels = ['off' => 'Off (rules only)', 'haiku' => 'Haiku (cheapest)', 'sonnet' => 'Sonnet (balanced)', 'opus' => 'Opus (strongest)'];
 
 rs_head('AI usage', true, ['assets/ai-usage.css']);
 ?>
@@ -77,12 +77,12 @@ rs_head('AI usage', true, ['assets/ai-usage.css']);
     <?php foreach (RS_AI_FEATURES as $k => [$name, , $allowed]): ?>
     <label><?= h($name) ?><select name="mode[<?= $k ?>]"<?= rs_is_owner() ? '' : ' disabled' ?>><?php foreach ($allowed as $o): ?><option value="<?= $o ?>"<?= $cfg['mode'][$k] === $o ? ' selected' : '' ?>><?= h($labels[$o]) ?></option><?php endforeach; ?></select></label>
     <?php endforeach; ?>
-    <label>Daily budget (US$)<input type="number" name="cap" min="0" step="0.5" value="<?= h((string)$cfg['cap']) ?>"<?= rs_is_owner() ? '' : ' disabled' ?>><small class="muted">0 means no limit. Once it's used up, AI features stop until midnight UTC; rules keep working.</small></label>
+    <label class="au-cap">Daily budget (US$)<input type="number" name="cap" min="0" step="0.5" value="<?= h((string)$cfg['cap']) ?>"<?= rs_is_owner() ? '' : ' disabled' ?>><small class="muted">0 means no limit. Once it's used up, AI features stop until midnight UTC; rules keep working.</small></label>
     <label class="au-check"><input type="checkbox" name="sub_autostart" value="1"<?= rs_setting('sub_autostart', '1') === '1' ? ' checked' : '' ?><?= rs_is_owner() ? '' : ' disabled' ?>> Start the checks as soon as a PC submission arrives</label>
   </div>
   <h2>Prices <span class="muted small">US$ per million tokens, from Anthropic's pricing page</span></h2>
   <div class="au-prices">
-    <?php foreach (['sonnet' => 'Sonnet', 'haiku' => 'Haiku'] as $m => $mn): ?>
+    <?php foreach (RS_AI_PRICE_NAMES as $m => $mn): ?>
     <fieldset><legend><?= $mn ?></legend>
       <?php foreach (['in' => 'Input', 'out' => 'Output', 'cr' => 'Cache read', 'cw' => 'Cache write'] as $f => $fn): ?>
       <label><?= $fn ?><input type="number" step="0.01" min="0" name="price[<?= $m ?>][<?= $f ?>]" value="<?= h((string)$cfg['price'][$m][$f]) ?>"<?= rs_is_owner() ? '' : ' disabled' ?>></label>
