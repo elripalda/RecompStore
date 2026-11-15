@@ -180,6 +180,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $n = 0;
             foreach (rs_msg_threads() as $t) if (!(int)$t['dismissed'] && !$t['waiting'] && !(int)$t['unread']) { rs_msg_dismiss((int)$t['id'], true); $n++; }
             rs_flash($n ? 'Dismissed ' . $n . ' conversation' . ($n === 1 ? '' : 's') . ' that weren\'t waiting on you.' : 'Every conversation in the inbox is waiting on a reply.');
+        } elseif ($action === 'dismiss_old') {
+            // Everything in the inbox with nothing new for two weeks, waiting or not.
+            $n = 0;
+            foreach (rs_msg_threads() as $t) if (!(int)$t['dismissed'] && !(int)$t['unread'] && strtotime((string)$t['last_at'] . ' UTC') < time() - 14 * 86400) { rs_msg_dismiss((int)$t['id'], true); $n++; }
+            rs_flash($n ? 'Dismissed ' . $n . ' conversation' . ($n === 1 ? '' : 's') . ' with nothing new for two weeks.' : 'Nothing in the inbox is older than two weeks.');
         } elseif ($action === 'lounge-post') {
             $r = array_key_exists($_POST['room'] ?? '', RS_DEV_ROOMS) ? (string)$_POST['room'] : 'general';
             $files = rs_msg_files_check($_FILES['files'] ?? null);
@@ -326,8 +331,11 @@ rs_head('Messages', true, ['assets/messages.css']);
     <div class="mx-find"><input type="search" placeholder="Search conversations" data-find aria-label="Search conversations"></div>
     <?php if ($box === 'inbox' && $nWait): ?><p class="mx-waitline"><b><?= $nWait ?></b> waiting for a reply</p><?php endif; ?>
     <div class="mx-list" data-list><?= $listHtml($threads, $quiet, $box, $cur ? (int)$cur['id'] : 0) ?></div>
-    <?php if ($box === 'inbox' && $nInbox > $nWait): ?>
-    <form method="post" class="mx-side-foot"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><button class="link" name="action" value="dismiss_quiet" onclick="return confirm('Dismiss every conversation that isn\'t waiting on a reply?');">Dismiss all that aren't waiting on you</button></form>
+    <?php if ($box === 'inbox' && $nInbox): ?>
+    <form method="post" class="mx-side-foot"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>">
+      <?php if ($nInbox > $nWait): ?><button class="link" name="action" value="dismiss_quiet" onclick="return confirm('Dismiss every conversation that isn\'t waiting on a reply?');">Dismiss the ones not waiting on you</button><?php endif; ?>
+      <button class="link" name="action" value="dismiss_old" onclick="return confirm('Dismiss every conversation with nothing new for two weeks, even ones waiting on a reply?');">Dismiss anything older than 2 weeks</button>
+    </form>
     <?php endif; ?>
     <div class="mx-newpop" data-newpop hidden>
       <div class="mx-newpop-top"><b>New message</b><button type="button" class="mx-x" data-new-close aria-label="Close">×</button></div>

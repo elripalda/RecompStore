@@ -3,7 +3,7 @@
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
 /* ---- The inbox ---------------------------------------------------------------------------------- */
-.mx{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:stretch;height:calc(100vh - 250px);min-height:540px}
+.mx{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:stretch;height:calc(100vh - 265px);min-height:540px}
 .mx-side{position:relative;display:flex;flex-direction:column;padding:0;overflow:hidden;min-height:0}
 .mx-side-top{display:flex;align-items:center;gap:8px;padding:12px 12px 8px}
 .mx-seg{display:flex;flex:1;gap:2px;padding:3px;border-radius:12px;background:rgba(var(--ink-rgb),.06)}
@@ -15,7 +15,7 @@
 .mx-find{padding:0 12px 8px}
 .mx-find input{width:100%;min-height:36px;padding:7px 12px;border-radius:10px;font-size:14px}
 .mx-waitline{margin:0 14px 6px;font-size:12.5px;color:#ffc857}
-.mx-list{flex:1;overflow-y:auto;padding:4px 8px 10px;overscroll-behavior:contain}
+.mx-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 8px 10px;overscroll-behavior:contain}
 .mx-row{display:flex;align-items:flex-start;gap:11px;padding:10px;border-radius:12px;color:var(--frost);text-decoration:none;position:relative}
 .mx-row+.mx-row{margin-top:2px}
 .mx-row:hover{background:rgba(var(--ink-rgb),.05)}
@@ -35,7 +35,7 @@
 .mx-wait.big{font-size:12.5px;padding:4px 10px;margin:0}
 .mx-sub{display:flex;justify-content:space-between;margin:14px 10px 6px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .mx-empty{margin:18px 12px;color:var(--muted);font-size:14px;text-align:center}
-.mx-side-foot{padding:8px 12px 12px;border-top:1px solid var(--line);margin:0;text-align:center}
+.mx-side-foot{padding:8px 12px 10px;border-top:1px solid var(--line);margin:0;display:flex;flex-direction:column;align-items:center;gap:2px}
 .mx-side-foot .link{font-size:12.5px;color:var(--muted)}
 .mx-av{width:36px;height:36px;border-radius:50%;object-fit:cover;flex:none;display:block}
 .mx-row .mx-av{width:40px;height:40px}
@@ -113,7 +113,7 @@
 .mx-chip button{min-height:24px;width:24px;padding:0;border-radius:6px;line-height:1;font-size:16px}
 
 /* ---- The Lounge, like a Discord channel ------------------------------------------------------- */
-.dc{display:grid;grid-template-columns:240px minmax(0,1fr);height:calc(100vh - 250px);min-height:540px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
+.dc{display:grid;grid-template-columns:240px minmax(0,1fr);height:calc(100vh - 265px);min-height:540px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
 .dc-chans{background:rgba(var(--bg-rgb),.55);border-right:1px solid var(--line);padding:0 8px 12px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
 .dc-server{display:grid;gap:2px;padding:16px 8px 14px;margin:0 -8px 8px;border-bottom:1px solid var(--line)}
 .dc-server b{font-size:15px}
