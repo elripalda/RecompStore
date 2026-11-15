@@ -5079,6 +5079,13 @@
           </div>
         </header>
         <section class="dev-perks">${perks.map(([i, h, p]) => `<div class="glass card-pad"><span class="perk-ico" aria-hidden="true">${i}</span><h2>${h}</h2><p>${p}</p></div>`).join('')}</section>
+        <section class="hub-dc-cta dev-dc-cta">
+          <span class="hub-dc-logo">${SVG.discord}</span>
+          <div class="hub-dc-txt"><strong>${t('Your Verified Developer tag on Discord')}</strong>
+            <span>${pcSide ? t('Link your Discord from your hub and you join our server with the green Verified Developer tag and the developer-only channels: a community of recomp developers who talk shop, share builds and help each other.')
+              : t('Link your Discord from your hub and you join our server with the green Verified Developer tag and the developer-only channels: a community of homebrew developers who talk shop, share builds and help each other.')}</span></div>
+          <a class="btn hub-dc-btn" href="#signin">${t('Get started')}</a>
+        </section>
         <section class="split">
           <div class="glass card-pad"><h2>${t('How it works')}</h2><ol class="dev-steps">
             <li>${t('Sign in with GitHub (your apps are found from your repositories), or make an account with your email.')}</li>
@@ -5168,7 +5175,7 @@
     const num = (n) => Number(n || 0).toLocaleString(lang);
     const q = new URLSearchParams(location.search);
     // (4.1) Every way linking Discord can end, said plainly.
-    const dcMsgs = { ok: t('Discord is linked.'), no: t('You didn\'t finish linking Discord.'),
+    const dcMsgs = { ok: t('Discord is linked. You\'re in our Discord server now.'), no: t('You didn\'t finish linking Discord.'),
       role: t('Discord is linked, but the Developer role couldn\'t be given yet. Make sure you\'re in the RecompStore Discord server; the team has been told.'),
       again: t('Linking Discord timed out. Press Link Discord again.'), signin: t('Sign in to your hub first, then link Discord.'), err: t('Discord didn\'t answer. Try Link Discord again in a minute.') };
     const dcNote = dcMsgs[q.get('dc')] ? dcMsgs[q.get('dc')]
@@ -5183,6 +5190,16 @@
       devHubButton(j.account);
       data = j; draw();
     });
+    // (4.12) Link Discord: one press puts them in our server with the Verified Developer role (pending
+    // accounts get it the moment they're approved). Shown to everyone who hasn't linked yet.
+    const dcCta = (acc) => !acc.discord && data.discordReady ? `
+      <section class="hub-dc-cta">
+        <span class="hub-dc-logo">${SVG.discord}</span>
+        <div class="hub-dc-txt"><strong>${acc.status === 'approved' ? t('Get your Verified Developer role on Discord') : t('Join the developer community on Discord')}</strong>
+          <span>${acc.status === 'approved' ? t('Link your Discord and you\'re in our server with the green Verified Developer tag, plus the developer-only channels where recomp developers talk shop, share builds and help each other.')
+            : t('Link your Discord and you\'re in our server right away. The green Verified Developer tag and the developer-only channels turn on the moment you\'re approved.')}</span></div>
+        <a class="btn hub-dc-btn" href="/api/discord.php?game=hub">${SVG.discord}<span>${t('Link Discord')}</span></a>
+      </section>` : '';
     const head = (acc) => {
       const verified = acc.status === 'approved' && data.profile && data.profile.verified;
       const pic = acc.avatar || (data.profile && data.profile.avatar);
@@ -5193,7 +5210,8 @@
           <span class="muted">${acc.github ? `github.com/${esc(acc.login)}` : esc(acc.email)}${verified ? ` <span class="verified-pill">${tick()}${t('Verified developer')}</span>` : ''}</span></div>
         <div class="hub-head-btns">${data.profile ? `<a class="btn" href="/dev/${encodeURIComponent(data.profile.slug)}">${t('Your page')} ${SVG.arrow}</a>` : ''}<button class="linkish" type="button" data-out>${t('Sign out')}</button></div>
       </header>
-      ${dcNote ? `<p class="status ${dcBad ? 'bad' : 'ok'}">${dcNote}</p>` : ''}
+      ${dcNote ? `<p class="status ${dcBad ? 'bad' : 'ok'}">${dcNote}${q.get('dc') === 'ok' || dcNote === dcMsgs.ok ? (acc.status === 'approved' ? ' ' + t('Your Verified Developer role is on.') : ' ' + t('Your Verified Developer role turns on when you\'re approved.')) : ''}</p>` : ''}
+      ${dcCta(acc)}
       ${!acc.github && acc.ghReady ? `<section class="glass hub-link-gh">${ghMark}<div><strong>${t('Link your GitHub')}</strong><span>${t('So we can find your apps from your repositories. We only see your public profile.')}</span></div><a class="btn" href="/api/dev.php?a=login&link=1">${t('Link GitHub')}</a></section>` : ''}`;
     };
     // A small line chart of new installs a day (last 30 days).
@@ -5227,7 +5245,10 @@
                   <div class="hub-ask-gh"><span class="hub-ask-lbl">${t('GitHub')}</span>${acc.github
                     ? `<span class="hub-ask-ok">${ghMark}<a href="https://github.com/${esc(acc.login)}" target="_blank" rel="noopener">github.com/${esc(acc.login)}</a><span class="tag">${t('Linked')}</span></span>`
                     : `<a class="btn" href="/api/dev.php?a=login&link=1">${ghMark}${t('Link GitHub')}</a><small>${t('Needed to apply. We only see your public profile.')}</small>`}</div>
-                  <label>${t('Discord')} <span class="opt">${t('optional')}</span><input name="discord" maxlength="64" placeholder="${t('Your username')}"></label>
+                  <div class="hub-ask-gh"><span class="hub-ask-lbl">${t('Discord')} <span class="opt">${t('recommended')}</span></span>${acc.discord
+                    ? `<span class="hub-ask-ok">${SVG.discord}<span>@${esc(acc.discord)}</span><span class="tag">${t('Linked')}</span></span>`
+                    : data.discordReady ? `<a class="btn hub-dc-btn" href="/api/discord.php?game=hub">${SVG.discord}<span>${t('Link Discord')}</span></a><small>${t('Joins you to our server. You get the Verified Developer tag there once you\'re approved.')}</small>`
+                    : `<input name="discord" maxlength="64" placeholder="${t('Your username')}">`}</div>
                 </div>
                 <fieldset class="hub-ask-plat"><legend>${t('What do you make apps for?')}</legend>
                   <label class="check"><input type="radio" name="platform" value="ps5" required> PS5</label>
@@ -5241,7 +5262,7 @@
             <h3>${t('Your apps we found')}</h3>${appsList()}
           </section>`;
         const f = page.querySelector('.hub-ask');
-        if (f) f.addEventListener('submit', (e) => { e.preventDefault(); const st = f.querySelector('.status'); const p = f.querySelector('[name=platform]:checked'); call('request', { name: f.name.value.trim(), email: f.email.value.trim(), platform: p ? p.value : '', work: f.work.value, links: f.links.value, discord: f.discord.value.trim() }).then((res) => { if (res.ok) load(); else say(st, res); }); });
+        if (f) f.addEventListener('submit', (e) => { e.preventDefault(); const st = f.querySelector('.status'); const p = f.querySelector('[name=platform]:checked'); call('request', { name: f.name.value.trim(), email: f.email.value.trim(), platform: p ? p.value : '', work: f.work.value, links: f.links.value, discord: f.discord ? f.discord.value.trim() : (acc.discord || '') }).then((res) => { if (res.ok) load(); else say(st, res); }); });
         wireOut();
         return;
       }

@@ -3413,3 +3413,23 @@ a.get-pc .get-ico{width:16px;height:16px;flex:none}body[data-platform=pc] a.get-
 .pr-vline b{font:800 15px/1 Figtree,sans-serif}
 .pr-vline b.great{color:#5fe3a1}.pr-vline b.good{color:#34F2E8}.pr-vline b.mixed{color:#ffc773}.pr-vline b.rough{color:#ffa45c}.pr-vline b.bad{color:#ff8a8a}.pr-vline b.few{color:rgba(255,255,255,.5)}
 .pr-vline small{color:rgba(255,255,255,.5);min-width:88px;text-align:right}
+
+/* (4.12) Link Discord: the Verified Developer tag in our server */
+.hub-dc-cta{display:flex;align-items:center;gap:18px;margin:14px 0;padding:18px 22px;border-radius:18px;color:#fff;
+  background:linear-gradient(120deg,#5865F2 0%,#4752c4 55%,#3b44a8 100%);box-shadow:0 10px 30px rgba(88,101,242,.35);position:relative;overflow:hidden}
+.hub-dc-cta::after{content:"";position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(87,242,135,.35),transparent 70%);pointer-events:none}
+.hub-dc-logo{flex:0 0 auto;display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.16)}
+.hub-dc-logo svg{width:30px;height:30px;color:#fff}
+.hub-dc-logo svg path{fill:#fff}
+.hub-dc-txt{flex:1 1 auto;display:flex;flex-direction:column;gap:4px;min-width:0}
+.hub-dc-txt strong{font-size:1.08rem;display:flex;align-items:center;gap:8px}
+.hub-dc-txt strong::after{content:"Verified Developer";font-size:.72rem;font-weight:700;color:#0b2e16;background:#57F287;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.hub-dc-txt span{opacity:.92;line-height:1.45}
+.btn.hub-dc-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;background:#fff;color:#4752c4;border-color:#fff;font-weight:700;position:relative;z-index:1}
+.btn.hub-dc-btn:hover{background:#eef0ff;color:#3b44a8}
+.btn.hub-dc-btn svg{width:18px;height:18px}
+.btn.hub-dc-btn svg path{fill:currentColor}
+.hub-ask-gh .btn.hub-dc-btn{background:#5865F2;color:#fff;border-color:#5865F2}
+.hub-ask-gh .btn.hub-dc-btn:hover{background:#4752c4}
+.hub-ask-ok svg{width:18px;height:18px}
+@media (max-width:640px){.hub-dc-cta{flex-wrap:wrap;padding:16px}.hub-dc-txt strong{flex-wrap:wrap}.btn.hub-dc-btn{width:100%;justify-content:center}}

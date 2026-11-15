@@ -23,7 +23,7 @@ Two separate things that work together:
 
 ## Approving developers
 
-Requests come from invites the team emailed (`dev_invites`) or from the developers page. The admin approves them on Developer accounts (`dev_accounts.status`). Approved developers get the Verified developer badge and the Developer role in Discord once they link Discord.
+Requests come from invites the team emailed (`dev_invites`) or from the developers page. The admin approves them on Developer accounts (`dev_accounts.status`). Approved developers get the Verified developer badge and the Developer role in Discord once they link Discord. **Link Discord** (`/api/discord.php?game=hub`) adds them to our server too (the bot's `guilds.join`), and gives the role straight away when they're approved, or on approval (`rs_dev_discord_role` in `rs_dev_approve`). Everyone who hasn't linked sees a Discord banner at the top of their hub (pending accounts too), the application form has a Link Discord button instead of a username box, and the public developers page has a Discord callout under the perks.
 
 ## Messages
 
