@@ -98,6 +98,13 @@ function rs_ach_tables(): void {
         ) CHARACTER SET utf8mb4');
         rs_set_setting('ach_schema', '2');
     }
+    // Schema 3: where this session's launcher had found the game's unlock file ('' = not found yet),
+    // so a tester who plays for hours with no unlocks can be told apart from one whose file is missing.
+    if (rs_setting('ach_schema', '1') === '2') {
+        $have = array_column($db->query('SHOW COLUMNS FROM ach_sessions')->fetchAll(), 'Field');
+        if (!in_array('found', $have, true)) $db->exec("ALTER TABLE ach_sessions ADD COLUMN found VARCHAR(200) NOT NULL DEFAULT ''");
+        rs_set_setting('ach_schema', '3');
+    }
     // (4.6) Beaten games, broken-achievement reports, events, rich presence and game leaderboards.
     $db->exec('CREATE TABLE IF NOT EXISTS ach_beaten (
         account_id INT NOT NULL, game VARCHAR(80) NOT NULL, at DATETIME NOT NULL, ranked TINYINT NOT NULL DEFAULT 0,
@@ -376,7 +383,13 @@ function rs_ach_session_start(int $acct, string $game, string $version, string $
     if ($local !== '') {
         $st = $db->prepare('SELECT id FROM ach_sessions WHERE account_id = ? AND local_id = ?');
         $st->execute([$acct, $local]);
-        if ($id = $st->fetchColumn()) { $native(); return (string)$id; }
+        if ($id = $st->fetchColumn()) {
+            $native();
+            $folder = rs_ach_folder_clean((string)($t['unlock_folder'] ?? ''));
+            if ($folder !== '') $db->prepare("UPDATE ach_sessions SET found = ? WHERE id = ? AND found = ''")->execute([$folder, $id]);
+            rs_ach_title_vote($game, (string)($t['title_id'] ?? ''), $acct);
+            return (string)$id;
+        }
     }
     $clamp = fn($x) => max($now - 30 * 86400, min($now, (int)$x));
     $started = isset($t['started']) && (int)$t['started'] > 0 ? $clamp($t['started']) : $now;
@@ -399,6 +412,9 @@ function rs_ach_session_start(int $acct, string $game, string $version, string $
             max(0, count($times) - 1), $loads ? gmdate('Y-m-d H:i:s', end($loads)) : null, mb_substr($casual, 0, 40),
             $ended ? gmdate('Y-m-d H:i:s', $ended) : null, json_encode($times), json_encode($loads), $local]);
     $folder = rs_ach_folder_clean((string)($t['unlock_folder'] ?? ''));
+    if ($folder !== '') $db->prepare('UPDATE ach_sessions SET found = ? WHERE id = ?')->execute([$folder, $id]);
+    rs_ach_title_vote($game, (string)($t['title_id'] ?? ''), $acct);
+    rs_ach_not_found_check($acct, $game, $folder);
     if ($folder !== '') $db->prepare('INSERT INTO ach_folders (game, folder, n, seen) VALUES (?, ?, 1, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE n = n + 1, seen = VALUES(seen)')->execute([$game, $folder]);
     $native();
     return $id;
@@ -465,6 +481,48 @@ function rs_ach_folder_clean(string $f): string {
 }
 
 // Most reported folder per game -> [game => folder]
+// (4.12) The game's Xbox 360 title id, as players' launchers read it from the disc or the unlock file's
+// name. Its launcher finds the unlock file by it, so a listing without one gets it once two accounts agree.
+function rs_ach_title_vote(string $game, string $tid, int $acct): void {
+    $tid = strtoupper(trim($tid));
+    if (!preg_match('/^[0-9A-F]{8}$/', $tid) || in_array($tid, ['00000000', 'FFFFFFFF'], true)) return;
+    require_once __DIR__ . '/pc.php';
+    $a = rs_pc_app($game);
+    if (!$a || (string)($a['origin'] ?? '') !== 'x360' || preg_match('/^[0-9A-Fa-f]{8}$/', trim((string)($a['title_id'] ?? '')))) return;
+    $k = 'achtitle:' . $game;
+    $c = rs_kv_get($k);
+    $v = $c ? (json_decode($c['v'], true) ?: []) : [];
+    $v[$tid][(string)$acct] = 1;
+    rs_kv_put($k, (string)json_encode($v));
+    if (count($v[$tid]) < 2) return;
+    $a['title_id'] = $tid;
+    rs_pc_save($a);
+    if (empty($a['hidden'])) { try { rs_pc_publish_one($a['id']); } catch (Throwable $e) { /* the next publish carries it */ } }
+    rs_log('pc', $game, 'Title id ' . $tid . ' set from players\' launchers (two agree), so the launcher can find the game\'s unlock file for everyone');
+}
+
+// (4.12) A tester who has played an Xbox 360 game for 2 hours or more, has no unlocks in it, and whose
+// launcher has never found its unlock file: one review item, so someone asks for their launcher log.
+function rs_ach_not_found_check(int $acct, string $game, string $folder): void {
+    if ($folder !== '') return;
+    require_once __DIR__ . '/pc.php';
+    $a = rs_pc_app($game);
+    if (!$a || (string)($a['origin'] ?? '') !== 'x360') return;
+    $db = rs_db();
+    $st = $db->prepare("SELECT SUM(TIMESTAMPDIFF(MINUTE, started, last_seen)) m, SUM(found <> '') f FROM ach_sessions WHERE account_id = ? AND game = ?");
+    $st->execute([$acct, $game]);
+    $r = $st->fetch() ?: [];
+    if ((int)($r['m'] ?? 0) < 120 || (int)($r['f'] ?? 0) > 0) return;
+    $st = $db->prepare('SELECT COUNT(*) FROM ach_unlocks WHERE account_id = ? AND game = ?');
+    $st->execute([$acct, $game]);
+    if ((int)$st->fetchColumn() > 0) return;
+    $why = 'Played 2+ hours with no unlocks, and their launcher never found the game\'s unlock file. Ask for their launcher log.';
+    $st = $db->prepare('SELECT COUNT(*) FROM ach_review WHERE account_id = ? AND game = ? AND why = ?');
+    $st->execute([$acct, $game, $why]);
+    if ((int)$st->fetchColumn() > 0) return;
+    $db->prepare('INSERT INTO ach_review (account_id, game, session, why, at) VALUES (?, ?, \'\', ?, UTC_TIMESTAMP())')->execute([$acct, $game, $why]);
+}
+
 function rs_ach_folders(): array {
     rs_ach_tables();
     $out = [];

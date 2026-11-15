@@ -31,3 +31,10 @@ Sponsor spots on recomplauncher.com. Each spot is off until a sponsor is booked 
 ## Recomp Achievements (`inc/ach.php`, `api/ach.php`)
 
 RetroAchievements-style achievements for PC recomps (recompachievements.com later). Lists in SDK format 1, launcher sessions, unlocks with Ranked rules, Mastered games. Dev only: the API answers test accounts alone (`ach_testers`), and nothing reaches the public catalog until `ach_public` is on.
+
+Xbox 360 recomps built on ReXGlue without the library: the launcher watches the game's own `achievements/<TITLE ID>.toml` (in its user data folder) and sends what's in it. It finds that file by the title id, from the catalog's `title_id`, the list, or the player's disc. Without one of those it only catches a file the game writes during the session, which is why a listing's title id matters.
+
+- `ach_folders`: where players' launchers found the file, per game. `ach_sessions.found` (schema 3): the folder this session's launcher had found, '' when it hadn't.
+- Title id from players (`rs_ach_title_vote`): session-start may carry `title_id`. A listing with origin x360 and no title id gets it once two accounts send the same one (kv `achtitle:<game>`), and is republished.
+- Admin "To review" (`ach_review`): new lists made from a player's copy, more than 20 Ranked unlocks in a minute (`RS_ACH_FLOOD`), and (`rs_ach_not_found_check`) a tester with 2+ hours in an x360 game, no unlocks, and no session where the file was found. None of these block anything.
+- session-start answers 404 for a game that isn't a RecompLauncher listing, so a game a player added themselves from another link gets no achievements.

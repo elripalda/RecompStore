@@ -118,7 +118,7 @@ rs_head('Recomp Achievements', true, ['assets/account.css']);
 <div class="role-cards">
   <div class="role-card"><span class="muted small">Lists</span><span class="n"><?= count($lists) ?></span><p class="muted small"><?= count(array_filter($lists, fn($l) => $l['live'])) ?> live for testers.</p></div>
   <div class="role-card"><span class="muted small">Testers</span><span class="n"><?= $appCounts['approved'] + count($testers) ?></span><p class="muted small"><?= $appCounts['pending'] ?> waiting to be approved.</p></div>
-  <div class="role-card"><span class="muted small">To review</span><span class="n"><?= count($review) ?></span><p class="muted small">Unlock bursts too fast to be real play.</p></div>
+  <div class="role-card"><span class="muted small">To review</span><span class="n"><?= count($review) ?></span><p class="muted small">New lists, unlocks too fast to be real play, and testers whose launcher can't find a game's unlocks. Nothing here is blocked.</p></div>
 </div>
 
 <section class="card">

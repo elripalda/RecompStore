@@ -24,7 +24,8 @@
 //        session back). unlock_folder = where the ReXGlue unlock file is, as {game}, %APPDATA%,
 //        %LOCALAPPDATA%, %USERPROFILE% or %DOCUMENTS% plus the rest. native = the game's achievement table
 //        read from the player's copy [{id, title, description, gamerscore}]: a game with no list yet gets one
-//        made from it.
+//        made from it. title_id = the game's Xbox 360 title id, as the launcher read it (disc or unlock file's
+//        name): a listing without one gets it once two accounts agree.
 //   POST a=checkin {session, casual?, save_loaded?} -> {}
 //   POST a=unlocks {session, unlocks: [{id, source, at, casual?, reason?, earlier?, title?, description?, gamerscore?}]}
 //        -> {results: [{id, ranked, reason, new}], mastered, beaten, events: [{id, title}] (events just finished)}
