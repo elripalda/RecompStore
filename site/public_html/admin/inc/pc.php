@@ -1411,6 +1411,7 @@ function rs_pc_players_map(): array {
 }
 
 function rs_pc_catalog(): array {
+    require_once __DIR__ . '/mediadesign.php'; // (4.11) media designs and Cover Labels
     $abs = 'rs_abs';
     $apps = [];
     // (4.3) Games handheld players say run well (player reports, last 90 days).
@@ -1475,6 +1476,9 @@ function rs_pc_catalog(): array {
         if (is_array($boot) && $boot) { if ((int)($boot['format'] ?? 0) === 1 && isset($boot['start'])) $e['launcher'] = $boot; else $e['boot'] = $boot; }
         if ($ci = rs_pc_copy_ids((string)($a['copy_ids'] ?? ''))) $e['copy_ids'] = $ci;
         $e['support'] = rs_pc_support($a);
+        // (4.11) Its cartridge, card or disc on the setup screen (RecompLauncher Beta 52): its own key,
+        // since 'media' is the "Around the web" links. Left out when it has none (the launcher's defaults).
+        if (function_exists('rs_md_catalog') && ($md = rs_md_catalog($a))) $e['media_design'] = $md;
         // (4.9) Xbox 360: the game's title ID where we know it (its launcher profile), so achievements reach the
         // launcher before the game writes its first unlock file.
         if ((string)$a['origin'] === 'x360' && !isset($e['title_id'])) {
@@ -1515,6 +1519,8 @@ function rs_pc_catalog(): array {
     $bn = rs_pc_banner_resolve($apps);
     $cat = ['catalogVersion' => 1, 'platform' => 'pc', 'updated' => gmdate('c'), 'apps' => $apps, 'origins' => $origins, 'developers' => $devs, 'titles' => $titles, 'banner' => $bn['merged'],
         'bannerInfo' => (object)$bn['info'], 'banners' => $bn['banners']];
+    // (4.11) Cover Labels (Settings): a label strip per console, for the launcher's Console Labels on Covers.
+    if (function_exists('rs_md_catalog_labels')) $cat['labels'] = (object)rs_md_catalog_labels();
     // (4.7) Hidden listings another one replaces (a stale mirror, a moved project): {old id: new id}, so the
     // launcher can move players who have the old one. Only to a listing that's out.
     $replaced = [];
@@ -1729,6 +1735,7 @@ function rs_pc_web_copy(array $cat): array {
         $series = is_array($a['about'] ?? null) ? (string)($a['about']['series'] ?? '') : '';
         // (4.11) Easy Setup is one of the two flags a tile shows (with its versions count).
         if (!empty($a['support']['easy_setup'])) $a['ez'] = 1;
+        unset($a['media_design']); // the launcher's setup screen only
         // (4.9) Only what lists, tiles, rows and search use. A game's page asks for the rest of its
         // entry (api/pc.php?a=app) when it opens, so phones no longer download and read 2.5 MB of
         // descriptions, setup steps and file checksums for 1,700 games on every page.

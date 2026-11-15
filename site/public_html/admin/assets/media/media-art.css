@@ -1,0 +1,39 @@
+/* A game's media (media-art.js): the layers, the shadow for each look, and how each kind moves.
+   States on .md: is-in (just arrived), is-busy (working), is-done (finished). */
+.md{position:relative;width:100%;aspect-ratio:600/420;--md-cast:.85;contain:layout}
+.md-l{position:absolute;inset:0;width:100%;height:100%;overflow:visible;display:block}
+.md-spin{transform-origin:50% 50%;will-change:transform}
+.md-cast{opacity:var(--md-cast)}
+body.oled .md{--md-cast:1}
+body.light .md{--md-cast:.42}
+.md-glow,.md-arrow,.md-shimmer{opacity:0}
+.md-ghost{color:var(--line3,rgba(244,248,252,.24))}
+
+/* Arriving: a disc drops in turning; a cartridge slides down into its slot and clicks home. */
+.md-disc.is-in,.md-umd.is-in{animation:mdDrop .95s var(--ease,cubic-bezier(.2,.8,.2,1)) both}
+.md-disc.is-in .md-spin{animation:mdDropTurn .95s var(--ease,cubic-bezier(.2,.8,.2,1)) both}
+.md-cart.is-in{animation:mdSlide .9s cubic-bezier(.3,.7,.2,1) both}
+.md-cart.is-in .md-glow{animation:mdClick .9s ease-out both}
+@keyframes mdDrop{from{transform:translateY(-22%);opacity:0}}
+@keyframes mdDropTurn{from{transform:rotate(-140deg)}}
+@keyframes mdSlide{0%{transform:translateY(-24%);opacity:0}55%{transform:translateY(2.2%);opacity:1}68%{transform:translateY(-.7%)}80%{transform:translateY(.6%)}100%{transform:none}}
+@keyframes mdClick{0%,50%{opacity:0}58%{opacity:.75}100%{opacity:0}}
+
+/* Working: discs spin with the light staying put; cartridges pulse their arrow and catch a sheen
+   across the label; both glow underneath. */
+.md-disc.is-busy .md-spin,.md-umd.is-busy .md-spin{animation:mdSpin 1.5s linear infinite}
+.md.is-busy .md-glow{animation:mdGlow 2.4s ease-in-out infinite}
+.md-cart.is-busy .md-arrow{animation:mdArrow 1.6s ease-in-out infinite}
+.md-cart.is-busy .md-shimmer{opacity:1;animation:mdSheen 3s cubic-bezier(.45,0,.25,1) infinite}
+@keyframes mdSpin{to{transform:rotate(360deg)}}
+@keyframes mdGlow{0%,100%{opacity:.14}50%{opacity:.42}}
+@keyframes mdArrow{0%,100%{opacity:0}45%{opacity:.85}}
+@keyframes mdSheen{0%{transform:translateX(0)}60%,100%{transform:translateX(560px)}}
+
+/* Done: one bright glow, and the disc coasts to a stop. */
+.md.is-done .md-glow{animation:mdDone 1.1s ease-out both}
+.md-disc.is-done .md-spin,.md-umd.is-done .md-spin{animation:mdCoast 1.1s cubic-bezier(.15,.75,.3,1) both}
+@keyframes mdDone{0%{opacity:0}25%{opacity:.7}100%{opacity:0}}
+@keyframes mdCoast{from{transform:rotate(-200deg)}}
+
+@media (prefers-reduced-motion:reduce){.md,.md *{animation:none!important}}

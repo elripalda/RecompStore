@@ -1,0 +1,77 @@
+/* The admin's media editor (media-editor.js). Plain and practical; works on its own page or
+   inside a game's edit screen. */
+.mde{--e-bg:#0f1829;--e-card:#141f33;--e-line:rgba(244,248,252,.12);--e-ink:#F4F8FC;--e-mut:#A9B4C4;--e-acc:#34F2E8;
+  display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:20px;color:var(--e-ink);font:500 14px/1.45 Figtree,system-ui,sans-serif;position:relative}
+.mde *{box-sizing:border-box}
+.mde-stage{background:var(--e-bg);border:1px solid var(--e-line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.mde[data-look="oled"] .mde-stage{background:#000}
+.mde[data-look="light"] .mde-stage{background:#F3F5F8}
+.mde[data-look="light"] .md{--md-cast:.42}.mde[data-look="oled"] .md{--md-cast:1}
+.mde-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mde-top b{font-weight:700;margin-right:auto}
+.mde[data-look="light"] .mde-stage .mde-top b{color:#0e1626}
+.mde-dirty{font-size:12px;color:#f5b83d}
+.mde-view{position:relative;width:100%;max-width:720px;margin:0 auto}
+.mde-art .md{width:100%}
+.mde-over{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;overflow:visible}
+.mde-over:active{cursor:grabbing}
+.mde-lab{fill:none;stroke:var(--e-acc);stroke-width:1.4;stroke-dasharray:5 5;opacity:.75;pointer-events:none}
+.mde-logo{fill:rgba(52,242,232,.06);stroke:var(--e-acc);stroke-width:1.4;cursor:move}
+.mde-hand{fill:var(--e-acc);cursor:nwse-resize}
+.mde-hint{margin:0;font-size:12px;color:var(--e-mut);text-align:center}
+.mde[data-look="light"] .mde-hint{color:#4a5568}
+.mde-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.mde-f{display:flex;flex-direction:column;gap:6px;background:var(--e-card);border:1px solid var(--e-line);border-radius:12px;padding:10px 12px}
+.mde-f>span{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--e-mut)}
+.mde-f[hidden]{display:none}
+.mde select,.mde-url{background:#0b1220;border:1px solid var(--e-line);color:var(--e-ink);border-radius:8px;padding:7px 9px;font:inherit;width:100%}
+.mde-seg{display:inline-flex;background:#0b1220;border:1px solid var(--e-line);border-radius:9px;padding:2px;gap:2px}
+.mde-side .mde-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.mde-seg button{background:none;border:0;color:var(--e-mut);font:600 13px Figtree,system-ui,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer}
+.mde-seg button.on{background:rgba(52,242,232,.14);color:var(--e-ink)}
+.mde-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mde-b{background:#1b2842;border:1px solid var(--e-line);color:var(--e-ink);font:600 13px Figtree,system-ui,sans-serif;padding:7px 12px;border-radius:9px;cursor:pointer}
+.mde-b:hover{border-color:rgba(52,242,232,.45)}
+.mde-b.mde-main{background:linear-gradient(180deg,#34F2E8,#377BB6);color:#06121a;border:0}
+.mde-b.mde-sm{align-self:flex-start;padding:5px 10px;font-size:12px}
+.mde input[type=color]{width:44px;height:32px;border:1px solid var(--e-line);border-radius:8px;background:none;padding:2px}
+.mde-sl{display:grid;grid-template-columns:62px 1fr;align-items:center;gap:8px;font-size:13px;color:var(--e-mut)}
+.mde-sl input{width:100%;accent-color:#34F2E8}
+.mde-tg{display:flex;gap:8px;align-items:center}
+.mde-foot{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.mde-msg{margin:0;font-size:13px;color:var(--e-mut);min-height:1.4em}
+.mde-msg.bad{color:#ff7a7a}
+.mde.mde-busy{cursor:progress}.mde.mde-busy .mde-side{opacity:.6;pointer-events:none}
+.mde-pick{position:absolute;inset:0;background:rgba(8,16,28,.82);border-radius:14px;display:flex;padding:18px;z-index:5}
+.mde-pick[hidden]{display:none}
+.mde-pick-in{background:var(--e-bg);border:1px solid var(--e-line);border-radius:14px;padding:14px;flex:1;display:flex;flex-direction:column;gap:12px;min-height:0}
+.mde-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;overflow:auto;min-height:0}
+.mde-grid[data-shape="wide"]{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.mde-grid button{padding:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#0b1220;cursor:pointer}
+.mde-grid button:hover{border-color:#34F2E8}
+.mde-grid img{display:block;width:100%;height:auto}
+@media (max-width:900px){.mde{grid-template-columns:1fr}}
+
+/* Cover Labels (cover-labels.js). The .cvl rule is the same one the launcher uses. */
+.cvl{position:absolute;left:50%;top:calc(var(--cvl-y,0) * 100%);width:calc(var(--cvl-s,1) * 100%);transform:translateX(-50%);height:auto;pointer-events:none;z-index:2}
+.cle{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px;color:#F4F8FC;font:500 14px/1.45 Figtree,system-ui,sans-serif}
+.cle-list{display:flex;flex-direction:column;gap:6px;max-height:640px;overflow:auto}
+.cle-list button{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:10px;background:#141f33;border:1px solid rgba(244,248,252,.12);border-radius:10px;padding:6px 10px 6px 6px;color:inherit;font:600 13px Figtree,system-ui,sans-serif;text-align:left;cursor:pointer}
+.cle-list button.on{border-color:#34F2E8}
+.cle-list i{font-style:normal;font-size:11px;color:#34F2E8}
+.cle-th{position:relative;width:34px;aspect-ratio:2/3;border-radius:4px;overflow:hidden;background:#0b1220}
+.cle-th>img:first-child{width:100%;height:100%;object-fit:cover;display:block}
+.cle-main{display:flex;flex-direction:column;gap:14px;min-width:0}
+.cle-top{display:flex;gap:10px;align-items:center}.cle-top b{font-size:16px}.cle-dirty{font-size:12px;color:#f5b83d}
+.cle-prev{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;background:#0f1829;border:1px solid rgba(244,248,252,.12);border-radius:14px;padding:16px}
+.cle-cover{position:relative;aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:#1b2842;box-shadow:0 10px 24px -10px rgba(0,0,0,.6)}
+.cle-cover>img:first-child{width:100%;height:100%;object-fit:cover;display:block}
+.cle-empty{display:grid;place-items:center;height:100%;color:#8B97AA;font-size:13px}
+.cle-cover.cvl-push>img:not(.cvl){position:absolute;top:calc(var(--cvl-h) * 100%);height:calc(100% - var(--cvl-h) * 100%)}
+.cle-cover>img:first-child{position:absolute;inset:0}
+.cle-badge{position:absolute;top:9px;left:9px;z-index:3;height:22px;padding:0 8px;border-radius:7px;display:flex;align-items:center;font:700 11px Figtree,sans-serif;color:#F4F8FC;background:rgba(6,11,21,.72);border:1px solid rgba(244,248,252,.14)}
+.cle-cover.cvl-on .cle-badge{top:calc(var(--cvl-top) * 100% + 9px)}
+.cle-guide{position:absolute;left:0;right:0;top:0;height:12%;border-bottom:1px dashed rgba(52,242,232,.7);pointer-events:none;z-index:3}
+.cle-ctl{display:flex;flex-direction:column;gap:10px;background:#141f33;border:1px solid rgba(244,248,252,.12);border-radius:12px;padding:12px}
+.cle-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cle-tip,.cle-msg{margin:0;font-size:12px;color:#A9B4C4}

@@ -1,0 +1,5 @@
+/* (4.11) The admin's own bits around the media editor (the editor's files stay as they came). */
+#media-editor{margin:10px 0 26px}
+#media-autofill .actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.af-track{height:6px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin:14px 0 8px}
+.af-track i{display:block;height:100%;width:0;background:#34F2E8;transition:width .2s}

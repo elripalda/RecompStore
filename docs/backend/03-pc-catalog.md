@@ -60,3 +60,28 @@ Three guards keep it steady. A version rated under 50 from 5 reports or more is 
 ## The 30-minute refresh
 
 `pc-refresh.php` (cron) calls `rs_pc_refresh_github()`: for each listing not checked in the last 30 minutes, reads its repo and newest release, updates version, size, downloads, stars and features, and runs the download check (`rs_pc_dl_check`) and the weekly "moved?" check. It saves the listing; the site changes on the next Publish. See [09-background-jobs.md](09-background-jobs.md) for everything else that job does.
+
+## Game media and Cover Labels (4.11, RecompLauncher Beta 52)
+
+**Media design.** The cartridge, card or disc RecompLauncher draws while an Easy Setup game sets up.
+- Kept in the listing's data as `media_design`.
+- Goes out in pc-catalog.json as `media_design`, left out when there is none. It isn't called `media` because `media` is already the "Around the web" links.
+- The format is RecompLauncher's docs/CATALOG-MEDIA.md.
+- Edited on the listing's page (Media, Easy Setup games only). The PC list's Easy Setup filter has Auto-Fill Media, which works in the browser and writes the catalog once at the end.
+- The editor's files are `admin/assets/media/`. `media-art.js` is the launcher's own `ui/media-art.js` and is never edited here; a new copy comes with the launcher beta that changes it. `admin-media.js` mounts them.
+
+**Cover Labels.** Settings > Cover Labels (owner only).
+- A label PNG per console, stored as the setting `cover_labels`.
+- Goes out as the catalog's top-level `labels`, with full URLs.
+
+**Calls** (`admin/media-api.php`, which needs `X-CSRF`):
+- `upload`: label or scan pictures, up to 10 MB, saved as they are to `/media/pc-<id>-<kind>-<hash>`.
+- `sgdb`: searches SteamGridDB by shape. The game id is remembered on the listing as `sgdb_game`.
+- `sgdb-image`: a proxy that saves the picture into `/media` the first time.
+- `img`: passes listing art from other sites through for the editor's canvas.
+- `save`: checked by `rs_md_clean`; a proxied picture becomes its `/media` file.
+- `publish`.
+- `labels-upload` and `labels-save` (owner only).
+
+The code is in `inc/mediadesign.php`.
+

@@ -427,7 +427,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-rs_head('Settings');
+rs_head('Settings', true, ['assets/media/media-art.css', 'assets/media/media-editor.css']);
 ?>
 <section class="head-row"><div><h1>Settings</h1></div><a class="btn" href="log.php">Change log</a></section>
 <?php
@@ -757,6 +757,22 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <div class="actions"><button class="btn">Save</button><?php if (rs_sgdb_key() !== ''): ?><label class="check"><input type="checkbox" name="sgdb_clear" value="1"> Remove the key</label><?php endif; ?></div>
   </form>
 </section>
+<?php // (4.11) Cover Labels: a label strip per console over the top of covers in RecompLauncher.
+require_once __DIR__ . '/inc/pc.php'; require_once __DIR__ . '/inc/mediadesign.php';
+$clCons = [];
+$clLive = array_filter(rs_pc_apps(false), fn($x) => empty($x['hidden']) && empty($x['soon']));
+usort($clLive, fn($x, $y) => (int)$y['downloads'] <=> (int)$x['downloads']);
+foreach (RS_PC_ORIGINS as $k => $n) {
+    $of = array_values(array_filter($clLive, fn($x) => (string)$x['origin'] === $k && (string)$x['cover'] !== ''));
+    if (!$of) continue;
+    $clCons[] = ['id' => $k, 'name' => $n, 'samples' => array_values(array_filter(array_map(fn($x) => rs_md_art_url((string)$x['cover']), array_slice($of, 0, 3))))];
+}
+$clLabels = rs_md_labels(); ?>
+<section class="card" id="cover-labels-card">
+  <h2>Cover Labels <?= $clLabels ? '<span class="pill ok">' . count($clLabels) . '</span>' : '<span class="pill">None</span>' ?></h2>
+  <p class="muted">A label strip for each console, laid over the top of covers in RecompLauncher when players turn on Console Labels on Covers (Settings, Library). PNG or WebP with transparency, up to 5 MB and 3000 px wide. Saving writes the catalog.</p>
+  <div id="cover-labels" data-csrf="<?= h(rs_csrf()) ?>" data-media="<?= h(json_encode(['consoles' => $clCons, 'labels' => (object)$clLabels], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>"></div>
+</section>
 <?php require_once __DIR__ . '/inc/artsrc.php'; $igOn = rs_art_igdb_id() !== '' && rs_art_igdb_secret() !== ''; $tgOn = rs_art_tgdb_key() !== ''; ?>
 <section class="card" id="art">
   <h2>Art sources <?= $igOn || $tgOn ? '<span class="pill ok">On</span>' : '<span class="pill">Off</span>' ?></h2>
@@ -848,4 +864,4 @@ $when = fn(string $t) => rs_date('M j, Y g:i a', strtotime($t));
     <button class="btn">Save the list</button>
   </form>
 </section>
-<?php rs_foot(['assets/qrcode.js', 'assets/security.js', 'assets/settings.js']);
+<?php rs_foot(['assets/qrcode.js', 'assets/security.js', 'assets/settings.js', 'assets/media/media-art.js', 'assets/media/media-auto.js', 'assets/media/media-editor.js', 'assets/media/cover-labels.js', 'assets/media/admin-media.js']);

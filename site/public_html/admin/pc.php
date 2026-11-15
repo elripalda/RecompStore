@@ -320,7 +320,7 @@ if ($view === 'found') rs_pc_find_discord_maybe();
 
 // (4.0) The recomps list in pages: search, what to show, the order, and how many per page. The order
 // and page size are remembered (a cookie) so the list comes back the way you left it.
-$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look', 'blocked' => 'Not compatible', 'mac' => 'On Mac', 'macfix' => 'Mac needs a fix'],
+$lsOpt = ['show' => ['all' => 'All', 'live' => 'Live', 'hidden' => 'Hidden', 'soon' => 'Coming soon', 'featured' => 'Featured', 'ended' => 'Ended or on hold', 'noart' => 'No cover', 'look' => 'Needs a look', 'blocked' => 'Not compatible', 'mac' => 'On Mac', 'macfix' => 'Mac needs a fix', 'easy' => 'Easy Setup'],
     'sort' => ['new' => 'Newest', 'old' => 'Oldest', 'az' => 'A to Z', 'za' => 'Z to A', 'updated' => 'Recently updated', 'downloads' => 'Most downloads', 'reports' => 'Most reports'],
     'per' => [25, 50, 100, 200]];
 $lsPick = function (string $k, $def) use ($lsOpt) {
@@ -368,7 +368,7 @@ $pcReportLi = function (array $x, string $appId, string $from, array $replies) u
 };
 $thumb = fn(string $u, int $w): string => preg_match('#/media/([A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(jpe?g|png|webp))$#i', $u, $m) ? '/api/thumb.php?f=' . rawurlencode($m[1]) . '&w=' . $w : $u;
 
-rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css', 'assets/boot.css']);
+rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css', 'assets/boot.css', 'assets/media/media-art.css', 'assets/media/media-editor.css', 'assets/media/admin-media.css']);
 ?>
 <section class="head-row">
   <div>
@@ -494,6 +494,14 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
     </div>
     <div class="actions span2"><button class="primary">Save</button><button name="art" value="1"<?= rs_sgdb_key() === '' ? ' disabled title="Add your SteamGridDB key in Settings"' : '' ?>>Get art from SteamGridDB</button><button name="art" value="next"<?= rs_sgdb_key() === '' ? ' disabled' : '' ?> title="The next cover and banner SteamGridDB has for it">Different art</button><button name="readme" value="1">Key features from the README</button><?php if ($a['repo'] !== ''): ?><a class="btn" href="https://github.com/<?= h($a['repo']) ?>" target="_blank" rel="noopener">Its GitHub</a><?php endif; ?></div>
   </form>
+  <?php // (4.11) Media: its cartridge, card or disc on RecompLauncher's setup screen (Easy Setup games only).
+  require_once __DIR__ . '/inc/mediadesign.php';
+  if (rs_md_easy($a)): $mdData = ['id' => $a['id'], 'console' => (string)$a['origin'], 'title' => (string)$a['name'],
+      'art' => ['cover' => rs_md_art_url((string)$a['cover']), 'hero' => rs_md_art_url((string)$a['hero']), 'logo' => rs_md_art_url((string)$a['logo'])],
+      'design' => $a['media_design'] ?? null]; ?>
+  <h3 id="media">Media <span class="muted small">its cartridge, card or disc while it sets up in RecompLauncher</span></h3>
+  <div id="media-editor" data-csrf="<?= h(rs_csrf()) ?>" data-media="<?= h(json_encode($mdData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>"></div>
+  <?php endif; ?>
   <?php $fb = $pcReports($a['id'], 200); ?>
   <h3 id="feedback">Player reports <span class="pill<?= $fb ? ' cyan' : '' ?>"><?= count($fb) ?></span></h3>
   <?php if (!$fb): ?><p class="muted">Nobody has said how it runs yet.</p><?php else: ?>
@@ -504,13 +512,15 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
 <?php endif; ?>
 
 <?php $counts = $view === '' ? rs_pc_feedback_counts() : []; ?>
-<?php if ($view === ''):
+<?php if ($view === ''): require_once __DIR__ . '/inc/mediadesign.php';
     // (4.0) What each filter matches, its count, then the search, the order and the page.
     $lifeOf = fn(array $a): bool => (string)($a['status'] ?? '') !== 'complete' && (in_array((string)($a['status'] ?? ''), RS_PC_STATUSES, true) || !empty($a['archived']));
     $lsMatch = ['all' => fn($a) => true, 'live' => fn($a) => !$a['hidden'] && empty($a['soon']), 'hidden' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) === '', 'soon' => fn($a) => !empty($a['soon']),
         'featured' => fn($a) => !empty($a['featured']), 'ended' => $lifeOf, 'noart' => fn($a) => (string)$a['cover'] === '', 'look' => fn($a) => (bool)rs_pc_alerts($a), 'blocked' => fn($a) => (bool)$a['hidden'] && trim((string)($a['blocked_why'] ?? '')) !== '',
         // (4.2) Mac: ones players get on Mac, and ones whose Mac download the launcher can't use.
-        'mac' => fn($a) => rs_pc_mac_ok((string)$a['asset_mac']) !== '', 'macfix' => fn($a) => rs_pc_mac_why((string)$a['asset_mac']) !== ''];
+        'mac' => fn($a) => rs_pc_mac_ok((string)$a['asset_mac']) !== '', 'macfix' => fn($a) => rs_pc_mac_why((string)$a['asset_mac']) !== '',
+        // (4.11) Easy Setup games: the ones with a Media design (and Auto-fill for them).
+        'easy' => fn($a) => rs_md_easy($a)];
     $q = mb_strtolower($ls['q']);
     $inQ = $q === '' ? $apps : array_values(array_filter($apps, fn($a) => str_contains(mb_strtolower($a['name'] . ' ' . $a['game'] . ' ' . $a['repo'] . ' ' . $a['id'] . ' ' . $a['author']), $q)));
     $lsCount = array_map(fn($f) => count(array_filter($inQ, $f)), $lsMatch);
@@ -567,6 +577,19 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
   <?= $pager() ?>
   <?php endif; ?>
 </section>
+<?php if ($ls['show'] === 'easy'): require_once __DIR__ . '/inc/mediadesign.php';
+  $afGames = array_values(array_map(fn($x) => ['id' => $x['id'], 'console' => (string)$x['origin'],
+      'art' => ['cover' => rs_md_art_url((string)$x['cover']), 'hero' => rs_md_art_url((string)$x['hero']), 'logo' => rs_md_art_url((string)$x['logo'])],
+      'design' => $x['media_design'] ?? null], array_filter($apps, fn($x) => rs_md_easy($x))));
+  $afHave = count(array_filter($afGames, fn($g) => !empty($g['design']))); ?>
+<section class="card" id="media-autofill" data-csrf="<?= h(rs_csrf()) ?>" data-media="<?= h(json_encode(['games' => $afGames], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>">
+  <h2>Media for Easy Setup games <span class="pill cyan"><?= $afHave ?> of <?= count($afGames) ?></span></h2>
+  <p class="muted">Works out each game's cartridge, card or disc from its cover, backdrop and logo, right here in the browser. Games that already have one are kept unless you tick Redo. The catalog is written once at the end.</p>
+  <div class="actions"><button type="button" class="primary" data-af-go>Auto-Fill Media for Easy Setup Games</button><label class="check"><input type="checkbox" data-af-redo> Redo games that already have one</label><button type="button" class="danger" data-af-stop hidden>Stop</button></div>
+  <div class="af-track"><i data-af-bar></i></div>
+  <p class="muted small" data-af-note></p>
+</section>
+<?php endif; ?>
 <?php elseif ($view === 'found'): ?>
 <section class="card" id="found">
   <div class="found-head">
@@ -631,4 +654,4 @@ rs_head('PC', true, ['assets/health.css', 'assets/artpick.css', 'assets/vt.css',
   if (q.value) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 })();
 </script>
-<?php rs_foot(['assets/artpick.js', 'assets/boot.js', 'assets/sdk-prompt.js']);
+<?php rs_foot(['assets/artpick.js', 'assets/boot.js', 'assets/sdk-prompt.js', 'assets/media/media-art.js', 'assets/media/media-auto.js', 'assets/media/media-editor.js', 'assets/media/admin-media.js']);
