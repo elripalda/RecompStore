@@ -80,6 +80,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $out[] = $x['name'];
             }
             rs_flash($out ? count($out) . ' out: ' . implode(', ', $out) . '.' : 'Nothing clean was waiting.', 'ok');
+        } elseif ($act === 'contact-mail') {
+            // (4.12) The prepared email about a flagged file, after a person read it and pressed Send.
+            $to = trim((string)($_POST['to'] ?? ''));
+            $subject = mb_substr(trim((string)($_POST['subject'] ?? '')), 0, 200);
+            $body = trim(str_replace("\r\n", "\n", (string)($_POST['body'] ?? '')));
+            if (!filter_var($to, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('There\'s no email address for them.');
+            if ($subject === '' || mb_strlen($body) < 10) throw new RuntimeException('Write the message first.');
+            if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up yet, so no email can go out.');
+            rs_mail_send($to, $subject, $body . "\n\n" . rs_mail_get('mail_sign'), ['save' => true]);
+            $subId = (int)($_POST['sub'] ?? 0);
+            rs_mail_log('reply', $to, $subject, $body, '', $subId ?: null);
+            rs_log('security', $to, 'emailed about a flagged file: ' . $subject);
+            rs_flash('Sent to ' . $to . '.', 'ok');
+        } elseif ($act === 'contact-msg') {
+            $acc = rs_dev_account((int)($_POST['dev'] ?? 0));
+            if (!$acc) throw new RuntimeException('That developer account is gone.');
+            rs_dev_msg_add('dm', (int)$acc['id'], true, (string)($_POST['body'] ?? ''));
+            rs_log('security', 'dev:' . (int)$acc['id'], 'messaged about a flagged file');
+            rs_flash('Sent. It\'s in ' . ($acc['name'] ?: $acc['gh_login']) . '\'s hub.', 'ok');
         } elseif ($act === 'seen') {
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? '')]);
             rs_flash('Marked as seen.', 'ok');
@@ -198,6 +217,8 @@ rs_head('Security', true, ['assets/vt.css']);
         <?php elseif ($f['source'] === 'submission'): ?><a class="button" href="hub.php#<?= h(preg_replace('/^m(\d+)$/', 'sub:$1', (string)$f['ref'])) ?>">Open submission</a><?php endif; ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="seen"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><button class="ghost">Mark seen</button></form>
       </div>
+      <?php // (4.12) Their email or hub, with a message made from this scan
+        try { echo rs_vt_contact_html(rs_vt_contact($f, $app), 'r' . $f['id']); } catch (Throwable $e) { rs_errlog('vt contact', $e); } ?>
     </div>
     <?php endforeach; ?>
   </div>
@@ -240,8 +261,13 @@ rs_head('Security', true, ['assets/vt.css']);
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="block"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button class="danger">Block</button></form>
       </div>
       <?php // (4.10) Stuck or flagged: reach the developer
+        // (4.12) Flagged: the prepared email or hub message. Their GitHub links stay next to it.
+        $vc = null;
+        if ($v === 'red') { try { $vc = rs_vt_contact(rs_vt_worst(rs_pc_key($x), (string)$p['tag']), $x); } catch (Throwable $e) { rs_errlog('vt contact', $e); } }
+        if ($vc) echo rs_vt_contact_html($vc, 'h' . $x['id']);
         $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.');
-        if ($cl): ?><div class="vt-contact"><span class="muted">Ask the developer:</span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
+        if ($vc) $cl = array_values(array_filter($cl, fn($c) => $c[2] === 'gh'));
+        if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
   </div>

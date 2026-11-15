@@ -178,7 +178,12 @@ function rs_hub_check(int $id, array $d, int $maxAge = 21600): array {
     // 4. Not listed yet.
     $key = strtolower(rs_repo_key($host, $repo));
     $steps['new'] = ['ok', 'Not on ' . ($pc ? 'RecompLauncher' : 'RecompStore') . ' yet'];
-    foreach (rs_pc_apps() as $a) if (strtolower(rs_pc_key($a)) === $key) { $steps['new'] = ['bad', 'Already on RecompLauncher as ' . $a['name'] . (!empty($a['hidden']) ? ' (hidden)' : ''), 'Already on RecompLauncher']; break; }
+    // (4.12) A hidden or Coming Soon one can be replaced by this submission (Approve and replace).
+    foreach (rs_pc_apps() as $a) if (strtolower(rs_pc_key($a)) === $key) {
+        $steps['new'] = rs_auto_replaceable($a) ? ['warn', 'Listed already as ' . $a['name'] . rs_auto_listed_how($a) . '. Approve and replace fills that listing in from this one', 'Listed already' . rs_auto_listed_how($a)]
+            : ['bad', 'Already on RecompLauncher as ' . $a['name'], 'Already on RecompLauncher'];
+        break;
+    }
     if ($steps['new'][0] === 'ok') foreach (rs_games() as $g) if (strtolower((string)$g['repo']) === $key) { $steps['new'] = ['bad', 'Already on RecompStore as ' . $g['name']]; break; }
     if ($steps['new'][0] === 'ok') {
         $k = rs_auto_norm((string)($d['name'] ?? ''));
@@ -353,7 +358,7 @@ function rs_hub_job_state(array $j): array {
 function rs_hub_fail_note(string $notes): string {
     $n = trim((string)strtok(trim($notes), "\n"));
     if ($n === '') return 'Didn\'t finish. Run it again';
-    if (preg_match('/^Already on RecompLauncher as .+\(hidden\)/', $n)) return 'Already listed, hidden. Run it again or dismiss';
+    if (preg_match('/^Already on RecompLauncher as .+\((hidden|on Coming Soon)\)/', $n, $m)) return 'Already listed' . ($m[1] === 'hidden' ? ', hidden' : ' on Coming Soon') . '. Approve and replace, or dismiss';
     if (str_starts_with($n, 'Already on RecompLauncher')) return 'Already live on RecompLauncher. Dismiss it';
     return 'Didn\'t finish: ' . rs_hub_short($n);
 }

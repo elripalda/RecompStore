@@ -97,3 +97,12 @@ a.vt-badge:hover{filter:brightness(1.15)}
 
 /* (4.10) Reach the developer about a held update */
 .vt-contact{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}
+/* (4.12) Reach the developer about a flagged file: the prepared email or hub message */
+.vt-contact2 .vt-compose summary{list-style:none;cursor:pointer}
+.vt-contact2 .vt-compose summary::-webkit-details-marker{display:none}
+.vt-contact2 .vt-compose[open]{flex-basis:100%;order:2}
+.vt-contact2 .vt-compose[open] summary{margin-bottom:8px}
+.vt-compose-form{display:grid;gap:8px;max-width:760px}
+.vt-compose-form input,.vt-compose-form textarea{width:100%;box-sizing:border-box;font:inherit}
+.vt-compose-form textarea{min-height:240px;line-height:1.5;resize:vertical}
+.vt-compose-form .vt-acts{justify-content:flex-end}

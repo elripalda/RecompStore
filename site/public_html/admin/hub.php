@@ -382,6 +382,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['msg'] = 'Running it again with AI writing the page.';
                 break;
             }
+            // (4.12) Approve and replace: its repo is a hidden or Coming Soon listing already. That listing
+            // is filled in again from this submission (or draft) and goes out on Publish.
+            case 'replace': {
+                if (!rs_hub_store_ok('pc')) throw new RuntimeException('Approve and replace is for the PC store.');
+                if (str_starts_with($item, 'job:')) {
+                    $j = $needJob();
+                    $jid = rs_auto_replace((string)$j['link'], rs_me_name(), (int)($j['sub_id'] ?? 0), (int)$j['id']);
+                } else {
+                    [$id, $r, $d] = $needSub();
+                    if ($r['status'] === 'done') throw new RuntimeException('That one was already handled.');
+                    if ((string)($d['repo'] ?? '') === '') throw new RuntimeException('It has no repo to check.');
+                    $jid = rs_auto_replace(rs_host_web(rs_host_norm((string)($d['host'] ?? '')), (string)$d['repo']), rs_me_name(), $id);
+                    $db->prepare("UPDATE inbox SET status = 'read' WHERE id = ? AND status = 'new'")->execute([$id]);
+                }
+                $rj = rs_auto_get($jid);
+                $ra = $rj ? rs_pc_app((string)$rj['app_id']) : null;
+                rs_log('hub', 'replace', $ra ? (string)$ra['name'] : (string)$jid);
+                $res['msg'] = 'Approved. It\'s replacing ' . ($ra ? $ra['name'] : 'the listing') . ': the download, virus scans, art and its page are checked again, then it\'s on Ready to publish.';
+                $res['open'] = 'job:' . $jid;
+                break;
+            }
             case 'again': {
                 $j = $needJob();
                 if (in_array($j['status'], ['queued', 'running'], true) && rs_hub_ts((string)$j['updated']) > time() - RS_AUTO_STUCK) throw new RuntimeException('It\'s still running.');

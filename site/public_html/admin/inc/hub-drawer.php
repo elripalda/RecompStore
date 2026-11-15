@@ -363,6 +363,11 @@ if ($job && $shelved) {
     elseif (!$live && $job['status'] === 'failed' && preg_match('/no download|no release/i', (string)($job['notes'] ?? ''))) {
         // (4.10) No build yet: Coming Soon is the obvious next step.
         echo '<button class="primary" data-act="job_soon" data-confirm="Click again to put it on Coming Soon">Add to Coming Soon</button><button data-act="again">Check again</button>';
+    } elseif (!$live && $job['status'] === 'failed' && str_starts_with(trim((string)($job['notes'] ?? '')), 'Already on RecompLauncher') && rs_auto_replaceable(rs_auto_listed((string)$job['repo_key']))) {
+        // (4.12) Its repo is a hidden or Coming Soon listing: this draft fills that one in.
+        $rx = rs_auto_listed((string)$job['repo_key']);
+        echo '<button class="primary" data-act="replace" data-confirm="Click again to replace ' . h($rx['name']) . ' with this one">Approve and replace</button>';
+        $more[] = '<button type="button" data-act="again">Run it again</button>';
     } elseif (!$live) echo '<button class="primary" data-act="again">Run it again</button>';
     if ($job['status'] === 'review') echo '<button data-act="again">Run again</button>';
     if ($job['status'] === 'review' && !$live) $more[] = '<button type="button" data-act="again_ai" data-confirm="Uses the AI budget. Click again">Write the page with AI</button>';
@@ -378,6 +383,9 @@ if ($job && $shelved) {
     if ($noRel) {
         echo '<button class="primary" data-act="soon" data-confirm="Click again to put it on Coming Soon">Add to Coming Soon</button>';
         $more[] = '<button type="button" data-act="approve" data-confirm="There\'s no release. Click again to approve anyway">Approve and check anyway</button>';
+    } elseif ($pcSide && str_starts_with((string)($chk['steps']['new'][2] ?? ''), 'Listed already')) {
+        // (4.12) Its repo is a hidden or Coming Soon listing: approve it into that listing.
+        echo '<button class="primary" data-act="replace" data-confirm="' . h('Click again to replace ' . preg_replace('/^Listed already as (.+?)( \((hidden|on Coming Soon)\))?\. .*$/', '$1', (string)$chk['steps']['new'][1]) . ' with this one') . '">Approve and replace</button>';
     } else echo '<button class="primary" data-act="approve"' . (array_filter($chk['steps'], fn($x) => $x[0] === 'bad') ? ' data-confirm="Some checks are red. Click again to approve anyway"' : '') . '>' . ($pcSide ? 'Approve and check' : 'Approve') . '</button>';
     echo '<button type="button" data-open-panel="changes">Ask for changes</button>' . $flagBtn . '<button type="button" class="danger" data-open-panel="decline">Decline</button>';
     $more[] = '<button type="button" data-open-panel="done">Mark done without an email</button>';

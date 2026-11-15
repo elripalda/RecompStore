@@ -764,3 +764,93 @@ function rs_vt_need_count(): int {
         return (int)$st->fetchColumn();
     } catch (Throwable $e) { return 0; }
 }
+
+// ---- (4.12) Reaching the developer about a flagged file ------------------------------------------------
+// Security > Needs you and Updates on hold: who made it, their hub account and the email we have, and a
+// message written from the scan (rules, no AI). A person reads it, can change it, and presses Send.
+// $f: a vt_files row. -> null when we have neither a hub account nor an email for them.
+function rs_vt_contact(array $f, ?array $app = null): ?array {
+    $db = rs_db();
+    $sub = null; $subD = [];
+    if (preg_match('/^m(\d+)$/', (string)$f['ref'], $m)) {
+        $st = $db->prepare("SELECT * FROM inbox WHERE id = ? AND kind = 'submit'");
+        $st->execute([(int)$m[1]]);
+        if ($sub = $st->fetch(PDO::FETCH_ASSOC) ?: null) $subD = json_decode((string)$sub['data'], true) ?: [];
+    }
+    if (!$app && str_starts_with((string)$f['ref'], 'pc:')) $app = rs_pc_app(substr((string)$f['ref'], 3));
+    if (!$app && str_starts_with((string)$f['ref'], 'auto:')) {
+        $st = $db->prepare('SELECT app_id, sub_id FROM pc_auto WHERE id = ?');
+        $st->execute([(int)substr((string)$f['ref'], 5)]);
+        if ($j = $st->fetch(PDO::FETCH_ASSOC)) {
+            if ((string)$j['app_id'] !== '') $app = rs_pc_app((string)$j['app_id']);
+            if (!$sub && (int)$j['sub_id']) return rs_vt_contact(['ref' => 'm' . (int)$j['sub_id']] + $f, $app);
+        }
+    }
+    $repo = (string)$f['repo'];
+    $owner = strtolower((string)strtok((string)preg_replace('#^(gitlab\.com|sourceforge\.net)/#', '', $repo), '/'));
+    $slug = (string)($app['dev'] ?? '');
+    $acc = null;
+    try {
+        $st = $db->prepare("SELECT id, email, name, gh_login FROM dev_accounts WHERE status = 'approved' AND ((slug <> '' AND slug = ?) OR (gh_login <> '' AND LOWER(gh_login) = ?)) ORDER BY slug = ? DESC LIMIT 1");
+        $st->execute([$slug, $owner, $slug]);
+        $acc = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    } catch (Throwable $e) { }
+    $email = $acc && filter_var(trim((string)$acc['email']), FILTER_VALIDATE_EMAIL) ? trim((string)$acc['email']) : '';
+    if ($email === '' && $app) $email = rs_pc_dev_email($app);
+    if ($email === '' && $sub) $email = rs_inbox_email($sub);
+    if (!$acc && $email === '') return null;
+
+    $name = (string)($app['name'] ?? '') ?: ((string)($subD['name'] ?? '') ?: basename($repo));
+    $who = $acc ? ((string)$acc['name'] ?: (string)$acc['gh_login']) : (trim((string)($subD['author'] ?? '')) ?: $owner);
+    $tag = (string)$f['tag'];
+    $hits = (int)($f['malicious'] ?? 0) + (int)($f['suspicious'] ?? 0);
+    $clam = str_starts_with((string)($f['flagged_by'] ?? ''), 'ClamAV');
+    $held = $app && (string)($app['pending']['tag'] ?? '') === $tag;
+    $lines = ["Hi " . $who . ",", '',
+        "Every new release on RecompLauncher goes through an automatic security scan, and it flagged a file in " . $name . " " . $tag . ":", '',
+        "File: " . (string)$f['name']];
+    if ($clam) $lines[] = "Result: " . (string)$f['flagged_by'];
+    elseif ($hits) $lines[] = "Result: " . $hits . " of " . (int)$f['engines'] . " antivirus engines on VirusTotal flagged it";
+    if (!$clam && trim((string)($f['flagged_by'] ?? '')) !== '') $lines[] = "Flagged by: " . str_replace(' · ', ', ', (string)$f['flagged_by']);
+    if (($link = rs_vt_link($f)) !== '') $lines[] = "Full report: " . $link;
+    $lines[] = '';
+    $lines[] = "This happens a lot with new, unsigned programs, so we're not assuming anything. "
+        . ($held ? "For now that release is on hold, so players stay on " . ((string)($app['version'] ?? '') !== '' ? $app['version'] : 'the version before') . " until it's sorted."
+            : ($sub || (!empty($app['hidden']) && empty($app['live_at'])) ? "We're holding it back from the store until it's sorted." : "We wanted you to know right away."));
+    $lines[] = '';
+    $lines[] = "What usually clears it up:";
+    $lines[] = "- Build the release on GitHub Actions (or another clean machine) and upload it again";
+    $lines[] = "- Report it as a false positive to the engines that flagged it (most have a form for that)";
+    $lines[] = "- Sign the exe, if you can";
+    $lines[] = '';
+    $lines[] = "If you know why it gets flagged, or once there's a new build, just reply and we'll take another look.";
+    $lines[] = '';
+    $lines[] = "Thanks!";
+    return ['acc' => $acc ? ['id' => (int)$acc['id'], 'name' => $who] : null, 'email' => $email, 'who' => $who, 'name' => $name,
+        'subject' => $name . ' ' . $tag . ': our security scan flagged a file', 'body' => implode("\n", $lines), 'sub' => $sub ? (int)$sub['id'] : 0];
+}
+// The worst checked file of a release, as a vt_files row (a stand-in when nothing's checked yet).
+function rs_vt_worst(string $repoKey, string $tag): array {
+    $st = rs_db()->prepare("SELECT * FROM vt_files WHERE repo = ? AND tag = ? AND status = 'done' ORDER BY (malicious + suspicious) DESC, id LIMIT 1");
+    $st->execute([$repoKey, $tag]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: ['repo' => $repoKey, 'tag' => $tag, 'name' => '', 'ref' => '', 'malicious' => 0, 'suspicious' => 0, 'engines' => 0, 'flagged_by' => '', 'sha256' => null];
+}
+// The two buttons and their prepared message, for a row on Security. '' when there's no way to reach them.
+function rs_vt_contact_html(?array $c, string $key): string {
+    if (!$c) return '';
+    $k = preg_replace('/[^a-z0-9]/i', '', $key);
+    $form = function (string $kind, string $label) use ($c, $k): string {
+        $to = $kind === 'mail' ? $c['email'] : 'their developer hub';
+        return '<details class="vt-compose" id="vtc-' . $kind . '-' . h($k) . '"><summary class="btn small' . ($kind === 'mail' ? ' primary' : '') . '">' . h($label) . '</summary>'
+            . '<form method="post" class="vt-compose-form"><input type="hidden" name="csrf" value="' . h(rs_csrf()) . '"><input type="hidden" name="action" value="contact-' . $kind . '">'
+            . ($kind === 'mail' ? '<input type="hidden" name="to" value="' . h($c['email']) . '"><input type="hidden" name="sub" value="' . (int)$c['sub'] . '">' : '<input type="hidden" name="dev" value="' . (int)$c['acc']['id'] . '">')
+            . '<small class="muted">To ' . h($to) . ($kind === 'msg' ? ' (' . h($c['acc']['name']) . ')' : '') . '. Change anything you like, then send.</small>'
+            . ($kind === 'mail' ? '<input name="subject" maxlength="200" value="' . h($c['subject']) . '">' : '')
+            . '<textarea name="body" rows="14">' . h($c['body']) . '</textarea>'
+            . '<div class="vt-acts"><button class="primary">Send</button></div></form></details>';
+    };
+    $out = '';
+    if ($c['email'] !== '') $out .= $form('mail', 'Email ' . $c['who']);
+    if ($c['acc']) $out .= $form('msg', 'Message in their hub');
+    return '<div class="vt-contact vt-contact2"><span class="muted">Reach the developer:</span> ' . $out . '</div>';
+}

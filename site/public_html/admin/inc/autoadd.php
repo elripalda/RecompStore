@@ -112,7 +112,8 @@ function rs_auto_dismiss(int $id = 0): int {
 function rs_sub_close_live(): int {
     if (!function_exists('rs_pc_apps')) require_once __DIR__ . '/pc.php';
     $live = [];
-    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '' && empty($a['hidden'])) $live[strtolower(rs_pc_key($a))] = $a['id'];
+    // (4.12) A Coming Soon listing isn't out yet: a submission for it waits for Approve and replace.
+    foreach (rs_pc_apps() as $a) if ($a['repo'] !== '' && empty($a['hidden']) && empty($a['soon'])) $live[strtolower(rs_pc_key($a))] = $a['id'];
     if (!$live) return 0;
     $n = 0;
     foreach (rs_db()->query("SELECT id, data FROM inbox WHERE kind = 'submit' AND status <> 'done'") as $r) {
@@ -138,6 +139,36 @@ function rs_auto_sub(array $job): array {
 function rs_auto_again(int $id): void {
     rs_auto_set($id, ['status' => 'queued', 'steps' => [], 'verdict' => '', 'notes' => '']);
     rs_auto_launch($id);
+}
+// (4.12) Approve and replace. A submission (or a draft that stopped as "Already on RecompLauncher") whose
+// repo is already a hidden or Coming Soon listing: that listing is kept (its address, downloads and
+// history) and filled in again from this one, then goes out on Publish like any draft. A live listing
+// is never replaced this way.
+function rs_auto_listed(string $key): ?array {
+    foreach (rs_pc_apps() as $x) if (strcasecmp(rs_pc_key($x), $key) === 0) return $x;
+    return null;
+}
+function rs_auto_replaceable(?array $x): bool { return $x !== null && (!empty($x['hidden']) || !empty($x['soon'])); }
+// How a listing that's there already is described: "(hidden)", "(on Coming Soon)" or ''.
+function rs_auto_listed_how(array $x): string { return !empty($x['soon']) ? ' (on Coming Soon)' : (!empty($x['hidden']) ? ' (hidden)' : ''); }
+// -> the draft's id.
+function rs_auto_replace(string $link, string $who, int $subId = 0, int $jobId = 0): int {
+    rs_auto_tables();
+    $l = rs_repo_from_link($link);
+    if (!$l) throw new RuntimeException('It has no repo to check.');
+    $x = rs_auto_listed(rs_repo_key($l['host'], $l['repo']));
+    if (!$x) throw new RuntimeException('Nothing from that repo is listed, so there\'s nothing to replace. Approve it as usual.');
+    if (!rs_auto_replaceable($x)) throw new RuntimeException($x['name'] . ' is live on RecompLauncher, so it isn\'t replaced. Edit it on PC recomps instead.');
+    if (!$jobId) $jobId = rs_auto_start($link, $who, false, $subId);
+    $job = rs_auto_get($jobId);
+    if (!$job) throw new RuntimeException('That draft is gone.');
+    if (in_array($job['status'], ['queued', 'running'], true) && strtotime((string)$job['updated'] . ' UTC') > time() - RS_AUTO_STUCK && ($job['steps'] ?? [])) throw new RuntimeException('It\'s being checked right now. Wait for it to finish.');
+    // made = 0: removing this draft later never deletes the listing it fills in.
+    rs_auto_set($jobId, ['app_id' => $x['id'], 'made' => 0, 'status' => 'queued', 'steps' => [], 'verdict' => '', 'notes' => ''] + ($subId ? ['sub_id' => $subId] : []));
+    rs_kv_put('auto_replace_' . $jobId, (string)$x['id']);
+    rs_log('pc', $x['id'], 'Approve and replace: filled in again from ' . ($subId ? 'submission ' . $subId : 'draft ' . $jobId));
+    rs_auto_launch($jobId);
+    return $jobId;
 }
 function rs_auto_dir(): string {
     $d = dirname(RS_PUBLIC) . '/recompstore-private/auto';
@@ -206,11 +237,24 @@ function rs_auto_run(int $id): void {
         $cur = 'add';
         rs_auto_step($id, 'add', 'run');
         if ($job['app_id'] !== '' && ($a = rs_pc_app($job['app_id']))) {
-            rs_auto_step($id, 'add', 'ok', 'Hidden as ' . $a['id'] . ' (filled in again)');
+            $rk = rs_kv_get('auto_replace_' . $id);
+            if ($rk && (string)$rk['v'] === (string)$a['id']) {
+                // (4.12) Approve and replace: the listing follows this repo's newest release (a Coming Soon
+                // listing had no downloads yet), and isn't "not compatible" any more.
+                $was = trim(rs_auto_listed_how($a));
+                foreach (['win', 'linux', 'mac'] as $sk) if ((string)($f['pattern'][$sk] ?? '') !== '') $a['asset_' . $sk] = (string)$f['pattern'][$sk];
+                $a['repo'] = (string)$f['repo']; $a['host'] = $host;
+                foreach (['version', 'released'] as $fk) if ((string)($f[$fk] ?? '') !== '') $a[$fk] = (string)$f[$fk];
+                if (!empty($f['size'])) $a['size'] = rs_human_size((int)$f['size']);
+                $a['blocked_why'] = '';
+                if (!empty($job['sub_id'])) $a['found'] = 'submission';
+                rs_pc_save($a);
+                rs_auto_step($id, 'add', 'ok', 'Replacing ' . $a['name'] . ($was !== '' ? ', ' . trim($was, '()') : '') . ': filled in again from this one');
+            } else rs_auto_step($id, 'add', 'ok', 'Hidden as ' . $a['id'] . ' (filled in again)');
         } else {
             foreach (rs_pc_apps() as $x) if (strcasecmp(rs_pc_key($x), $key) === 0) {
                 rs_auto_set($id, ['app_id' => $x['id']]);
-                throw new RuntimeException('Already on RecompLauncher as ' . $x['name'] . (!empty($x['hidden']) ? ' (hidden)' : '') . '.');
+                throw new RuntimeException('Already on RecompLauncher as ' . $x['name'] . rs_auto_listed_how($x) . '.');
             }
             $a = rs_pc_add($job['link']);
             // (4.8) Where it was found, kept on the listing: our own finds (the daily scout, a player's
@@ -507,6 +551,9 @@ function rs_auto_publish(int $id, bool $force = false): string {
     $a = rs_pc_app($job['app_id']);
     if (!$a) throw new RuntimeException('Its listing is gone.');
     $a['hidden'] = false;
+    // (4.12) A Coming Soon listing that was replaced is out now.
+    $a['soon'] = false;
+    rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['auto_replace_' . $id]);
     // (4.8) A listing's live_at defaults to '', so "?? now" never set it.
     if ((string)($a['live_at'] ?? '') === '') $a['live_at'] = gmdate('Y-m-d\TH:i:s\Z');
     rs_pc_save($a);

@@ -13,6 +13,8 @@ Files are found by their SHA-256 (GitHub publishes it per release file); only fi
 
 **Reaching the developer:** each held update on Security, and the **Download needs a look** box, has "Ask the developer" buttons (`rs_pc_contact_links`): **Message** (their hub, when they have an approved account), **Email** (a prepared mailto with their account or submission address; a person sends it), **Open an issue** (prefilled on GitHub) and **Its repo** (for a pull request).
 
+Flagged files (every row under **Needs you**, and flagged updates on hold) get **Email <name>** and **Message in their hub** instead, when we have an approved account or an email (account first, then the listing's or submission's address). Each opens a message written from the scan (`rs_vt_contact` in `inc/vt.php`, rules, no AI): the file, how many engines flagged it and which, the VirusTotal link, what it means for the release (on hold, held back from the store), and what usually clears it (build on GitHub Actions, report the false positive, sign the exe). It can be edited; nothing goes out until someone presses Send (`contact-mail`: sent from the site's mailbox with the signature and logged; `contact-msg`: a hub message). Held updates still show the GitHub links next to it.
+
 ## ClamAV
 
 Run by Auto-add on the downloaded release, next to the look inside for game files and emulator wrappers. A bad result makes the draft's verdict `skip`.
