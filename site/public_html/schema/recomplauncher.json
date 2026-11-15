@@ -387,6 +387,17 @@
             },
             "additionalProperties": true
           }
+        },
+        "version": {
+          "type": "string",
+          "description": "Change it when players have to run this step again (its output changed). Nothing else in this file makes a finished step count as not done."
+        },
+        "done": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files that exist once this step has finished, with the same {home}, {local} and {install} words as elsewhere (like \"{home}/Games/MyGame/prepared.bin\"). When they're all there, RecompLauncher counts the step as done and starts the game without asking for the copy again, even if the player built it with your own launcher first (RecompLauncher 0.90 Beta 51 and newer; older launchers ignore it)."
         }
       },
       "additionalProperties": false

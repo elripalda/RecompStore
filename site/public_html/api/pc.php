@@ -225,6 +225,10 @@ try {
                     'engines' => (int)$r['engines'], 'found' => (int)$r['malicious'] + (int)$r['suspicious']];
             }
         }
+        // (4.11) A few engines flagged it and the team okayed it on the hub: said so on each such file.
+        if ($full && $files && ($okd = rs_kv_get('vtok:' . md5(strtolower(rs_pc_key($full)) . '|' . $tag))) && !empty(json_decode((string)$okd['v'], true)['by']))
+            foreach ($files as &$f) if ($f['verdict'] === 'yellow') $f['reviewed'] = true;
+        unset($f);
         // A check still running is asked about again soon; a finished one stays as it is.
         rs_pc_out(200, ['ok' => true, 'tag' => $tag, 'files' => $files], $files && !$waiting ? 3600 : 120);
     }
