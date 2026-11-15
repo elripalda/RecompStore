@@ -45,6 +45,9 @@ try {
     // (4.9) Pull requests waiting their turn go out, at most 5 an hour.
     [$ok, $bad] = rs_prq_send_due();
     if ($ok || $bad) echo gmdate('c') . ' sdk prs: sent ' . $ok . ' from the line' . ($bad ? ', ' . $bad . ' back to drafts' : '') . "\n";
+    // (4.11) After a pull request: our copy follows the developer's file in their repo until their release ships it.
+    $sy = rs_prq_sync_repo_files(40);
+    if ($sy['synced'] || $sy['bad']) echo gmdate('c') . ' sdk files: looked at ' . $sy['looked'] . ', followed ' . $sy['synced'] . ($sy['bad'] ? ', ' . $sy['bad'] . ' fail the rules' : '') . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' sdk prs: ' . $e->getMessage() . "\n"; }
 // (4.9) Forgejo listings move up to the next launcher once it's published on GitHub (not while it's a
 // draft): forgejo_launcher_min_next, e.g. 0.90.0-beta.44, the first launcher with their Easy Setup.

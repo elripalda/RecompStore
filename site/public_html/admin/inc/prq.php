@@ -106,6 +106,65 @@ function rs_prq_run(array $appIds): int {
     rs_log('sdk', 'prq', 'Draft now: ' . implode(', ', $ids));
     return count($ids);
 }
+// ---- (4.11) After a pull request: our copy follows the developer's file ------------------------------------------
+// The launcher reads a developer's recomplauncher.json only from their release; until it's there, players get our
+// profile. So for every game we sent a pull request to (ours from the queue, or one marked "pull request open"), the
+// 30-minute job reads the file in their repo every 6 hours. When they've changed it and it passes the launcher's
+// schema, our profile becomes their file and the game is republished. It stops once their release ships the file
+// (theirs wins then), and never replaces an older-style profile of ours (those keep Easy Setup some files don't have).
+// State per game in kv_cache 'prqsync:<id>' => {at, state: synced|same|none|bad|release|kept, why}.
+function rs_json_norm($v) {
+    if (!is_array($v)) return $v;
+    if (!array_is_list($v)) ksort($v);
+    return array_map('rs_json_norm', $v);
+}
+function rs_prq_same_file(array $x, array $y): bool {
+    foreach (['repo', '$schema'] as $k) { unset($x[$k], $y[$k]); }
+    return json_encode(rs_json_norm($x)) === json_encode(rs_json_norm($y));
+}
+function rs_prq_sync_repo_files(int $secs = 40): array {
+    require_once __DIR__ . '/sdk.php';
+    require_once __DIR__ . '/sdkcheck.php';
+    rs_prq_tables();
+    $t = microtime(true);
+    $ids = array_column(rs_db()->query("SELECT DISTINCT app_id FROM pc_prq WHERE status = 'sent'")->fetchAll(), 'app_id');
+    foreach (rs_sdk_marks() as $id => $m) if (($m['kind'] ?? '') === 'pr') $ids[] = (string)$id;
+    $n = ['looked' => 0, 'synced' => 0, 'bad' => 0];
+    foreach (array_values(array_unique(array_map('strval', $ids))) as $id) {
+        if (microtime(true) - $t > $secs) break;
+        $c = rs_kv_get('prqsync:' . $id);
+        if ($c && $c['age'] < 6 * 3600) continue;
+        $a = rs_pc_app($id);
+        if (!$a || (string)$a['repo'] === '' || rs_pc_host($a) !== '') continue;
+        $n['looked']++;
+        $put = function (string $state, string $why = '') use ($id) { rs_kv_put('prqsync:' . $id, (string)json_encode(['at' => time(), 'state' => $state, 'why' => $why])); };
+        $sdk = rs_kv_get('sdk:' . $id);
+        if ($sdk && ((json_decode($sdk['v'], true) ?: [])['has'] ?? '') === 'release') { $put('release'); continue; } // theirs wins
+        $boot = trim((string)($a['boot'] ?? ''));
+        $ours = $boot !== '' ? json_decode($boot, true) : null;
+        if ($boot !== '' && !(is_array($ours) && (int)($ours['format'] ?? 0) === 1)) { $put('kept', 'our older profile stays'); continue; }
+        try { [$st, $txt] = rs_sdk_repo_file('', (string)$a['repo']); } catch (Throwable $e) { continue; }
+        if ($st === 404) { $put('none'); continue; } // not merged (or no file) yet
+        if ($st !== 200) continue; // GitHub didn't answer: next run
+        $theirs = json_decode((string)$txt, true);
+        $errs = is_array($theirs) && ($schema = rs_sdk_schema()) ? rs_json_schema_errors(json_decode((string)$txt), $schema, 5) : [['(top)', 'isn\'t valid JSON']];
+        if (!is_array($theirs) || $errs || !isset($theirs['start'])) {
+            $why = $errs ? implode('; ', array_map(fn($e) => $e[0] . ' ' . $e[1], $errs)) : 'no "start"';
+            if (($c ? (json_decode($c['v'], true)['why'] ?? '') : '') !== $why) rs_log('sdk', $id, 'Their recomplauncher.json in the repo fails the launcher\'s rules, so our copy stays: ' . $why);
+            $put('bad', $why); $n['bad']++; continue;
+        }
+        if (is_array($ours) && rs_prq_same_file($ours, $theirs)) { $put('same'); continue; }
+        unset($theirs['repo']);
+        $a['boot'] = json_encode($theirs, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        rs_pc_save($a);
+        if (empty($a['hidden'])) { try { rs_pc_publish_one($a['id']); } catch (Throwable $e) { /* the next publish carries it */ } }
+        rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['sdkhealth:' . $id]);
+        rs_log('pc', $id, 'Our profile now follows the developer\'s recomplauncher.json from their repo (they changed it)');
+        $put('synced'); $n['synced']++;
+    }
+    return $n;
+}
+
 // ---- (4.11) Before sending: what a draft gives players, what's missing, and what stops it going out ------------
 // -> ['level' => ok|warn|bad, 'blockers' => [..], 'warns' => [..], 'gives' => [[name, yes|no|na, how]], 'new' => bool]
 // A blocker means it can't be sent (the server refuses too): a file that isn't JSON, fails the launcher's rules,

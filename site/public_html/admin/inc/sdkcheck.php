@@ -9,6 +9,7 @@
 // launcher by the 30-minute job), and the paths it names against the release download's file list.
 declare(strict_types=1);
 require_once __DIR__ . '/pc.php';
+require_once __DIR__ . '/prq.php'; // (4.11) rs_prq_same_file
 
 // ---- A small JSON Schema (draft-07) check: the rules the launcher's schema uses -------------------------
 // The document is decoded as objects (json_decode without assoc), so {} and [] stay apart.
@@ -224,7 +225,14 @@ function rs_sdk_health_feats(array $a, ?array $j, array $h, ?array $names): arra
     // Does the file reach players?
     $d = $h['docs'];
     if (isset($d['release'])) $set('ships', 'ok', 'In the release, so it comes with every install.');
-    elseif (isset($d['repo']) && isset($d['ours'])) $set('ships', 'warn', 'In their repo, not in the release. Players get our copy for now.', 'Ask the developer to copy recomplauncher.json into each release zip, next to the program.');
+    elseif (isset($d['repo']) && isset($d['ours'])) {
+        // (4.11) Our copy follows theirs (rs_prq_sync_repo_files) until their release ships it.
+        $sy = rs_kv_get('prqsync:' . $a['id']); $sy = $sy ? (json_decode($sy['v'], true) ?: []) : [];
+        $same = is_array($r1 = json_decode($d['repo'], true)) && is_array($r2 = json_decode($d['ours'], true)) && rs_prq_same_file($r1, $r2);
+        if (($sy['state'] ?? '') === 'bad') $set('ships', 'bad', 'In their repo, not in the release, and their file fails the launcher\'s rules (' . ($sy['why'] ?? '') . '), so players keep our older copy.', 'Tell the developer what to fix.');
+        elseif ($same) $set('ships', 'warn', 'In their repo, not in the release. Our copy matches theirs and follows their changes (checked every 6 hours).', 'Ask the developer to copy recomplauncher.json into each release zip, next to the program; then theirs is used directly.');
+        else $set('ships', 'warn', 'In their repo, not in the release. Players get our copy, which differs from theirs.', 'If we sent them a pull request, our copy follows theirs within 6 hours. Otherwise ask them to put it in their release.');
+    }
     elseif (isset($d['repo'])) $set('ships', 'bad', 'In their repo, not in the release, so the launcher never reads it.', 'Use as our profile now, and ask the developer to copy it into each release zip.');
     elseif (isset($d['ours'])) $set('ships', 'warn', 'Players get our profile. The developer has no recomplauncher.json yet.', 'Send them a pull request, or the file.');
     else $set('ships', 'bad', 'No recomplauncher.json anywhere.', 'Draft it, then send the pull request or use it as our profile.');
