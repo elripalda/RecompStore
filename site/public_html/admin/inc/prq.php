@@ -156,7 +156,8 @@ function rs_prq_sync_repo_files(int $secs = 40): array {
         if (is_array($ours) && rs_prq_same_file($ours, $theirs)) { $put('same'); continue; }
         // The program it starts has to be in their current download (a file ahead of its release, or a typo).
         $prog = array_map('strval', (array)($theirs['start']['program'] ?? []));
-        if (rs_sdk_program_in($prog, rs_sdk_release_names($a)) === false) {
+        // (A file with a setup step can start a program that step builds, so it isn't in the download.)
+        if (!isset($theirs['prepare']) && rs_sdk_program_in($prog, rs_sdk_release_names($a)) === false) {
             $why = implode(', ', $prog) . ' isn\'t in their current download';
             if (($c ? (json_decode($c['v'], true)['why'] ?? '') : '') !== $why) rs_log('sdk', $id, 'Their recomplauncher.json in the repo starts a program their release doesn\'t have, so our copy stays: ' . $why);
             $put('bad', $why); $n['bad']++; continue;

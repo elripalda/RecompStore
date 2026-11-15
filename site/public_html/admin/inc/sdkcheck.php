@@ -227,6 +227,7 @@ function rs_sdk_health_feats(array $a, ?array $j, array $h, ?array $names): arra
         $prog = (array)($j['start']['program'] ?? []);
         $hits = array_filter(array_map($inZip, array_map('strval', $prog)), fn($x) => $x !== null);
         if (!$prog) $set('start', 'bad', 'No "start.program".', 'Add the program to start, from the top of the release.');
+        elseif ($hits && !in_array(true, $hits, true) && isset($j['prepare'])) $set('start', 'ok', implode(', ', $prog) . ', made by its setup step (it isn\'t in the download itself)');
         elseif ($hits && !in_array(true, $hits, true)) $set('start', 'bad', implode(', ', $prog) . ' isn\'t in the download.', 'The paths start at the top of the release zip. Fix the name, or the release.');
         else $set('start', 'ok', implode(', ', $prog) . ($hits ? ', found in the download' : ''));
         if (rs_sdk_easy($j)) {
