@@ -1692,6 +1692,8 @@ function rs_pc_banner_info(): array {
 // website's lighter copy: the same list without what only a game's own page shows (the original
 // game's details, the launch settings, "What's in it"). The site asks for those one game at a time.
 function rs_pc_write_files(array $cat, ?string $only = null): bool {
+    // (4.11) Cover Labels is always an object, also when empty or read back from the file (rs_pc_publish_one).
+    if (array_key_exists('labels', $cat) && !$cat['labels']) $cat['labels'] = new stdClass();
     $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
     $json = json_encode($cat, $flags);
     $tmp = RS_PC_CATALOG . '.tmp';
