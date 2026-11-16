@@ -84,6 +84,14 @@ try {
     $bk = rs_bk_maybe();
     if ($bk !== '') echo gmdate('c') . ' backup: ' . $bk . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' backup: ' . $e->getMessage() . "\n"; }
+// (4.13) Discord: approved developers who linked Discord but don't have the Developer role yet get
+// it (once an hour; a grant Discord turned down when they linked is tried again here).
+try {
+    require_once 'admin/inc/devhub.php';
+    require_once 'admin/inc/discord.php';
+    $dg = rs_dc_sync_due();
+    if ($dg) echo gmdate('c') . ' discord: gave the Developer role to ' . $dg . "\n";
+} catch (Throwable $e) { echo gmdate('c') . ' discord role: ' . $e->getMessage() . "\n"; }
 // (4.6) Docs parity: recomplauncher.com/schema/recomplauncher.json follows the launcher's own schema
 // (docs/recomplauncher.schema.json on its main branch), so what editors check against is what the
 // launcher accepts. Changed only when it really changed, and only to a schema that looks like ours.

@@ -326,19 +326,72 @@ function rs_dc_server_setup(): array {
     return $done;
 }
 
-// Gives the Developer role to every approved developer who linked Discord. -> [given, without Discord]
-function rs_dc_sync_devs(): array {
+// (4.13) Gives one approved developer the Developer role. Discord only lets the bot give roles below
+// its own in Server Settings > Roles; when that's why it says no (403, code 50013), kv dc_role_blocked
+// says so for the Discord page, and it's cleared by the next role that goes through. A role given is
+// remembered per account (kv dcrole:<account id>) so the hourly catch-up skips them.
+// -> [true/false, Discord's status, its answer]
+function rs_dc_role_put(array $acc): array {
+    $c = rs_dc_conf();
+    $role = trim((string)rs_setting('dc_dev_role', ''));
+    if ((string)($acc['discord_id'] ?? '') === '' || $role === '' || $c['bot'] === '' || $c['guild'] === '') return [false, 0, ''];
+    [$st, $j, $raw] = rs_dc_call('PUT', '/guilds/' . rawurlencode($c['guild']) . '/members/' . rawurlencode((string)$acc['discord_id']) . '/roles/' . rawurlencode($role), ['bot' => $c['bot']]);
+    if ($st === 204) {
+        rs_kv_put('dcrole:' . (int)$acc['id'], (string)$acc['discord_id']);
+        if (rs_kv_get('dc_role_blocked')) rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['dc_role_blocked']);
+        return [true, $st, $raw];
+    }
+    if ($st === 403 && is_array($j) && (int)($j['code'] ?? 0) === 50013) rs_kv_put('dc_role_blocked', (string)time());
+    return [false, $st, (string)$raw];
+}
+
+// Gives the Developer role to every approved developer who linked Discord. $missing: only the ones
+// it hasn't given it to yet (the hourly catch-up). Stops at the first "not allowed": the rest would
+// get the same answer. -> [given, without Discord, not given]
+function rs_dc_sync_devs(bool $missing = false): array {
     $c = rs_dc_conf();
     $role = trim((string)rs_setting('dc_dev_role', ''));
     if ($c['bot'] === '' || $c['guild'] === '' || $role === '') throw new RuntimeException('Set up the server first.');
     rs_dev_tables();
-    $given = 0; $none = 0;
+    $given = 0; $none = 0; $failed = 0;
     foreach (rs_db()->query("SELECT * FROM dev_accounts WHERE status = 'approved'")->fetchAll() as $acc) {
         if ((string)$acc['discord_id'] === '') { $none++; continue; }
-        [$st] = rs_dc_call('PUT', '/guilds/' . rawurlencode($c['guild']) . '/members/' . rawurlencode((string)$acc['discord_id']) . '/roles/' . rawurlencode($role), ['bot' => $c['bot']]);
-        if ($st === 204) $given++;
+        if ($missing && ($k = rs_kv_get('dcrole:' . (int)$acc['id'])) && $k['v'] === (string)$acc['discord_id']) continue;
+        [$ok, $st] = rs_dc_role_put($acc);
+        if ($ok) { $given++; usleep(300000); continue; }
+        $failed++;
+        if ($st === 403) break;
+        if ($st === 429) { sleep(3); }
     }
-    return [$given, $none];
+    return [$given, $none, $failed];
+}
+
+// (4.13) The hourly catch-up from the 30-minute job: anyone approved and linked who doesn't have the
+// role yet gets it (a grant that failed when they linked, or they were approved before the bot could).
+// -> how many got it now
+function rs_dc_sync_due(): int {
+    if (trim((string)rs_setting('dc_dev_role', '')) === '' || !rs_dc_ready()) return 0;
+    $last = rs_kv_get('dc_sync_at');
+    if ($last && $last['age'] < 3300) return 0;
+    rs_kv_put('dc_sync_at', (string)time());
+    return rs_dc_sync_devs(true)[0];
+}
+
+// Whether the bot's highest role sits above the Developer role, so it may give it. -> true, false,
+// or null when Discord couldn't say.
+function rs_dc_role_order_ok(): ?bool {
+    $c = rs_dc_conf();
+    $role = trim((string)rs_setting('dc_dev_role', ''));
+    if ($role === '' || $c['bot'] === '' || $c['guild'] === '') return null;
+    [$st, $roles] = rs_dc_call('GET', '/guilds/' . rawurlencode($c['guild']) . '/roles', ['bot' => $c['bot']]);
+    [$st2, $me] = rs_dc_call('GET', '/users/@me', ['bot' => $c['bot']]);
+    if ($st !== 200 || $st2 !== 200 || !is_array($roles) || empty($me['id'])) return null;
+    [$st3, $mem] = rs_dc_call('GET', '/guilds/' . rawurlencode($c['guild']) . '/members/' . rawurlencode((string)$me['id']), ['bot' => $c['bot']]);
+    if ($st3 !== 200 || !is_array($mem)) return null;
+    $pos = []; foreach ($roles as $r) if (is_array($r)) $pos[(string)$r['id']] = (int)$r['position'];
+    if (!isset($pos[$role])) return null;
+    $top = 0; foreach ((array)($mem['roles'] ?? []) as $id) $top = max($top, $pos[(string)$id] ?? 0);
+    return $top > $pos[$role];
 }
 
 // A message from the team in #dev-announcements (a team note, when you tick it). Best effort.

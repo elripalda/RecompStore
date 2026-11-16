@@ -17,12 +17,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $st = rs_dc_server_state();
             if (!$st['ready']) throw new RuntimeException($st['why']);
             $done = rs_dc_server_setup();
-            [$given, $none] = rs_dc_sync_devs();
+            [$given, $none, $failed] = rs_dc_sync_devs();
             rs_flash(implode(' ', $done) . ' Gave the role to ' . $given . ($given === 1 ? ' developer' : ' developers') . ($none ? ' (' . $none . ' haven\'t linked Discord yet)' : '') . '.');
             $back = 'community.php#discord';
         } elseif ($act === 'dc-sync') {
-            [$given, $none] = rs_dc_sync_devs();
-            rs_flash('Gave the Developer role to ' . $given . ($given === 1 ? ' developer' : ' developers') . '.' . ($none ? ' ' . $none . ' haven\'t linked Discord in their hub yet; they get it when they do.' : ''));
+            [$given, $none, $failed] = rs_dc_sync_devs();
+            rs_flash('Gave the Developer role to ' . $given . ($given === 1 ? ' developer' : ' developers') . '.' . ($failed ? ' Discord turned down the rest: check the warning on this page.' : '') . ($none ? ' ' . $none . ' haven\'t linked Discord in their hub yet; they get it when they do.' : ''), $failed ? 'err' : 'ok');
             $back = 'community.php#discord';
         } elseif ($act === 'pc-posts') {
             // The webhook is a secret: never shown again in full, never logged.
@@ -90,6 +90,9 @@ $notes = rs_notes(false);
 rs_dev_tables();
 $devsLinked = (int)rs_db()->query("SELECT COUNT(*) FROM dev_accounts WHERE status = 'approved' AND discord_id <> ''")->fetchColumn();
 $devsAll = (int)rs_db()->query("SELECT COUNT(*) FROM dev_accounts WHERE status = 'approved'")->fetchColumn();
+// (4.13) The bot can only give roles below its own: say so when Discord's role order stops it.
+$roleOrder = $state['ready'] && $state['role'] !== '' ? rs_dc_role_order_ok() : null;
+$roleBlocked = $roleOrder === false || ($roleOrder === null && rs_kv_get('dc_role_blocked'));
 $chan = fn(string $k) => ($id = trim((string)rs_setting($k, ''))) !== '' && $c['guild'] !== '' ? 'https://discord.com/channels/' . rawurlencode($c['guild']) . '/' . rawurlencode($id) : '';
 
 rs_head('Discord & notes', true, ['assets/health.css']);
@@ -117,7 +120,8 @@ rs_head('Discord & notes', true, ['assets/health.css']);
       <b>#dev-chat</b> <?= ($u = $chan('dc_dev_chat')) ? '<a href="' . h($u) . '" target="_blank" rel="noopener">open</a>' : '' ?> for talking, and
       <b>#dev-announcements</b> <?= ($u = $chan('dc_dev_news')) ? '<a href="' . h($u) . '" target="_blank" rel="noopener">open</a>' : '' ?> where only the team posts.</li>
   </ul>
-  <p class="muted"><?= $devsLinked ?> of <?= $devsAll ?> approved developers have linked Discord.</p>
+  <?php if ($roleBlocked): ?><p class="cm-warn"><strong>Developers aren't getting the role.</strong> In Discord, Server Settings, Roles, the bot's role is below the Developer role, and Discord only lets the bot give roles under its own. Drag the bot's role (RecompStore) above it. Everyone who's missing the role gets it within the hour, or press <b>Give developers the role</b>.</p><?php endif; ?>
+  <p class="muted"><?= $devsLinked ?> of <?= $devsAll ?> approved developers have linked Discord. Anyone missing the role gets it in the hourly catch-up.</p>
   <div class="actions">
     <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><button class="primary" name="action" value="dc-setup"<?= $state['ready'] ? '' : ' disabled' ?>>Set up</button>
       <button name="action" value="dc-sync"<?= $state['ready'] && $state['role'] !== '' ? '' : ' disabled' ?>>Give developers the role</button></form>

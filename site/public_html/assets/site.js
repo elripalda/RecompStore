@@ -5176,11 +5176,11 @@
     const q = new URLSearchParams(location.search);
     // (4.1) Every way linking Discord can end, said plainly.
     const dcMsgs = { ok: t('Discord is linked. You\'re in our Discord server now.'), no: t('You didn\'t finish linking Discord.'),
-      role: t('Discord is linked, but the Developer role couldn\'t be given yet. Make sure you\'re in the RecompStore Discord server; the team has been told.'),
+      role: t('Discord is linked. Your Developer role shows up in Discord within the hour.'),
       again: t('Linking Discord timed out. Press Link Discord again.'), signin: t('Sign in to your hub first, then link Discord.'), err: t('Discord didn\'t answer. Try Link Discord again in a minute.') };
     const dcNote = dcMsgs[q.get('dc')] ? dcMsgs[q.get('dc')]
       : q.get('gh') === 'linked' ? t('GitHub is linked. Your apps are found from your repositories now.') : q.get('gh') === 'taken' ? t('That GitHub account already has its own developer account. Sign in with GitHub instead.') : '';
-    const dcBad = ['no', 'role', 'again', 'signin', 'err'].includes(q.get('dc')) || q.get('gh') === 'taken';
+    const dcBad = ['no', 'again', 'signin', 'err'].includes(q.get('dc')) || q.get('gh') === 'taken';
     if (q.get('dc') || q.get('gh')) history.replaceState(history.state, '', DEV_HOME);
     let data = null;
     const load = () => fetch('/api/dev.php?a=me', { cache: 'no-store', credentials: 'same-origin' }).then((r) => r.json()).catch(() => null).then((j) => {

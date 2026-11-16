@@ -23,7 +23,8 @@ All cron jobs run as `www-data`. Times are UTC unless noted; Phoenix is UTC-7 al
 7. Instant Gaming card refresh.
 8. **Trending**: builds the new weekly chart once Friday midnight Phoenix has passed (`rs_trend_maybe`), writes `trending.json`.
 9. **Emergency backup**: picks games per its settings and starts a copying run in the background when there's something to copy (`rs_bk_maybe`).
-10. Docs parity: keeps the published schema in step with the launcher's.
+10. Discord: once an hour, gives the Developer role to approved developers who linked Discord and don't have it yet (`rs_dc_sync_due`, see [06](06-developers.md)).
+11. Docs parity: keeps the published schema in step with the launcher's.
 
 Each step is wrapped so one failing doesn't stop the rest; failures go to the log.
 

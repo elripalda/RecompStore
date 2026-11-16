@@ -553,13 +553,14 @@ function rs_dev_approve(int $id, string $pick = ''): array {
 }
 
 // The Developer role on Discord, when they've linked Discord and the site's bot can give it.
-// -> true when they have the role now (or there's no role to give). (4.1) Says when Discord says no.
+// -> true when they have the role now (or there's no role to give). (4.1) Says when Discord says no;
+// (4.13) a role that couldn't be given now is given by the hourly catch-up (rs_dc_sync_due).
 function rs_dev_discord_role(array $acc): bool {
     $role = trim((string)rs_setting('dc_dev_role', ''));
     $c = rs_dc_conf();
     if ($acc['status'] !== 'approved' || $acc['discord_id'] === '' || $role === '' || $c['bot'] === '' || $c['guild'] === '') return true;
-    [$st, , $raw] = rs_dc_call('PUT', '/guilds/' . rawurlencode($c['guild']) . '/members/' . rawurlencode((string)$acc['discord_id']) . '/roles/' . rawurlencode($role), ['bot' => $c['bot']]);
-    if ($st === 204) return true;
+    [$ok, $st, $raw] = rs_dc_role_put($acc);
+    if ($ok) return true;
     rs_log('discord', 'dev-role', ($acc['gh_login'] ?: $acc['name']) . ': Discord answered ' . ($st ?: 'nothing') . ' ' . mb_substr((string)$raw, 0, 160));
     return false;
 }
