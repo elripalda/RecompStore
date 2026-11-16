@@ -6349,7 +6349,7 @@
     if (!me) { history.replaceState(null, '', '/signin?back=%2Faccount'); signinPage(); return; }
     if (me.needName) { history.replaceState(null, '', '/signin?step=name'); signinPage(); return; }
     setBackdrop(null);
-    const card = (id, title, body) => `<section class="glass acct-card" id="acct-${id}"><h2>${title}</h2>${body}</section>`;
+    const card = (id, title, body) => `<section class="glass acct-card${id === 'data' ? ' acct-wide' : ''}" id="acct-${id}"><h2>${title}</h2>${body}</section>`;
     const ways = Object.keys(ACCT_PROV).map((p) => {
       const on = me.linked[p], can = acct.providers.includes(p);
       if (!on && !can) return '';
@@ -6373,6 +6373,7 @@
         ${card('devices', t('Signed in on'), `<div data-sessions><p class="muted">${t('Loading…')}</p></div><div class="form-row"><button class="btn" type="button" data-signout>${t('Sign out')}</button><button class="btn" type="button" data-signout-all>${t('Sign out everywhere')}</button></div>`)}
         ${card('pcs', t('RecompLauncher on your PCs'), `<div data-pcs><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('cloud', t('Cloud saves'), `<div data-cloud><p class="muted">${t('Loading…')}</p></div>`)}
+        ${card('playtime', t('Playtime'), `<div data-playtime><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('betas', t('Betas'), `<div data-betas><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('reports', t('Your Reports'), `<div data-myreports><p class="muted">${t('Loading…')}</p></div>`)}
         ${card('data', t('Your data'), `<p class="muted">${t('Download everything we keep about you, or delete your account. Deleting removes your email, saved games and sign-ins. Your comments stay up as "deleted user" so threads still make sense.')}</p>
@@ -6470,8 +6471,25 @@
         rlApi('cloud-delete', { game, v }).then(drawCloud);
       }));
     };
+    // (4.13) Playtime from RecompLauncher: each game's total over your PCs, and each PC's share.
+    const playBox = view.querySelector('[data-playtime]');
+    const hrs = (secs) => (secs >= 3600 ? tf('{n} h', { n: (secs / 3600).toFixed(secs >= 36000 ? 0 : 1) }) : tf('{n} min', { n: Math.max(1, Math.round(secs / 60)) }));
+    const drawPlay = (j) => {
+      if (!j.ok) { playBox.innerHTML = `<p class="muted">${esc(j.error || '')}</p>`; return; }
+      const note = `<p class="muted small">${t('Only you see this. Clearing removes it from every PC here; the next full send from a PC brings back that PC\'s own numbers.')}</p>`;
+      playBox.innerHTML = j.games.length ? j.games.map((g) => `<details class="acct-save"><summary><b>${esc(g.name)}</b><small>${esc(hrs(g.secs))}${g.last ? ' · ' + esc(tf('last played {when}', { when: ago(new Date(g.last * 1000).toISOString()) })) : ''}</small></summary>
+            <ul class="acct-sessions">${g.pcs.map((p) => `<li><span><b>${esc(p.removed ? t('A PC you removed') : p.name)}</b><small>${esc(hrs(p.secs))}</small></span></li>`).join('')}</ul>
+            <div class="form-row"><button type="button" class="linkish" data-play-clear="${esc(g.game)}">${t('Clear this game')}</button></div></details>`).join('')
+          + `<div class="form-row"><button type="button" class="btn small" data-play-clear="">${t('Clear all playtime')}</button></div>${note}`
+        : `<p class="muted">${t('Sign in to RecompLauncher on your PC and your playtime shows up here after you play.')}</p>`;
+      playBox.querySelectorAll('[data-play-clear]').forEach((b) => b.addEventListener('click', () => {
+        if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = t('Clear it on every PC?'); return; }
+        rlApi('playtime-clear', b.dataset.playClear ? { game: b.dataset.playClear } : {}).then(drawPlay);
+      }));
+    };
     rlApi('pcs').then(drawPcs);
     rlApi('cloud').then(drawCloud);
+    rlApi('playtime').then(drawPlay);
     // (3.2) Betas: test builds of PC recomps, played from RecompLauncher.
     const betaBox = view.querySelector('[data-betas]');
     const drawBetas = (j) => {
@@ -6571,6 +6589,7 @@
         <li>${t('What you post or save here: comments, saved games and cloud saves.')}</li></ul>
       <h2 id="launcher">${t('RecompLauncher')}</h2><ul>
         <li>${t('If you sign RecompLauncher in: the name of each PC you signed in, when it was last used, and the saves it backs up to your account.')}</li>
+        <li>${t('Signed in, RecompLauncher also stores how long you played each game on each of your PCs with your account, to show your totals. Only you see it, and you can clear it from your account page. We don\'t publish these numbers or use them for community stats unless you choose to share them.')}</li>
         <li>${t('Usage and diagnostics, so we can fix problems and see what players use: the launcher\'s version, your Windows version, processor, graphics card, memory, screen size and language, the kind of controller, which recomps you install and play and for how long, and when an install fails or a game closes right after it starts. It goes with a random ID made by that launcher. It isn\'t linked to your account.')}</li>
         <li>${t('Anonymous usage stats: when the launcher opens and closes, and which recomp is running and for how long, with the launcher\'s version, your system and whether you\'re signed in. It uses a second random ID, also not linked to your account.')}</li>
         <li>${t('"How did it run?" reports you send from the launcher show on the game\'s page with your PC\'s graphics card, processor, memory and Windows version. Your name isn\'t shown.')}</li>
@@ -6582,7 +6601,7 @@
         <li>${t('We only email you about the things you ticked. Every email has an unsubscribe link.')}</li>
         <li>${t('We use a few services to run the site: Hostinger (hosting), Brevo (email) and Google, Discord and GitHub (only if you sign in with them). They only handle what\'s needed for that.')}</li></ul>
       <h2>${t('Your control')}</h2><ul>
-        <li>${t('You can download your data or delete your account at any time from your account page. Deleting removes your email, saved games and cloud saves. Your comments stay up under "deleted user" so threads still make sense.')}</li>
+        <li>${t('You can download your data or delete your account at any time from your account page. Deleting removes your email, saved games, cloud saves and playtime. Your comments stay up under "deleted user" so threads still make sense.')}</li>
         <li>${tf('Usage data isn\'t tied to your account, so deleting your account doesn\'t find it. Email {email} with your launcher\'s ID and we\'ll remove it.', { email: '<a href="mailto:info@recompstore.com">info@recompstore.com</a>' })}</li>
         <li>${tf('Questions, or want us to remove something? Email {email}.', { email: `<a href="mailto:${c}">${c}</a>` })}</li></ul>
       <h2 id="terms">${t('House rules')}</h2><ul>
@@ -6595,7 +6614,7 @@
         <li>${t('RecompStore isn\'t affiliated with Sony, Microsoft, Nintendo or any game publisher.')}</li>
         <li>${t('Signing up uses Cloudflare Turnstile to keep bots out.')}</li>
         <li>${t('If these terms change in a big way, we\'ll say so on the site and email account holders.')}</li></ul>
-      <p class="muted small">${t('Last updated October 2026.')}</p></div>`);
+      <p class="muted small">${t('Last updated November 2026.')}</p></div>`);
     const want = (location.hash || '').slice(1) || (current() === '/privacy' ? 'privacy' : '');
     if (want && /^[a-z]+$/.test(want)) { const h = document.getElementById(want); if (h) h.scrollIntoView(); }
   }

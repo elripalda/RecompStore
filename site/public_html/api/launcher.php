@@ -15,6 +15,8 @@
 //         423 {ok: false, error: "Cloud saves are paused ..."}.
 //   (3.2) GET a=inbox -> {items[]} (games sent from the website)   POST a=inbox-done {id, result}
 //   (3.2) GET a=betas -> {betas[]}   POST a=beta-join {id}   POST a=beta-leave {id}
+//   (4.13) POST a=play {games: [{game, secs, last}]} (up to 500) -> this PC's totals, never lowered
+//          GET  a=play -> {games: {id: {secs, last}}, titles: {id: {secs, last}}} (summed over the account's PCs)
 //   (4.7) GET a=library -> {saved: [{id, at}]} (the account's saved PC games, as on the website)
 //         POST a=library-save {game | games[], on} -> {saved} (adds or removes; games[] for the first merge)
 // The launcher, signed in or not (an install ID it made itself):
@@ -28,9 +30,12 @@
 //   GET  a=cloud-get&game=&v= -> the copy (zip)   POST a=cloud-delete {game, v}
 //   (3.2) GET a=send-pcs&game= -> {pcs[]} (the PCs that can run it)   POST a=send {game, pc}
 //   (3.2) GET a=my-betas -> {betas[]}   POST a=web-beta-join {id}   POST a=web-beta-leave {id}
+//   (4.13) GET a=playtime -> {games: [{game, name, secs, last, pcs: [{pc, name, removed, secs, last}]}]}
+//          POST a=playtime-clear {game?} -> clears that game (or everything) on every PC
 declare(strict_types=1);
 require dirname(__DIR__) . '/admin/inc/bootstrap.php';
 require_once dirname(__DIR__) . '/admin/inc/rl_cloud.php';
+require_once dirname(__DIR__) . '/admin/inc/rl_playtime.php';
 
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
@@ -55,7 +60,8 @@ $a = (string)($_GET['a'] ?? '');
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $in = [];
 if ($method === 'POST') {
-    $in = json_decode((string)file_get_contents('php://input', false, null, 0, 16384), true);
+    // (4.13) A PC's full playtime send (up to 500 games) is bigger than the other calls.
+    $in = json_decode((string)file_get_contents('php://input', false, null, 0, $a === 'play' ? 262144 : 16384), true);
     if (!is_array($in)) $in = [];
 }
 $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
@@ -79,7 +85,7 @@ try {
     $space = fn(array $acc) => ['used' => rs_rl_used((int)$acc['id']), 'quota' => RS_RL_QUOTA];
 
     // ---- the account page (cookie) ----
-    if (in_array($a, ['pcs', 'pc-remove', 'cloud', 'cloud-get', 'cloud-delete', 'send-pcs', 'send', 'my-betas', 'web-beta-join', 'web-beta-leave'], true)) {
+    if (in_array($a, ['pcs', 'pc-remove', 'cloud', 'cloud-get', 'cloud-delete', 'send-pcs', 'send', 'my-betas', 'web-beta-join', 'web-beta-leave', 'playtime', 'playtime-clear'], true)) {
         $me = rs_acct_current();
         if (!$me) rs_rl_err(401, 'Sign in first.');
         if ($method === 'POST') {
@@ -123,6 +129,13 @@ try {
                 if ($method !== 'POST') rs_rl_err(405, 'POST');
                 rs_rl_beta_leave((int)$me['id'], (int)($in['id'] ?? 0));
                 rs_rl_out(200, ['betas' => rs_rl_betas_for((int)$me['id'])]);
+            // (4.13) Playtime: per game, the total and each PC's share. Clearing removes it on every PC; the
+            // next full send from a PC brings that PC's own numbers back.
+            case 'playtime': rs_rl_out(200, ['games' => rs_rl_play_list((int)$me['id'])]);
+            case 'playtime-clear':
+                if ($method !== 'POST') rs_rl_err(405, 'POST');
+                rs_rl_play_clear((int)$me['id'], (string)($in['game'] ?? ''));
+                rs_rl_out(200, ['games' => rs_rl_play_list((int)$me['id'])]);
         }
     }
 
@@ -256,6 +269,19 @@ try {
             $out = [];
             foreach (rs_acct_saved($me) as $r) if (str_starts_with((string)$r['game'], 'pc:')) $out[] = ['id' => substr((string)$r['game'], 3), 'at' => (int)strtotime($r['created'] . ' UTC')];
             rs_rl_out(200, ['saved' => $out]);
+        }
+        // (4.13) Playtime: this PC's total per game in, the account's sums out. Limited per PC (its token).
+        case 'play': {
+            $kind = $method === 'POST' ? 'rl-play-put' : 'rl-play-get';
+            if (rs_acct_try_count($kind, (string)$pc['id'], 60) >= 120) rs_rl_err(429, 'Too many at once. Try again later.');
+            rs_acct_try_add($kind, (string)$pc['id']);
+            if ($method === 'POST') {
+                if (!isset($in['games']) || !is_array($in['games'])) rs_rl_err(400, 'No games.');
+                rs_rl_play_put((int)$me['id'], (int)$pc['id'], $in['games']);
+                rs_rl_out(200, []);
+            }
+            [$games, $titles] = rs_rl_play_totals((int)$me['id']);
+            rs_rl_out(200, ['games' => (object)$games, 'titles' => (object)$titles]);
         }
         case 'save-delete':
             if ($method !== 'POST') rs_rl_err(405, 'POST');

@@ -397,7 +397,7 @@ function rs_rl_send(string $file, string $name): void {
     exit;
 }
 
-// An account being deleted: its PCs and cloud saves go too.
+// An account being deleted: its PCs, cloud saves and playtime go too.
 function rs_rl_forget(array $a): void {
     rs_rl_tables();
     $db = rs_db();
@@ -410,6 +410,10 @@ function rs_rl_forget(array $a): void {
     $db->prepare('DELETE FROM launcher_devices WHERE account_id = ?')->execute([$id]);
     $db->prepare('DELETE FROM launcher_links WHERE account_id = ?')->execute([$id]);
     $db->prepare('DELETE FROM cloud_saves WHERE account_id = ?')->execute([$id]);
+    // (4.13) And its playtime.
+    require_once __DIR__ . '/rl_playtime.php';
+    rs_rl_play_tables();
+    $db->prepare('DELETE FROM rl_playtime WHERE uid = ?')->execute([$id]);
     $dir = rs_rl_dir($a);
     if (is_dir($dir)) {
         $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
@@ -420,7 +424,8 @@ function rs_rl_forget(array $a): void {
 
 // For "Download my data": the PCs and the saves kept.
 function rs_rl_export(array $a): array {
-    return ['launcherPCs' => rs_rl_devices((int)$a['id']), 'cloudSaves' => rs_rl_games((int)$a['id'])];
+    require_once __DIR__ . '/rl_playtime.php';
+    return ['launcherPCs' => rs_rl_devices((int)$a['id']), 'cloudSaves' => rs_rl_games((int)$a['id']), 'playtime' => rs_rl_play_list((int)$a['id'])];
 }
 
 // ---- (3.2) Get it on my PC --------------------------------------------------------------------

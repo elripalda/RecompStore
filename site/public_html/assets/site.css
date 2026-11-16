@@ -1959,6 +1959,7 @@ a.get:hover{background:#6ff7f0;transform:translateY(-1px);box-shadow:0 10px 26px
 .acct-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}
 .acct-card .form{background:none!important;border:0!important;padding:0!important;box-shadow:none!important;border-radius:0}
 .acct-card{align-content:start}
+.acct-wide{grid-column:1/-1}
 @media (max-width:860px){.acct-grid{grid-template-columns:1fr}}
 .acct-card{padding:22px;display:grid;gap:14px;min-width:0}
 .acct-card h2{font-size:20px;margin:0}
