@@ -684,10 +684,8 @@ function rs_prq_auto_sweep(): int {
 
 // ---- (4.12) Developer replied --------------------------------------------------------------------
 // Xarishark: when a developer answers on a pull request (or the issue asking for support), it leaves Sent
-// for "Developer replied" until one of us answers on GitHub or presses Mark answered. Every 3 hours per
-// pull request: its comments, reviews and review comments; the newest one by someone outside the team
-// (prq_team_logins, our PR account, the PR's own author; bots never count) that's newer than anything
-// of ours counts. kv `prreply:<app id>` = {who, at, text, url, state, kind}; `prreplyok:<app id>` = answered.
+// for "Developer replied" until one of us answers on GitHub or presses Mark answered. Who's "us":
+// prq_team_logins and our PR account; bots never count. (4.13) Read from the threads below.
 function rs_prq_team_logins(): array {
     $l = array_map('trim', explode(',', strtolower((string)rs_setting('prq_team_logins', 'elripalda,xarishark'))));
     $me = strtolower((string)rs_setting('prq_gh_login', ''));
@@ -708,68 +706,178 @@ function rs_prq_gh_read(string $path): ?array {
     $h = rs_http(rs_gh_api() . $path, ['github' => true, 'timeout' => 10, 'max' => 4000000]);
     return $h['status'] === 200 ? (json_decode((string)$h['body'], true) ?: null) : null;
 }
-function rs_prq_reply_scan(int $secs = 25): int {
+// (4.13) Replies: every pull request and issue we sent (and the ones marked by hand) has a thread
+// (pc_prq_threads) and its messages (pc_prq_msgs: comments, reviews, code comments, and who closed or
+// merged it), ours and theirs, so Launcher support > Replies shows each conversation and what's new.
+// Open ones are read every hour; closed or merged ones every 6 hours for two weeks, daily up to 90 days,
+// then left alone. "New" = something of theirs (a reply, a merge, a close) after our last comment and
+// after someone pressed Got it (read_at). The PR queue's "Developer replied" stays open ones only.
+function rs_prq_reply_tables(): void {
+    static $done = false;
+    if ($done) return;
+    rs_db()->exec("CREATE TABLE IF NOT EXISTS pc_prq_threads (
+        app_id VARCHAR(100) NOT NULL PRIMARY KEY,
+        url VARCHAR(300) NOT NULL DEFAULT '',
+        repo VARCHAR(200) NOT NULL DEFAULT '',
+        kind VARCHAR(8) NOT NULL DEFAULT 'pull',
+        num INT NOT NULL DEFAULT 0,
+        title VARCHAR(300) NOT NULL DEFAULT '',
+        state VARCHAR(8) NOT NULL DEFAULT 'open',
+        closed_at INT NOT NULL DEFAULT 0,
+        theirs_at INT NOT NULL DEFAULT 0,
+        news_at INT NOT NULL DEFAULT 0,
+        ours_at INT NOT NULL DEFAULT 0,
+        read_at INT NOT NULL DEFAULT 0,
+        n_theirs INT NOT NULL DEFAULT 0,
+        checked DATETIME NULL
+    ) DEFAULT CHARSET=utf8mb4");
+    rs_db()->exec("CREATE TABLE IF NOT EXISTS pc_prq_msgs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        app_id VARCHAR(100) NOT NULL,
+        ext VARCHAR(60) NOT NULL,
+        who VARCHAR(80) NOT NULL DEFAULT '',
+        mine TINYINT NOT NULL DEFAULT 0,
+        kind VARCHAR(10) NOT NULL DEFAULT 'comment',
+        at INT NOT NULL DEFAULT 0,
+        body TEXT NULL,
+        url VARCHAR(300) NOT NULL DEFAULT '',
+        UNIQUE KEY ext (app_id, ext),
+        KEY app (app_id, at)
+    ) DEFAULT CHARSET=utf8mb4");
+    $done = true;
+}
+// A thread is due: open every hour, closed ones less and less often. $force: open ones and ones closed
+// in the last two weeks now.
+function rs_prq_reply_due(?array $t, bool $force): bool {
+    if (!$t || $t['checked'] === null) return true;
+    $age = time() - (int)strtotime((string)$t['checked'] . ' UTC');
+    if ($t['state'] === 'open') return $force || $age >= 3300;
+    $since = time() - (int)$t['closed_at'];
+    if ($since < 14 * 86400) return $force || $age >= 6 * 3600;
+    return $since < 90 * 86400 && $age >= 86400;
+}
+// Reads one thread from GitHub and saves it. -> true when GitHub answered.
+function rs_prq_reply_read(string $id, string $url, array $team, ?array $old): bool {
+    if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/(pull|issues)/(\d+)#', $url, $m)) return false;
+    [$repo, $kind, $num] = [$m[1], $m[2], (int)$m[3]];
+    $item = rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num);
+    if (!$item) return false;
+    $state = !empty($item['pull_request']['merged_at']) ? 'merged' : ((string)($item['state'] ?? 'open') === 'closed' ? 'closed' : 'open');
+    $closedAt = $state === 'open' ? 0 : (int)(strtotime((string)($item['pull_request']['merged_at'] ?? '') ?: (string)($item['closed_at'] ?? '')) ?: 0);
+    $msgs = [];
+    $add = function (array $x, string $ext, string $k, string $at, string $text, string $link) use (&$msgs, $team) {
+        $u = (array)($x['user'] ?? []);
+        $login = (string)($u['login'] ?? '');
+        if ($login === '' || ($u['type'] ?? '') === 'Bot' || str_ends_with($login, '[bot]')) return;
+        $text = trim((string)preg_replace('/<!--.*?-->/s', '', $text));
+        $msgs[] = ['ext' => $ext, 'who' => $login, 'mine' => in_array(strtolower($login), $team, true) ? 1 : 0, 'kind' => $k, 'at' => (int)(strtotime($at) ?: 0), 'body' => mb_substr($text, 0, 4000), 'url' => $link];
+    };
+    // Its opening post: ours when we sent it; a developer's issue we marked counts as theirs.
+    $add((array)$item, 'o:' . $num, 'opened', (string)($item['created_at'] ?? ''), '', (string)($item['html_url'] ?? $url));
+    foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num . '/comments?per_page=100') as $x) if (is_array($x)) $add($x, 'c:' . ($x['id'] ?? ''), 'comment', (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
+    if ($kind === 'pull') {
+        foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/reviews?per_page=100') as $x) {
+            if (!is_array($x)) continue;
+            $b = trim((string)($x['body'] ?? ''));
+            $rs = (string)($x['state'] ?? '');
+            if ($b === '' && $rs === 'COMMENTED') continue;
+            $add($x, 'r:' . ($x['id'] ?? ''), 'review', (string)($x['submitted_at'] ?? ''), $b !== '' ? $b : ($rs === 'APPROVED' ? 'Approved the pull request.' : ($rs === 'CHANGES_REQUESTED' ? 'Asked for changes.' : '')), (string)($x['html_url'] ?? $url));
+        }
+        foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/comments?per_page=100') as $x) if (is_array($x)) $add($x, 'k:' . ($x['id'] ?? ''), 'code', (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
+    }
+    if ($state !== 'open' && $closedAt) {
+        $by = (array)($item['closed_by'] ?? []);
+        if ($by) $add(['user' => $by], 'x:' . $closedAt, $state, gmdate('c', $closedAt), '', (string)($item['html_url'] ?? $url));
+    }
+    $db = rs_db();
+    $ins = $db->prepare('INSERT INTO pc_prq_msgs (app_id, ext, who, mine, kind, at, body, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE body = VALUES(body), mine = VALUES(mine)');
+    $theirs = 0; $news = 0; $ours = 0; $n = 0;
+    foreach ($msgs as $x) {
+        $ins->execute([$id, mb_substr($x['ext'], 0, 60), mb_substr($x['who'], 0, 80), $x['mine'], $x['kind'], $x['at'], $x['body'], mb_substr($x['url'], 0, 300)]);
+        if ($x['mine']) { if ($x['kind'] !== 'merged' && $x['kind'] !== 'closed') $ours = max($ours, $x['at']); continue; }
+        $news = max($news, $x['at']);
+        if (in_array($x['kind'], ['comment', 'review', 'code'], true) || ($x['kind'] === 'opened')) { $theirs = max($theirs, $x['at']); ++$n; }
+    }
+    // A first look at a thread closed a while back starts read: only what happens from now shows as new.
+    $read = $old ? (int)$old['read_at'] : max((int)(($k = rs_kv_get('prreplyok:' . $id)) ? $k['v'] : 0), $state !== 'open' && $closedAt < time() - 7 * 86400 ? time() : 0);
+    $db->prepare('INSERT INTO pc_prq_threads (app_id, url, repo, kind, num, title, state, closed_at, theirs_at, news_at, ours_at, read_at, n_theirs, checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE url = VALUES(url), repo = VALUES(repo), kind = VALUES(kind), num = VALUES(num), title = VALUES(title), state = VALUES(state), closed_at = VALUES(closed_at), theirs_at = VALUES(theirs_at), news_at = VALUES(news_at), ours_at = VALUES(ours_at), n_theirs = VALUES(n_theirs), checked = VALUES(checked)')
+        ->execute([$id, mb_substr($url, 0, 300), $repo, $kind, $num, mb_substr((string)($item['title'] ?? ''), 0, 300), $state, $closedAt, $theirs, $news, $ours, $read, $n]);
+    return true;
+}
+// Looks at the threads that are due, for up to $secs seconds. -> how many it read
+function rs_prq_reply_scan(int $secs = 50, bool $force = false): int {
+    rs_prq_reply_tables();
     $t0 = microtime(true); $n = 0;
     $team = rs_prq_team_logins();
-    foreach (rs_prq_reply_targets() as $id => $url) {
+    $have = [];
+    foreach (rs_db()->query('SELECT * FROM pc_prq_threads') as $t) $have[(string)$t['app_id']] = $t;
+    $targets = rs_prq_reply_targets();
+    // Never read ones first, then the ones read longest ago.
+    uksort($targets, fn($x, $y) => strcmp((string)($have[$x]['checked'] ?? ''), (string)($have[$y]['checked'] ?? '')));
+    foreach ($targets as $id => $url) {
         if (microtime(true) - $t0 > $secs) break;
-        if (($c = rs_kv_get('prrchk:' . $id)) && $c['age'] < 3 * 3600) continue;
-        rs_kv_put('prrchk:' . $id, '1');
-        if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/(pull|issues)/(\d+)#', $url, $m)) continue;
-        [$repo, $kind, $num] = [$m[1], $m[2], $m[3]];
-        try {
-            $item = rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num);
-            if (!$item) continue;
-            ++$n;
-            $author = strtolower((string)($item['user']['login'] ?? ''));
-            $state = !empty($item['pull_request']['merged_at']) ? 'merged' : (string)($item['state'] ?? 'open');
-            $ev = [];
-            $add = function (array $x, string $at, string $text, string $link) use (&$ev) {
-                $u = (array)($x['user'] ?? []);
-                $login = (string)($u['login'] ?? '');
-                if ($login === '' || ($u['type'] ?? '') === 'Bot' || str_ends_with($login, '[bot]')) return;
-                $ev[] = ['who' => $login, 'at' => strtotime($at) ?: 0, 'text' => $text, 'url' => $link];
-            };
-            foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num . '/comments?per_page=100') as $x) $add((array)$x, (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
-            if ($kind === 'pull') {
-                foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/reviews?per_page=100') as $x) {
-                    $b = trim((string)($x['body'] ?? ''));
-                    $rs = (string)($x['state'] ?? '');
-                    if ($b === '' && $rs === 'COMMENTED') continue;
-                    $add((array)$x, (string)($x['submitted_at'] ?? ''), $b !== '' ? $b : ($rs === 'APPROVED' ? 'Approved the pull request.' : ($rs === 'CHANGES_REQUESTED' ? 'Asked for changes.' : '')), (string)($x['html_url'] ?? $url));
-                }
-                foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/comments?per_page=100') as $x) $add((array)$x, (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
-            }
-            $us = (int)(strtotime((string)($item['created_at'] ?? '')) ?: 0); $them = null;
-            foreach ($ev as $e) {
-                $l = strtolower($e['who']);
-                if (in_array($l, $team, true) || ($l === $author && in_array($author, $team, true))) $us = max($us, $e['at']);
-                elseif ($l !== $author || !in_array($author, $team, true)) { if (!$them || $e['at'] > $them['at']) $them = $e; }
-            }
-            if ($them && $them['at'] > $us) {
-                $text = trim((string)preg_replace('/\s+/', ' ', strip_tags((string)preg_replace('/<!--.*?-->/s', '', $them['text']))));
-                rs_kv_put('prreply:' . $id, (string)json_encode(['who' => $them['who'], 'at' => gmdate('Y-m-d H:i', $them['at']), 't' => $them['at'], 'text' => mb_substr($text, 0, 280),
-                    'url' => $them['url'], 'state' => $state, 'kind' => $kind, 'pr' => $url], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-            } else rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['prreply:' . $id]);
-        } catch (Throwable $e) { /* next run */ }
+        $old = $have[(string)$id] ?? null;
+        if ($old && (string)$old['url'] !== $url) $old = null;
+        if (!rs_prq_reply_due($old, $force)) continue;
+        try { if (rs_prq_reply_read((string)$id, $url, $team, $have[(string)$id] ?? null)) ++$n; } catch (Throwable $e) { /* next run */ }
     }
+    rs_kv_put('prq_reply_scan', (string)time());
     return $n;
 }
-// [app id => reply] for the ones nobody has answered yet (one query).
-function rs_prq_replies(): array {
-    $out = []; $ok = [];
+// Every thread with its newest message from them. -> [app id => thread + 'last' (their newest message) + 'new' (bool) + 'waiting' (bool)]
+function rs_prq_threads(): array {
     try {
-        foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'prreply:%' OR k LIKE 'prreplyok:%'") as $r) {
-            if (str_starts_with((string)$r['k'], 'prreplyok:')) $ok[substr((string)$r['k'], 10)] = (int)$r['v'];
-            else if ($j = json_decode((string)$r['v'], true)) $out[substr((string)$r['k'], 8)] = $j;
+        rs_prq_reply_tables();
+        $out = [];
+        foreach (rs_db()->query('SELECT * FROM pc_prq_threads') as $t) {
+            $t['new'] = (int)$t['news_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
+            $t['waiting'] = $t['state'] === 'open' && (int)$t['theirs_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
+            $t['last'] = null;
+            $out[(string)$t['app_id']] = $t;
         }
+        foreach (rs_db()->query("SELECT m.* FROM pc_prq_msgs m JOIN (SELECT app_id, MAX(at) at FROM pc_prq_msgs WHERE mine = 0 AND kind IN ('comment', 'review', 'code') GROUP BY app_id) l ON l.app_id = m.app_id AND l.at = m.at WHERE m.mine = 0") as $m)
+            if (isset($out[(string)$m['app_id']])) $out[(string)$m['app_id']]['last'] = $m;
+        return $out;
     } catch (Throwable $e) { return []; }
-    // Only open ones: a "thanks, merged!" on a merged or closed pull request isn't waiting on anybody.
-    return array_filter($out, fn($j, $id) => ($j['state'] ?? 'open') === 'open' && (int)($j['t'] ?? 0) > (int)($ok[$id] ?? 0), ARRAY_FILTER_USE_BOTH);
 }
+// One thread's messages, oldest first.
+function rs_prq_thread_msgs(string $id): array {
+    rs_prq_reply_tables();
+    $st = rs_db()->prepare('SELECT * FROM pc_prq_msgs WHERE app_id = ? ORDER BY at, id');
+    $st->execute([$id]);
+    return $st->fetchAll();
+}
+// [app id => reply] for open ones where the developer is waiting on us (the PR queue's Developer replied
+// and the Games list). Same fields as before 4.13: who, at, t, text, url, state, kind, pr.
+function rs_prq_replies(): array {
+    $out = [];
+    foreach (rs_prq_threads() as $id => $t) {
+        if (!$t['waiting'] || !$t['last']) continue;
+        $m = $t['last'];
+        $out[$id] = ['who' => (string)$m['who'], 'at' => gmdate('Y-m-d H:i', (int)$m['at']), 't' => (int)$m['at'],
+            'text' => mb_substr(trim((string)preg_replace('/\s+/', ' ', strip_tags((string)$m['body']))), 0, 280),
+            'url' => (string)$m['url'], 'state' => (string)$t['state'], 'kind' => $t['kind'] === 'pull' ? 'pull' : 'issues', 'pr' => (string)$t['url']];
+    }
+    return $out;
+}
+// Mark answered / Got it: what's there now isn't new any more.
 function rs_prq_reply_ok(string $appId): void {
-    $r = rs_prq_replies()[$appId] ?? null;
-    rs_kv_put('prreplyok:' . $appId, (string)(int)($r['t'] ?? time()));
+    rs_prq_reply_tables();
+    rs_db()->prepare('UPDATE pc_prq_threads SET read_at = GREATEST(news_at, theirs_at, ?) WHERE app_id = ?')->execute([time(), $appId]);
+    rs_kv_put('prreplyok:' . $appId, (string)time());
+}
+// Check now: a background run over every open thread (and ones closed in the last two weeks).
+function rs_prq_reply_launch(): bool {
+    $last = rs_kv_get('prq_reply_now');
+    if ($last && $last['age'] < 120) return false;
+    rs_kv_put('prq_reply_now', (string)time());
+    $p = proc_open('setsid php ' . escapeshellarg(__DIR__ . '/prq-replies-run.php') . ' > /dev/null 2>&1 &',
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, __DIR__,
+        ['PATH' => '/usr/local/bin:/usr/bin:/bin', 'LANG' => 'C.UTF-8']);
+    if (!is_resource($p)) return false;
+    proc_close($p);
+    return true;
 }
 
 // The half-hourly job: the next ones in line, keeping to the hourly number. -> [sent, failed]
@@ -778,7 +886,7 @@ function rs_prq_send_due(): array {
     $done = [0, 0];
     // (4.12) Green drafts join the line, and developers' answers on pull requests are looked for.
     try { rs_prq_auto_sweep(); } catch (Throwable $e) { rs_errlog('prq auto', $e); }
-    try { rs_prq_reply_scan(25); } catch (Throwable $e) { rs_errlog('prq replies', $e); }
+    try { rs_prq_reply_scan(50); } catch (Throwable $e) { rs_errlog('prq replies', $e); }
     if (rs_prq_token() === '') return $done;
     $room = RS_PRQ_PER_HOUR - rs_prq_sent_last_hour();
     if ($room <= 0) return $done;

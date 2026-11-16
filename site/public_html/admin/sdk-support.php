@@ -268,10 +268,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_flash($n ? 'Drafting ' . $n . ' again, a few at a time. Each takes a few minutes and shows up below when it\'s done.' : 'Back in line for the next daily run.');
                 $qid = 0;
             } elseif ($act === 'prq_reply_ok') {
-                // (4.12) Answered somewhere else (Discord, email): it goes back to Sent.
+                // (4.12) Answered somewhere else (Discord, email): it goes back to Sent. (4.13) Also Got it on Replies.
                 $rid = (string)($_POST['app'] ?? '');
                 if ($rid !== '') { rs_prq_reply_ok($rid); rs_log('sdk', $rid, 'developer reply marked answered'); }
+                if (($_POST['back'] ?? '') === 'replies') { header('Location: sdk-support.php?tab=replies&show=' . rawurlencode((string)($_POST['show'] ?? '')) . '#rp-' . rawurlencode($rid)); exit; }
                 rs_flash('Marked answered. It\'s back with the sent ones.', 'ok');
+            } elseif ($act === 'prq_reply_check') {
+                // (4.13) Replies > Check now: reads every open one in the background.
+                rs_flash(rs_prq_reply_launch() ? 'Checking every open pull request and issue now. Reload in a minute or two.' : 'Already checking. Reload in a minute or two.', 'ok');
+                header('Location: sdk-support.php?tab=replies'); exit;
             } elseif ($act === 'prq_auto') {
                 if (!rs_is_owner()) throw new RuntimeException('Only the owner can change that.');
                 rs_set_setting('prq_auto_green', !empty($_POST['on']) ? '1' : '0');
@@ -336,10 +341,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 
-$tab = in_array($_GET['tab'] ?? '', ['queue', 'lookup', 'check', 'guide'], true) ? (string)$_GET['tab'] : 'list';
+$tab = in_array($_GET['tab'] ?? '', ['queue', 'replies', 'lookup', 'check', 'guide'], true) ? (string)$_GET['tab'] : 'list';
 $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 rs_prq_tables();
 $draftN = (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'draft'")->fetchColumn();
+// (4.13) Replies: developers' answers on what we sent, open and closed; the tab's count is what's new.
+$rpThreads = rs_prq_threads();
+$rpNewN = count(array_filter($rpThreads, fn($t) => $t['new']));
 $listN = 0;
 
 if ($tab === 'list') {
@@ -403,6 +411,7 @@ rs_head('Launcher support', true, ['assets/sdk-support.css']);
 <nav class="sdk-tabs" aria-label="Launcher support">
   <a href="sdk-support.php"<?= $tab === 'list' ? ' class="on" aria-current="page"' : '' ?>>Games<?= $listN ? '<span>' . number_format($listN) . '</span>' : '' ?></a>
   <a href="sdk-support.php?tab=queue"<?= $tab === 'queue' ? ' class="on" aria-current="page"' : '' ?>>PR queue<?= $draftN ? '<span class="hot" title="Ready for you to look over">' . $draftN . '</span>' : '' ?></a>
+  <a href="sdk-support.php?tab=replies"<?= $tab === 'replies' ? ' class="on" aria-current="page"' : '' ?>>Replies<?= $rpNewN ? '<span class="hot" title="New from developers">' . $rpNewN . '</span>' : '' ?></a>
   <a href="sdk-support.php?tab=check"<?= in_array($tab, ['check', 'lookup'], true) ? ' class="on" aria-current="page"' : '' ?>>Check a game</a>
   <a href="sdk-support.php?tab=guide"<?= $tab === 'guide' ? ' class="on" aria-current="page"' : '' ?>>Guide</a>
 </nav>
@@ -469,6 +478,7 @@ rs_head('Launcher support', true, ['assets/sdk-support.css']);
 <script type="application/json" id="sdk-data"><?= json_encode($pageData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 <?php endif; ?>
 <?php if ($tab === 'queue') require __DIR__ . '/inc/sdk-queue-tab.php'; ?>
+<?php if ($tab === 'replies') require __DIR__ . '/inc/sdk-replies-tab.php'; ?>
 <?php if ($tab === 'guide') require __DIR__ . '/inc/sdk-guide-tab.php'; ?>
 <?php if ($tab === 'check') require __DIR__ . '/inc/sdk-check-tab.php'; ?>
 <?php if ($tab === 'lookup'): ?>

@@ -27,7 +27,7 @@ declare(strict_types=1);
     <li><b>Ready for you.</b> It's written and waiting for you. <u>Nothing has been sent.</u> Open it and look it over.</li>
     <li><b>Going out.</b> You pressed Send. At most 5 go out an hour, so GitHub doesn't treat us as spam; you can still take it back.</li>
     <li><b>Sent.</b> The pull request is open on the developer's GitHub. It's up to them now.</li>
-    <li><b>Developer replied.</b> The developer commented or reviewed and nobody on the team has answered since (checked every 3 hours, hand-marked pull requests and issues too). Answer on GitHub and it goes back to Sent by itself, or press <b>Mark answered</b> if you answered somewhere else.</li>
+    <li><b>Developer replied.</b> The developer commented or reviewed and nobody on the team has answered since (checked every hour, hand-marked pull requests and issues too; every conversation, open or closed, is on the Replies tab). Answer on GitHub and it goes back to Sent by itself, or press <b>Mark answered</b> if you answered somewhere else.</li>
     <li><b>Skipped.</b> No pull request for this game. You skipped it, or the drafter did (it already has one, it's archived, or it isn't something it can draft). <b>Put it back</b> undoes it.</li>
   </ol>
   <p class="g-safe"><b>The rule:</b> the drafter only ever writes drafts. A pull request is sent when someone ticks <b>I've looked it over</b> and presses <b>Send pull request</b>, or, while <b>Send green drafts by themselves</b> is on (Settings, at the bottom), when the review marks it green: nothing missing or blocking, made by the new drafter, and no changes to the developer's code. Those go to Going out, 5 an hour. The server refuses to send a file the launcher would reject.</p>

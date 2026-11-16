@@ -18,7 +18,7 @@ All cron jobs run as `www-data`. Times are UTC unless noted; Phoenix is UTC-7 al
 2. Moves the Home banner's automatic slots on.
 3. Coming soon watch (once a day): releases, betas and new repos for Coming soon games.
 4. Launcher support: looks for `recomplauncher.json` in recomps not checked this week (up to four minutes a run).
-5. Rebuilds sent PRs that now conflict; sends up to 5 waiting PRs an hour; after a PR, makes our profile follow the developer's `recomplauncher.json` in their repo until their release ships it (`rs_prq_sync_repo_files`, see [08](08-sdk-and-pr-queue.md)).
+5. Rebuilds sent PRs that now conflict; sends up to 5 waiting PRs an hour; reads developers' replies on what we sent (open ones hourly, see Replies in [08](08-sdk-and-pr-queue.md)); after a PR, makes our profile follow the developer's `recomplauncher.json` in their repo until their release ships it (`rs_prq_sync_repo_files`, see [08](08-sdk-and-pr-queue.md)).
 6. Moves Forgejo listings to the next launcher once it's published.
 7. Instant Gaming card refresh.
 8. **Trending**: builds the new weekly chart once Friday midnight Phoenix has passed (`rs_trend_maybe`), writes `trending.json`.
@@ -34,6 +34,7 @@ Long jobs never run inside a web request. A page starts them with `setsid php <s
 
 - Auto-add: `inc/auto-run.php` (`rs_auto_launch`)
 - Repo watch Scan now: `inc/repowatch-run.php now`
+- Launcher support > Replies, Check now: `inc/prq-replies-run.php` (`rs_prq_reply_launch`)
 - Emergency backup: `inc/backup-run.php` (`rs_bk_launch`); one run at a time (a lock file), 50 minutes at most, the rest next run
 - PR drafts: `recompstore-private/prq/draft.py` (`rs_prq_run`), heartbeat every 2 minutes so the page shows it's alive
 

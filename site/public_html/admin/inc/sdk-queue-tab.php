@@ -167,7 +167,7 @@ $qHelp = function (string $err): string {
 <?php if ($qShow === 'replied'): ?>
 <section class="card">
   <h2>Developer replied <span class="muted small"><?= number_format($qCount['replied']) ?> waiting on us</span></h2>
-  <p class="muted small">The developer answered on the pull request (or the issue asking for support) and nobody on the team has answered since. Pull requests and issues are looked at every 3 hours. Once one of us comments on GitHub it goes back to Sent by itself; answered somewhere else? <b>Mark answered</b>.</p>
+  <p class="muted small">The developer answered on the pull request (or the issue asking for support) and nobody on the team has answered since. Pull requests and issues are looked at every hour; the whole conversation, and closed ones too, are on <a href="sdk-support.php?tab=replies">Replies</a>. Once one of us comments on GitHub it goes back to Sent by itself; answered somewhere else? <b>Mark answered</b>.</p>
   <?php uasort($qReplies, fn($x, $y) => (int)$y['t'] <=> (int)$x['t']); foreach ($qReplies as $rid => $rp): $qa = rs_pc_app((string)$rid); ?>
   <div class="q-row"><span class="q-name"><strong><a href="<?= h((string)$rp['pr']) ?>" target="_blank" rel="noopener"><?= h($qa['name'] ?? $rid) ?> ↗</a></strong><span class="muted small"><?= h($qa['repo'] ?? '') ?> · <?= h(($rp['kind'] ?? '') === 'issues' ? 'issue' : 'pull request') ?> <?= h((string)($rp['state'] ?? 'open')) ?></span></span>
     <span class="q-row-st small"><b><?= h((string)$rp['who']) ?></b> replied <?= h((string)$rp['at']) ?> UTC<span class="q-reply"><?= h((string)$rp['text'] !== '' ? (string)$rp['text'] : '(no text)') ?></span></span>
