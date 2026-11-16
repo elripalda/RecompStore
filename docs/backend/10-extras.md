@@ -22,7 +22,13 @@ A copy of each tracked game's live release on Backblaze B2, next to the cloud sa
 
 ## Instant Gaming (`inc/ig.php`, page Sponsors > Instant Gaming, `api/ig.php`)
 
-A card on a game's page with where to buy the original game, through our partner link. A card belongs to a title (every version of the game) or one recomp. Prices, stock and countries are read every 5 minutes (`ig-refresh.php`); the answer is per country and currency. Layout variants (`v`) are tested with shares; views and clicks are counted per variant and round. Two switches: **on** (the website) and **Show in the launcher** (`launcher`, off by default). The launcher shows cards only when both are on.
+A card on a game's page with where to buy the original game, through our partner link. A card belongs to a title (every version of the game) or one recomp. The answer is per country and currency.
+
+**Partner feed (4.13).** Instant Gaming's exportCatalog (`https://www.instant-gaming.com/en/exportCatalog/json/?igr=<partner code>`) gives each product's price in 13 currencies (`with_currencies=1`), the price before the discount, stock, region, type and Steam id. Their rules: user agent `IG-ExportCatalog-Fetcher`, at most once an hour, never in the first minute of the hour, and only from the server's IPv4 address, which they whitelisted (they have no IPv6; any other address gets 401 "Not Allowed"). Heavy use gets access taken away.
+- `ig-refresh.php` runs hourly at :37 (`rs_ig_feed_refresh`): the products our links use (`ig_offers.prod_id`, the number in the page address; `prod_ids`, 150 a request) get their prices, stock and region. A product the feed no longer has is marked and goes out of stock after a day.
+- Each link's page is still read when it's added and once a week after (`cc_read`, 8 a run), only for the countries its key works in; the feed only names the region.
+- Once a day, the whole catalog (`rs_ig_catalog_refresh`, kept small in `recompstore-private/ig-catalog.json`). `rs_ig_suggest_build` matches our games without a card by name (exact, or the name plus platform or region words), best fit first (platform matching the console, in stock, cheapest), into `ig-suggest.json`. The admin page shows them under **Found in Instant Gaming's catalog**; **Use** fills the form with the links, name and platform.
+- The feed's state is the setting `ig_feed` (`rs_ig_feed_state`). While the feed refuses, prices are read from each page as before (`rs_ig_refresh`), once an hour. Layout variants (`v`) are tested with shares; views and clicks are counted per variant and round. Two switches: **on** (the website) and **Show in the launcher** (`launcher`, off by default). The launcher shows cards only when both are on.
 
 ## Sponsors (`inc/sponsors.php`, `api/spons.php`)
 

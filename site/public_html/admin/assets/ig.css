@@ -96,3 +96,6 @@
 .ig-cc p{margin:6px 0 0}
 @media (max-width:760px){.ig-offers li{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .ig-pr{display:flex;flex-wrap:wrap;gap:4px 10px}.ig-cur{white-space:nowrap}
+/* (4.13) Found in the catalog */
+.ig-found{display:flex;flex-direction:column;align-items:stretch!important;gap:6px}
+.ig-found-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line)}

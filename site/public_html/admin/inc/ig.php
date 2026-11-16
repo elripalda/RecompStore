@@ -184,7 +184,8 @@ function rs_ig_page_price(string $h, string $cur, array $rates): ?array {
     return [$price, $old];
 }
 
-function rs_ig_read(string $url, bool $world = false): array {
+// (4.13) $currencies false: only the page itself (name, region, countries); prices come from the feed.
+function rs_ig_read(string $url, bool $world = false, bool $currencies = true): array {
     require_once __DIR__ . '/countries.php';
     $url = rs_ig_clean_url($url);
     if ($url === '') return ['ok' => false, 'why' => 'That isn\'t a game page on instant-gaming.com.'];
@@ -245,6 +246,7 @@ function rs_ig_read(string $url, bool $world = false): array {
     foreach (array_keys($codes) as $cc) $need[rs_ig_currency_for($cc, $rt)] = true;
     // A worldwide link can be shown anywhere, so it's read in every currency the store has.
     if ($world) foreach (array_keys($rt) as $cur) $need[$cur] = true;
+    if (!$currencies) $need = [];
     foreach (array_keys($need) as $cur) {
         if (isset($prices[$cur])) continue;
         $rc = rs_ig_fetch($url, $cur);
@@ -282,12 +284,18 @@ function rs_ig_currency_for(string $cc, array $rates): string {
 
 // Save what a page said onto one of a game's links.
 function rs_ig_offer_store(string $listing, string $url, array $x): void {
-    rs_ig_tables();
+    rs_ig_feed_tables();
+    // (4.13) Prices from the feed when it lets us in: every currency at once, to the cent.
+    if (rs_ig_feed_ok() && ($pid = rs_ig_prod_id($url)) && ($by = rs_ig_feed_prices([$pid])) && ($p = $by[$pid] ?? null) && $p['eur'] > 0) {
+        $x['eur'] = $p['eur']; $x['old_eur'] = $p['old']; $x['prices'] = $p['prices']; $x['stock'] = $p['stock'];
+        if ($p['region'] !== '') $x['region'] = $p['region'];
+    }
     rs_db()->prepare('INSERT INTO ig_offers (listing, url, region, countries, unknown_names, price_eur, old_eur, prices, stock, fetched, fetch_err, created)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), \'\', UTC_TIMESTAMP())
         ON DUPLICATE KEY UPDATE region = VALUES(region), countries = VALUES(countries), unknown_names = VALUES(unknown_names), price_eur = VALUES(price_eur),
         old_eur = VALUES(old_eur), prices = VALUES(prices), stock = VALUES(stock), fetched = VALUES(fetched), fetch_err = \'\'')
         ->execute([$listing, $url, $x['region'], json_encode($x['countries']), json_encode($x['unknown'], JSON_UNESCAPED_UNICODE), $x['eur'], $x['old_eur'], json_encode($x['prices'] ?? new stdClass()), $x['stock'] ? 1 : 0]);
+    rs_db()->prepare('UPDATE ig_offers SET prod_id = ?, cc_read = UTC_TIMESTAMP() WHERE listing = ? AND url = ?')->execute([rs_ig_prod_id($url), $listing, $url]);
 }
 
 function rs_ig_offers(?string $listing = null): array {
@@ -412,4 +420,256 @@ function rs_ig_stats(int $round): array {
 function rs_ig_rate(array $n): string {
     $v = (int)($n['views'] ?? 0);
     return $v ? number_format(($n['clicks'] ?? 0) / $v * 100, 2) . '%' : '–';
+}
+
+// ---- (4.13) Instant Gaming's catalog feed (exportCatalog) ----
+// Our partner feed: prices in every currency, the price before the discount, stock and region for each
+// product, read from one address instead of from each product page. Their rules: the user agent
+// IG-ExportCatalog-Fetcher, at most once an hour (it's cached an hour on their side), never in the first
+// minute of the hour (our cron runs at :37), and only from the server's address they let in.
+// - Every hour: the products our cards use (prod_ids), so the cards follow their prices and stock.
+// - Once a day: the whole catalog, kept in recompstore-private/ig-catalog.json, to find our games in it.
+// - Until the feed lets us in (it answers 401 "Not Allowed"), prices are read from the product pages as
+//   before, once an hour.
+// A product page is still read when a link is added, and once a week after, for the countries its key
+// works in (the feed only says the region).
+const RS_IG_FEED_UA = 'IG-ExportCatalog-Fetcher';
+const RS_IG_FEED_CURS = ['AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CZK', 'DKK', 'EUR', 'GBP', 'PLN', 'USD', 'RSD', 'SEK'];
+
+function rs_ig_feed_tables(): void {
+    static $done = false;
+    if ($done) return;
+    rs_ig_tables();
+    $db = rs_db();
+    $db->exec('ALTER TABLE ig_offers ADD COLUMN IF NOT EXISTS prod_id INT NOT NULL DEFAULT 0');
+    $db->exec('ALTER TABLE ig_offers ADD COLUMN IF NOT EXISTS cc_read DATETIME NULL');
+    $done = true;
+}
+
+// The product number in a product page's address (https://www.instant-gaming.com/en/815-buy-…). 0: none.
+function rs_ig_prod_id(string $url): int {
+    return preg_match('~instant-gaming\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(\d+)-~i', $url, $m) ? (int)$m[1] : 0;
+}
+
+function rs_ig_feed_url(array $params = []): string {
+    $c = rs_ig_cfg();
+    return 'https://www.instant-gaming.com/en/exportCatalog/json/?' . http_build_query(['igr' => $c['igr']] + $params);
+}
+
+// Reads the feed. -> [status, products (list) or null, why it failed]. $file: written there as it
+// arrives (the whole catalog is big), else kept in memory.
+function rs_ig_feed_get(array $params, int $timeout = 60, string $file = ''): array {
+    $ch = curl_init(rs_ig_feed_url($params));
+    $fh = $file !== '' ? fopen($file . '.part', 'wb') : null;
+    $body = '';
+    curl_setopt_array($ch, [CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_USERAGENT => RS_IG_FEED_UA, CURLOPT_ENCODING => '', CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+        CURLOPT_HTTPHEADER => ['Accept: application/json'],
+        CURLOPT_WRITEFUNCTION => function ($c, $chunk) use (&$body, $fh) {
+            if ($fh) return fwrite($fh, $chunk);
+            if (strlen($body) + strlen($chunk) > (64 << 20)) return 0;
+            $body .= $chunk;
+            return strlen($chunk);
+        }]);
+    curl_exec($ch);
+    $st = curl_errno($ch) ? 0 : (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    if ($fh) { fclose($fh); $body = $st === 200 ? (string)file_get_contents($file . '.part') : (string)@file_get_contents($file . '.part', false, null, 0, 300); @unlink($file . '.part'); }
+    if ($st !== 200) {
+        $why = $st === 401 || $st === 403 ? 'Instant Gaming says "' . trim(mb_substr(strip_tags($body), 0, 60)) . '": the server\'s address isn\'t on their list yet (your partner manager adds it).'
+            : ($st ? 'Instant Gaming answered ' . $st . '.' : 'No answer from Instant Gaming' . ($err !== '' ? ' (' . $err . ')' : '') . '.');
+        return [$st, null, $why];
+    }
+    $j = json_decode($body, true);
+    unset($body);
+    if (!is_array($j)) return [$st, null, 'The feed wasn\'t JSON.'];
+    // A list of products, or a list under a key, or products keyed by id.
+    foreach (['products', 'data', 'items', 'catalog'] as $k) if (isset($j[$k]) && is_array($j[$k])) { $j = $j[$k]; break; }
+    $list = array_values(array_filter($j, 'is_array'));
+    return [$st, $list, ''];
+}
+
+// One product from the feed, in our words. eur/old: euros; prices: currency => [price, price before | null].
+function rs_ig_feed_norm(array $p): ?array {
+    $id = (int)($p['id'] ?? 0);
+    if ($id <= 0) return null;
+    $num = fn($v) => is_numeric(str_replace(',', '.', (string)$v)) ? round((float)str_replace(',', '.', (string)$v), 2) : 0.0;
+    $eur = $num($p['price'] ?? 0); $retail = $num($p['retail'] ?? 0);
+    $prices = [];
+    $cp = is_array($p['currency_prices'] ?? null) ? $p['currency_prices'] : [];
+    $rp = is_array($p['retail_prices'] ?? null) ? $p['retail_prices'] : [];
+    foreach ($cp as $cur => $v) {
+        $cur = strtoupper((string)$cur);
+        if (!preg_match('/^[A-Z]{3}$/', $cur) || ($pv = $num($v)) <= 0) continue;
+        $ov = $num($rp[$cur] ?? 0);
+        $prices[$cur] = [$pv, $ov > $pv ? $ov : null];
+    }
+    if ($eur > 0 && !isset($prices['EUR'])) $prices['EUR'] = [$eur, $retail > $eur ? $retail : null];
+    if ($eur <= 0 && isset($prices['EUR'])) $eur = $prices['EUR'][0];
+    return ['id' => $id, 'name' => mb_substr(trim(html_entity_decode((string)($p['name'] ?? ''), ENT_QUOTES | ENT_HTML5)), 0, 160),
+        'type' => mb_substr(trim((string)($p['type'] ?? '')), 0, 60), 'url' => (string)($p['url'] ?? ''), 'img' => (string)($p['img'] ?? ''),
+        'region' => mb_substr(trim((string)($p['region'] ?? '')), 0, 60), 'stock' => (int)($p['stock'] ?? 1) === 1,
+        'steam' => (string)($p['steam_id'] ?? ''), 'eur' => $eur, 'old' => $retail > $eur ? $retail : null, 'disc' => (int)($p['discount'] ?? 0), 'prices' => $prices];
+}
+
+// The feed's status for the admin page: [at, ok, why, n (products read), full (when the catalog was read), fullN].
+function rs_ig_feed_state(): array {
+    $s = json_decode((string)rs_setting('ig_feed', ''), true);
+    return (is_array($s) ? $s : []) + ['at' => 0, 'ok' => false, 'why' => 'Not read yet.', 'n' => 0, 'full' => 0, 'fullN' => 0, 'okAt' => 0];
+}
+function rs_ig_feed_state_save(array $s): void { rs_set_setting('ig_feed', json_encode($s, JSON_UNESCAPED_UNICODE)); }
+function rs_ig_feed_ok(): bool { $s = rs_ig_feed_state(); return $s['ok'] && time() - (int)$s['okAt'] < 6 * 3600; }
+
+// Prices, discount, stock and region from the feed, for these products. -> [products read, [id => product]] or null when the feed said no.
+function rs_ig_feed_prices(array $ids): ?array {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    $s = rs_ig_feed_state();
+    $s['at'] = time();
+    $by = [];
+    foreach (array_chunk($ids, 150) as $chunk) {
+        [$st, $list, $why] = rs_ig_feed_get(['prod_ids' => implode(',', $chunk), 'with_currencies' => 1]);
+        if ($list === null) { $s['ok'] = false; $s['why'] = $why; rs_ig_feed_state_save($s); return null; }
+        foreach ($list as $p) if ($n = rs_ig_feed_norm($p)) $by[$n['id']] = $n;
+    }
+    $s['ok'] = true; $s['why'] = ''; $s['okAt'] = time(); $s['n'] = count($by);
+    rs_ig_feed_state_save($s);
+    return $by;
+}
+
+// Puts the feed's numbers on our links. A product the feed no longer has is marked, and out of stock after a day.
+function rs_ig_feed_apply(array $by, array $offers): int {
+    $db = rs_db();
+    $up = $db->prepare('UPDATE ig_offers SET price_eur = ?, old_eur = ?, prices = ?, stock = ?, region = IF(? = \'\', region, ?), fetched = UTC_TIMESTAMP(), fetch_err = \'\' WHERE id = ?');
+    $miss = $db->prepare('UPDATE ig_offers SET fetch_err = ?, stock = IF(fetched < UTC_TIMESTAMP() - INTERVAL 1 DAY, 0, stock) WHERE id = ?');
+    $n = 0;
+    foreach ($offers as $o) {
+        $p = $by[(int)$o['prod_id']] ?? null;
+        if (!$p || $p['eur'] <= 0) { $miss->execute(['Not in Instant Gaming\'s catalog right now.', $o['id']]); continue; }
+        $up->execute([$p['eur'], $p['old'], json_encode($p['prices'] ?: new stdClass()), $p['stock'] ? 1 : 0, $p['region'], $p['region'], $o['id']]);
+        ++$n;
+    }
+    return $n;
+}
+
+// The hourly run (ig-refresh.php). -> a line for the log
+function rs_ig_feed_refresh(bool $full = false): string {
+    rs_ig_feed_tables();
+    $db = rs_db();
+    // Links added before the feed: their product number from the address.
+    foreach ($db->query('SELECT id, url FROM ig_offers WHERE prod_id = 0')->fetchAll() as $o)
+        if ($pid = rs_ig_prod_id((string)$o['url'])) $db->prepare('UPDATE ig_offers SET prod_id = ? WHERE id = ?')->execute([$pid, $o['id']]);
+    $offers = $db->query('SELECT id, listing, url, prod_id, world, cc_read FROM ig_offers')->fetchAll();
+    $line = [];
+    $by = $offers ? rs_ig_feed_prices(array_column($offers, 'prod_id')) : [];
+    if ($by === null) {
+        // Not let in yet: the product pages, as before.
+        [$ok, $bad] = rs_ig_refresh(3000, 200);
+        $line[] = 'feed refused (' . rs_ig_feed_state()['why'] . '), read ' . $ok . ' pages' . ($bad ? ', ' . $bad . ' failed' : '');
+    } else {
+        $n = rs_ig_feed_apply($by, $offers);
+        if ($offers) $line[] = 'feed: ' . $n . ' of ' . count($offers) . ' links priced';
+        // Where each key works, from its page once a week (a few a run).
+        $cc = 0;
+        foreach ($offers as $o) {
+            if ($cc >= 8) break;
+            if ($o['cc_read'] !== null && strtotime($o['cc_read'] . ' UTC') > time() - 7 * 86400) continue;
+            $x = rs_ig_read((string)$o['url'], false, false);
+            if ($x['ok']) $db->prepare('UPDATE ig_offers SET countries = ?, unknown_names = ?, cc_read = UTC_TIMESTAMP() WHERE id = ?')
+                ->execute([json_encode($x['countries']), json_encode($x['unknown'], JSON_UNESCAPED_UNICODE), $o['id']]);
+            ++$cc;
+            usleep(500000);
+        }
+        if ($cc) $line[] = 'countries read for ' . $cc;
+        // The whole catalog once a day, to find our games in it.
+        $s = rs_ig_feed_state();
+        if ($full || time() - (int)$s['full'] > 23 * 3600) $line[] = rs_ig_catalog_refresh();
+    }
+    rs_ig_cache_write();
+    return implode('; ', array_filter($line));
+}
+
+function rs_ig_catalog_file(): string { return dirname(__DIR__, 3) . '/recompstore-private/ig-catalog.json'; }
+function rs_ig_suggest_file(): string { return dirname(__DIR__, 3) . '/recompstore-private/ig-suggest.json'; }
+
+// The whole catalog, kept small: [id, name, type, url, region, stock, eur, old, img].
+function rs_ig_catalog_refresh(): string {
+    @ini_set('memory_limit', '1024M');
+    $f = rs_ig_catalog_file();
+    @mkdir(dirname($f), 0775, true);
+    [$st, $list, $why] = rs_ig_feed_get([], 240, $f . '.raw');
+    $s = rs_ig_feed_state();
+    if ($list === null) { $s['why'] = $why; rs_ig_feed_state_save($s); return 'catalog: ' . $why; }
+    $out = [];
+    foreach ($list as $p) {
+        $n = rs_ig_feed_norm($p);
+        if ($n && $n['name'] !== '') $out[] = [$n['id'], $n['name'], $n['type'], $n['url'], $n['region'], $n['stock'] ? 1 : 0, $n['eur'], $n['old'], $n['img']];
+    }
+    unset($list);
+    file_put_contents($f . '.tmp', json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    rename($f . '.tmp', $f);
+    $s = rs_ig_feed_state();
+    $s['full'] = time(); $s['fullN'] = count($out);
+    rs_ig_feed_state_save($s);
+    $m = rs_ig_suggest_build($out);
+    return 'catalog: ' . count($out) . ' products, ' . $m . ' of our games found';
+}
+
+// A name for matching: lower case, plain letters and numbers, single spaces.
+function rs_ig_norm(string $s): string {
+    $s = str_replace(['&', '™', '®', '©', '’', "'"], [' and ', '', '', '', '', ''], $s);
+    $a = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+    $s = strtolower($a !== false ? $a : $s);
+    return trim((string)preg_replace('/\s+/', ' ', (string)preg_replace('/[^a-z0-9]+/', ' ', $s)));
+}
+
+// Words that can follow a game's name in a product's name without making it another game.
+const RS_IG_TAIL = '/^((nintendo )?switch( 2)?|nintendo|xbox( one| series x s| series)?( pc)?|xbox 360|pc|steam|epic( games)?|playstation [45]|ps[45]|eshop|key|edition|standard( edition)?|eu|us|uk|europe|united states|north america|latam|latin america|row|worldwide|global| )+$/';
+
+// Our games found in the catalog: game key => products, the best fit first. -> how many games have one
+function rs_ig_suggest_build(array $cat): int {
+    require_once __DIR__ . '/pc.php';
+    $apps = [];
+    foreach (rs_pc_apps(true) as $a) $apps[(string)$a['id']] = $a;
+    $games = rs_ig_games($apps);
+    $idx = [];
+    foreach ($cat as $i => $p) {
+        $n = rs_ig_norm((string)$p[1]);
+        if ($n === '') continue;
+        $w = explode(' ', $n);
+        $idx[$w[0] . ' ' . ($w[1] ?? '')][] = $i;
+        $idx[$w[0]][] = $i;
+    }
+    $out = [];
+    foreach ($games as $k => $g) {
+        if (!$g['shown']) continue;
+        $gn = rs_ig_norm((string)$g['name']);
+        if (strlen($gn) < 3) continue;
+        $gw = explode(' ', $gn);
+        $cands = $idx[$gw[0] . ' ' . ($gw[1] ?? '')] ?? (count($gw) === 1 ? ($idx[$gw[0]] ?? []) : []);
+        $hits = [];
+        foreach (array_unique($cands) as $i) {
+            $p = $cat[$i];
+            $pn = rs_ig_norm((string)$p[1]);
+            if ($pn === $gn) $score = 3;
+            elseif (str_starts_with($pn, $gn . ' ') && preg_match(RS_IG_TAIL, substr($pn, strlen($gn) + 1))) $score = 2;
+            else continue;
+            $t = strtolower((string)$p[2]);
+            $fit = in_array($g['origin'], ['switch', 'switch2'], true) ? (str_contains($t, 'nintendo') || str_contains($t, 'switch') || str_contains($t, 'eshop'))
+                : ($g['origin'] === 'x360' ? str_contains($t, 'xbox') : false);
+            $hits[] = ['id' => (int)$p[0], 'name' => (string)$p[1], 'type' => (string)$p[2], 'url' => (string)$p[3], 'region' => (string)$p[4],
+                'stock' => (bool)$p[5], 'eur' => (float)$p[6], 'old' => $p[7] !== null ? (float)$p[7] : null, 'img' => (string)($p[8] ?? ''),
+                'score' => $score + ($fit ? 1 : 0) + ($p[5] ? 1 : 0)];
+        }
+        if (!$hits) continue;
+        usort($hits, fn($x, $y) => [$y['score'], $x['eur']] <=> [$x['score'], $y['eur']]);
+        $out[$k] = array_slice($hits, 0, 8);
+    }
+    file_put_contents(rs_ig_suggest_file(), json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    return count($out);
+}
+
+function rs_ig_suggestions(): array {
+    $j = json_decode((string)@file_get_contents(rs_ig_suggest_file()), true);
+    return is_array($j) ? $j : [];
 }

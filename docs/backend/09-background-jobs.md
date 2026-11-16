@@ -5,7 +5,7 @@ All cron jobs run as `www-data`. Times are UTC unless noted; Phoenix is UTC-7 al
 | When | What | File |
 |---|---|---|
 | Every 30 min | The big refresh, below | `pc-refresh.php` (www-data crontab), log `/var/log/recompstore-pc-refresh.log` |
-| Every 5 min | Instant Gaming prices, stock and countries | `ig-refresh.php` (`/etc/cron.d/recompstore-ig`) |
+| Hourly at :37 | Instant Gaming: prices, stock and region from the partner feed, countries weekly, the whole catalog daily | `ig-refresh.php` (`/etc/cron.d/recompstore-ig`) |
 | Every 10 min | Discord member counter channel | `dc-counter.php` |
 | 5:23 and 17:23 | Repo watch | `inc/repowatch-run.php` (`/etc/cron.d/recompstore-repowatch`) |
 | Mondays 15:07 (8:07 am Phoenix) | Weekly digest email to the owner | `inc/digest-run.php` (same cron file) |

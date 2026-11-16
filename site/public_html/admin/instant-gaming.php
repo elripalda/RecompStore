@@ -106,7 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($world !== '' && !isset($urls[$world])) $world = '';
             $read = []; $first = null;
             foreach (array_keys($urls) as $u) {
-                $x = rs_ig_read($u, $u === $world);
+                // (4.13) With the feed, the page is read once for its countries; the prices come from the feed.
+                $x = rs_ig_read($u, $u === $world, !rs_ig_feed_ok());
                 if (!$x['ok']) throw new RuntimeException($u . ': ' . $x['why']);
                 if (!$x['countries'] && $u !== $world) throw new RuntimeException($u . ': its page doesn\'t say which countries the key works in, so it can only be used as the worldwide link.');
                 $read[$u] = $x; $first = $first ?? $x;
@@ -132,9 +133,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Shown in ' . count($cov) . ' countr' . (count($cov) === 1 ? 'y' : 'ies') . ' (where its key works); everyone else sees no card.'));
             $back .= '#listings';
         } elseif ($act === 'refresh_now') {
-            [$ok, $bad] = rs_ig_refresh(0, 200);
-            rs_flash('Read ' . $ok . ' page' . ($ok === 1 ? '' : 's') . ' again' . ($bad ? '; ' . $bad . ' couldn\'t be read' : '') . '.');
+            // (4.13) From the feed (a page read per link only while the feed won't let us in).
+            $st = rs_ig_feed_state();
+            if (time() - (int)$st['at'] < 600) throw new RuntimeException('Read from Instant Gaming ' . rs_ago(time() - (int)$st['at']) . '. Their feed changes once an hour, so try again later.');
+            rs_flash('Done: ' . (rs_ig_feed_refresh() ?: 'nothing to read') . '.');
             $back .= '#listings';
+        } elseif ($act === 'catalog_now') {
+            // (4.13) The whole catalog again (once a day by itself), to find our games in it.
+            $st = rs_ig_feed_state();
+            if (time() - (int)$st['full'] < 3600) throw new RuntimeException('The catalog was read ' . rs_ago(time() - (int)$st['full']) . '. Their feed changes once an hour.');
+            @set_time_limit(300);
+            rs_flash(rs_ig_catalog_refresh() . '.');
+            $back .= '#found';
         } elseif (in_array($act, ['listing_pause', 'listing_resume', 'listing_delete', 'listing_rule'], true)) {
             $id = (string)($_POST['app_id'] ?? '');
             if ($act === 'listing_delete') {
@@ -191,7 +201,17 @@ $edit = null;
 if (isset($_GET['edit']) && isset($linked[(string)$_GET['edit']])) $edit = $linked[(string)$_GET['edit']];
 if (!$edit && isset($_GET['add']) && isset($games[(string)$_GET['add']])) {
     $edit = ['app_id' => (string)$_GET['add'], 'url' => '', 'title' => '', 'platform' => '', 'price' => null, 'old_price' => null, 'currency' => 'USD', 'tag' => 0, 'auto' => 1, 'region' => '', 'new' => true];
+    // (4.13) From "Found in Instant Gaming's catalog": its links, name and platform filled in.
+    $pre = [];
+    foreach (explode(' ', (string)($_GET['urls'] ?? '')) as $u) if (($u = rs_ig_clean_url($u)) !== '') $pre[] = $u;
+    $edit['pre'] = implode("\n", $pre);
+    $edit['title'] = mb_substr((string)($_GET['title'] ?? ''), 0, 160);
+    $edit['platform'] = mb_substr((string)($_GET['platform'] ?? ''), 0, 60);
 }
+// (4.13) The feed and what it found.
+$feed = rs_ig_feed_state();
+$found = array_filter(rs_ig_suggestions(), fn($k) => isset($games[$k]) && !isset($linked[$k]) && !array_filter($games[$k]['ids'], fn($id) => isset($linked[$id])), ARRAY_FILTER_USE_KEY);
+uksort($found, fn($x, $y) => ($games[$y]['dl'] ?? 0) <=> ($games[$x]['dl'] ?? 0));
 // Games still sold today (Switch and Switch 2) without a card yet, most downloaded first.
 $maybe = array_filter($games, fn($g, $k) => $g['shown'] && in_array($g['origin'], ['switch2', 'switch'], true) && !isset($linked[$k]) && !array_filter($g['ids'], fn($id) => isset($linked[$id])), ARRAY_FILTER_USE_BOTH);
 uasort($maybe, fn($x, $y) => $y['dl'] <=> $x['dl']);
@@ -286,7 +306,7 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
 </section>
 
 <section class="card" id="listings">
-  <div class="ig-sec-head"><div><h2>Games with a card</h2><p class="muted small">A game's card shows on every version of it. Prices, discounts and stock are read from Instant Gaming every 3 hours, so the card matches their page.</p></div>
+  <div class="ig-sec-head"><div><h2>Games with a card</h2><p class="muted small">A game's card shows on every version of it. Prices, discounts and stock come from Instant Gaming's partner feed every hour, so the card matches their page.</p></div>
     <?php if ($rows): ?><form method="post"><?= $csrf ?><button name="action" value="refresh_now">Check prices now</button></form><?php endif; ?></div>
   <?php if (!$rows): ?>
   <p class="muted">None yet. Add one below: search the game, paste its page on Instant Gaming, and the rest fills in.</p>
@@ -338,7 +358,7 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
       <ul class="ig-results" data-ig-results hidden></ul>
       <div class="ig-chosen" data-ig-chosen<?= $eg ? '' : ' hidden' ?>><?php if ($eg): ?><b><?= h($eg['name']) ?></b><span class="muted small"><?= h($eg['line']) ?></span><?php endif; ?></div>
     </div>
-    <?php $eUrls = $edit && empty($edit['new']) ? implode("\n", array_column($offersBy[$edit['app_id']] ?? [], 'url')) : ''; ?>
+    <?php $eUrls = $edit && empty($edit['new']) ? implode("\n", array_column($offersBy[$edit['app_id']] ?? [], 'url')) : (string)($edit['pre'] ?? ''); ?>
     <label class="span2">Its pages on Instant Gaming, one per region<span class="ig-inline ig-urls"><textarea name="urls" rows="3" required spellcheck="false" placeholder="https://www.instant-gaming.com/en/24209-buy-…  (its US key)&#10;https://www.instant-gaming.com/en/24210-buy-…  (its Latin America key)"><?= h($eUrls) ?></textarea><span class="ig-urlbtns"><button type="button" data-ig-read>Read them</button><a class="btn" data-ig-find href="<?= h($searchUrl((string)($eg['name'] ?? ''))) ?>" target="_blank" rel="noopener">Find it</a></span></span><small>Each page says which countries its key works in. A visitor only sees the card if one of these keys works where they are, priced in their currency, and the button opens that key's page.</small></label>
     <div class="span2 ig-read-out" data-ig-read-out aria-live="polite"></div>
     <?php $eWorld = ''; foreach ($offersBy[$edit['app_id'] ?? ''] ?? [] as $o) if ((int)$o['world']) $eWorld = (string)$o['url']; ?>
@@ -352,16 +372,33 @@ rs_head('Instant Gaming', true, ['assets/ig.css']);
     <p class="span2 ig-hint" data-ig-hint aria-live="polite"></p>
     <div class="span2 ig-acts"><button name="action" value="listing_save" class="primary"><?= $edit && empty($edit['new']) ? 'Save' : 'Add it' ?></button><?php if ($edit): ?><a class="btn" href="instant-gaming.php#listings">Cancel</a><?php endif; ?></div>
   </form>
-  <section class="card ig-maybe">
-    <h2>Might be on Instant Gaming</h2>
-    <p class="muted small">Switch and Switch 2 games, the ones most likely sold as keys, most downloaded first.</p>
-    <?php if (!$maybe): ?><p class="muted">Nothing left to check.</p><?php else: ?>
+  <section class="card ig-maybe" id="found">
+    <?php $feedWhen = fn(int $t): string => $t ? rs_ago(max(0, time() - $t)) : 'never'; ?>
+    <div class="ig-sec-head"><div><h2>Found in Instant Gaming's catalog</h2>
+      <p class="muted small"><?php if ($feed['ok']): ?>Partner feed connected. Prices read <?= h($feedWhen((int)$feed['okAt'])) ?>; the whole catalog <?= $feed['full'] ? '(' . number_format((int)$feed['fullN']) . ' products) ' : '' ?>read <?= h($feedWhen((int)$feed['full'])) ?>.<?php else: ?><span class="warn"><?= h((string)$feed['why']) ?></span> Until then prices are read from each game's page, once an hour.<?php endif; ?></p></div>
+      <?php if ($feed['ok']): ?><form method="post"><?= $csrf ?><button class="small" name="action" value="catalog_now">Read the catalog now</button></form><?php endif; ?></div>
+    <?php if ($found): ?>
+    <p class="muted small">Our games without a card whose name matches a product, most downloaded first. Use picks its links, name and platform for the form; check them, then Add it.</p>
+    <ul>
+      <?php foreach (array_slice($found, 0, 12, true) as $k => $ps): $g = $games[$k]; $byType = [];
+          foreach ($ps as $p) $byType[$p['type'] ?: 'Other'][] = $p; ?>
+      <li class="ig-found"><div><b><?= h($g['name']) ?></b><span class="muted small"><?= h($g['line']) ?></span></div>
+        <?php foreach ($byType as $t => $list): $first = $list[0];
+            $useUrl = 'instant-gaming.php?add=' . rawurlencode($k) . '&urls=' . rawurlencode(implode(' ', array_map(fn($p) => rs_ig_clean_url($p['url']), $list))) . '&title=' . rawurlencode($g['name']) . '&platform=' . rawurlencode($t) . '#edit'; ?>
+        <div class="ig-found-row"><span class="small"><b><?= h($t) ?></b> · <?= h(implode(', ', array_unique(array_map(fn($p) => $p['region'] ?: 'Region not given', $list)))) ?> · from <?= h(rs_ig_money(min(array_column($list, 'eur')), 'USD', $rates)) ?><?= !array_filter($list, fn($p) => $p['stock']) ? ' · <span class="warn">out of stock</span>' : '' ?></span>
+          <span class="ig-rowacts"><a class="btn small" href="<?= h(rs_ig_link(rs_ig_clean_url($first['url']), $c['igr'])) ?>" target="_blank" rel="noopener">See it</a><a class="btn small" href="<?= h($useUrl) ?>">Use</a></span></div>
+        <?php endforeach; ?>
+      </li>
+      <?php endforeach; ?>
+    </ul>
+    <?php elseif ($maybe): ?>
+    <p class="muted small"><?= $feed['full'] ? 'No other game of ours matched by name. ' : '' ?>Switch and Switch 2 games, the ones most likely sold as keys, most downloaded first.</p>
     <ul>
       <?php foreach ($maybe as $k => $g): ?>
       <li><div><b><?= h($g['name']) ?></b><span class="muted small"><?= h($g['line']) ?></span></div><span class="ig-rowacts"><a class="btn small" href="<?= h($searchUrl($g['name'])) ?>" target="_blank" rel="noopener">Find</a><a class="btn small" href="instant-gaming.php?add=<?= rawurlencode($k) ?>#edit">Add</a></span></li>
       <?php endforeach; ?>
     </ul>
-    <?php endif; ?>
+    <?php else: ?><p class="muted">Nothing left to check.</p><?php endif; ?>
   </section>
 </div>
 <script type="application/json" id="ig-games"><?= json_encode($pickList, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
