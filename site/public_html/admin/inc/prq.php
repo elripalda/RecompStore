@@ -839,8 +839,7 @@ function rs_prq_threads(): array {
         }
         foreach (rs_db()->query('SELECT * FROM pc_prq_threads') as $t) {
             $t['new'] = (int)$t['news_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
-            if ($t['new'] && $t['state'] === 'merged' && (int)$t['theirs_at'] <= max((int)$t['ours_at'], (int)$t['read_at'])
-                && (isset($ships[(string)$t['app_id']]) || (int)$t['closed_at'] < time() - 3 * 86400)) $t['new'] = false;
+            if ($t['new'] && $t['state'] === 'merged' && (isset($ships[(string)$t['app_id']]) || (int)$t['closed_at'] < time() - 3 * 86400)) $t['new'] = false;
             $t['ships'] = isset($ships[(string)$t['app_id']]);
             $t['waiting'] = $t['state'] === 'open' && (int)$t['theirs_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
             $t['last'] = null;
