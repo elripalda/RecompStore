@@ -764,7 +764,8 @@ function rs_prq_replies(): array {
             else if ($j = json_decode((string)$r['v'], true)) $out[substr((string)$r['k'], 8)] = $j;
         }
     } catch (Throwable $e) { return []; }
-    return array_filter($out, fn($j, $id) => (int)($j['t'] ?? 0) > (int)($ok[$id] ?? 0), ARRAY_FILTER_USE_BOTH);
+    // Only open ones: a "thanks, merged!" on a merged or closed pull request isn't waiting on anybody.
+    return array_filter($out, fn($j, $id) => ($j['state'] ?? 'open') === 'open' && (int)($j['t'] ?? 0) > (int)($ok[$id] ?? 0), ARRAY_FILTER_USE_BOTH);
 }
 function rs_prq_reply_ok(string $appId): void {
     $r = rs_prq_replies()[$appId] ?? null;
