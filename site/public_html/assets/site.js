@@ -5225,7 +5225,7 @@
         <figcaption><span>${t('New installs, last 30 days')}</span><strong>${num(total)}</strong></figcaption></figure>`;
     };
     // (4.8) On recomplauncher.com/dev the hub leads with their PC recomps.
-    const found = () => (LAUNCHER ? (data.pcApps || []).concat(data.apps) : data.apps);
+    const found = () => (LAUNCHER ? ((data.pcApps || []).length ? data.pcApps : (data.pcFound || [])).concat(data.apps) : data.apps);
     const appsList = () => found().length ? `<ul class="hub-found">${found().map((a) => `<li>${a.icon || a.cover ? `<img src="${esc(thumb(a.icon || a.cover, 256))}" alt="" width="36" height="36">` : ''}<span>${esc(a.name)}${a.beta ? ` <span class="tag">${t('Beta')}</span>` : ''}</span></li>`).join('')}</ul>`
       : `<p class="muted">${LAUNCHER ? t('None of your GitHub repositories are on RecompLauncher yet.') : t('None of your GitHub repositories are in RecompStore yet. That\'s fine: you can send one in once you\'re approved.')}</p>`;
     const draw = () => {

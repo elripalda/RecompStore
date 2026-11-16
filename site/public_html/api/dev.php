@@ -320,6 +320,9 @@ try {
                 'repo' => $g['repo'], 'beta' => (bool)$g['beta'], 'soon' => (bool)$g['soon'], 'category' => $g['category'],
                 
                 'fields' => array_intersect_key($g, RS_DEV_CHANGE_FIELDS), 'stats' => $stats[$g['id']] ?? null], $apps),
+            // (4.13) While waiting for approval: the recomps we found under their repos, names only, so the hub
+            // doesn't tell them none of their repositories are on RecompLauncher.
+            'pcFound' => $approved ? [] : array_map(fn($a) => ['id' => (string)$a['id'], 'name' => (string)$a['name'], 'icon' => (string)($a['icon'] ?? '') !== '' ? rs_abs((string)$a['icon']) : ''], array_values(array_filter(rs_dev_pc_apps($acc), fn($a) => empty($a['hidden'])))),
             'pcApps' => (function () use ($pcApps, $acc, $db): array {
                 $fb = rs_pc_feedback_counts();
                 // (3.9) Reports they haven't seen yet (a bare "Plays great" isn't one to read).
