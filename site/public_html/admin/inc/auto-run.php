@@ -2,6 +2,8 @@
 // (4.7) Auto-add's background run: php auto-run.php [draft ids]. Started by rs_auto_launch; never from the web.
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+// (4.12) Someone is waiting on this (a submission, Check it): it may use GitHub's reserve like a web page.
+const RS_GH_PEOPLE = true;
 require __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/pc.php';
 if (is_file(__DIR__ . '/vt.php')) require_once __DIR__ . '/vt.php';

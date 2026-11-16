@@ -302,8 +302,18 @@ function rs_gh_allowed(string $url): bool {
 // -> [status, body, error, url (the final one), headers (lowercase name => value)]
 function rs_http(string $url, array $o = []): array {
     $out = ['status' => 0, 'body' => '', 'error' => '', 'url' => $url, 'headers' => []];
+    // (4.12) GitHub's API: background jobs leave a reserve for people (a developer looking up their repo
+    // never finds the hour used up), and a GET asks "changed since?" with the copy's ETag: GitHub's
+    // "304 Not Modified" doesn't count against the hourly limit, so re-reading unchanged repos is free.
+    $gh = !empty($o['github']) && str_starts_with($url, rs_gh_api() . '/');
+    $etagRow = null;
+    if ($gh) {
+        if (PHP_SAPI === 'cli' && !defined('RS_GH_PEOPLE') && rs_gh_low()) { $out['error'] = 'reserve'; return $out; }
+        if (empty($o['range']) && !array_key_exists('post', $o)) $etagRow = rs_gh_etag_get($url);
+    }
     $c = curl_init($url);
     $headers = $o['headers'] ?? [];
+    if ($etagRow) $headers[] = 'If-None-Match: ' . $etagRow['etag'];
     if (!empty($o['range'])) $headers[] = 'Range: bytes=' . $o['range'][0] . '-' . ($o['range'][1] ?? '');
     // (3.9) GitLab: the admin's token (Settings), only to GitLab's own API.
     if (!empty($o['gitlab'])) {
@@ -349,9 +359,88 @@ function rs_http(string $url, array $o = []): array {
     elseif (curl_errno($c)) $out['error'] = curl_error($c);
     curl_close($c);
     $out['body'] = $body;
+    if ($gh) {
+        rs_gh_rate_note($out['headers']);
+        rs_gh_tally($url);
+        if ($out['status'] === 304 && $etagRow) { $out['status'] = 200; $out['body'] = $etagRow['body']; $out['etag_hit'] = true; }
+        elseif ($out['status'] === 200 && ($et = (string)($out['headers']['etag'] ?? '')) !== '' && empty($o['range']) && !array_key_exists('post', $o)) rs_gh_etag_put($url, $et, $body);
+    }
     // A redirect to somewhere that isn't GitHub's: treated as nothing came.
     if (!rs_gh_allowed($out['url']) && !empty($o['github_only'])) { $out['status'] = 0; $out['body'] = ''; $out['error'] = 'redirected away'; }
     return $out;
+}
+
+// ---- (4.12) GitHub's hourly limit ----------------------------------------------------------------
+// What GitHub last said is left this hour (x-ratelimit-remaining / -reset), shared by every PHP worker.
+const RS_GH_RESERVE = 800;
+function rs_gh_rate_file(): string { return dirname(RS_PUBLIC) . '/recompstore-private/gh-rate.json'; }
+function rs_gh_rate(): ?array {
+    static $c = null, $t = 0;
+    if ($c !== null && time() - $t < 5) return $c ?: null;
+    $j = json_decode((string)@file_get_contents(rs_gh_rate_file()), true);
+    $c = is_array($j) ? $j : []; $t = time();
+    return $c ?: null;
+}
+function rs_gh_rate_note(array $h): void {
+    if (!isset($h['x-ratelimit-remaining'], $h['x-ratelimit-reset']) || strtolower((string)($h['x-ratelimit-resource'] ?? 'core')) !== 'core') return;
+    @file_put_contents(rs_gh_rate_file(), json_encode(['rem' => (int)$h['x-ratelimit-remaining'], 'reset' => (int)$h['x-ratelimit-reset'], 'limit' => (int)($h['x-ratelimit-limit'] ?? 0), 'at' => time()]), LOCK_EX);
+}
+// Background jobs stop when the hour is down to the reserve; people's lookups keep going.
+function rs_gh_low(): bool {
+    $r = rs_gh_rate();
+    return $r && (int)$r['reset'] > time() && (int)$r['rem'] < RS_GH_RESERVE;
+}
+// Copies of GitHub's answers with their ETags (gzipped), for "changed since?" requests.
+function rs_gh_etag_table(): void {
+    static $done = false;
+    if ($done) return;
+    rs_db()->exec('CREATE TABLE IF NOT EXISTS gh_etag (k CHAR(32) PRIMARY KEY, etag VARCHAR(200) NOT NULL, body MEDIUMBLOB NOT NULL, at DATETIME NOT NULL, KEY at (at)) DEFAULT CHARSET=utf8mb4');
+    $done = true;
+}
+function rs_gh_etag_get(string $url): ?array {
+    try {
+        rs_gh_etag_table();
+        $st = rs_db()->prepare('SELECT etag, body FROM gh_etag WHERE k = ?');
+        $st->execute([md5($url)]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r) return null;
+        $b = @gzuncompress((string)$r['body']);
+        return $b === false ? null : ['etag' => (string)$r['etag'], 'body' => $b];
+    } catch (Throwable $e) { return null; }
+}
+function rs_gh_etag_put(string $url, string $etag, string $body): void {
+    if (strlen($body) > (12 << 20) || strlen($etag) > 200) return;
+    try {
+        rs_gh_etag_table();
+        $z = gzcompress($body, 6);
+        if ($z === false || strlen($z) > (15 << 20)) return;
+        rs_db()->prepare('INSERT INTO gh_etag (k, etag, body, at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE etag = VALUES(etag), body = VALUES(body), at = NOW()')->execute([md5($url), $etag, $z]);
+        if (mt_rand(1, 500) === 1) rs_db()->exec('DELETE FROM gh_etag WHERE at < NOW() - INTERVAL 21 DAY');
+    } catch (Throwable $e) { /* it's only a copy */ }
+}
+// Which code asked GitHub, counted per hour (kv ghuse:<YmdH>), so a job that uses up the hour shows.
+function rs_gh_tally(string $url): void {
+    static $n = null;
+    $who = 'other';
+    foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 6) as $f) {
+        $fn = (string)($f['function'] ?? '');
+        if ($fn !== '' && !in_array($fn, ['rs_http', 'rs_gh_tally', 'rs_gh_cached', '{closure}'], true)) { $who = $fn; break; }
+    }
+    if ($who === 'other') $who = (PHP_SAPI === 'cli' ? 'cli:' : 'web:') . basename((string)($_SERVER['SCRIPT_NAME'] ?? '?'));
+    if ($n === null) {
+        $n = [];
+        register_shutdown_function(function () use (&$n) {
+            if (!$n || !function_exists('rs_kv_get')) return;
+            try {
+                $k = 'ghuse:' . gmdate('YmdH');
+                $c = rs_kv_get($k);
+                $have = $c ? (json_decode((string)$c['v'], true) ?: []) : [];
+                foreach ($n as $w => $x) $have[$w] = (int)($have[$w] ?? 0) + $x;
+                rs_kv_put($k, (string)json_encode($have));
+            } catch (Throwable $e) { /* counting is best effort */ }
+        });
+    }
+    $n[$who] = ($n[$who] ?? 0) + 1;
 }
 
 // (4.1) Several plain GETs at once (art pictures, SteamGridDB lists): [key => url] or [key => [url, headers]]
@@ -475,7 +564,18 @@ function rs_gh_cached(string $key, string $url, int $maxAge, callable $trim, str
     }
     // (4.8) 451: taken down (a DMCA notice) or blocked. That's GitHub's answer, not GitHub being busy:
     // kept like a 404 (with the block's reason and notice), without pausing every other request.
-    if (!in_array((int)$r['status'], [200, 404, 451], true)) rs_gh_cool($via, (int)$r['status'] === 403 || (int)$r['status'] === 429 ? 300 : 90);
+    // (4.12) Only a real "hour used up" pauses everyone (until GitHub's reset, at most 15 minutes), and
+    // its "slow down" (secondary limit) for 2 minutes. A 403 on one repo, or a job stopped by the reserve,
+    // no longer pauses every lookup on the site.
+    $rst = (int)$r['status'];
+    if (!in_array($rst, [200, 404, 451], true) && ($r['error'] ?? '') !== 'reserve') {
+        if ($via !== 'github') rs_gh_cool($via, $rst === 403 || $rst === 429 ? 300 : 90);
+        elseif ($rst === 403 || $rst === 429) {
+            $rl = rs_gh_rate();
+            if ((string)($r['headers']['x-ratelimit-remaining'] ?? '') === '0' || ($rl && (int)$rl['rem'] === 0 && (int)$rl['reset'] > time())) rs_gh_cool($via, max(30, min(900, (int)($r['headers']['x-ratelimit-reset'] ?? ($rl['reset'] ?? 0)) - time() + 5)));
+            elseif (stripos((string)$r['body'], 'rate limit') !== false || isset($r['headers']['retry-after'])) rs_gh_cool($via, max(30, min(300, (int)($r['headers']['retry-after'] ?? 120))));
+        } elseif ($rst === 0 || $rst >= 500) rs_gh_cool($via, 45);
+    }
     if ($r['status'] === 200) {
         // (4.3) SourceForge's file feed is RSS; everything else is JSON.
         $j = $via === 'sourceforge' && str_starts_with(ltrim($r['body']), '<') ? rs_sf_feed_parse($r['body']) : json_decode($r['body'], true);

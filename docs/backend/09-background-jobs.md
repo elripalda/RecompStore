@@ -46,3 +46,11 @@ Long jobs never run inside a web request. A page starts them with `setsid php <s
 ## Adding a job
 
 Prefer a step in `pc-refresh.php` (wrapped in try/catch, short, with a time budget) over a new cron entry. If it needs its own schedule, add a `*-run.php` next to its code with a lock, list it in the table above, and put the cron line in `/etc/cron.d/`.
+
+## GitHub's hourly limit (4.12)
+
+Every GitHub API call goes through `rs_http` (`inc/connect.php`) with `github => true`:
+- **"Changed since?"**: a GET sends the ETag of the copy it has (`gh_etag` table, gzipped bodies, kept 21 days). GitHub's 304 doesn't count against the hour, so the 30-minute refresh re-reading unchanged repos is nearly free.
+- **A reserve for people**: what's left this hour is kept in `recompstore-private/gh-rate.json` from GitHub's headers. Background jobs (PHP on the command line) stop asking once fewer than 800 calls are left (`RS_GH_RESERVE`, `rs_gh_low`), so a developer submitting or looking up a repo never finds the hour used up. Auto-add's runner (`auto-run.php`) counts as people (`RS_GH_PEOPLE`).
+- **Pauses**: only a real "hour used up" pauses every lookup (until GitHub's reset, at most 15 minutes), GitHub's "slow down" 2 minutes, and a timeout or 5xx 45 seconds. A 403 on one repo no longer pauses the site.
+- **Who used it**: calls are counted per function per hour in kv `ghuse:<YmdH>` (UTC).
