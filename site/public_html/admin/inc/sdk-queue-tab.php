@@ -53,7 +53,8 @@ $qHelp = function (string $err): string {
 <section class="card q-card">
   <div class="q-rules">
     <strong>How it works:</strong> every morning at 7:23 the drafter writes pull requests for 8 games with no <code>recomplauncher.json</code> (ones you queued first), and you can draft any game straight away from its page or the Games tab.
-    <b>Nothing goes to a developer until you press Send pull request.</b> <a href="sdk-support.php?tab=guide">Read the guide</a>
+    <?php if (rs_prq_auto_on()): ?><b>Green drafts go out by themselves</b>, up to <?= RS_PRQ_PER_HOUR ?> an hour: the review found nothing missing and they only add the file. Drafts that change the developer's code, redrafts and ones the review has questions on stay in Ready for you until you press Send pull request.
+    <?php else: ?><b>Sending by itself is off</b> (Settings, below), so nothing goes to a developer until you press Send pull request.<?php endif; ?> <a href="sdk-support.php?tab=guide">Read the guide</a>
   </div>
   <nav class="q-stages" aria-label="Where each game is">
     <?php foreach ($qStages as $k => [$label, $desc]): ?>
