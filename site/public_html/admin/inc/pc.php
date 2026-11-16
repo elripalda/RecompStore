@@ -161,6 +161,11 @@ function rs_pc_games_entry(array $a): array {
     return array_map(function ($g) {
         $e = ['id' => (string)$g['id'], 'name' => (string)$g['name']];
         foreach (['args', 'title_id', 'inputs'] as $k) if (!empty($g[$k])) $e[$k] = $g[$k];
+        // (4.13) Game info for this game alone (IGDB, rs_pc_games_about), and, when set, its own
+        // description, genre and tags; without them a game uses its release's.
+        if (!empty($g['about']) && is_array($g['about'])) $e['about'] = $g['about'];
+        foreach (['description', 'genre'] as $k) if (trim((string)($g[$k] ?? '')) !== '') $e[$k] = (string)$g[$k];
+        if (!empty($g['tags']) && is_array($g['tags'])) $e['tags'] = array_values(array_map('strval', $g['tags']));
         foreach (['icon', 'cover', 'hero', 'logo'] as $k) if ((string)($g[$k] ?? '') !== '') $e[$k] = rs_abs((string)$g[$k]);
         return $e;
     }, rs_pc_games($a));
@@ -1378,6 +1383,29 @@ function rs_pc_about_fetch(array $a, int $igdbId = 0): ?array {
         'summary' => $sum], fn($v) => $v !== '' && $v !== [] && $v !== 0);
 }
 
+// (4.13) Game info for each game of a release that carries several (COGBox, Athelas), by the game's own
+// name. A game can be from another console than its release (Pokemon Emerald, a Game Boy Advance game,
+// in a Game Boy collection), so when the release's console finds nothing close, any console counts, but
+// then only an exact name match is good enough. A game's own igdb_id wins. Games that already have it are
+// skipped unless $redo; one found nothing gets about_none. -> [app, found, missed]
+function rs_pc_games_about(array $a, bool $redo = false): array {
+    $found = 0; $missed = 0;
+    foreach ((array)($a['games'] ?? []) as $k => $g) {
+        if (!is_array($g) || trim((string)($g['name'] ?? '')) === '') continue;
+        if (!$redo && (!empty($g['about']) || !empty($g['about_none']))) continue;
+        $q = ['game' => (string)$g['name'], 'name' => (string)$g['name'], 'origin' => (string)($g['origin'] ?? $a['origin'] ?? '')];
+        $ab = rs_pc_about_fetch($q, (int)($g['igdb_id'] ?? 0));
+        if (!$ab && empty($g['igdb_id'])) {
+            $q['origin'] = '';
+            $ab = rs_pc_about_fetch($q);
+            if ($ab && rs_pc_about_norm((string)$ab['name']) !== rs_pc_about_norm((string)$g['name'])) $ab = null;
+        }
+        if ($ab) { $a['games'][$k]['about'] = $ab; unset($a['games'][$k]['about_none']); ++$found; }
+        else { $a['games'][$k]['about_none'] = gmdate('Y-m-d'); ++$missed; }
+    }
+    return [$a, $found, $missed];
+}
+
 // (3.5) Sharper art: swaps a backdrop or logo for a bigger one SteamGridDB has for the same game,
 // the best voted first. $have: kind => the width it is now. -> [app, kinds changed]
 function rs_pc_art_upgrade(array $a, array $have): array {
@@ -1748,6 +1776,10 @@ function rs_pc_web_copy(array $cat): array {
         unset($a['about'], $a['boot'], $a['launcher'], $a['features'], $a['copy_ids'], $a['description'], $a['files'], $a['needs'],
             $a['setup_steps'], $a['assets'], $a['support'], $a['credits'], $a['media'], $a['issues'], $a['license']);
         if ($series !== '') $a['about'] = ['series' => $series];
+        // (4.13) A release's games keep what tiles and search use; a game's page reads the rest with its release's entry.
+        if (!empty($a['games']) && is_array($a['games']))
+            foreach ($a['games'] as &$g) if (is_array($g)) unset($g['about'], $g['description'], $g['args'], $g['inputs'], $g['title_id']);
+        unset($g);
         // Pictures on our own server, written from the root: they load from whichever of our two
         // addresses the page is on (and it's 30 characters fewer, 7,000 times).
         foreach (['cover', 'hero', 'logo', 'icon'] as $k)

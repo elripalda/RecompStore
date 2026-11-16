@@ -47,3 +47,7 @@ Everything in `/media`. `api/thumb.php?f=<file>&w=<width>` makes and keeps small
 ## Rules for the site's look
 
 UI layouts are even and clean: no row with a single leftover item, boxes side by side the same size. Pages work on phones (check at 390 px wide). Redesigns get a few design samples first, matching the existing look.
+
+## A release's games (4.13)
+
+A release that carries several games (COGBox, Athelas) gets a page per game at `/pc/game/<release>--<game>` (`pcSubOf`, `pcChild` in `site.js`; `page.php` fills its title and preview too). It shows the game's own name, art and IGDB card with the release's details, and a "Part of {name} · {n} games" pill to the release. Install, README, reports, counts and the account buttons are the release's. The release's "Includes {n} games" cards open these pages, search lists each game (with the same "Part of" line), and a title's versions list shows a release's copy with that mark. Route patterns allow ids up to 100 characters.

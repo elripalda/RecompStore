@@ -84,6 +84,19 @@ try {
     $bk = rs_bk_maybe();
     if ($bk !== '') echo gmdate('c') . ' backup: ' . $bk . "\n";
 } catch (Throwable $e) { echo gmdate('c') . ' backup: ' . $e->getMessage() . "\n"; }
+// (4.13) Game info for the games of releases that carry several (COGBox, Athelas), a few releases a run.
+try {
+    $n = 0;
+    foreach (rs_pc_apps() as $a) {
+        if ($n >= 3 || !array_filter(rs_pc_games($a), fn($g) => empty($g['about']) && empty($g['about_none']))) continue;
+        [$b, $f, $m] = rs_pc_games_about($a);
+        $c = rs_pc_app($a['id']) ?? $a;
+        $c['games'] = $b['games'];
+        rs_pc_save($c);
+        echo gmdate('c') . ' game info ' . $a['id'] . ': ' . $f . ' found, ' . $m . " not\n";
+        ++$n;
+    }
+} catch (Throwable $e) { echo 'game info: ', $e->getMessage(), "\n"; }
 // (4.13) Discord: approved developers who linked Discord but don't have the Developer role yet get
 // it (once an hour; a grant Discord turned down when they linked is tried again here).
 try {

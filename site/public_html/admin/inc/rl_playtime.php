@@ -123,7 +123,7 @@ function rs_rl_play_totals(int $uid): array {
         $t = $titles[$tid] ?? ['secs' => 0, 'last' => 0];
         $titles[$tid] = ['secs' => $t['secs'] + $g['secs'], 'last' => max($t['last'], $g['last'])];
     };
-    foreach ($map['titles'] as $tid => $ids) foreach ($ids as $rid) if (!isset($map['multi'][$rid]) && isset($games[$rid])) $add((string)$tid, $games[$rid]);
+    foreach ($map['titles'] as $tid => $ids) foreach ($ids as $rid) if (!isset($map['multi'][$rid]) && !str_contains($rid, '--') && isset($games[$rid])) $add((string)$tid, $games[$rid]);
     foreach ($map['subTitle'] as $full => $tid) if (isset($games[$full]) && isset($map['titles'][$tid])) $add((string)$tid, $games[$full]);
     return [$games, $titles];
 }

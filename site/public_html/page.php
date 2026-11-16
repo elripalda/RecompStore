@@ -361,10 +361,16 @@ try {
             $id = preg_replace('/[^a-z0-9-]/', '', is_string($_GET['id'] ?? null) ? $_GET['id'] : '');
             $a = null;
             foreach ($pcApps as $x) if (($x['id'] ?? '') === $id) $a = $x;
+            // (4.13) One game of a release that carries several: /pc/game/<release>--<game>.
+            $sub = null;
+            if ($a === null && preg_match('/^(.+)--([a-z0-9]{1,16})$/', $id, $sm)) foreach ($pcApps as $x) if (($x['id'] ?? '') === $sm[1])
+                foreach ((array)($x['games'] ?? []) as $g) if (is_array($g) && (string)($g['id'] ?? '') === $sm[2] && count((array)$x['games']) >= 2) { $sub = $g; $a = $x; }
             if ($a !== null) {
-                $an = (string)$a['name'];
-                $gn = (string)($a['game'] ?? '') ?: $an;
-                $about = trim((string)($a['blurb'] ?? '')) ?: tf('{name} is a PC recomp of {game}. Bring your own copy of the game.', ['name' => $an, 'game' => $gn]);
+                $an = (string)($sub['name'] ?? $a['name']);
+                $gn = $sub ? $an : ((string)($a['game'] ?? '') ?: $an);
+                $about = $sub ? tf('{game} is one of the {n} games in {name}, a PC recomp. Bring your own copy of the game.', ['game' => $an, 'n' => count((array)$a['games']), 'name' => (string)$a['name']])
+                    : (trim((string)($a['blurb'] ?? '')) ?: tf('{name} is a PC recomp of {game}. Bring your own copy of the game.', ['name' => $an, 'game' => $gn]));
+                if ($sub) foreach (['hero', 'cover'] as $k) if (!empty($sub[$k])) $a[$k] = $sub[$k];
                 $m = ['title' => $name(tf('{name} — PC recomp of {game}', ['name' => $an, 'game' => $gn])), 'ogTitle' => $an, 'path' => $pp('/pc/game/') . $id,
                     'desc' => rs_seo_short($about), 'image' => !empty($a['hero']) ? (string)$a['hero'] : (!empty($a['cover']) ? (string)$a['cover'] : null),
                     'body' => '<h1>' . $e($an) . '</h1><p>' . $e($about) . '</p>' . $pcNav

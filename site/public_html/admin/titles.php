@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $origin = isset(RS_PC_ORIGINS[$_POST['origin'] ?? '']) ? (string)$_POST['origin'] : 'other';
             $t = array_merge(rs_title_defaults(), ['id' => rs_title_new_id($name), 'name' => $name, 'origin' => $origin]);
             rs_title_save($t);
-            foreach ((array)($_POST['pc'] ?? []) as $id) if (rs_pc_app((string)$id)) rs_title_add_member($t['id'], 'pc', (string)$id);
+            foreach ((array)($_POST['pc'] ?? []) as $id) if (rs_pc_app((string)$id) || rs_pc_game_of((string)$id)) rs_title_add_member($t['id'], 'pc', (string)$id);
             foreach ((array)($_POST['ps5'] ?? []) as $id) if (rs_game((string)$id)) rs_title_add_member($t['id'], 'ps5', (string)$id);
             rs_log('title-add', $t['id'], $name);
             rs_flash($name . ' is set up. Publish PC to put it on the site.');
@@ -35,7 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pick = (string)($_POST['pick'] ?? '');
             $t['pick'] = preg_match('/^(pc|ps5):[A-Za-z0-9_-]{1,64}$/', $pick) ? $pick : '';
             rs_title_save($t);
-            if (($add = (string)($_POST['add_pc'] ?? '')) !== '' && rs_pc_app($add)) rs_title_add_member($tid, 'pc', $add);
+            // (4.13) Or one game of a release that carries several, by its full id (cogbox--gow2).
+            if (($add = (string)($_POST['add_pc'] ?? '')) !== '' && (rs_pc_app($add) || rs_pc_game_of($add))) rs_title_add_member($tid, 'pc', $add);
             if (($add = (string)($_POST['add_ps5'] ?? '')) !== '' && rs_game($add)) rs_title_add_member($tid, 'ps5', $add);
             rs_flash('Saved ' . $t['name'] . '. Publish PC to put it on the site.');
         } elseif ($act === 'remove') {
@@ -76,6 +77,8 @@ $csrf = '<input type="hidden" name="csrf" value="' . h(rs_csrf()) . '">';
 $pcOptions = function (string $sel = '') use ($pcApps, $inTitle): string {
     $o = '<option value="">Add a PC recomp…</option>';
     foreach ($pcApps as $id => $a) if (!isset($inTitle['pc'][$id])) $o .= '<option value="' . h($id) . '"' . ($sel === $id ? ' selected' : '') . '>' . h($a['name'] . ($a['game'] !== '' && $a['game'] !== $a['name'] ? ' (' . $a['game'] . ')' : '')) . '</option>';
+    // (4.13) Each game of a release that carries several, by its full id.
+    foreach ($pcApps as $id => $a) foreach (rs_pc_games($a) as $g) { $full = $id . '--' . $g['id']; if (!isset($inTitle['pc'][$full])) $o .= '<option value="' . h($full) . '"' . ($sel === $full ? ' selected' : '') . '>' . h($g['name'] . ' (in ' . $a['name'] . ')') . '</option>'; }
     return $o;
 };
 $ps5Options = function () use ($ps5, $inTitle): string {
@@ -153,10 +156,12 @@ rs_head('Versions', true, ['assets/titles.css']);
           <thead><tr><th>Recommended</th><th>Version</th><th>Players</th><th></th></tr></thead>
           <tbody>
             <tr><td><label class="check"><input type="radio" name="pick" value=""<?= $t['pick'] === '' ? ' checked' : '' ?>> Automatic</label></td><td colspan="3" class="muted small">Right now: <?= h($auto === '' ? 'none shown yet' : (str_starts_with($auto, 'pc:') ? ($pcApps[substr($auto, 3)]['name'] ?? $auto) : ($ps5[substr($auto, 4)]['name'] ?? $auto))) ?>. Scored out of 100: players' rating 45 (under 3 reports counts as 40%), downloads 30, Easy Setup 12, settings 8, saves 3, copy check 2. One with under 5 reports never beats one with 5 or more, and the current pick keeps it until another scores 8 more.</td></tr>
-            <?php foreach ($t['pc'] as $id): $a = $pcApps[$id] ?? null; ?>
+            <?php foreach ($t['pc'] as $id): $a = $pcApps[$id] ?? null;
+                // (4.13) A release's game: shown as that game, in its release.
+                if (!$a && ($pg = rs_pc_game_of((string)$id))) $a = ['name' => $pg[1]['name'] . ' (in ' . $pg[0]['name'] . ')', 'author' => $pg[0]['author'], 'version' => $pg[0]['version'], 'hidden' => !empty($pg[0]['hidden'])]; ?>
             <tr<?= !$a || $a['hidden'] ? ' class="dim"' : '' ?>>
               <td><label class="check"><input type="radio" name="pick" value="pc:<?= h($id) ?>"<?= $t['pick'] === "pc:$id" ? ' checked' : '' ?>> Pin</label></td>
-              <td><span class="tt-chip"><em>PC</em><?= $a ? '<a href="pc.php?edit=' . h(rawurlencode($id)) . '#edit">' . h($a['name']) . '</a>' : h($id) . ' (gone)' ?></span><small class="muted"><?= $a ? h(($a['author'] ?: '?') . ' · ' . ($a['version'] ?: 'no release') . ($a['hidden'] ? ' · hidden' : '')) : '' ?></small></td>
+              <td><span class="tt-chip"><em>PC</em><?= $a ? '<a href="pc.php?edit=' . h(rawurlencode((string)preg_replace('/--[a-z0-9]{1,16}$/', '', $id))) . '#edit">' . h($a['name']) . '</a>' : h($id) . ' (gone)' ?></span><small class="muted"><?= $a ? h(($a['author'] ?: '?') . ' · ' . ($a['version'] ?: 'no release') . ($a['hidden'] ? ' · hidden' : '')) : '' ?></small></td>
               <td class="small"><?= h($verdicts($id)) ?><?php if (isset($recScore[$id])): [$tot, $rr, $dd, $ff] = $recScore[$id]; ?><br><span class="muted" title="Rating <?= round($rr) ?> + downloads <?= round($dd) ?> + features <?= round($ff) ?>">Score <?= round($tot) ?> (rating <?= round($rr) ?>, downloads <?= round($dd) ?>, features <?= round($ff) ?>)</span><?php endif; ?></td>
               <td><button form="rm-<?= h($t['id'] . '-pc-' . $id) ?>" class="linkish">Take out</button></td>
             </tr>

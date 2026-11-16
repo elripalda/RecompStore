@@ -2250,7 +2250,7 @@
   // How many recomps a list of tiles stands for: a game's tile counts each of its listed versions.
   const pcVersions = (list) => list.reduce((n, a) => {
     const tt = pcTitleOf('pc', a.id);
-    return n + (tt ? Math.max(1, (tt.pc || []).filter((id) => pcCat.listed.some((x) => x.id === id)).length) : 1);
+    return n + (tt ? Math.max(1, (tt.pc || []).filter((id) => pcListedVer(id)).length) : 1);
   }, 0);
   // (3.0) Games with more than one version (pc-catalog.json's titles): PC recomps and PS5 apps.
   const pcTitles = () => (pcCat && pcCat.titles) || [];
@@ -2269,8 +2269,25 @@
     const on = ((pcCat && pcCat.listed) || []).filter((a) => a.origin === o);
     return on.filter((a) => { const tt = pcTitleOf('pc', a.id); return !tt || pcLeadOf(tt, on) === a.id; });
   };
-  const titleVersions = (tt) => (tt.pc || []).filter((id) => ((pcCat && pcCat.listed) || []).some((a) => a.id === id)).length + (tt.ps5 || []).length;
+  const titleVersions = (tt) => (pcCat ? (tt.pc || []).filter((id) => pcListedVer(id)).length : 0) + (tt.ps5 || []).length;
   const pcById = (id) => (pcCat ? pcCat.all.find((a) => a.id === id) : null);
+  // (4.13) One game of a release that carries several, by its full id ("cogbox--gow2"): {p: release, g: game}.
+  const pcSubOf = (id) => {
+    const m = String(id || '').match(/^(.+)--([a-z0-9]{1,16})$/);
+    const p = m && pcById(m[1]);
+    const g = p && isPack(p) && p.games.find((x) => x.id === m[2]);
+    return g ? { p, g } : null;
+  };
+  // That game as a listing of its own: its name and art, the release's details. Installing it installs
+  // the release. Without its own description, genre and tags it uses its release's.
+  const pcChild = (p, g) => Object.assign({}, p, {
+    id: p.id + '--' + g.id, name: g.name, game: g.name, games: undefined, title: g.title,
+    cover: g.cover || p.cover, hero: g.hero || p.hero, icon: g.icon || g.cover || p.icon, logo: g.logo || '',
+    about: g.about || null, description: g.description || p.description, genre: g.genre || p.genre, tags: g.tags || p.tags,
+    parent: p.id, parentName: p.name, partOf: p.games.length,
+  });
+  // A version id (a recomp, or a release's game) that's listed now -> the listing, else null.
+  const pcListedVer = (id) => { const sub = pcSubOf(id); return sub ? ((pcCat.listed || []).includes(sub.p) ? pcChild(sub.p, sub.g) : null) : ((pcCat.listed || []).find((x) => x.id === id) || null); };
   // (4.7) Recomps that carry several games (a trilogy, a bundle): what each includes, and which of them
   // carry a given game. Names are matched loosely ("Gears of War 2" = "Gears of War 2 Recomp").
   const pkNorm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\b(the|recomp(iled)?|pc|port|native|decomp(ilation)?|edition)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -2279,7 +2296,7 @@
     if (!pcCat || !a) return [];
     const tt = pcTitleOf('pc', a.id);
     const want = new Set([a.game, a.name, tt && tt.name].map(pkNorm).filter(Boolean));
-    return (pcCat.listed || []).filter((p) => p.id !== a.id && isPack(p) && p.games.some((g) => want.has(pkNorm(g.name))));
+    return (pcCat.listed || []).filter((p) => p.id !== a.id && p.id !== a.parent && isPack(p) && p.games.some((g) => want.has(pkNorm(g.name))));
   };
   const packGameHome = (name) => {
     const n = pkNorm(name);
@@ -2292,11 +2309,13 @@
   const packCols = (n) => (n <= 4 ? n : n % 4 === 0 || n % 4 === 3 ? 4 : 3);
   function packHTML(a) {
     if (!isPack(a)) return '';
+    // (4.13) Each card opens that game's own page; "Other versions" when there are others of it.
     const card = (g) => {
-      const home = packGameHome(g.name);
+      const full = a.id + '--' + g.id;
+      const tt = pcTitleOf('pc', full);
+      const more = (tt && titleVersions(tt) > 1) || packGameHome(g.name);
       const pic = g.cover || a.cover ? `<img src="${esc(thumb(g.cover || a.cover, 320))}" alt="" width="150" height="225" loading="lazy" decoding="async">` : '<span class="pk-pic"></span>';
-      const inner = `${pic}<b dir="auto">${esc(g.name)}</b>${home ? `<small>${t('Other versions')}</small>` : ''}`;
-      return home ? `<a class="pk-game" href="/pc/game/${encodeURIComponent(home.id)}">${inner}</a>` : `<div class="pk-game">${inner}</div>`;
+      return `<a class="pk-game" href="/pc/game/${encodeURIComponent(full)}">${pic}<b dir="auto">${esc(g.name)}</b>${more ? `<small>${t('Other versions')}</small>` : ''}</a>`;
     };
     return `<section class="pk" aria-label="${esc(t('Games in this recomp'))}"><div class="pk-head"><h2>${tf('Includes {n} games', { n: fmtNum(a.games.length) })}</h2>
       <small>${t('One download for all of them. Each gets its own tile in RecompLauncher.')}</small></div>
@@ -2354,8 +2373,8 @@
   }
   const pcWarm = (e) => {
     const l = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-    const m = l && (l.getAttribute('href') || '').match(/^\/(?:pc\/)?game\/([a-z0-9-]{1,64})(?:[?#]|$)/);
-    if (m && pcCat) pcFull(m[1]);
+    const m = l && (l.getAttribute('href') || '').match(/^\/(?:pc\/)?game\/([a-z0-9-]{1,100})(?:[?#]|$)/);
+    if (m && pcCat) pcFull(pcSubOf(m[1]) ? pcSubOf(m[1]).p.id : m[1]);
   };
   document.addEventListener('pointerover', pcWarm, { passive: true });
   document.addEventListener('touchstart', pcWarm, { passive: true });
@@ -2376,7 +2395,7 @@
   const LAUNCHER_ORIGIN = location.origin.replace(/recompstore/i, 'recomplauncher');
   // (4.7) The Submit page starts on PC on recomplauncher.com, from the PC side, or with ?platform=pc.
   const submitPc = () => new URLSearchParams(location.search).get('platform') === 'pc' || LAUNCHER || document.body.dataset.platform === 'pc';
-  const PC_PATH_RE = /^\/pc(\/(all|how|top|trending|new|whats-new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,64}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
+  const PC_PATH_RE = /^\/pc(\/(all|how|top|trending|new|whats-new|consoles|launcher|press|soon|settings|sdk|achievements|action|adventure|platformers|racing|fighting|shooters|sports|rpg|puzzle|game\/[a-z0-9-]{1,100}|achievements\/u\/[A-Za-z0-9_.-]{2,40}|achievements\/[a-z0-9-]{1,64}))?$/;
   // (4.8) recomplauncher.com also has the developer hub (/dev, which the old /developers and /hub
   // addresses become), developers' pages, accounts, Submit, Contact and Copyright, so nobody who came for
   // the PC side is sent over to recompstore.com.
@@ -2530,7 +2549,7 @@
     const tt = pcCat && pcTitleOf(kind, id);
     if (!tt) return '';
     const rows = [];
-    (tt.pc || []).forEach((vid) => { const a = (pcCat.listed || []).find((x) => x.id === vid); if (a) rows.push({ kind: 'pc', id: vid, a }); });
+    (tt.pc || []).forEach((vid) => { const a = pcListedVer(vid); if (a) rows.push({ kind: 'pc', id: vid, a }); });
     (tt.ps5 || []).forEach((p) => rows.push({ kind: 'ps5', id: p.id, p }));
     if (rows.length < 2) return '';
     const isRec = (r) => tt.pick === r.kind + ':' + r.id;
@@ -2547,7 +2566,7 @@
       const chev = '<svg class="vr-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
       if (r.kind === 'pc') {
         const a = r.a;
-        const sub = [a.author, a.adds || a.blurb].filter(Boolean).join(' · ');
+        const sub = [a.author, a.parent ? tf('Part of {name} · {n} games', { name: a.parentName, n: fmtNum(a.partOf) }) : a.adds || a.blurb].filter(Boolean).join(' · ');
         const sys = (a.systems || []).map((x) => `<span class="vr-os">${osIcon(x)}${esc(SYS_NAMES[x] || x)}</span>`).join('');
         return `<a class="vr${on ? ' on' : ''}" href="/pc/game/${encodeURIComponent(a.id)}" data-vk="pc" data-vid="${esc(a.id)}"${on ? ' aria-current="page"' : ''}>
           ${pic}<span class="vr-main"><span class="vr-name"><b dir="auto">${esc(a.name)}</b>${rec}<span class="vr-score" data-score></span></span>
@@ -2948,7 +2967,7 @@
     // (3.5) Once the list is here, every PC page is drawn at once (no "Loading…" between pages).
     const go = () => {
       if (!h.startsWith('/pc') || current() !== h) return;
-      const g = h.match(/^\/pc\/game\/([a-z0-9-]{1,64})$/);
+      const g = h.match(/^\/pc\/game\/([a-z0-9-]{1,100})$/);
       const c = h.match(PC_CAT_RE);
       if (g) pcGame(decodeURIComponent(g[1]));
       else if (h === '/pc/all') pcAll(new URLSearchParams(location.search).get('kind') || '');
@@ -3694,11 +3713,15 @@
   }
 
   function pcGame(id) {
-    const a = pcById(id);
+    // (4.13) One game of a release that carries several has its own page: its name and art, the
+    // release's details. What installs, its README, reports and counts are the release's (rid).
+    const sub = pcSubOf(id);
+    const a = sub ? pcChild(sub.p, sub.g) : pcById(id);
+    const rid = sub ? sub.p.id : id, rel = sub ? sub.p : a;
     // Drawn now from the list; once the rest of its entry is here, drawn again in place.
     if (a && a.lite) {
       const here = current();
-      pcFull(id).then((x) => { if (x && !x.lite && current() === here) { const y = window.scrollY; pcGame(id); enhanceRows(view); window.scrollTo({ top: y, behavior: 'instant' }); } });
+      pcFull(rid).then((x) => { if (x && !x.lite && current() === here) { const y = window.scrollY; pcGame(id); enhanceRows(view); window.scrollTo({ top: y, behavior: 'instant' }); } });
     }
     if (!a) { pcGone(id); return; }
     pcTitle = `${tf('{name} — PC recomp of {game}', { name: a.name, game: a.game || a.name })} · RecompLauncher`;
@@ -3747,7 +3770,7 @@
       ? `<a class="pc-media yt" href="${esc(m.url)}" target="_blank" rel="noopener" data-yt="${esc(m.id)}"><span class="pc-media-pic"><img src="https://i.ytimg.com/vi/${esc(m.id)}/hqdefault.jpg" alt="" loading="lazy"><i aria-hidden="true"></i></span><span class="pc-media-words"><b>YouTube</b><small>${t('Watch it here')}</small></span></a>`
       : `<a class="pc-media ${esc(m.type)}" href="${esc(m.url)}" target="_blank" rel="noopener"><span class="pc-media-pic"><span>${esc(m.type === 'x' ? 'X' : m.type === 'reddit' ? 'Reddit' : (m.host || '').replace(/\.[a-z]+$/, ''))}</span></span><span class="pc-media-words"><b>${esc(m.host || '')}</b><small dir="auto">${esc(m.title || m.url.replace(/^https:\/\/(www\.)?/, '').slice(0, 70))}</small></span></a>`).join('');
     const myTitle = pcTitleOf('pc', a.id);
-    const others = pcCat.apps.filter((x) => x.id !== a.id && !(myTitle && (myTitle.pc || []).includes(x.id)));
+    const others = pcCat.apps.filter((x) => x.id !== a.id && x.id !== a.parent && !(myTitle && (myTitle.pc || []).includes(x.id)));
     // (3.5) More like this: shared tags count most, then the same kind of game, console and series.
     const myTags = new Set(a.tags || []), mySeries = a.about && a.about.series, myGame = String(a.game || '').toLowerCase();
     const likeScore = (x) => (x.tags || []).filter((g) => myTags.has(g)).length * 2 + (a.genre && a.genre !== 'other' && x.genre === a.genre ? 3 : 0)
@@ -3765,12 +3788,12 @@
             <div class="pc-game-head">
               ${a.cover ? `<img class="pc-game-cover" src="${esc(thumb(a.cover, 400))}" alt="" width="200" height="300">` : ''}
               <div class="pc-game-words">
-                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}${p5 ? `<a class="pc-pill ps5-pill" href="/game/${encodeURIComponent(p5.id)}" title="${esc(t('Also on PS5, through RecompStore'))}">${t('Also on PS5')}${SVG_OUT}</a>` : ''}</div>
+                <div class="pc-pills">${originPill(a.origin)}${genre}<span class="pc-pill plain">${t('Recomp')}</span>${aiChip(a, true)}${lifePill(a)}${a.parent ? `<a class="pc-pill part-pill" href="/pc/game/${encodeURIComponent(a.parent)}">${tf('Part of {name} · {n} games', { name: `<bdi>${esc(a.parentName)}</bdi>`, n: fmtNum(a.partOf) })}</a>` : ''}${p5 ? `<a class="pc-pill ps5-pill" href="/game/${encodeURIComponent(p5.id)}" title="${esc(t('Also on PS5, through RecompStore'))}">${t('Also on PS5')}${SVG_OUT}</a>` : ''}</div>
                 <h1 dir="auto">${esc(a.name)}</h1>
                 ${a.game && a.game !== a.name ? `<p class="pc-based big">${SVG_DISC}${tf('Rebuilt from {game}', { game: `<strong dir="auto">${esc((a.games || []).length > 1 ? a.games.map((g) => g.name).join('; ') : a.game)}</strong>` })}</p>` : ''}
                 ${pcByLine(a)}
                 ${tags ? `<div class="pc-taglist" aria-label="${esc(t('Tags'))}">${tags}</div>` : ''}
-                <p class="pc-head-verdict" data-head-verdict>${pcCounts ? verdictChip(pcCounts[a.id]) : ''}</p>
+                <p class="pc-head-verdict" data-head-verdict>${pcCounts ? verdictChip(pcCounts[rid]) : ''}</p>
               </div>
             </div>
             ${a.blurb ? `<p class="lead" dir="auto">${esc(a.blurb)}</p>` : ''}
@@ -3796,7 +3819,7 @@
             <div class="glass panel">
               <div class="panel-head">${a.icon ? `<img src="${esc(thumb(a.icon, 256))}" alt="" width="112" height="112" class="pc-panel-ico">` : a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" class="pc-panel-ico cover">` : ''}<div><strong dir="auto">${esc(a.name)}</strong><span>${esc(originName(a.origin))}</span></div></div>
               ${a.soon ? `<div class="pc-dl pc-dl-soon"><span class="pc-soon-pill">${t('Coming soon')}</span><div data-notify></div>${!a.repo && a.follow ? `<a class="btn" href="${esc(a.follow)}" target="_blank" rel="noopener">${/^https:\/\/(x|twitter)\.com\//.test(a.follow) ? t('Follow it on X') : t('Follow it')}</a>` : a.repo ? `<a class="btn" href="${gh}" target="_blank" rel="noopener">${hostSay(t('Follow it on GitHub'), t('Follow it on GitLab'), t('Follow it on SourceForge'))}</a>` : ''}</div>` : `<div class="pc-dl" data-dl>
-                <a class="btn primary pc-open-rl" href="recomplauncher://game/${encodeURIComponent(a.id)}" data-rl-open aria-label="${t('Open in RecompLauncher')}"><img src="/assets/mark.svg" alt="" width="18" height="18">RecompLauncher</a>
+                <a class="btn primary pc-open-rl" href="recomplauncher://game/${encodeURIComponent(rid)}" data-rl-open aria-label="${t('Open in RecompLauncher')}"><img src="/assets/mark.svg" alt="" width="18" height="18">RecompLauncher</a>
                 <p class="pc-open-help" data-rl-help role="status" hidden>${tf('RecompLauncher didn\'t open? {get}, or update it, then try again. You can also download it directly below.', { get: `<a href="/pc/launcher">${t('Get RecompLauncher')}</a>` })}</p>
                 <div class="pc-dl-direct" style="--n:${Math.max(1, Math.min(systems.length, 3))}">${systems.map((sx) => `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener" data-sys="${sx}">${osIcon(sx)}${systems.length > 1 ? esc(SYS_NAMES[sx]) : tf('Download for {system}', { system: SYS_NAMES[sx] })}</a>`).join('') || `<a class="btn" href="${ghLatest}" target="_blank" rel="noopener">${t("The developer's release")}</a>`}</div>
               </div>`}
@@ -3840,12 +3863,12 @@
       loaded[name] = true;
       const panel = view.querySelector(`[data-panel="${name}"]`);
       if (name === 'readme') {
-        fetch('/api/pc.php?a=readme&id=' + encodeURIComponent(a.id)).then((r) => r.json()).then((j) => {
+        fetch('/api/pc.php?a=readme&id=' + encodeURIComponent(rid)).then((r) => r.json()).then((j) => {
           if (!j.ok) { panel.innerHTML = `<p class="muted">${esc(j.error || hostSay(t('No README on its GitHub.'), t('No README on its GitLab.'), t('The README is on its SourceForge page.'), tf('The README is on its page on {site}.', { site: fjAt })))}</p>`; return; }
           panel.innerHTML = `<div class="md-body" dir="auto">${mdFull(j.md, j.raw, j.blob)}</div><a class="src" href="${esc(j.url || repoWeb(a.repo, a.host))}" target="_blank" rel="noopener">${hostSay(t('Read it on GitHub'), t('Read it on GitLab'), t('Read it on SourceForge'), tf('Read it on {site}', { site: fjAt }))} ↗</a>`;
         }).catch(() => { panel.innerHTML = `<p class="muted">${hostSay(t('GitHub didn\'t answer. Try again in a moment.'), t('GitLab didn\'t answer. Try again in a moment.'), t('SourceForge didn\'t answer. Try again in a moment.'), tf('{site} didn\'t answer. Try again in a moment.', { site: fjAt }))}</p>`; });
       } else if (name === 'releases') loadNotes(a.repo, panel, a.host);
-      else if (name === 'feedback') pcFeedback(a, panel);
+      else if (name === 'feedback') pcFeedback(rel, panel);
     };
     // (2.9) A long tab (a big README, many updates) folds to where the side column ends, with Show more,
     // so the rows under it (the AI note, no game files, More like this) aren't pushed far down.
@@ -3885,7 +3908,7 @@
     window.addEventListener('resize', () => { if (view.contains(tabs)) foldOpen(); }, { passive: true });
     tabs.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { open(b.dataset.tab); requestAnimationFrame(foldOpen); }));
     open('readme', true);
-    acctGameMount('pc', a.id);
+    acctGameMount('pc', rid);
     requestAnimationFrame(() => { const b = tabs.querySelector('.on'); if (b) { place(b); tabs.classList.add('ready'); } });
     window.addEventListener('resize', () => { const b = tabs.querySelector('.on'); if (b && b.isConnected) place(b); }, { passive: true });
     // A video plays right here, from YouTube's privacy-friendly player.
@@ -3897,16 +3920,16 @@
     }));
     // How many have said how it plays, on the tab, once known.
     pcCountsLoad().then((c) => {
-      const v = verdictOf(c[a.id]);
+      const v = verdictOf(c[rid]);
       const n = view.querySelector('[data-fb-n]'), hv = view.querySelector('[data-head-verdict]');
       if (n && v) n.textContent = ' ' + fmtNum(v.n);
-      if (hv && !hv.innerHTML.trim()) hv.innerHTML = verdictChip(c[a.id]);
+      if (hv && !hv.innerHTML.trim()) hv.innerHTML = verdictChip(c[rid]);
       const pills = view.querySelector('.pc-pills');
-      if (pills && onDeck(a.id) && !pills.querySelector('.deck')) pills.insertAdjacentHTML('beforeend', `<span class="pc-pill deck" title="${esc(t('Steam Deck players say it plays great'))}">${SVG_DECK}${t('Great on Deck')}</span>`);
+      if (pills && onDeck(rid) && !pills.querySelector('.deck')) pills.insertAdjacentHTML('beforeend', `<span class="pc-pill deck" title="${esc(t('Steam Deck players say it plays great'))}">${SVG_DECK}${t('Great on Deck')}</span>`);
       const vs = view.querySelector('[data-versions]');
       if (vs) ps5CountsLoad().then(() => { const v2 = view.querySelector('[data-versions]'); if (v2) v2.outerHTML = versionsHTML('pc', a.id); });
     });
-    pcIG(a, view);
+    pcIG(rel, view);
     // (4.3) Open in RecompLauncher: its recomplauncher:// link. If the browser never leaves the page
     // (the launcher isn't installed, or is too old for links), a line offers to get it.
     view.querySelectorAll('[data-rl-open]').forEach((b) => b.addEventListener('click', () => {
@@ -3920,7 +3943,7 @@
     // The real files from its latest release, straight from GitHub or GitLab (through this site).
     // (4.10) Its repo is down and it was switched to its emergency backup: the files come from there.
     if (a.backup) {
-      fetch('/api/backup.php?id=' + encodeURIComponent(a.id)).then((r) => r.json()).then((j) => {
+      fetch('/api/backup.php?id=' + encodeURIComponent(rid)).then((r) => r.json()).then((j) => {
         if (!j || !j.ok) return;
         view.querySelectorAll('[data-sys]').forEach((b) => {
           const hit = (j.files || []).find((f) => f.os === b.dataset.sys);
@@ -4557,13 +4580,16 @@
   function searchItems(q) {
     if (document.body.dataset.platform === 'pc') {
       const words = fold(q).split(/\s+/).filter(Boolean);
-      return ((pcCat && (pcCat.listed || pcCat.apps)) || []).map((a) => {
+      const base = (pcCat && (pcCat.listed || pcCat.apps)) || [];
+      // (4.13) Each game of a release that carries several is found by itself too, once there's a search.
+      const kids = words.length ? base.filter(isPack).flatMap((p) => p.games.map((g) => pcChild(p, g))) : [];
+      return base.concat(kids).map((a) => {
         const hay = fold([a.name, a.game, a.author, originName(a.origin), (a.games || []).map((g) => g.name).join(' ')].join(' '));
         if (!words.every((w) => hay.includes(w))) return null;
         const name = fold(a.name + ' ' + (a.game || ''));
         return [a, false, !words.length ? (-(a.downloads || 0)) : name.startsWith(words[0]) ? 0 : name.includes(words[0]) ? 1 : 2, true];
       }).filter(Boolean).sort((x, y) => x[2] - y[2] || String(x[0].name).localeCompare(String(y[0].name)))
-        .map((r) => { const tt = pcTitleOf('pc', r[0].id); const la = tt && pcCat.listed.find((x) => x.id === pcLeadOf(tt, pcCat.listed)); return la ? [la, r[1], r[2], r[3]] : r; })
+        .map((r) => { if (r[0].parent) return r; const tt = pcTitleOf('pc', r[0].id); const la = tt && pcCat.listed.find((x) => x.id === pcLeadOf(tt, pcCat.listed)); return la ? [la, r[1], r[2], r[3]] : r; })
         .filter((r, i, arr) => arr.findIndex((o) => o[0].id === r[0].id) === i).slice(0, q ? 24 : 8);
     }
     const all = cat.apps.map((a) => [a, false]).concat((cat.soon || []).map((a) => [a, true]));
@@ -4596,7 +4622,7 @@
       ? items.map(([a, soon, , pc]) => pc ? `
         <a class="sr" role="option" href="/pc/game/${encodeURIComponent(a.id)}">
           <span class="sr-ico pc-sr">${a.cover ? `<img src="${esc(thumb(a.cover, 400))}" alt="" loading="lazy">` : iconHTML(a, 56)}</span>
-          <span class="sr-words"><strong dir="auto">${esc(a.name)}</strong><span dir="auto">${esc([a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span></span>
+          <span class="sr-words"><strong dir="auto">${esc(a.name)}</strong><span dir="auto">${esc([a.parent ? tf('Part of {name} · {n} games', { name: a.parentName, n: fmtNum(a.partOf) }) : a.game && a.game !== a.name ? a.game : '', originName(a.origin)].filter(Boolean).join(' · '))}</span></span>
         </a>` : `
         <a class="sr" role="option" href="/${soon ? 'soon' : 'game'}/${encodeURIComponent(a.id)}" data-id="${esc(a.id)}"${soon ? ' data-soon' : ''}>
           <span class="sr-ico">${iconHTML(a, 56)}</span>
@@ -7547,7 +7573,7 @@
   // the server answers with the page's title and links for search engines; here they're the same page.
   const PATHS = ['/games', '/emulators', '/apps', '/tools', '/how', '/get', '/about', '/contact', '/team', '/submit', '/report', '/ids', '/soon', '/link', '/my-ps5', '/press', '/beta', '/developers', '/hub', '/dmca', '/signin', '/account', '/account/reset', '/library', '/terms', '/privacy', '/pc', '/pc/all', '/pc/how', '/pc/top', '/pc/trending', '/pc/new', '/pc/whats-new', '/pc/consoles', '/pc/launcher', '/pc/settings', '/pc/sdk', '/pc/action', '/pc/adventure', '/pc/platformers', '/pc/racing', '/pc/fighting', '/pc/shooters', '/pc/sports', '/pc/rpg', '/pc/puzzle'];
   const pathNow = () => location.pathname.replace(/(.)\/+$/, '$1');
-  const pathPage = () => !(location.hash.length > 1) && (PATHS.includes(pathNow()) || /^\/dev\/[a-z0-9-]{1,40}$/.test(pathNow()) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(pathNow()));
+  const pathPage = () => !(location.hash.length > 1) && (PATHS.includes(pathNow()) || /^\/dev\/[a-z0-9-]{1,40}$/.test(pathNow()) || /^\/pc\/game\/[a-z0-9-]{1,100}$/.test(pathNow()));
   function current() {
     if (LAUNCHER) {
       const p = pathNow();
@@ -7704,7 +7730,7 @@
   }
 
   // (2.6) Links to the site's own pages (/games, /game/<ID>...) open here, without loading the page again.
-  const ownPath = (p) => LAUNCHER ? PC_PATH_RE.test(pcIn(p)) || LAUNCHER_OWN.test(p) : p === '/' || PATHS.includes(p) || /^\/(game|soon)\/[A-Za-z0-9_-]+$/.test(p) || /^\/dev\/[a-z0-9-]{1,40}$/.test(p) || /^\/pc\/game\/[a-z0-9-]{1,64}$/.test(p);
+  const ownPath = (p) => LAUNCHER ? PC_PATH_RE.test(pcIn(p)) || LAUNCHER_OWN.test(p) : p === '/' || PATHS.includes(p) || /^\/(game|soon)\/[A-Za-z0-9_-]+$/.test(p) || /^\/dev\/[a-z0-9-]{1,40}$/.test(p) || /^\/pc\/game\/[a-z0-9-]{1,100}$/.test(p);
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest('a[href]');

@@ -3034,6 +3034,9 @@ body[data-platform="pc"] .top-actions{margin-inline-start:0}
 .pc-sys-ps5 .out-ico,.ps5-pill .out-ico{width:11px;height:11px;flex:none}
 .pc-pill.ps5-pill{--c:#5b8eff;color:#dfe8ff;text-decoration:none}
 .pc-pill.ps5-pill:hover{color:#fff;border-color:rgba(140,180,255,.8)}
+/* (4.13) A release's game: links to the release it's part of */
+.pc-pill.part-pill{--c:#2fbf9b;color:#d9fff3;text-decoration:none}
+.pc-pill.part-pill:hover{color:#fff;border-color:rgba(80,220,180,.8)}
 /* (4.8) The Team (recomplauncher.com/team) */
 .tm .page-head{margin-bottom:34px}
 .tm .page-head .lead{margin:0}

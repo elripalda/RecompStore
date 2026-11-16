@@ -210,6 +210,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($_POST['about'])) {
                 $ab = rs_pc_about_fetch($a, (int)($a['igdb_id'] ?? 0));
                 if ($ab) { $a['about'] = $ab; unset($a['about_none']); } else $a['about_none'] = gmdate('Y-m-d');
+                // (4.13) And each of its games, when it carries several.
+                if (rs_pc_games($a)) [$a] = rs_pc_games_about($a, true);
                 rs_pc_save($a);
                 rs_flash($ab ? 'About the game: ' . $ab['name'] . ($ab['released'] ?? '' ? ' (' . substr($ab['released'], 0, 4) . ')' : '') . ' from IGDB.' : 'IGDB has no close match. Put its IGDB game ID in and try again.', $ab ? 'ok' : 'err');
             }
@@ -233,12 +235,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // (3.5) Fills "About the game" from IGDB for the ones that don't have it yet, a few at a time.
             @set_time_limit(120);
             $n = max(1, min(20, (int)($_POST['n'] ?? 10))); $redo = !empty($_POST['redo']);
-            $todo = array_values(array_filter(rs_pc_apps(), fn($x) => empty($x['about']) && ($redo || empty($x['about_none']))));
+            $gamesTodo = fn($x) => (bool)array_filter(rs_pc_games($x), fn($g) => empty($g['about']) && ($redo || empty($g['about_none'])));
+            $todo = array_values(array_filter(rs_pc_apps(), fn($x) => (empty($x['about']) && ($redo || empty($x['about_none']))) || $gamesTodo($x)));
             $got = []; $miss = [];
             foreach (array_slice($todo, 0, $n) as $x) {
-                try { $ab = rs_pc_about_fetch($x, (int)($x['igdb_id'] ?? 0)); } catch (Throwable $e) { header('Content-Type: application/json'); echo json_encode(['error' => $e->getMessage()]); exit; }
+                $needs = empty($x['about']) && ($redo || empty($x['about_none']));
+                try {
+                    $ab = $needs ? rs_pc_about_fetch($x, (int)($x['igdb_id'] ?? 0)) : null;
+                    [$gx, $gf, $gm] = rs_pc_games($x) ? rs_pc_games_about($x, $redo) : [$x, 0, 0];
+                } catch (Throwable $e) { header('Content-Type: application/json'); echo json_encode(['error' => $e->getMessage()]); exit; }
                 $x = rs_pc_app($x['id']) ?? $x; // saved on top of the newest copy, so edits made meanwhile stay
-                if ($ab) { $x['about'] = $ab; unset($x['about_none']); $got[] = $x['id'] . ' = ' . $ab['name']; } else { $x['about_none'] = gmdate('Y-m-d'); $miss[] = $x['id']; }
+                if ($needs) { if ($ab) { $x['about'] = $ab; unset($x['about_none']); $got[] = $x['id'] . ' = ' . $ab['name']; } else { $x['about_none'] = gmdate('Y-m-d'); $miss[] = $x['id']; } }
+                if ($gf || $gm) { $x['games'] = $gx['games']; $gf && $got[] = $x['id'] . ': ' . $gf . ' game' . ($gf === 1 ? '' : 's'); $gm && $miss[] = $x['id'] . ' (' . $gm . ' game' . ($gm === 1 ? '' : 's') . ')'; }
                 rs_pc_save($x);
             }
             header('Content-Type: application/json');

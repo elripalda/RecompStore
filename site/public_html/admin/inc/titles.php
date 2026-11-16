@@ -212,21 +212,32 @@ function rs_title_catalog(array &$apps): array {
     // (4.11) What's Recommended now, so a close call doesn't flip it back and forth.
     $prevPick = [];
     if (defined('RS_PC_CATALOG') && is_file(RS_PC_CATALOG)) foreach ((array)(json_decode((string)@file_get_contents(RS_PC_CATALOG), true)['titles'] ?? []) as $pt) $prevPick[(string)($pt['id'] ?? '')] = (string)($pt['pick'] ?? '');
+    // (4.13) One game of a release that carries several (COGBox's Gears of War 2: "cogbox--gow2") can be
+    // a version too, by its full id, when its release is in the catalog and lists that game. It counts
+    // like any recomp toward the two a title needs, and its release's games[] entry gets the title's id
+    // (games[].title), which the launcher and playtime totals read.
+    $subOk = function (string $id) use ($apps, $byId): ?array {
+        if (!preg_match('/^(.+)--([a-z0-9]{1,16})$/', $id, $m) || !isset($byId[$m[1]])) return null;
+        foreach ((array)($apps[$byId[$m[1]]]['games'] ?? []) as $k => $g) if ((string)($g['id'] ?? '') === $m[2]) return [$byId[$m[1]], $k];
+        return null;
+    };
     $out = [];
     foreach (rs_titles() as $t) {
-        $pcIds = array_values(array_filter($t['pc'], fn($id) => isset($byId[$id])));
+        $pcIds = array_values(array_filter($t['pc'], fn($id) => isset($byId[$id]) || $subOk((string)$id)));
         $ps5Ids = array_values(array_filter($t['ps5'], fn($id) => isset($ps5[$id])));
         if (count($pcIds) + count($ps5Ids) < 2) continue;
+        foreach ($pcIds as $id) if (!isset($byId[$id]) && ($at = $subOk((string)$id))) $apps[$at[0]]['games'][$at[1]]['title'] = $t['id'];
+        $plain = array_values(array_filter($pcIds, fn($id) => isset($byId[$id])));
         // Art: a version without some picture takes it from the first one that has it.
         foreach (['cover', 'hero', 'icon', 'logo'] as $k) {
             $donor = '';
-            foreach ($pcIds as $id) if (($apps[$byId[$id]][$k] ?? '') !== '') { $donor = $apps[$byId[$id]][$k]; break; }
+            foreach ($plain as $id) if (($apps[$byId[$id]][$k] ?? '') !== '') { $donor = $apps[$byId[$id]][$k]; break; }
             if ($donor === '') continue;
-            foreach ($pcIds as $id) if (($apps[$byId[$id]][$k] ?? '') === '') $apps[$byId[$id]][$k] = $donor;
+            foreach ($plain as $id) if (($apps[$byId[$id]][$k] ?? '') === '') $apps[$byId[$id]][$k] = $donor;
         }
         $icon = '';
-        foreach ($pcIds as $id) if ($apps[$byId[$id]]['icon'] !== '') { $icon = $apps[$byId[$id]]['icon']; break; }
-        foreach ($pcIds as $id) $apps[$byId[$id]]['title'] = $t['id'];
+        foreach ($plain as $id) if ($apps[$byId[$id]]['icon'] !== '') { $icon = $apps[$byId[$id]]['icon']; break; }
+        foreach ($plain as $id) $apps[$byId[$id]]['title'] = $t['id'];
         $out[] = [
             'id' => $t['id'], 'name' => $t['name'], 'origin' => $t['origin'],
             'pick' => $pick = rs_title_pick($t, array_intersect_key($listed, array_flip($pcIds)), $ps5Ids, $recent, $prevPick[$t['id']] ?? ''),

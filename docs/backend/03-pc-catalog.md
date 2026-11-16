@@ -50,6 +50,10 @@ Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked 
 
 `inc/titles.php`. A title is the game; every listing built from it is a version under it. `rs_titles_autogroup()` groups new ones on Publish. The site shows a game once in lists and lets you pick the version on its page. Trending and Emergency backup work per listing (each version on its own).
 
+**A release's game as a version** (4.13): a title can list one game of a release that carries several (COGBox, Athelas) by its full id, `<release id>--<game id>` (`cogbox--gow2`, checked with `rs_pc_game_of`). It counts toward the two versions a title needs, takes no art from the others, and is never the Recommended one (that stays a plain listing). `rs_title_catalog` puts the title's id on the release's `games[k].title`, which the launcher and playtime totals read. Add one on Admin > Games with versions by typing the full id.
+
+**Games of a release** (`games[]`, from `rs_pc_games_entry`): id, name, args, title_id, inputs, art, and now `about` (IGDB, `rs_pc_games_about`: by the game's own name on the release's console, else any console with an exact name match; a game's own `igdb_id` wins), plus `description`, `genre` and `tags` when set (without them a game uses its release's) and `title`. The 30-minute refresh fills `about` for 3 releases a run; the listing's "About the game" button and the PC list's batch do it too. The website's light copy keeps only id, name, art, title, genre and tags.
+
 **Recommended** (`titles[].pick`, read by both the website and the launcher): the version pinned on Admin > Games with versions, else the best score out of 100 from `rs_title_rec_scores()`:
 - players' rating 45 (from 3 reports, else 50);
 - downloads 30, against the game's most downloaded version (1/100 of it or less scores 0);
