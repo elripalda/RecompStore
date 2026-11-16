@@ -65,4 +65,4 @@ The PR body follows the hand-made ones: What it adds for players, Not in this pu
 - **New**: something of theirs after our last comment and after **Got it** (a merge with nothing else new clears itself once the game ships its file, by the launcher support check, or 3 days after the merge) (`rs_prq_reply_ok`, also the queue's Mark answered). A thread closed more than a week before it was first read starts as read. **Waiting on us**: open, and their last comment is newer than ours. That's what `rs_prq_replies()` gives the PR queue's Developer replied stage and the Games list.
 - The tab's count in the menu is how many are new. Views: New, Waiting on us, Open, Merged or closed, All; each item shows their newest message, the whole conversation, Answer on GitHub, Got it and its page.
 
-The admin search (`find.php`), given a repo that's listed, also shows its Launcher support state, linking to its page on Check a game (4.13).
+The admin search (`find.php`) shows Launcher support states too (`rs_find_sdk_item`, 4.13): for a pasted repo that's listed, and for the first three recomps found by name, each linking to its page on Check a game.

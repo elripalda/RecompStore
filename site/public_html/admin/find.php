@@ -31,21 +31,7 @@ if (rs_can_page('pc.php') && preg_match('#(github\.com|gitlab\.com|sourceforge\.
             $it[] = ['href' => 'pc.php?lookup=' . rawurlencode($rsq['link']) . '&t=' . rawurlencode(rs_csrf()), 'label' => 'Not on RecompStore yet', 'note' => 'Add it to Found on GitHub to be checked'];
         }
         // (4.13) Xarishark: where it stands on Launcher support, one click to its page there.
-        if ($a && rs_can_page('sdk-support.php')) {
-            try {
-                require_once __DIR__ . '/inc/sdk.php';
-                require_once __DIR__ . '/inc/prq.php';
-                $sk = rs_kv_get('sdk:' . $a['id']);
-                $sc = $sk ? ['v' => json_decode((string)$sk['v'], true), 'age' => (int)$sk['age'], 't' => 0] : null;
-                $sq = rs_db()->prepare('SELECT * FROM pc_prq WHERE app_id = ? ORDER BY id DESC LIMIT 1');
-                $sq->execute([(string)$a['id']]);
-                $qr = $sq->fetch(PDO::FETCH_ASSOC) ?: null;
-                $row = rs_sdk_row($a, 0, $sc, rs_sdk_marks(), $qr ? [(string)$a['id'] => $qr] : [], array_intersect_key(rs_prq_replies(), [(string)$a['id'] => 1]));
-                $sLab = ['ships' => 'Ships its own file', 'pr' => 'Pull request open', 'replied' => 'Developer replied', 'queue' => 'In the PR queue', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'missing' => 'No file yet', 'unknown' => 'Couldn\'t check yet'][$row['state']] ?? $row['state'];
-                $it[] = ['href' => 'sdk-support.php?tab=check&app=' . rawurlencode((string)$a['id']), 'label' => 'Launcher support: ' . $sLab,
-                    'note' => ['json' => 'Its file, in our catalog', 'profile' => 'Our setup profile', 'steps' => 'Setup steps only', 'none' => 'Nothing yet'][$row['now']] ?? ''];
-            } catch (Throwable $e) { rs_errlog('find sdk', $e); }
-        }
+        if ($a && ($si = rs_find_sdk_item($a))) $it[] = $si;
         $it[] = ['href' => $rsq['link'], 'label' => 'Open the repo', 'note' => $rsq['key']];
         $out[] = ['title' => 'This repo', 'items' => $it];
     }
@@ -81,6 +67,28 @@ if (rs_can_page('players.php')) {
     } catch (Throwable $e) { /* accounts not set up */ }
 }
 
+// (4.13) A recomp's Launcher support state as a search line, linking to its page on Check a game.
+function rs_find_sdk_item(array $a, bool $named = false): ?array {
+    static $marks = null, $replies = null;
+    if (!rs_can_page('sdk-support.php')) return null;
+    try {
+        require_once __DIR__ . '/inc/sdk.php';
+        require_once __DIR__ . '/inc/prq.php';
+        $marks ??= rs_sdk_marks();
+        $replies ??= rs_prq_replies();
+        $id = (string)$a['id'];
+        $sk = rs_kv_get('sdk:' . $id);
+        $sc = $sk ? ['v' => json_decode((string)$sk['v'], true), 'age' => (int)$sk['age'], 't' => 0] : null;
+        $sq = rs_db()->prepare('SELECT * FROM pc_prq WHERE app_id = ? ORDER BY id DESC LIMIT 1');
+        $sq->execute([$id]);
+        $qr = $sq->fetch(PDO::FETCH_ASSOC) ?: null;
+        $row = rs_sdk_row($a, 0, $sc, $marks, $qr ? [$id => $qr] : [], array_intersect_key($replies, [$id => 1]));
+        $lab = ['ships' => 'Ships its own file', 'pr' => 'Pull request open', 'replied' => 'Developer replied', 'queue' => 'In the PR queue', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'missing' => 'No file yet', 'unknown' => 'Couldn\'t check yet'][$row['state']] ?? $row['state'];
+        $now = ['json' => 'Its file, in our catalog', 'profile' => 'Our setup profile', 'steps' => 'Setup steps only', 'none' => 'Nothing yet'][$row['now']] ?? '';
+        return ['href' => 'sdk-support.php?tab=check&app=' . rawurlencode($id), 'label' => ($named ? (string)$a['name'] . ': ' : 'Launcher support: ') . $lab, 'note' => $now];
+    } catch (Throwable $e) { rs_errlog('find sdk', $e); return null; }
+}
+
 // PC recomps
 if (rs_can_page('pc.php')) {
     $pc = [];
@@ -90,6 +98,16 @@ if (rs_can_page('pc.php')) {
         if (count($pc) >= 6) break;
     }
     if ($pc) $out[] = ['title' => 'PC recomps', 'items' => $pc];
+    // (4.13) Xarishark: their Launcher support state too, for the first few found by name.
+    if ($pc && empty($rsq)) {
+        $sdk = [];
+        foreach (rs_pc_apps() as $a) {
+            if (count($sdk) >= 3) break;
+            if (!$has((string)$a['name'], (string)$a['repo'], (string)$a['id'], (string)($a['game'] ?? ''))) continue;
+            if ($si = rs_find_sdk_item($a, true)) $sdk[] = $si;
+        }
+        if ($sdk) $out[] = ['title' => 'Launcher support', 'items' => $sdk];
+    }
 }
 
 // PS5 games
