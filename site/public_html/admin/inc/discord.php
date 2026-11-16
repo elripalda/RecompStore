@@ -358,10 +358,11 @@ function rs_dc_sync_devs(bool $missing = false): array {
         if ((string)$acc['discord_id'] === '') { $none++; continue; }
         if ($missing && ($k = rs_kv_get('dcrole:' . (int)$acc['id'])) && $k['v'] === (string)$acc['discord_id']) continue;
         [$ok, $st] = rs_dc_role_put($acc);
-        if ($ok) { $given++; usleep(300000); continue; }
+        // Discord's "slow down": wait and try that one again.
+        if (!$ok && $st === 429) { sleep(3); [$ok, $st] = rs_dc_role_put($acc); }
+        if ($ok) { $given++; usleep(600000); continue; }
         $failed++;
         if ($st === 403) break;
-        if ($st === 429) { sleep(3); }
     }
     return [$given, $none, $failed];
 }
