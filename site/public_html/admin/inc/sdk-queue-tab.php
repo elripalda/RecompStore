@@ -15,7 +15,13 @@ if ($qKeyOnce !== '') rs_secret_put('prq_key_once', '');
 $qStuckAt = time() - RS_PRQ_STUCK;
 $qRows = rs_db()->query("SELECT id, app_id, repo, status, error, pick, updated, UNIX_TIMESTAMP(updated) u FROM pc_prq WHERE status IN ('todo', 'drafting', 'outbox', 'skipped')")->fetchAll();
 $qCount = ['ready' => (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'draft'")->fetchColumn(), 'waiting' => 0, 'drafting' => 0, 'going' => 0,
-    'sent' => (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'sent'")->fetchColumn(), 'skipped' => 0];
+    'sent' => (int)rs_db()->query("SELECT COUNT(*) FROM pc_prq WHERE status = 'sent'")->fetchColumn(), 'skipped' => 0, 'replied' => 0];
+// (4.12) Developers who answered on a pull request (or issue) and are waiting on us; they leave Sent.
+$qReplies = rs_prq_replies();
+$qCount['replied'] = count($qReplies);
+$qSentReplied = 0;
+foreach (rs_db()->query("SELECT app_id FROM pc_prq WHERE status = 'sent'")->fetchAll() as $sr) if (isset($qReplies[(string)$sr['app_id']])) ++$qSentReplied;
+$qCount['sent'] -= $qSentReplied;
 foreach ($qRows as $r) {
     if ($r['status'] === 'drafting' && (int)$r['u'] >= $qStuckAt) $qCount['drafting']++;
     elseif ($r['status'] === 'todo' || $r['status'] === 'drafting') $qCount['waiting']++;
@@ -28,9 +34,10 @@ $qStages = [
     'ready' => ['Ready for you', 'Written: look over, then send'],
     'going' => ['Going out', 'You pressed Send: 5 go out an hour'],
     'sent' => ['Sent', 'Pull request open: up to the developer'],
+    'replied' => ['Developer replied', 'They answered: your turn'],
     'skipped' => ['Skipped', 'No pull request for these'],
 ];
-$qShow = isset($qStages[$_GET['show'] ?? '']) ? (string)$_GET['show'] : ($qCount['ready'] ? 'ready' : ($qCount['drafting'] ? 'drafting' : 'waiting'));
+$qShow = isset($qStages[$_GET['show'] ?? '']) ? (string)$_GET['show'] : ($qCount['replied'] ? 'replied' : ($qCount['ready'] ? 'ready' : ($qCount['drafting'] ? 'drafting' : 'waiting')));
 $qWhat = '';
 $qDate = fn(string $t) => h(gmdate('M j, H:i', (int)strtotime($t . ' UTC'))) . ' UTC';
 $qPage = fn(string $id) => 'sdk-support.php?tab=check&app=' . rawurlencode($id);
@@ -149,11 +156,23 @@ $qHelp = function (string $err): string {
 <section class="card">
   <h2>Sent <span class="muted small"><?= number_format($qCount['sent']) ?> pull requests</span></h2>
   <p class="muted small">Open on the developer's repo: they merge it, change it, or close it. If they edit their README later and it conflicts, it's rebuilt on their newest code by itself. <b>Redraft and update</b> writes it again with the current drafter and lets you push that to the same pull request.</p>
-  <?php foreach ($qSent as $pq): $qa = rs_pc_app((string)$pq['app_id']); $fx = rs_prq_fix_state((int)$pq['id']); ?>
+  <?php foreach ($qSent as $pq): if (isset($qReplies[(string)$pq['app_id']])) continue; $qa = rs_pc_app((string)$pq['app_id']); $fx = rs_prq_fix_state((int)$pq['id']); ?>
   <div class="q-row"><span class="q-name"><strong><a href="<?= h((string)$pq['pr_url']) ?>" target="_blank" rel="noopener"><?= h($qa['name'] ?? $pq['repo']) ?> ↗</a></strong><span class="muted small"><?= h((string)$pq['repo']) ?></span></span>
     <span class="q-row-st small">Sent <?= $qDate((string)($pq['sent_at'] ?: $pq['updated'])) ?><?= (string)$pq['who'] !== '' ? ' by ' . h((string)$pq['who']) : '' ?><?php if ($fx && ($fx['why'] ?? '') !== ''): ?><br><span class="warn">Conflict, needs a look: <?= h((string)$fx['why']) ?></span><?php elseif ($fx): ?><br><span class="ok">Rebuilt after a conflict</span><?php endif; ?></span>
     <form method="post" class="q-row-btns"><?= $csrf ?><input type="hidden" name="qid" value="<?= (int)$pq['id'] ?>"><button class="btn small" name="action" value="prq_reopen">Redraft and update</button><?php if ($qa): ?><a class="btn small" href="<?= h($qPage((string)$qa['id'])) ?>">Its page</a><?php endif; ?></form></div>
   <?php endforeach; if (!$qSent): ?><p class="muted">None sent yet.</p><?php endif; ?>
+</section>
+<?php endif; ?>
+
+<?php if ($qShow === 'replied'): ?>
+<section class="card">
+  <h2>Developer replied <span class="muted small"><?= number_format($qCount['replied']) ?> waiting on us</span></h2>
+  <p class="muted small">The developer answered on the pull request (or the issue asking for support) and nobody on the team has answered since. Pull requests and issues are looked at every 3 hours. Once one of us comments on GitHub it goes back to Sent by itself; answered somewhere else? <b>Mark answered</b>.</p>
+  <?php uasort($qReplies, fn($x, $y) => (int)$y['t'] <=> (int)$x['t']); foreach ($qReplies as $rid => $rp): $qa = rs_pc_app((string)$rid); ?>
+  <div class="q-row"><span class="q-name"><strong><a href="<?= h((string)$rp['pr']) ?>" target="_blank" rel="noopener"><?= h($qa['name'] ?? $rid) ?> ↗</a></strong><span class="muted small"><?= h($qa['repo'] ?? '') ?> · <?= h(($rp['kind'] ?? '') === 'issues' ? 'issue' : 'pull request') ?> <?= h((string)($rp['state'] ?? 'open')) ?></span></span>
+    <span class="q-row-st small"><b><?= h((string)$rp['who']) ?></b> replied <?= h((string)$rp['at']) ?> UTC<span class="q-reply"><?= h((string)$rp['text'] !== '' ? (string)$rp['text'] : '(no text)') ?></span></span>
+    <form method="post" class="q-row-btns"><?= $csrf ?><input type="hidden" name="app" value="<?= h((string)$rid) ?>"><a class="btn small primary" href="<?= h((string)$rp['url']) ?>" target="_blank" rel="noopener">Answer on GitHub ↗</a><button class="btn small" name="action" value="prq_reply_ok">Mark answered</button><?php if ($qa): ?><a class="btn small" href="<?= h($qPage((string)$qa['id'])) ?>">Its page</a><?php endif; ?></form></div>
+  <?php endforeach; if (!$qReplies): ?><p class="muted">No developer is waiting on an answer.</p><?php endif; ?>
 </section>
 <?php endif; ?>
 
@@ -182,6 +201,10 @@ $qHelp = function (string $err): string {
         <input type="password" name="ai_key" autocomplete="off" placeholder="<?= $qHasAi ? 'Paste a new one to replace it, or leave empty and save to remove it' : 'sk-ant-…' ?>"></label>
       <small class="muted">Make one on console.anthropic.com → API Keys. Draft now and test drafts run on this server with it. It's kept encrypted on the server. Which models it uses is on <a href="ai-usage.php">AI usage</a>.</small>
       <button class="btn">Save key</button></form>
+    <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_auto">
+      <label class="check"><input type="checkbox" name="on" value="1"<?= rs_prq_auto_on() ? ' checked' : '' ?>> Send green drafts by themselves</label>
+      <small class="muted">A draft the review marks green (nothing missing or blocking, made by the new drafter, no changes to their code) goes in line to be sent, 5 an hour, without anyone pressing Send. Drafts that change code, and redrafts of ones already sent, still wait for you.</small>
+      <button class="btn">Save</button></form>
     <form method="post"><?= $csrf ?><input type="hidden" name="action" value="prq_key">
       <label>The daily run's key <span class="muted small"><?= (string)rs_setting('prq_key_hash', '') !== '' ? 'set' : 'not set' ?></span></label>
       <?php if ($qKeyOnce !== ''): ?><input readonly class="mono" value="<?= h($qKeyOnce) ?>" onclick="this.select()"><small class="warn">Copy it now into the RecompStore repo on GitHub as the secret <code>RS_PRQ_KEY</code> (Settings → Secrets and variables → Actions). It isn't shown again.</small>

@@ -7,14 +7,16 @@
   if (!dataEl) return;
   var D = JSON.parse(dataEl.textContent);
   var PER = 100;
-  var STATE = { ships: ['Ships its own file', 'ok'], pr: ['Pull request open', 'blue'], no: ['Won\'t support it', 'warn'], locked: ['Pull requests closed', 'violet'], missing: ['No file yet', 'bad'], unknown: ['Couldn\'t check yet', ''] };
+  var STATE = { ships: ['Ships its own file', 'ok'], pr: ['Pull request open', 'blue'], replied: ['Developer replied', 'hot'], queue: ['In the PR queue', 'blue'], no: ['Won\'t support it', 'warn'], locked: ['Pull requests closed', 'violet'], missing: ['No file yet', 'bad'], unknown: ['Couldn\'t check yet', ''] };
+  // (4.12) Where it is in the PR queue
+  var QSTAGE = { todo: 'Waiting to be drafted', drafting: 'Drafting now', draft: 'Draft ready for you', outbox: 'Going out' };
   var NOW = {
     json: ['Its file, in our catalog', 'The developer\'s recomplauncher.json is pasted into the catalog. Shipping it in the release keeps it up to date.'],
     profile: ['Our setup profile', 'Easy Setup works from a profile we wrote. The developer\'s own file would be better.'],
     steps: ['Setup steps only', 'Players follow written steps before the first play.'],
     none: ['Nothing yet', 'Players set it up by hand.']
   };
-  var ORDER = { missing: 0, unknown: 1, pr: 2, locked: 3, no: 4, ships: 5 };
+  var ORDER = { replied: 0, missing: 1, unknown: 2, queue: 3, pr: 4, locked: 5, no: 6, ships: 7 };
 
   var byId = {};
   var rows = D.rows;
@@ -37,6 +39,8 @@
     var s = STATE[r.state] || STATE.unknown;
     if (r.state === 'pr' && r.mark && r.mark.kind === 'issue') return [/\/discussions\//.test(r.mark.url) ? 'Discussion open' : 'Issue open', 'blue'];
     if (r.state === 'pr' && r.pr) return r.pr === 'merged' ? ['Pull request merged', 'ok'] : (r.pr === 'closed' ? ['Pull request closed', 'warn'] : ['Pull request open', 'blue']);
+    if (r.state === 'queue') return [QSTAGE[r.q] || 'In the PR queue', 'blue'];
+    if (r.state === 'replied') return [(r.reply ? r.reply.who + ' replied' : 'Developer replied'), 'hot'];
     if (r.state === 'unknown' && r.waiting) return ['Not checked yet', ''];
     return s;
   }
@@ -145,6 +149,8 @@
     var main = '';
     if (r.state === 'ships') main = hasLauncherBadge ? '' : badgePrBtn(' primary');
     else if (r.state === 'pr' && mk && mk.url) main = '<a class="btn primary" href="' + esc(mk.url) + '" target="_blank" rel="noopener">Open the ' + (mk.kind === 'issue' ? (/\/discussions\//.test(mk.url) ? 'discussion' : 'issue') : 'pull request') + ' ↗</a>';
+    else if (r.state === 'replied' && r.reply) main = '<a class="btn primary" href="' + esc(r.reply.url) + '" target="_blank" rel="noopener">Answer ' + esc(r.reply.who) + ' on GitHub ↗</a>';
+    else if (r.state === 'queue') main = '<a class="btn primary" href="sdk-support.php?tab=queue&amp;show=' + ({ todo: 'waiting', drafting: 'drafting', draft: 'ready', outbox: 'going' }[r.q] || 'waiting') + '">See it in the PR queue</a>';
     else if (r.state === 'locked') main = '<div class="sdk-doors" data-doors="' + esc(r.id) + '"><span class="muted small"><span class="sdk-spin" aria-hidden="true"></span> Checking whether it takes issues or discussions…</span></div>';
     else main = promptBtn(' primary');
     var readmeTxt = r.badge ? '★ ' + badgeNames(r) + ' badge' : (r.link ? '☆ Links to us, no badge' : (r.badge === false ? 'No badge or link' : 'Not checked yet'));
@@ -165,6 +171,7 @@
       + '<div class="kv"><span>Downloads</span><span>' + fmt(r.dl) + ' · #' + r.rank + '</span></div>'
       + (mk ? '<div class="kv"><span>Marked</span><span>' + esc(mk.who) + ', ' + esc(mk.at) + (r.state === 'no' && mk.url ? ' · <a href="' + esc(mk.url) + '" target="_blank" rel="noopener">where ↗</a>' : '') + '</span></div>' : '')
       // (4.11) Everything about this game in one place: what players get, its drafts, the next step.
+      + (r.state === 'replied' && r.reply ? '<blockquote class="sdk-reply"><strong>' + esc(r.reply.who) + '</strong> <span class="muted small">' + esc(r.reply.at) + ' UTC</span><p>' + esc(r.reply.text || '(no text)') + '</p></blockquote>' : '')
       + '<div class="sdk-side-acts"><a class="btn primary wide" href="sdk-support.php?tab=check&amp;app=' + encodeURIComponent(r.id) + '">Open its page: what players get, drafts, next step</a>' + main.replace('btn primary', 'btn') + more.join('') + '</div>';
     if (r.state === 'locked') {
       h += '<form class="sdk-issue-link" data-act="mark_issue"><label>Posted it? Paste its link<input name="url" required placeholder="https://github.com/' + esc(r.repo) + '/issues/…" spellcheck="false"></label><button class="btn">Save</button></form>';

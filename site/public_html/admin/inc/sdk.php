@@ -81,21 +81,30 @@ function rs_sdk_checks(): array {
 }
 // One recomp's row: its status, the README badge, what Easy Setup runs on today, and whether it's
 // due a check (never checked, older than a week, or checked before the badge was looked at).
-function rs_sdk_row(array $a, int $rank, ?array $c, array $marks): array {
+function rs_sdk_row(array $a, int $rank, ?array $c, array $marks, array $queue = [], array $replies = []): array {
     $r = $c && is_array($c['v']) ? $c['v'] : null;
     $got = $r ? (string)($r['has'] ?? 'unknown') : 'waiting';
     $mk = $marks[$a['id']] ?? null;
+    // (4.12) Xarishark: one the PR queue is working on isn't "No file yet": it's in the queue (waiting,
+    // drafting, ready, going out), or sent, which counts as a pull request open like a hand-made mark.
+    $q = $queue[$a['id']] ?? null;
+    if (!$mk && $q && $q['status'] === 'sent' && (string)$q['pr_url'] !== '') $mk = ['kind' => 'pr', 'url' => (string)$q['pr_url'], 'who' => (string)$q['who'], 'at' => '', 'queue' => true];
     // A pull request that got merged and shipped: it's done, whatever the mark says.
     if (in_array($got, ['release', 'repo'], true)) $state = 'ships';
     // (4.8) An issue or discussion asking for it (the repo takes no pull requests) counts with the PRs.
     elseif ($mk) $state = $mk['kind'] === 'issue' ? 'pr' : (in_array($mk['kind'], ['pr', 'locked'], true) ? $mk['kind'] : 'no');
+    elseif ($q && in_array($q['status'], ['todo', 'drafting', 'draft', 'outbox'], true)) $state = 'queue';
     elseif ($got === 'none') $state = 'missing';
     else $state = 'unknown';
+    // A developer answered on its pull request (or issue) and nobody has replied yet.
+    $reply = $replies[$a['id']] ?? null;
+    if ($reply && $state !== 'ships') $state = 'replied';
     $boot = (string)($a['boot'] ?? '') !== '' ? json_decode((string)$a['boot'], true) : null;
     $now = is_array($boot) && $boot ? ((int)($boot['format'] ?? 0) === 1 && isset($boot['start']) ? 'json' : 'profile') : (!empty($a['setup_required']) ? 'steps' : 'none');
     return ['a' => $a, 'rank' => $rank, 'state' => $state, 'waiting' => $got === 'waiting', 'm' => $mk, 'now' => $now,
+        'q' => $q ? (string)$q['status'] : '', 'reply' => $reply,
         'kind' => in_array((string)$a['origin'], ['pc', 'other'], true) ? 'pc' : 'console',
-        'pr' => $state === 'pr' ? rs_sdk_pr_cached($a, (string)$mk['url']) : '',
+        'pr' => in_array($state, ['pr', 'replied'], true) && $mk ? rs_sdk_pr_cached($a, (string)$mk['url']) : '',
         'badge' => $r && array_key_exists('badge', $r) ? (bool)$r['badge'] : null,
         // Which badges (checks from before the list only knew the RecompLauncher one)
         'badges' => $r ? (array)($r['badges'] ?? (!empty($r['badge']) ? ['launcher'] : [])) : [],
@@ -118,10 +127,16 @@ function rs_sdk_all(): array {
     $checked = rs_sdk_checks();
     $marks = rs_sdk_marks();
     $rows = [];
-    $count = ['all' => 0, 'missing' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'link' => 0, 'bare' => 0, 'todo' => 0];
+    $count = ['all' => 0, 'missing' => 0, 'queue' => 0, 'replied' => 0, 'ships' => 0, 'pr' => 0, 'no' => 0, 'locked' => 0, 'unknown' => 0, 'badge' => 0, 'link' => 0, 'bare' => 0, 'todo' => 0];
+    // (4.12) The PR queue's rows and developers' unanswered replies, one query each.
+    $queue = []; $replies = [];
+    try {
+        foreach (rs_db()->query('SELECT app_id, status, pr_url, who FROM pc_prq') as $qr) $queue[(string)$qr['app_id']] = $qr;
+        if (function_exists('rs_prq_replies')) $replies = rs_prq_replies();
+    } catch (Throwable $e) { /* no queue yet */ }
     $due = [];
     foreach ($apps as $i => $a) {
-        $row = rs_sdk_row($a, $i + 1, $checked[$a['id']] ?? null, $marks);
+        $row = rs_sdk_row($a, $i + 1, $checked[$a['id']] ?? null, $marks, $queue, $replies);
         $row['t'] = (int)($checked[$a['id']]['t'] ?? 0);
         $rows[$a['id']] = $row;
         ++$count['all'];

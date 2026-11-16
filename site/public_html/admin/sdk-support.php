@@ -48,7 +48,9 @@ function rs_sdk_data(array $row): array {
         'origin' => (string)$a['origin'], // (4.8) the console it came from, for the console filter
         'state' => $row['state'], 'pr' => (string)$row['pr'], 'waiting' => (bool)$row['waiting'], 'now' => $row['now'], 'kind' => $row['kind'],
         'badge' => $row['badge'], 'badges' => array_values($row['badges']), 'link' => $row['link'], 'dlss' => (bool)$row['dlss'], 'bare' => rs_sdk_bare($row),
-        'mark' => $mk ? ['kind' => (string)$mk['kind'], 'url' => (string)$mk['url'], 'who' => (string)$mk['who'], 'at' => (string)$mk['at']] : null,
+        'mark' => $mk ? ['kind' => (string)$mk['kind'], 'url' => (string)$mk['url'], 'who' => (string)$mk['who'], 'at' => (string)$mk['at'], 'queue' => !empty($mk['queue'])] : null,
+        'q' => (string)($row['q'] ?? ''), // (4.12) its PR queue stage
+        'reply' => !empty($row['reply']) ? ['who' => (string)$row['reply']['who'], 'at' => (string)$row['reply']['at'], 'text' => (string)$row['reply']['text'], 'url' => (string)$row['reply']['url']] : null,
         't' => (int)$row['t'],
     ];
 }
@@ -265,6 +267,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $n = $ids && rs_prq_now_ready() ? rs_prq_run($ids) : 0;
                 rs_flash($n ? 'Drafting ' . $n . ' again, a few at a time. Each takes a few minutes and shows up below when it\'s done.' : 'Back in line for the next daily run.');
                 $qid = 0;
+            } elseif ($act === 'prq_reply_ok') {
+                // (4.12) Answered somewhere else (Discord, email): it goes back to Sent.
+                $rid = (string)($_POST['app'] ?? '');
+                if ($rid !== '') { rs_prq_reply_ok($rid); rs_log('sdk', $rid, 'developer reply marked answered'); }
+                rs_flash('Marked answered. It\'s back with the sent ones.', 'ok');
+            } elseif ($act === 'prq_auto') {
+                if (!rs_is_owner()) throw new RuntimeException('Only the owner can change that.');
+                rs_set_setting('prq_auto_green', !empty($_POST['on']) ? '1' : '0');
+                rs_flash(!empty($_POST['on']) ? 'Green drafts go in line by themselves now.' : 'Every draft waits for you again.', 'ok');
             } elseif ($act === 'prq_unskip') {
                 // (4.11) Back on the list: it can be picked and drafted again.
                 rs_db()->prepare("DELETE FROM pc_prq WHERE id = ? AND status = 'skipped'")->execute([$qid]);
@@ -373,7 +384,7 @@ if ($tab === 'lookup' && mb_strlen($q) >= 2) {
         }
     }
 }
-$sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['PR or issue open', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
+$sdkState = ['ships' => ['Ships its own file', 'ok'], 'pr' => ['PR or issue open', 'blue'], 'replied' => ['Developer replied', 'hot'], 'queue' => ['In the PR queue', 'blue'], 'no' => ['Won\'t support it', 'warn'], 'locked' => ['Pull requests closed', 'violet'], 'missing' => ['No file yet', 'bad'], 'unknown' => ['Couldn\'t check yet', '']];
 
 rs_head('Launcher support', true, ['assets/sdk-support.css']);
 ?>
@@ -397,7 +408,7 @@ rs_head('Launcher support', true, ['assets/sdk-support.css']);
 </nav>
 <?php if ($tab === 'list'): ?>
 <div class="sdk-kpis" id="sdk-kpis" role="group" aria-label="Filter by status">
-  <?php foreach (['missing', 'ships', 'pr', 'no', 'locked', 'unknown'] as $k): ?>
+  <?php foreach (['missing', 'queue', 'pr', 'replied', 'ships', 'no', 'locked', 'unknown'] as $k): ?>
   <button type="button" class="sdk-kpi k-<?= $k ?>" data-state="<?= $k ?>" aria-pressed="false"><span><?= h($k === 'unknown' ? 'Not checked' : $sdkState[$k][0]) ?></span><strong data-n="<?= $k ?>"><?= number_format($count[$k]) ?></strong></button>
   <?php endforeach; ?>
 </div>

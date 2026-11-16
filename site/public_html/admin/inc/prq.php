@@ -440,6 +440,7 @@ function rs_prq_draft_save(array $d): array {
     $found = !$skip && is_array($d['found'] ?? null) ? mb_substr((string)json_encode($d['found'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0, 200000) : null;
     if ($was === false) $db->prepare('INSERT INTO pc_prq (app_id, repo, pick, status, json, title, body, note, code, body_plain, found, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([...$row, $code, $plain, $found]);
     else $db->prepare('UPDATE pc_prq SET app_id = ?, repo = ?, pick = ?, status = ?, json = ?, title = ?, body = ?, note = ?, code = ?, body_plain = ?, found = ?, error = NULL, updated = NOW() WHERE repo = ?')->execute([...$row, $code, $plain, $found, $a['repo']]);
+    if (!$skip && rs_prq_auto_line((string)$a['repo'])) return ['ok' => true, 'status' => 'outbox'];
     return ['ok' => true, 'status' => $skip ? 'skipped' : 'draft'];
 }
 
@@ -650,10 +651,133 @@ function rs_prq_send_or_queue(int $id, bool $here, bool $codeOn, string $who): s
         ->execute([json_encode(['here' => $here, 'code' => $codeOn]), $who, $id]);
     return '';
 }
+// (4.12) Xarishark: a draft the review marks green (nothing missing, nothing blocking, made by the new
+// drafter) goes in line to be sent by itself, so nobody has to press Send on the easy ones. Drafts that
+// change the developer's code still wait for a person (nobody has built them), and so does a redraft of
+// one already sent. Owner switch on the PR queue's Settings (prq_auto_green, on unless turned off).
+function rs_prq_auto_on(): bool { return (string)rs_setting('prq_auto_green', '1') === '1'; }
+function rs_prq_auto_green(array $q): bool {
+    if ($q['status'] !== 'draft' || (string)$q['pr_url'] !== '' || (string)$q['pick'] === 'redo') return false;
+    $code = (string)($q['code'] ?? '') !== '' ? (json_decode((string)$q['code'], true) ?: []) : [];
+    if (!empty($code['edits'])) return false;
+    $rv = rs_prq_review($q);
+    return $rv['level'] === 'ok' && !$rv['blockers'];
+}
+function rs_prq_auto_line(string $repo): bool {
+    if (!rs_prq_auto_on()) return false;
+    $st = rs_db()->prepare('SELECT * FROM pc_prq WHERE repo = ?');
+    $st->execute([$repo]);
+    $q = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$q || !rs_prq_auto_green($q)) return false;
+    $u = rs_db()->prepare("UPDATE pc_prq SET status = 'outbox', opts = ?, who = 'Drafter (green)', updated = NOW() WHERE id = ? AND status = 'draft'");
+    $u->execute([json_encode(['here' => false, 'code' => false]), (int)$q['id']]);
+    if ($u->rowCount()) rs_log('sdk', (string)$q['app_id'], 'green draft put in line to be sent by itself');
+    return $u->rowCount() > 0;
+}
+// Green drafts already waiting (made before the switch, or while it was off) join the line too.
+function rs_prq_auto_sweep(): int {
+    if (!rs_prq_auto_on()) return 0;
+    $n = 0;
+    foreach (rs_db()->query("SELECT repo FROM pc_prq WHERE status = 'draft' AND pr_url = '' AND pick <> 'redo'")->fetchAll() as $r) if (rs_prq_auto_line((string)$r['repo'])) ++$n;
+    return $n;
+}
+
+// ---- (4.12) Developer replied --------------------------------------------------------------------
+// Xarishark: when a developer answers on a pull request (or the issue asking for support), it leaves Sent
+// for "Developer replied" until one of us answers on GitHub or presses Mark answered. Every 3 hours per
+// pull request: its comments, reviews and review comments; the newest one by someone outside the team
+// (prq_team_logins, our PR account, the PR's own author; bots never count) that's newer than anything
+// of ours counts. kv `prreply:<app id>` = {who, at, text, url, state, kind}; `prreplyok:<app id>` = answered.
+function rs_prq_team_logins(): array {
+    $l = array_map('trim', explode(',', strtolower((string)rs_setting('prq_team_logins', 'elripalda,xarishark'))));
+    $me = strtolower((string)rs_setting('prq_gh_login', ''));
+    if ($me !== '') $l[] = $me;
+    return array_values(array_unique(array_filter($l)));
+}
+// [app id => [repo, url]]: pull requests we sent from the queue, and the ones marked by hand.
+function rs_prq_reply_targets(): array {
+    $out = [];
+    foreach (rs_db()->query("SELECT app_id, pr_url FROM pc_prq WHERE status = 'sent' AND pr_url <> '' AND sent_at > NOW() - INTERVAL 180 DAY")->fetchAll() as $r) $out[(string)$r['app_id']] = (string)$r['pr_url'];
+    foreach (rs_sdk_marks() as $id => $m) if (in_array($m['kind'] ?? '', ['pr', 'issue'], true) && !isset($out[(string)$id])) $out[(string)$id] = (string)($m['url'] ?? '');
+    return array_filter($out, fn($u) => (bool)preg_match('#github\.com/[\w.-]+/[\w.-]+/(pull|issues)/\d+#', $u));
+}
+function rs_prq_gh_read(string $path): ?array {
+    $r = rs_prq_token() !== '' ? rs_prq_gh('GET', $path) : null;
+    if ($r && $r['status'] === 200) return is_array($r['json']) ? $r['json'] : null;
+    if ($r) return null;
+    $h = rs_http(rs_gh_api() . $path, ['github' => true, 'timeout' => 10, 'max' => 4000000]);
+    return $h['status'] === 200 ? (json_decode((string)$h['body'], true) ?: null) : null;
+}
+function rs_prq_reply_scan(int $secs = 25): int {
+    $t0 = microtime(true); $n = 0;
+    $team = rs_prq_team_logins();
+    foreach (rs_prq_reply_targets() as $id => $url) {
+        if (microtime(true) - $t0 > $secs) break;
+        if (($c = rs_kv_get('prrchk:' . $id)) && $c['age'] < 3 * 3600) continue;
+        rs_kv_put('prrchk:' . $id, '1');
+        if (!preg_match('#github\.com/([\w.-]+/[\w.-]+)/(pull|issues)/(\d+)#', $url, $m)) continue;
+        [$repo, $kind, $num] = [$m[1], $m[2], $m[3]];
+        try {
+            $item = rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num);
+            if (!$item) continue;
+            ++$n;
+            $author = strtolower((string)($item['user']['login'] ?? ''));
+            $state = !empty($item['pull_request']['merged_at']) ? 'merged' : (string)($item['state'] ?? 'open');
+            $ev = [];
+            $add = function (array $x, string $at, string $text, string $link) use (&$ev) {
+                $u = (array)($x['user'] ?? []);
+                $login = (string)($u['login'] ?? '');
+                if ($login === '' || ($u['type'] ?? '') === 'Bot' || str_ends_with($login, '[bot]')) return;
+                $ev[] = ['who' => $login, 'at' => strtotime($at) ?: 0, 'text' => $text, 'url' => $link];
+            };
+            foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/issues/' . $num . '/comments?per_page=100') as $x) $add((array)$x, (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
+            if ($kind === 'pull') {
+                foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/reviews?per_page=100') as $x) {
+                    $b = trim((string)($x['body'] ?? ''));
+                    $rs = (string)($x['state'] ?? '');
+                    if ($b === '' && $rs === 'COMMENTED') continue;
+                    $add((array)$x, (string)($x['submitted_at'] ?? ''), $b !== '' ? $b : ($rs === 'APPROVED' ? 'Approved the pull request.' : ($rs === 'CHANGES_REQUESTED' ? 'Asked for changes.' : '')), (string)($x['html_url'] ?? $url));
+                }
+                foreach ((array)rs_prq_gh_read('/repos/' . $repo . '/pulls/' . $num . '/comments?per_page=100') as $x) $add((array)$x, (string)($x['created_at'] ?? ''), (string)($x['body'] ?? ''), (string)($x['html_url'] ?? $url));
+            }
+            $us = (int)(strtotime((string)($item['created_at'] ?? '')) ?: 0); $them = null;
+            foreach ($ev as $e) {
+                $l = strtolower($e['who']);
+                if (in_array($l, $team, true) || ($l === $author && in_array($author, $team, true))) $us = max($us, $e['at']);
+                elseif ($l !== $author || !in_array($author, $team, true)) { if (!$them || $e['at'] > $them['at']) $them = $e; }
+            }
+            if ($them && $them['at'] > $us) {
+                $text = trim((string)preg_replace('/\s+/', ' ', strip_tags((string)preg_replace('/<!--.*?-->/s', '', $them['text']))));
+                rs_kv_put('prreply:' . $id, (string)json_encode(['who' => $them['who'], 'at' => gmdate('Y-m-d H:i', $them['at']), 't' => $them['at'], 'text' => mb_substr($text, 0, 280),
+                    'url' => $them['url'], 'state' => $state, 'kind' => $kind, 'pr' => $url], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            } else rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['prreply:' . $id]);
+        } catch (Throwable $e) { /* next run */ }
+    }
+    return $n;
+}
+// [app id => reply] for the ones nobody has answered yet (one query).
+function rs_prq_replies(): array {
+    $out = []; $ok = [];
+    try {
+        foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'prreply:%' OR k LIKE 'prreplyok:%'") as $r) {
+            if (str_starts_with((string)$r['k'], 'prreplyok:')) $ok[substr((string)$r['k'], 10)] = (int)$r['v'];
+            else if ($j = json_decode((string)$r['v'], true)) $out[substr((string)$r['k'], 8)] = $j;
+        }
+    } catch (Throwable $e) { return []; }
+    return array_filter($out, fn($j, $id) => (int)($j['t'] ?? 0) > (int)($ok[$id] ?? 0), ARRAY_FILTER_USE_BOTH);
+}
+function rs_prq_reply_ok(string $appId): void {
+    $r = rs_prq_replies()[$appId] ?? null;
+    rs_kv_put('prreplyok:' . $appId, (string)(int)($r['t'] ?? time()));
+}
+
 // The half-hourly job: the next ones in line, keeping to the hourly number. -> [sent, failed]
 function rs_prq_send_due(): array {
     rs_prq_tables();
     $done = [0, 0];
+    // (4.12) Green drafts join the line, and developers' answers on pull requests are looked for.
+    try { rs_prq_auto_sweep(); } catch (Throwable $e) { rs_errlog('prq auto', $e); }
+    try { rs_prq_reply_scan(25); } catch (Throwable $e) { rs_errlog('prq replies', $e); }
     if (rs_prq_token() === '') return $done;
     $room = RS_PRQ_PER_HOUR - rs_prq_sent_last_hour();
     if ($room <= 0) return $done;
