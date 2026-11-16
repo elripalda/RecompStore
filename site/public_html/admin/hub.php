@@ -57,14 +57,14 @@ function hub_step_icon(string $s): string { return $s === 'run' ? HUB_IC['spin']
 function hub_card(array $c): string {
     [$st, $note] = $c['note'];
     $dev = $c['dev'] !== '' ? $c['dev'] : $c['con'];
-    return '<button type="button" class="sh-card' . ($c['flag'] ? ' flagged' : '') . '" data-item="' . h($c['key']) . '" data-q="' . h($c['q']) . '" data-v="' . ($c['verified'] ? 1 : 0) . '" data-s="' . h($st) . '" data-f="' . ($c['flag'] ? 1 : 0) . '"' . ($c['pre'] ? ' data-pre="' . (int)substr($c['key'], 4) . '"' : '') . '>'
+    return '<button type="button" class="sh-card' . ($c['flag'] ? ' flagged' : '') . (!empty($c['old']) ? ' old' : '') . '" data-item="' . h($c['key']) . '" data-q="' . h($c['q']) . '" data-v="' . ($c['verified'] ? 1 : 0) . '" data-s="' . h($st) . '" data-f="' . ($c['flag'] ? 1 : 0) . '"' . ($c['pre'] ? ' data-pre="' . (int)substr($c['key'], 4) . '"' : '') . '>'
         . '<span class="sh-card-top">' . hub_tile($c['name'], $c['icon']) . '<span class="sh-card-t"><b>' . h($c['name']) . '</b><span class="sh-by' . ($c['verified'] ? ' ver' : '') . '">'
         . ($c['verified'] ? '<span class="sh-ver" title="Verified developer">' . HUB_IC['ver'] . '</span>' : '') . h($dev) . '</span></span>'
         . ($c['flag'] ? '<span class="sh-flagged" title="Flagged for the owner">' . HUB_IC['flag'] . '</span>' : '')
         . (!empty($c['vt']) ? '<span class="sh-vtok' . ($c['vt']['ok'] ? ' on' : '') . '" role="button" data-vtok="' . ($c['vt']['ok'] ? '0' : '1') . '" title="' . h($c['vt']['ok'] ? 'VirusTotal\'s minor flags: ' . $c['vt']['by'] . ' looked, likely a false positive. Click to take it back' : 'VirusTotal: minor flags (1 or 2 engines, common for unsigned programs). Looked at the reports? Click to mark it fine') . '">' . HUB_IC['check'] . '</span>' : '') . '</span>'
         . '<span class="sh-note sh-' . h($st) . '">' . ($st === 'run' ? HUB_IC['spin'] : '<i></i>') . '<span>' . h($note) . '</span></span>'
         . '<span class="sh-card-foot"><span class="sh-src">' . h($c['src']) . '</span>' . ($c['dev'] !== '' && $c['con'] !== '' ? '<span class="sh-con">' . h($c['con']) . '</span>' : '')
-        . ($c['notes'] ? '<span class="sh-nn" title="Team notes">' . HUB_IC['msg'] . (int)$c['notes'] . '</span>' : '') . '<span class="sh-when">' . h($c['when'] ? rs_hub_ago($c['when']) : '') . '</span></span>'
+        . ($c['notes'] ? '<span class="sh-nn" title="Team notes">' . HUB_IC['msg'] . (int)$c['notes'] . '</span>' : '') . '<span class="sh-when"' . (!empty($c['old']) ? ' title="Waiting over a day: publish it, ask the developer, or decline it"' : '') . '>' . h($c['when'] ? rs_hub_ago($c['when']) : '') . '</span></span>'
         . '</button>';
 }
 // (4.8) Developers whose recomp went live without the "you're live" email: Send (the usual words), Edit
@@ -118,7 +118,8 @@ function hub_board_html(string $store, array $b): string {
             . ($good ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="publish_good" data-confirm="Click again to put ' . $good . ' live" title="Drafts from the finder, player requests and links that Claude and VirusTotal both passed. Submissions publish one by one so the developer can get the email.">' . HUB_IC['check'] . 'Publish ' . $good . ' that look good</button></div>' : '')
             . ($listed ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_listed" data-confirm="Click again to dismiss ' . $listed . '" title="Drafts that stopped because the recomp is already on RecompLauncher (hidden). They go under Dismissed, where you can put any back.">Dismiss ' . $listed . ' already listed</button></div>' : '')
             . '</header><div class="sh-cards">';
-        foreach ($cards as $c) $o .= hub_card($c);
+        // (4.13) Xarishark: nothing should sit in Ready for days. Over a day old, its age shows in red.
+        foreach ($cards as $c) { $c['old'] = $k === 'ready' && $c['when'] && $c['when'] < time() - 86400; $o .= hub_card($c); }
         if ($more) $o .= '<p class="sh-empty sh-more-line">And ' . $more . ' more in line. They start on their own, a few at a time.</p>';
         if (!$cards) $o .= '<p class="sh-empty">' . h(['new' => 'Nothing new. Submissions show up here as developers send them.', 'check' => 'Nothing being checked.', 'ready' => 'Nothing waiting to go live.', 'back' => 'Nobody\'s fixing anything.', 'draft' => 'No PS5 drafts waiting.'][$k]) . '</p>';
         $o .= '</div></section>';
@@ -632,6 +633,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $res['msg'] = $on ? 'Marked fine. With everything else good, it reads Ready to publish.' : 'Taken back.';
                 break;
             }
+            case 'asked':
+            case 'unasked': {
+                // (4.13) Asked the developer (on GitHub, Discord, by email): it waits on them. Back to Ready undoes it.
+                $j = $needJob();
+                if ($act === 'unasked') { rs_hub_ask_clear((int)$j['id']); $res['msg'] = 'Back in Ready to publish.'; break; }
+                $vtBad = rs_auto_vt($j)[0] === 'bad';
+                rs_hub_ask_set((int)$j['id'], rs_me_name(), $vtBad, (string)$j['tag']);
+                rs_hub_note_add('job:' . (int)$j['id'], ($vtBad ? 'Sent the developer the VirusTotal report.' : 'Asked the developer.') . ' Waiting on them.');
+                $res['msg'] = 'Moved to Waiting on the developer.' . ($vtBad ? ' It comes back by itself once VirusTotal clears it.' : '');
+                break;
+            }
             case 'vt_tell': {
                 [$title, , $subId] = $about($item);
                 if (!$subId || !($s = rs_hub_sub($subId))) throw new RuntimeException('There\'s no developer to write to on this one.');
@@ -656,7 +668,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $mailOut($to, $subject !== '' ? $subject : 'About your RecompLauncher submission: ' . $title, $body, $subId);
                     $went[] = $to;
                 }
-                $res['msg'] = 'Sent to ' . implode(' and ', $went) . '. Their answer shows here.';
+                // (4.13) Its draft waits on them now, and comes back once VirusTotal clears it.
+                if ($oj = rs_hub_open_draft_for($d)) { $ojr = rs_auto_get((int)$oj['id']); if ($ojr && $ojr['status'] === 'review') rs_hub_ask_set((int)$ojr['id'], rs_me_name(), true, (string)$ojr['tag']); }
+                $res['msg'] = 'Sent to ' . implode(' and ', $went) . '. It waits under Waiting on the developer; their answer shows here.';
                 $res['reload'] = false;
                 $res['refresh'] = true;
                 break;

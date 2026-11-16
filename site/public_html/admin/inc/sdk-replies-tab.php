@@ -41,7 +41,7 @@ $rpKind = ['opened' => 'opened it', 'comment' => 'commented', 'review' => 'revie
   <div class="rp-head">
     <div>
       <h2><?= h($rpGroups[$rpShow][0]) ?> <span class="muted small"><?= number_format(count($rpList)) ?></span></h2>
-      <p class="muted small">Every pull request and issue we sent, with what the developer said, merged or closed. Open ones are read from GitHub every hour, closed ones for a while after. Something of theirs after our last comment shows as new until one of us comments on GitHub or presses <b>Got it</b>.<?= $rpScan ? ' Last read ' . $rpAgo((int)$rpScan['v']) . '.' : '' ?></p>
+      <p class="muted small">Every pull request and issue we sent, with what the developer said, merged or closed. Open ones are read from GitHub every hour, closed ones for a while after. Something of theirs after our last comment shows as new until one of us comments on GitHub or presses <b>Got it</b>. A merge clears itself once the game ships its file, or after 3 days.<?= $rpScan ? ' Last read ' . $rpAgo((int)$rpScan['v']) . '.' : '' ?></p>
     </div>
     <form method="post"><?= $csrf ?><button class="btn" name="action" value="prq_reply_check">Check now</button></form>
   </div>
@@ -50,7 +50,7 @@ $rpKind = ['opened' => 'opened it', 'comment' => 'commented', 'review' => 'revie
     <div class="rp-top">
       <div class="rp-name"><strong><?= h($qa['name'] ?? $rid) ?></strong>
         <span class="muted small"><?= h((string)$t['repo']) ?> · <?= $t['kind'] === 'pull' ? 'Pull request' : 'Issue' ?> #<?= (int)$t['num'] ?></span></div>
-      <div class="rp-pills"><span class="pill <?= $st[1] ?>"><?= $st[0] ?></span><?php if ($t['new']): ?><span class="pill hot">New</span><?php endif; ?><?php if ($t['waiting']): ?><span class="pill warn">Waiting on us</span><?php endif; ?></div>
+      <div class="rp-pills"><span class="pill <?= $st[1] ?>"><?= $st[0] ?></span><?php if (!empty($t['ships'])): ?><span class="pill ok">Ships its file</span><?php endif; ?><?php if ($t['new']): ?><span class="pill hot">New</span><?php endif; ?><?php if ($t['waiting']): ?><span class="pill warn">Waiting on us</span><?php endif; ?></div>
     </div>
     <?php if ($m): ?>
     <div class="rp-msg"><div class="rp-by"><b><?= h((string)$m['who']) ?></b> <?= h($rpKind[$m['kind']] ?? 'wrote') ?> · <?= $rpAgo((int)$m['at']) ?></div><div class="rp-body"><?= (string)$m['body'] !== '' ? $rpText((string)$m['body'], 700) : '<span class="muted">(no text)</span>' ?></div></div>

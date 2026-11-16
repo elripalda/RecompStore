@@ -53,6 +53,8 @@ The drawer's **Make its recomplauncher.json** opens Launcher support > Check a g
 
 PC: **New** → (Approve and check) → **Checking** (Auto-add's run) → **Ready to publish** → (Publish) → live, off the board.
 **Ask for changes** sends it to **Waiting on the developer**; it comes back to New when they send it again (off the board after 45 days of silence). **Decline** closes it.
+
+**Drafts waiting on the developer (4.13).** A draft in Ready to publish that we've asked its developer about (the drawer's **Asked them, wait**, or sending the VirusTotal note from a submission) moves to Waiting on the developer: kv `hubask:job:<id>` = {at, by, vt, tag} (`rs_hub_ask*` in `inc/hub.php`). One asked about VirusTotal comes back to Ready by itself once the scan no longer flags it; **Back to Ready** (`unasked`) brings it back any time. After 14 days (`RS_HUB_ASK_DAYS`) the card says there's been no answer. Ready to publish lists the oldest first, and a card there over a day old shows its age in red. When VirusTotal flagged it, the drawer's Email and Open an issue links carry the full report (`rs_hub_vt_note`: each flagged file, what flagged it and its report link), and so do the GitHub links on Security's held updates (`rs_pc_contact_links($a, $why, $note)`).
 PS5: New → Draft made (hidden, in PS5 games) → the owner signs and publishes the PS5 store → live.
 
 After a PC submission goes live, the developer should get the "you're live" email. The strip on top of the board lists the ones still waiting: **Send**, **Edit** first, **Skip**, or send them all at once. It isn't sent by itself so a person can check the wording and the address first.

@@ -338,9 +338,22 @@ if ($job && empty($shelved)) {
         $ca = $job['app_id'] !== '' ? rs_pc_app((string)$job['app_id']) : null;
         if (!$ca && ($cl0 = rs_repo_from_link((string)$job['link']))) $ca = ['id' => '', 'name' => basename((string)$cl0['repo']), 'repo' => (string)$cl0['repo'], 'host' => rs_host_norm((string)$cl0['host']), 'dev' => '', 'hidden' => true];
         $cWhy = $job['status'] === 'failed' ? trim((string)$job['notes']) : ((($vt[0] ?? '') === 'bad') ? 'Our security scan (VirusTotal) flagged a file in your newest release. It may well be a false alarm; could you take a look?' : '');
-        if ($ca && ($cls = rs_pc_contact_links($ca, $cWhy))) {
-            echo '<div class="sh-d-contact"><span>Ask the developer</span>';
+        // (4.13) Xarishark: flagged, the issue and email carry the report: each file, what flagged it, its link.
+        $cNote = null;
+        if (($vt[0] ?? '') === 'bad' && array_filter($vtFiles, fn($f) => $f['hits'] > 0)) {
+            $cDev = $ca && (string)($ca['author'] ?? '') !== '' ? (string)$ca['author'] : (string)strtok((string)($ca['repo'] ?? ''), '/');
+            $cNote = ['subject' => 'RecompLauncher: our security scan flagged ' . ((string)$job['tag'] !== '' ? $job['tag'] : 'your newest release'),
+                'body' => rs_hub_vt_note($vtFiles, $cDev, (string)($ca['name'] ?? ''), 'RecompLauncher', (string)$job['tag'], $subId > 0)];
+        }
+        if ($ca && ($cls = rs_pc_contact_links($ca, $cWhy, $cNote))) {
+            echo '<div class="sh-d-contact" data-item="job:' . (int)$job['id'] . '"><span>Ask the developer</span>';
             foreach ($cls as [$cL, $cH, $cK]) echo '<a class="btn small" href="' . h($cH) . '"' . ($cK === 'gh' ? ' target="_blank" rel="noopener"' : '') . '>' . h($cL) . '</a>';
+            // (4.13) Once asked, it waits on them instead of sitting in Ready to publish.
+            if ($job['status'] === 'review') {
+                $jAsk = rs_hub_ask((int)$job['id']);
+                echo $jAsk ? '<span class="muted small">' . h((!empty($jAsk['vt']) ? 'VirusTotal report sent' : 'Asked') . ' by ' . $jAsk['by'] . ', ' . rs_hub_ago((int)$jAsk['at']) . ' ago') . '</span><button type="button" class="small" data-act="unasked">Back to Ready</button>'
+                    : '<button type="button" class="small" data-act="asked" title="After you\'ve opened the issue, emailed or messaged them: it moves to Waiting on the developer' . (($vt[0] ?? '') === 'bad' ? ', and back here once VirusTotal clears it' : '') . '">Asked them, wait</button>';
+            }
             echo '</div>';
         }
     }

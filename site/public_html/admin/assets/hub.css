@@ -302,3 +302,6 @@ img.sh-ico{background:#0f1216}
 /* (4.10) A possible new home: look first, then a two-click switch */
 .sh-whome{display:inline-flex;align-items:center;gap:6px;padding:3px 4px 3px 10px;border:1px solid var(--line);border-radius:10px;margin:2px 6px 2px 0}
 .sh-whome-open{font-size:13px}
+/* (4.13) Waiting in Ready over a day */
+.sh-card.old .sh-when{color:var(--bad,#ff6b6b);font-weight:700}
+.sh-d-contact .muted.small{align-self:center}

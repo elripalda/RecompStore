@@ -798,7 +798,8 @@ function rs_vt_contact(array $f, ?array $app = null): ?array {
     $email = $acc && filter_var(trim((string)$acc['email']), FILTER_VALIDATE_EMAIL) ? trim((string)$acc['email']) : '';
     if ($email === '' && $app) $email = rs_pc_dev_email($app);
     if ($email === '' && $sub) $email = rs_inbox_email($sub);
-    if (!$acc && $email === '') return null;
+    // (4.13) Kept even with no way to reach them: its words go into a GitHub issue.
+    $reach = $acc || $email !== '';
 
     $name = (string)($app['name'] ?? '') ?: ((string)($subD['name'] ?? '') ?: basename($repo));
     $who = $acc ? ((string)$acc['name'] ?: (string)$acc['gh_login']) : (trim((string)($subD['author'] ?? '')) ?: $owner);
@@ -827,7 +828,7 @@ function rs_vt_contact(array $f, ?array $app = null): ?array {
     $lines[] = '';
     $lines[] = "Thanks!";
     return ['acc' => $acc ? ['id' => (int)$acc['id'], 'name' => $who] : null, 'email' => $email, 'who' => $who, 'name' => $name,
-        'subject' => $name . ' ' . $tag . ': our security scan flagged a file', 'body' => implode("\n", $lines), 'sub' => $sub ? (int)$sub['id'] : 0];
+        'subject' => $name . ' ' . $tag . ': our security scan flagged a file', 'body' => implode("\n", $lines), 'sub' => $sub ? (int)$sub['id'] : 0, 'reach' => $reach];
 }
 // The worst checked file of a release, as a vt_files row (a stand-in when nothing's checked yet).
 function rs_vt_worst(string $repoKey, string $tag): array {
@@ -837,7 +838,7 @@ function rs_vt_worst(string $repoKey, string $tag): array {
 }
 // The two buttons and their prepared message, for a row on Security. '' when there's no way to reach them.
 function rs_vt_contact_html(?array $c, string $key): string {
-    if (!$c) return '';
+    if (!$c || empty($c['reach'])) return '';
     $k = preg_replace('/[^a-z0-9]/i', '', $key);
     $form = function (string $kind, string $label) use ($c, $k): string {
         $to = $kind === 'mail' ? $c['email'] : 'their developer hub';

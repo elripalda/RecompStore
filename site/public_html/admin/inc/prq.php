@@ -830,8 +830,18 @@ function rs_prq_threads(): array {
     try {
         rs_prq_reply_tables();
         $out = [];
+        // (4.13) Xarishark: a merge clears itself. It stops being new once the game ships its own file
+        // (the launcher support check sees it in the release or the repo) or 3 days after the merge.
+        $ships = [];
+        foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'sdk:%'") as $kr) {
+            $v = json_decode((string)$kr['v'], true);
+            if (in_array((string)($v['has'] ?? ''), ['release', 'repo'], true)) $ships[substr((string)$kr['k'], 4)] = true;
+        }
         foreach (rs_db()->query('SELECT * FROM pc_prq_threads') as $t) {
             $t['new'] = (int)$t['news_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
+            if ($t['new'] && $t['state'] === 'merged' && (int)$t['theirs_at'] <= max((int)$t['ours_at'], (int)$t['read_at'])
+                && (isset($ships[(string)$t['app_id']]) || (int)$t['closed_at'] < time() - 3 * 86400)) $t['new'] = false;
+            $t['ships'] = isset($ships[(string)$t['app_id']]);
             $t['waiting'] = $t['state'] === 'open' && (int)$t['theirs_at'] > max((int)$t['ours_at'], (int)$t['read_at']);
             $t['last'] = null;
             $out[(string)$t['app_id']] = $t;

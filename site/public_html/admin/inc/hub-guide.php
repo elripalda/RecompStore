@@ -30,6 +30,13 @@ $doc = [
         'Make its recomplauncher.json (in the drawer): opens Launcher support for that submission, where the drafter writes its file before you approve it. Copy or download it, and once it\'s on RecompLauncher use it for its listing.',
         'The ••• menu has Mark done without an email (duplicates, spam), Move to the other store, and more.',
     ]],
+    ['Look first and VirusTotal flagged it', [
+        'Nothing should sit in Ready to publish for more than a day. Ready shows the oldest first, and a card waiting over a day has its age in red.',
+        'Look first: open it and read the note. If it\'s fine (a missing license, a README quirk), Publish. If something has to change, ask the developer (below). If it can never be listed, Decline.',
+        'VirusTotal flagged it: open the reports. A false positive with 1 or 2 engines: tick the round check and Publish. Real flags: Ask the developer. Message and Email send the report; Open an issue opens it on their GitHub with every flagged file and its report link already written.',
+        'After asking, press Asked them, wait. The card moves to Waiting on the developer, so Ready only has what we can act on. One asked about VirusTotal comes back to Ready by itself once the scan is clean; Back to Ready brings it back any time.',
+        'No answer in 14 days: the card says so. Decline it, or dismiss it until they come back.',
+    ]],
     ['Talking to developers', [
         'Note for the team: only the admin team sees it. Use notes to leave context for whoever looks next.',
         'Message: goes to the developer. If they have a developer account it lands in their hub (and you can email them that it\'s there); otherwise it\'s an email.',

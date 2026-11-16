@@ -30,6 +30,22 @@ if (rs_can_page('pc.php') && preg_match('#(github\.com|gitlab\.com|sourceforge\.
         } else {
             $it[] = ['href' => 'pc.php?lookup=' . rawurlencode($rsq['link']) . '&t=' . rawurlencode(rs_csrf()), 'label' => 'Not on RecompStore yet', 'note' => 'Add it to Found on GitHub to be checked'];
         }
+        // (4.13) Xarishark: where it stands on Launcher support, one click to its page there.
+        if ($a && rs_can_page('sdk-support.php')) {
+            try {
+                require_once __DIR__ . '/inc/sdk.php';
+                require_once __DIR__ . '/inc/prq.php';
+                $sk = rs_kv_get('sdk:' . $a['id']);
+                $sc = $sk ? ['v' => json_decode((string)$sk['v'], true), 'age' => (int)$sk['age'], 't' => 0] : null;
+                $sq = rs_db()->prepare('SELECT * FROM pc_prq WHERE app_id = ? ORDER BY id DESC LIMIT 1');
+                $sq->execute([(string)$a['id']]);
+                $qr = $sq->fetch(PDO::FETCH_ASSOC) ?: null;
+                $row = rs_sdk_row($a, 0, $sc, rs_sdk_marks(), $qr ? [(string)$a['id'] => $qr] : [], array_intersect_key(rs_prq_replies(), [(string)$a['id'] => 1]));
+                $sLab = ['ships' => 'Ships its own file', 'pr' => 'Pull request open', 'replied' => 'Developer replied', 'queue' => 'In the PR queue', 'no' => 'Won\'t support it', 'locked' => 'Pull requests closed', 'missing' => 'No file yet', 'unknown' => 'Couldn\'t check yet'][$row['state']] ?? $row['state'];
+                $it[] = ['href' => 'sdk-support.php?tab=check&app=' . rawurlencode((string)$a['id']), 'label' => 'Launcher support: ' . $sLab,
+                    'note' => ['json' => 'Its file, in our catalog', 'profile' => 'Our setup profile', 'steps' => 'Setup steps only', 'none' => 'Nothing yet'][$row['now']] ?? ''];
+            } catch (Throwable $e) { rs_errlog('find sdk', $e); }
+        }
         $it[] = ['href' => $rsq['link'], 'label' => 'Open the repo', 'note' => $rsq['key']];
         $out[] = ['title' => 'This repo', 'items' => $it];
     }

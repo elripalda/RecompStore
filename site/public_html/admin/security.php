@@ -265,9 +265,9 @@ rs_head('Security', true, ['assets/vt.css']);
         $vc = null;
         if ($v === 'red') { try { $vc = rs_vt_contact(rs_vt_worst(rs_pc_key($x), (string)$p['tag']), $x); } catch (Throwable $e) { rs_errlog('vt contact', $e); } }
         if ($vc) echo rs_vt_contact_html($vc, 'h' . $x['id']);
-        $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.');
-        if ($vc) $cl = array_values(array_filter($cl, fn($c) => $c[2] === 'gh'));
-        if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
+        $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.', $vc);
+        if ($vc && !empty($vc['reach'])) $cl = array_values(array_filter($cl, fn($c) => $c[2] === 'gh'));
+        if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc && !empty($vc['reach']) ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
   </div>

@@ -329,6 +329,22 @@ function rs_hub_item_vt(string $item): ?array {
     }
     return null;
 }
+// (4.13) Xarishark: a draft we've asked its developer about (VirusTotal flagged it, or something to look
+// at first) waits under Waiting on the developer instead of sitting in Ready to publish. kv
+// hubask:job:<id> = {at, by, vt (asked about VirusTotal), tag}. It comes back to Ready by itself once
+// VirusTotal no longer flags it, or when someone presses Back to Ready.
+const RS_HUB_ASK_DAYS = 14; // no answer in this long: the card says so
+function rs_hub_ask(int $jobId): ?array {
+    $c = rs_kv_get('hubask:job:' . $jobId);
+    $v = $c ? json_decode((string)$c['v'], true) : null;
+    return is_array($v) && !empty($v['at']) ? $v : null;
+}
+function rs_hub_ask_set(int $jobId, string $by, bool $vt, string $tag): void {
+    rs_kv_put('hubask:job:' . $jobId, (string)json_encode(['at' => time(), 'by' => $by, 'vt' => $vt, 'tag' => $tag]));
+}
+function rs_hub_ask_clear(int $jobId): void {
+    rs_db()->prepare('DELETE FROM kv_cache WHERE k = ?')->execute(['hubask:job:' . $jobId]);
+}
 // A draft's state for its card and drawer: [col, note [state, text], stuck, vt [state, note]].
 function rs_hub_job_state(array $j): array {
     $vt = ($j['steps']['vt']['s'] ?? '') === 'skip' ? ['skip', (string)($j['steps']['vt']['n'] ?? '')] : rs_auto_vt($j);
@@ -344,6 +360,14 @@ function rs_hub_job_state(array $j): array {
             elseif ($at === '') $at = $label;
         }
         return ['check', ['run', ($at !== '' ? $at : 'Finishing') . ' · ' . $n . ' of ' . count(RS_AUTO_STEPS)], false, $vt];
+    }
+    // (4.13) Asked the developer: waiting on them, until VirusTotal clears it (when that's what we asked about).
+    if ($ask = rs_hub_ask((int)$j['id'])) {
+        if (!empty($ask['vt']) && !in_array($vt[0], ['bad', 'run'], true)) rs_hub_ask_clear((int)$j['id']);
+        else {
+            $days = intdiv(time() - (int)$ask['at'], 86400);
+            return ['back', ['wait', ($days >= RS_HUB_ASK_DAYS ? 'No answer in ' . $days . ' days. Decline or dismiss it' : (!empty($ask['vt']) ? 'Sent the VirusTotal report' : 'Asked the developer') . ' · ' . rs_hub_ago((int)$ask['at']) . ' ago')], false, $vt];
+        }
     }
     // Ready: Claude's verdict, with the live VirusTotal state on top.
     $note = match ($j['verdict']) { 'good' => ['ok', 'Ready to publish'], 'skip' => ['bad', 'Checks say don\'t list it'], default => ['warn', 'Look first'] };
@@ -474,8 +498,8 @@ function rs_hub_board(string $store): array {
             'q' => mb_strtolower($name . ' ' . ($sub['author'] ?? '') . ' ' . $j['repo_key']),
         ];
     }
-    // Newest first in New; the rest by when they started.
-    foreach ($cols as &$c) usort($c, fn($x, $y) => $y['when'] <=> $x['when']);
+    // Newest first in New; the rest by when they started. (4.13) Ready to publish: oldest first, so the ones waiting longest are on top.
+    foreach ($cols as $ck => &$c) usort($c, fn($x, $y) => $ck === 'ready' ? $x['when'] <=> $y['when'] : $y['when'] <=> $x['when']);
     unset($c);
     // (4.8) A long line on Checking: the ones being worked on and any that stopped, then the next few in
     // line, and a count of the rest.
@@ -789,7 +813,8 @@ function rs_hub_vt_files(string $repoKey, string $tag): array {
 }
 // The note to the developer about what was flagged, file by file with the report links (the same
 // wording as the old Submissions page's Virus scan reason).
-function rs_hub_vt_note(array $files, string $dev, string $name, string $where, string $tag): string {
+// (4.13) $sent false: a draft we found or a player asked for, not one they sent us.
+function rs_hub_vt_note(array $files, string $dev, string $name, string $where, string $tag, bool $sent = true): string {
     $lines = [];
     foreach ($files as $f) {
         if ($f['hits'] < 1) continue;
@@ -797,7 +822,7 @@ function rs_hub_vt_note(array $files, string $dev, string $name, string $where, 
             . ($f['by'] !== '' ? ' (' . $f['by'] . ')' : '') . ($f['link'] !== '' ? "\n  " . $f['link'] : '');
     }
     return 'Hi' . ($dev !== '' ? ' ' . $dev : '') . ",\n\n"
-        . 'Thanks for sending ' . $name . '. Before it can go on ' . $where . ', there\'s one thing to sort out: VirusTotal flagged your release' . ($tag !== '' ? ' (' . $tag . ')' : '') . ', which is more than we currently allow:' . "\n\n"
+        . ($sent ? 'Thanks for sending ' . $name . '. Before it can go on ' . $where . ', there\'s one thing to sort out' : 'We\'d like to list ' . $name . ' on ' . $where . ', but there\'s one thing to sort out first') . ': VirusTotal flagged your release' . ($tag !== '' ? ' (' . $tag . ')' : '') . ', which is more than we currently allow:' . "\n\n"
         . implode("\n", $lines) . "\n\n"
         . 'These are often false positives, especially on unsigned programs. You can ask the vendors named above to recheck it (most have a false-positive form on their website), or change whatever is setting them off. Once the scan comes back clean, let us know and we\'ll get it on ' . $where . ' as soon as possible.' . "\n";
 }

@@ -2200,7 +2200,9 @@ function rs_pc_update_status(array $a): array {
 // (4.10) Ways to reach a recomp's developer when its update is stuck: a message in their hub (when they
 // have an account), an email (an address we have for them), and its GitHub (open an issue, or the repo
 // for a pull request). The email is only a prepared mailto link: a person sends it. -> [[label, href, kind]]
-function rs_pc_contact_links(array $a, string $why = ''): array {
+// (4.13) $note: a full message (['subject', 'body']) to use for the email and the GitHub issue instead of
+// the short one built from $why, like the VirusTotal note with each flagged file and its report.
+function rs_pc_contact_links(array $a, string $why = '', ?array $note = null): array {
     $out = [];
     $owner = strtolower((string)strtok((string)$a['repo'], '/'));
     $acc = null;
@@ -2222,9 +2224,14 @@ function rs_pc_contact_links(array $a, string $why = ''): array {
     $subject = $a['name'] . ' on RecompLauncher';
     $page = (string)($a['id'] ?? '') !== '' && empty($a['hidden']) ? ' (' . rs_abs('/game/' . $a['id']) . ')' : '';
     $body = "Hi! Quick note about " . $a['name'] . ($page !== '' ? " on RecompLauncher" . $page : " and RecompLauncher (https://recomplauncher.com)") . ".\n\n" . ($why !== '' ? $why . "\n\n" : '') . "Thanks!";
+    $issueTitle = 'RecompLauncher: ' . ($why !== '' ? mb_substr($why, 0, 80) : 'about the latest release');
+    if ($note && trim((string)($note['body'] ?? '')) !== '') {
+        $body = (string)$note['body'];
+        if (trim((string)($note['subject'] ?? '')) !== '') $subject = $issueTitle = (string)$note['subject'];
+    }
     if ($email !== '') $out[] = ['Email', 'mailto:' . rawurlencode($email) . '?subject=' . rawurlencode($subject) . '&body=' . rawurlencode($body), 'mail'];
     if ((string)$a['repo'] !== '' && rs_pc_host($a) === '') {
-        $out[] = ['Open an issue', 'https://github.com/' . $a['repo'] . '/issues/new?title=' . rawurlencode('RecompLauncher: ' . ($why !== '' ? mb_substr($why, 0, 80) : 'about the latest release')) . '&body=' . rawurlencode($body), 'gh'];
+        $out[] = ['Open an issue', 'https://github.com/' . $a['repo'] . '/issues/new?title=' . rawurlencode($issueTitle) . '&body=' . rawurlencode(mb_substr($body, 0, 6000)), 'gh'];
         $out[] = ['Its repo', 'https://github.com/' . $a['repo'], 'gh'];
     } elseif ((string)$a['repo'] !== '') $out[] = ['Its repo', rs_host_web(rs_pc_host($a), (string)$a['repo']), 'gh'];
     return $out;
