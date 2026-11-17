@@ -59,6 +59,8 @@ PS5: New → Draft made (hidden, in PS5 games) → the owner signs and publishes
 
 After a PC submission goes live, the developer should get the "you're live" email. The strip on top of the board lists the ones still waiting: **Send**, **Edit** first, **Skip**, or send them all at once. It isn't sent by itself so a person can check the wording and the address first.
 
+**Builds are there** (`rs_hub_check`): the files a developer named are looked for in the newest release. When one is missing but that release still has a build for the same system (an installer swapped for a portable zip), the check says "File name changed" in orange with the new name instead of a red "Files not in the newest release", since Auto-add reads the release itself and takes the new file.
+
 Anything handled leaves the board at once (it's under **Handled**). Always mark a submission done when it's handled (added, duplicate, already listed, declined).
 
 ## Why is it hidden?

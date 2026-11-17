@@ -156,7 +156,17 @@ function rs_hub_check(int $id, array $d, int $maxAge = 21600): array {
         $has = $mainNames ? ' It has: ' . mb_strimwidth(implode(', ', array_slice($mainNames, 0, 6)), 0, 220, '…') : ' It has no files yet';
         if (!$pats) $steps['files'] = ['warn', 'They didn\'t say which release files to use. Newest is ' . $tag . $when . '.' . $has, 'No release files named'];
         elseif ($miss && $alt) $steps['files'] = ['warn', 'Their files are in ' . (string)$alt['tag_name'] . ', not in ' . $tag . ' yet. RecompLauncher installs ' . (string)$alt['tag_name'] . ' until ' . $tag . ' has them', 'Files only in an older release'];
-        elseif ($miss) {
+        elseif ($miss && $pc && ($now = (function () use ($main, $pats, $miss) {
+            // (4.13) The file was renamed (an installer swapped for a portable zip): the newest release still
+            // has a build for each of those systems, which is the one Auto-add takes, so it isn't missing.
+            $fl = [];
+            $got = rs_pc_assets((array)($main['assets'] ?? []), $fl);
+            $out = [];
+            foreach (array_keys(array_intersect($pats, $miss)) as $k) { if ((string)($got[$k] ?? '') === '') return null; $out[$k] = (string)$got[$k]; }
+            return $out;
+        })())) {
+            $steps['files'] = ['warn', 'The file name changed: ' . $tag . ' has ' . implode(', ', $now) . ' (they named ' . implode(', ', array_intersect_key($pats, $now)) . '). Approve takes the new one', 'File name changed'];
+        } elseif ($miss) {
             $sys = $pc ? $sysOf(array_keys(array_intersect($pats, $miss))) : [];
             $steps['files'] = ['bad', ($sys ? implode(' and ', $sys) . ' file' . (count($sys) > 1 ? 's' : '') . ' (' . implode(', ', array_intersect_key($pats, array_flip(array_keys(array_intersect($pats, $miss))))) . ')' : 'The file they named') . ' not in ' . $tag . '.' . $has, 'Files not in the newest release'];
         } else {
