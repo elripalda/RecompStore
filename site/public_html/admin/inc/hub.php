@@ -441,6 +441,41 @@ function rs_hub_marks(): array {
     return [$flags, $notes];
 }
 
+// (4.13) What was already sent to an item's developer from the board (an email, a hub message, or
+// "asked them" elsewhere), so the card shows it and nobody sends twice. kv hubreach:<item>.
+function rs_hub_reach_add(string $item, string $kind): void {
+    $k = 'hubreach:' . $item;
+    $r = rs_kv_get($k);
+    $l = $r ? (json_decode((string)$r['v'], true) ?: []) : [];
+    $l[] = ['kind' => $kind, 'at' => time(), 'by' => function_exists('rs_me_name') ? rs_me_name() : ''];
+    rs_kv_put($k, (string)json_encode(array_slice($l, -20)));
+}
+// Every item's sends: {item: [{kind, at, by}]}, plus emails to a submission from before (mail_sent) under "mail:<sub id>".
+function rs_hub_reach_all(): array {
+    static $m = null;
+    if ($m !== null) return $m;
+    $m = [];
+    try {
+        rs_cache_tables();
+        foreach (rs_db()->query("SELECT k, v FROM kv_cache WHERE k LIKE 'hubreach:%'")->fetchAll() as $r) $m[substr((string)$r['k'], 9)] = json_decode((string)$r['v'], true) ?: [];
+    } catch (Throwable $e) { }
+    try {
+        rs_mail_tables();
+        foreach (rs_db()->query("SELECT inbox_id, UNIX_TIMESTAMP(MAX(created)) t FROM mail_sent WHERE kind = 'reply' AND inbox_id > 0 GROUP BY inbox_id")->fetchAll() as $r) $m['mail:' . (int)$r['inbox_id']] = [['kind' => 'mail', 'at' => (int)$r['t'], 'by' => '']];
+    } catch (Throwable $e) { }
+    return $m;
+}
+// A card's sent marks: [kind => [at, by]] for mail, msg and asked, newest of each.
+function rs_hub_reach_of(array $keys): array {
+    $all = rs_hub_reach_all();
+    $out = [];
+    foreach ($keys as $k) foreach ($all[$k] ?? [] as $x) {
+        $kind = (string)$x['kind'];
+        if (!isset($out[$kind]) || (int)$x['at'] > $out[$kind][0]) $out[$kind] = [(int)$x['at'], (string)$x['by']];
+    }
+    return $out;
+}
+
 // The board for one store: [col => [card]], plus the submissions whose checks need working out.
 function rs_hub_board(string $store): array {
     $cols = array_fill_keys(array_keys(RS_HUB_COLS[$store]), []);
@@ -484,6 +519,7 @@ function rs_hub_board(string $store): array {
             'acct' => !empty($d['account']), 'src' => !empty($d['resubmitted']) && $r['col'] === 'new' ? 'Sent again' : 'Submission',
             'con' => $store === 'pc' ? rs_hub_con((string)($d['origin'] ?? '')) : rs_hub_cat((string)($d['category'] ?? '')),
             'when' => rs_hub_ts((string)$r['created']), 'note' => $note, 'icon' => $icon($sid), 'pre' => in_array($sid, $need, true), 'vt' => $subVt,
+            'sent' => rs_hub_reach_of(['sub:' . $sid, 'mail:' . $sid]),
             'flag' => !empty($flags['sub:' . $sid]), 'notes' => (int)($notes['sub:' . $sid] ?? 0),
             'q' => mb_strtolower(($d['name'] ?? '') . ' ' . ($d['author'] ?? '') . ' ' . ($d['repo'] ?? '') . ' ' . ($d['account_name'] ?? '')),
         ];
@@ -504,6 +540,7 @@ function rs_hub_board(string $store): array {
             'dev' => $sub !== null ? (string)($sub['author'] ?? '') : ($src === 'Link' ? 'Added by ' . (string)$j['who'] : ''), 'verified' => $sub !== null && !empty($sub['verified']),
             'acct' => $sub !== null && !empty($sub['account']), 'src' => $src, 'con' => $con, 'when' => rs_hub_ts((string)$j['created']), 'note' => $note,
             'icon' => (string)($a['icon'] ?? '') !== '' ? (string)$a['icon'] : ($sub !== null ? $icon((int)$j['sub_id']) : ''), 'pre' => false, 'vt' => $jobVt,
+            'sent' => rs_hub_reach_of(array_merge(['job:' . (int)$j['id']], !empty($j['sub_id']) ? ['sub:' . (int)$j['sub_id'], 'mail:' . (int)$j['sub_id']] : [])),
             'flag' => !empty($flags[$item]), 'notes' => (int)($notes[$item] ?? 0),
             'q' => mb_strtolower($name . ' ' . ($sub['author'] ?? '') . ' ' . $j['repo_key']),
         ];

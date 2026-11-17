@@ -41,6 +41,7 @@ const HUB_IC = [
     'ver' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5l2.2 1.6 2.7-.1.9 2.6 2.2 1.6-.8 2.6.8 2.6-2.2 1.6-.9 2.6-2.7-.1L12 21.5l-2.2-1.6-2.7.1-.9-2.6L4 15.8l.8-2.6L4 10.6l2.2-1.6.9-2.6 2.7.1z"/><path d="m8.6 12 2.3 2.3 4.5-4.6" fill="none" stroke="#06121a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     'flag' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>',
     'msg' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+    'mail' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
     'plus' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     'ext' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
     'more' => '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
@@ -54,6 +55,15 @@ function hub_tile(string $name, string $img = '', string $cls = ''): string {
     return '<span class="sh-ico' . ($cls !== '' ? ' ' . $cls : '') . '" style="--h:' . hub_hue($name) . '" aria-hidden="true">' . h($l) . '</span>';
 }
 function hub_step_icon(string $s): string { return $s === 'run' ? HUB_IC['spin'] : ($s === 'ok' ? HUB_IC['check'] : ($s === 'warn' ? HUB_IC['warn'] : ($s === 'bad' ? HUB_IC['x'] : '–'))); }
+// (4.13) Already sent to the developer: a mail or chat icon with a green check, top right of the card.
+function hub_sent_marks(array $sent): string {
+    if (!$sent) return '';
+    $ago = function (int $t): string { $d = time() - $t; return $d < 90 ? 'just now' : ($d < 3600 ? round($d / 60) . ' min ago' : ($d < 86400 ? round($d / 3600) . ' h ago' : round($d / 86400) . ' d ago')); };
+    $o = '';
+    foreach (['mail' => ['mail', 'Email sent'], 'msg' => ['msg', 'Message sent'], 'asked' => ['msg', 'Asked the developer']] as $k => [$ic, $label])
+        if (isset($sent[$k])) $o .= '<span class="sh-sent" title="' . h($label . ' ' . $ago($sent[$k][0]) . ($sent[$k][1] !== '' ? ' by ' . $sent[$k][1] : '')) . '">' . HUB_IC[$ic] . '<i aria-hidden="true">' . HUB_IC['check'] . '</i></span>';
+    return '<span class="sh-sents">' . $o . '</span>';
+}
 function hub_card(array $c): string {
     [$st, $note] = $c['note'];
     $dev = $c['dev'] !== '' ? $c['dev'] : $c['con'];
@@ -61,6 +71,7 @@ function hub_card(array $c): string {
         . '<span class="sh-card-top">' . hub_tile($c['name'], $c['icon']) . '<span class="sh-card-t"><b>' . h($c['name']) . '</b><span class="sh-by' . ($c['verified'] ? ' ver' : '') . '">'
         . ($c['verified'] ? '<span class="sh-ver" title="Verified developer">' . HUB_IC['ver'] . '</span>' : '') . h($dev) . '</span></span>'
         . ($c['flag'] ? '<span class="sh-flagged" title="Flagged for the owner">' . HUB_IC['flag'] . '</span>' : '')
+        . hub_sent_marks($c['sent'] ?? [])
         . (!empty($c['vt']) ? '<span class="sh-vtok' . ($c['vt']['ok'] ? ' on' : '') . '" role="button" data-vtok="' . ($c['vt']['ok'] ? '0' : '1') . '" title="' . h($c['vt']['ok'] ? 'VirusTotal\'s minor flags: ' . $c['vt']['by'] . ' looked, likely a false positive. Click to take it back' : 'VirusTotal: minor flags (1 or 2 engines, common for unsigned programs). Looked at the reports? Click to mark it fine') . '">' . HUB_IC['check'] . '</span>' : '') . '</span>'
         . '<span class="sh-note sh-' . h($st) . '">' . ($st === 'run' ? HUB_IC['spin'] : '<i></i>') . '<span>' . h($note) . '</span></span>'
         . '<span class="sh-card-foot"><span class="sh-src">' . h($c['src']) . '</span>' . ($c['dev'] !== '' && $c['con'] !== '' ? '<span class="sh-con">' . h($c['con']) . '</span>' : '')
@@ -484,12 +495,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $mailed = true;
                     }
                     rs_log('developers', 'message', 'to ' . rs_dev_label($acc) . ' about ' . $title);
+                    rs_hub_reach_add($item, 'msg'); if ($mailed) rs_hub_reach_add($item, 'mail');
                     $res['msg'] = 'Sent to their developer hub' . ($mailed ? ', and emailed.' : '.') . ' Their answer shows here and on Messages.';
                 } else {
                     $to = rs_inbox_email($r, null);
                     if ($to === '') throw new RuntimeException('They didn\'t leave an email address and have no developer account, so there\'s no way to write to them from here.');
                     if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up yet, so no email can go out.');
                     $mailOut($to, 'About your RecompLauncher submission: ' . $title, $body, $subId);
+                    rs_hub_reach_add($item, 'mail');
                     $res['msg'] = 'Emailed to ' . $to . '. Their answer comes to ' . rs_mail_get('mail_from') . '.';
                 }
                 $res['reload'] = false;
@@ -640,6 +653,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($act === 'unasked') { rs_hub_ask_clear((int)$j['id']); $res['msg'] = 'Back in Ready to publish.'; break; }
                 $vtBad = rs_auto_vt($j)[0] === 'bad';
                 rs_hub_ask_set((int)$j['id'], rs_me_name(), $vtBad, (string)$j['tag']);
+                rs_hub_reach_add($item, 'asked');
                 rs_hub_note_add('job:' . (int)$j['id'], ($vtBad ? 'Sent the developer the VirusTotal report.' : 'Asked the developer.') . ' Waiting on them.');
                 $res['msg'] = 'Moved to Waiting on the developer.' . ($vtBad ? ' It comes back by itself once VirusTotal clears it.' : '');
                 break;
@@ -660,12 +674,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$acc) throw new RuntimeException('They don\'t have a developer account, so it can only go by email.');
                     rs_dev_msg_add('dm', (int)$acc['id'], true, $body);
                     rs_log('developers', 'message', 'VirusTotal note to ' . rs_dev_label($acc) . ' about ' . $title);
+                    rs_hub_reach_add($item, 'msg');
                     $went[] = 'their developer hub';
                 }
                 if ($wantMail) {
                     if ($to === '') throw new RuntimeException('They didn\'t leave an email address' . ($went ? ', so it only went to their hub.' : '.'));
                     if (!rs_mail_ready()) throw new RuntimeException('The mailbox isn\'t set up yet, so no email can go out' . ($went ? ' (it went to their hub).' : '.'));
                     $mailOut($to, $subject !== '' ? $subject : 'About your RecompLauncher submission: ' . $title, $body, $subId);
+                    rs_hub_reach_add($item, 'mail');
                     $went[] = $to;
                 }
                 // (4.13) Its draft waits on them now, and comes back once VirusTotal clears it.

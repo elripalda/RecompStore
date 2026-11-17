@@ -61,6 +61,8 @@ After a PC submission goes live, the developer should get the "you're live" emai
 
 **Builds are there** (`rs_hub_check`): the files a developer named are looked for in the newest release. When one is missing but that release still has a build for the same system (an installer swapped for a portable zip), the check says "File name changed" in orange with the new name instead of a red "Files not in the newest release", since Auto-add reads the release itself and takes the new file.
 
+**Sent marks** (4.13): a card shows a mail or chat icon with a green check, top right, once its developer was emailed, messaged in their hub, or marked "Asked them, wait" from the board (`rs_hub_reach_add`, kv `hubreach:<item>`; emails to the submission from before count too, from `mail_sent`). Hover says when and who.
+
 Anything handled leaves the board at once (it's under **Handled**). Always mark a submission done when it's handled (added, duplicate, already listed, declined).
 
 ## Why is it hidden?
