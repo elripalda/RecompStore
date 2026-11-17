@@ -48,20 +48,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $why = rs_vt_test();
             rs_flash($why === '' ? 'VirusTotal is connected. Checks start on their own.' : $why, $why === '' ? 'ok' : 'err');
         } elseif ($act === 'key_add') {
-            // (4.13) Another team member's own VirusTotal key: theirs first while they work, a backup otherwise.
-            $k = trim((string)($_POST['vt_key'] ?? ''));
-            if (!preg_match('/^[A-Za-z0-9]{40,100}$/', $k)) throw new RuntimeException('That doesn\'t look like a VirusTotal API key. Copy it again from the VirusTotal profile, API key.');
+            // (4.13) One or more team members' own VirusTotal keys (one per line). Each is tested, and the
+            // page says what happened to each one (by its last four characters, never the key).
+            $pasted = array_values(array_unique(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string)($_POST['vt_key'] ?? '')) ?: []))));
+            if (!$pasted) throw new RuntimeException('Paste a VirusTotal API key first.');
             $all = rs_vt_extra_keys();
-            foreach (array_merge([rs_vt_key()], array_column($all, 'key')) as $have) if ($have !== '' && hash_equals($have, $k)) throw new RuntimeException('That key is already here.');
-            if (count($all) >= 9) throw new RuntimeException('Ten keys is the most this page keeps.');
-            $why = rs_vt_test($k);
-            if ($why !== '') throw new RuntimeException($why);
             [$oid, $oname] = $vtOwner((string)($_POST['owner'] ?? ''));
-            $all[] = ['id' => bin2hex(random_bytes(4)), 'owner' => $oid, 'owner_name' => $oname, 'by' => rs_me_name(),
-                'label' => mb_substr(trim((string)($_POST['label'] ?? '')) ?: ($oid ? $oname . '\'s key' : 'Backup key'), 0, 60), 'key' => $k, 'added' => gmdate('c')];
-            rs_vt_extra_save($all);
-            rs_log('security', 'vt-key', 'added a VirusTotal key (' . rs_me_name() . ')');
-            rs_flash('Key added and tested. ' . ($oid ? 'It\'s used first while ' . $oname . ' is working here, and as a backup when the main key runs out.' : 'It\'s a backup for when the main key runs out.'), 'ok');
+            $added = []; $not = [];
+            foreach (array_slice($pasted, 0, 10) as $k) {
+                $tail = '…' . substr($k, -4);
+                $why = '';
+                if (!preg_match('/^[A-Za-z0-9]{40,100}$/', $k)) $why = 'doesn\'t look like a VirusTotal API key (it\'s 64 letters and numbers, on your VirusTotal profile under API key)';
+                foreach (array_merge([rs_vt_key()], array_column($all, 'key')) as $have) if ($why === '' && $have !== '' && hash_equals($have, $k)) $why = 'is already here';
+                if ($why === '' && count($all) >= 9) $why = 'didn\'t fit: ten keys is the most this page keeps';
+                if ($why === '' && ($t = rs_vt_test($k)) !== '') $why = rtrim($t, '.');
+                if ($why !== '') { $not[] = $tail . ' ' . $why; rs_log('security', 'vt-key', 'key ' . $tail . ' not added: ' . $why); continue; }
+                $all[] = ['id' => bin2hex(random_bytes(4)), 'owner' => $oid, 'owner_name' => $oname, 'by' => rs_me_name(),
+                    'label' => mb_substr(trim((string)($_POST['label'] ?? '')) ?: ($oid ? $oname . '\'s key' : 'Key ' . $tail), 0, 60), 'key' => $k, 'added' => gmdate('c')];
+                $added[] = $tail;
+                rs_log('security', 'vt-key', 'added a VirusTotal key ' . $tail . ' (' . rs_me_name() . ')');
+            }
+            if ($added) rs_vt_extra_save($all);
+            $msg = ($added ? 'Added and tested: ' . implode(', ', $added) . '.' : '') . ($not ? ' Not added: ' . implode('; ', $not) . '.' : '');
+            rs_flash(trim($msg), $not ? 'err' : 'ok');
         } elseif ($act === 'key_owner') {
             // (4.13) Whose key it is: theirs goes first while they work; nobody's is a backup only.
             if (!rs_is_owner()) throw new RuntimeException('Only the owner can change whose key it is.');
@@ -406,7 +415,7 @@ rs_head('Security', true, ['assets/vt.css']);
 <?php if ($on): $vtKeys = rs_vt_keys(); $meId = (int)(rs_me()['id'] ?? 0); $vtTeam = array_values(array_filter(rs_team(), fn($u) => (int)$u['active'])); usort($vtKeys, fn($x, $y) => ($x['id'] === 'main' ? 0 : 1) <=> ($y['id'] === 'main' ? 0 : 1)); ?>
 <section class="card" id="keys">
   <h2>VirusTotal keys</h2>
-  <p class="muted">Each key gets VirusTotal's free 500 checks a day and keeps its own count. A team member's key is used first while they're working here; every other key is a backup for when the main key's day is used up.</p>
+  <p class="muted">Each key gets VirusTotal's free 500 checks a day and keeps its own count. Checks are shared out evenly: each one goes to the key that has sent the fewest today, so they all go up together.</p>
   <ul class="vt-keys">
     <?php foreach ($vtKeys as $k): $ks = rs_vt_kstate($k['id']); ?>
     <li><div><strong><?= h($k['id'] === 'main' ? 'Main key' : ($k['label'] !== '' ? $k['label'] : 'Key')) ?></strong>
@@ -420,7 +429,7 @@ rs_head('Security', true, ['assets/vt.css']);
   <details class="vt-keyadd"><summary class="btn">+ Add a key</summary>
     <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_add"><input type="hidden" name="back" value="keys">
       <select name="owner" aria-label="Whose key" style="flex:0 1 200px"><option value="0"<?= rs_is_owner() ? ' selected' : '' ?>>Backup only</option><?php foreach ($vtTeam as $u): ?><option value="<?= (int)$u['id'] ?>"<?= !rs_is_owner() && (int)$u['id'] === $meId ? ' selected' : '' ?>><?= h($u['display_name'] ?: $u['username']) ?></option><?php endforeach; ?></select>
-      <input type="text" name="vt_key" placeholder="Paste the VirusTotal API key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc" required>
+      <textarea name="vt_key" rows="2" placeholder="Paste a VirusTotal API key, or several, one per line" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc;flex:1 1 320px" required></textarea>
       <button class="primary">Add and test</button></form>
   </details>
 </section>

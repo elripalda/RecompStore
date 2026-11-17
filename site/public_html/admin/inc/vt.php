@@ -22,7 +22,8 @@ const RS_VT_PER_DAY = 480;           // a little under the free key's 500
 const RS_VT_KEEP_FOR_NEW = 100;      // (3.8) of those, kept for submissions and "Check a link": updates stop before
 const RS_VT_UPDATE_EVERY = 86400;    // (4.13) a game's updates: one checked a day, the next waits its turn
 const RS_VT_CLAM_AFTER = 6 * 3600;   // (4.13) an update VirusTotal couldn't take in this long: ClamAV, the last resort
-const RS_VT_BACKFILL_PER_TURN = 15; // (4.13) listings whose current version was never checked, added a turn
+const RS_VT_BACKFILL_PER_TURN = 25; // (4.13) listings whose current version was never checked, added a turn
+const RS_VT_BACKFILL_KEEP = 200;    // (4.13) the store's own files upload only while more than this is left today over all keys
 const RS_VT_BACKFILL_UPLOADS = 60;   // a day, for files already in the stores (new ones go first)
 const RS_VT_MAX_BYTES = 650 << 20;   // VirusTotal's largest upload
 const RS_VT_FILE_RE = '/\.(zip|7z|rar|exe|msi|appimage|dmg|deb|rpm|tar\.gz|tgz|tar\.xz|tar\.zst|pkg|elf|bin)$/i';
@@ -60,6 +61,12 @@ function rs_vt_tables(): void {
     // (3.8) Who answered: VirusTotal, or ClamAV on this server.
     try {
         if (!rs_db()->query("SHOW COLUMNS FROM vt_files LIKE 'scanner'")->fetch()) rs_db()->exec("ALTER TABLE vt_files ADD COLUMN scanner VARCHAR(12) NOT NULL DEFAULT 'vt'");
+        // (4.13) A file ClamAV checked still gets VirusTotal's report later (vt_redo), so every download
+        // players get has one. Until then its ClamAV result stands.
+        if (!rs_db()->query("SHOW COLUMNS FROM vt_files LIKE 'vt_redo'")->fetch()) {
+            rs_db()->exec("ALTER TABLE vt_files ADD COLUMN vt_redo TINYINT NOT NULL DEFAULT 0");
+            rs_db()->exec("UPDATE vt_files SET vt_redo = 1 WHERE status = 'done' AND scanner = 'clamav' AND source <> 'finder'");
+        }
     } catch (Throwable $e) { /* next time */ }
     $done = true;
 }
@@ -106,7 +113,7 @@ function rs_clam_check(array $f, string $tmp): bool {
     @unlink($tmp);
     if (!$r['ok']) { rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => $r['err'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 600)]); return true; }
     $red = rs_vt_cfg()['red_at'];
-    rs_vt_save($id, ['status' => 'done', 'scanner' => 'clamav', 'err' => '', 'engines' => 1, 'suspicious' => 0,
+    rs_vt_save($id, ['status' => 'done', 'scanner' => 'clamav', 'err' => '', 'engines' => 1, 'suspicious' => 0, 'vt_redo' => (string)($f['source'] ?? '') !== 'finder' ? 1 : 0,
         'malicious' => $r['found'] !== '' ? $red : 0, 'flagged_by' => $r['found'] !== '' ? 'ClamAV: ' . $r['found'] : '']);
     return true;
 }
@@ -127,11 +134,6 @@ function rs_vt_keys(): array {
     $main = rs_vt_key();
     if ($main !== '') $out[] = ['id' => 'main', 'owner' => 0, 'owner_name' => '', 'label' => 'Main key', 'key' => $main];
     foreach (rs_vt_extra_keys() as $k) $out[] = ['id' => (string)$k['id'], 'owner' => (int)($k['owner'] ?? 0), 'owner_name' => (string)($k['owner_name'] ?? ''), 'label' => (string)($k['label'] ?? ''), 'key' => (string)$k['key'], 'added' => (string)($k['added'] ?? '')];
-    $me = function_exists('rs_me') && !empty($_SESSION['uid']) ? (int)(rs_me()['id'] ?? 0) : 0;
-    if ($me > 0) {
-        $mine = array_values(array_filter($out, fn($k) => $k['id'] !== 'main' && $k['owner'] === $me));
-        $out = array_merge($mine, array_values(array_filter($out, fn($k) => !($k['id'] !== 'main' && $k['owner'] === $me))));
-    }
     return $out;
 }
 function rs_vt_on(): bool { return (bool)rs_vt_keys(); }
@@ -159,7 +161,8 @@ function rs_vt_cfg(): array {
 // green (nothing found), yellow (1 or 2 engines, usually an unsigned program), red (held for you),
 // grey (waiting, too big, or not checked).
 function rs_vt_verdict(array $f): string {
-    if (($f['status'] ?? '') !== 'done') return 'grey';
+    $redo = (int)($f['vt_redo'] ?? 0) === 1 && ($f['scanner'] ?? '') === 'clamav'; // (4.13) in line for VirusTotal's report: ClamAV's answer stands meanwhile
+    if (($f['status'] ?? '') !== 'done' && !$redo) return 'grey';
     $c = rs_vt_cfg();
     if ((int)$f['malicious'] >= $c['red_at']) return 'red';
     if ((int)$f['malicious'] + (int)$f['suspicious'] > 0) return 'yellow';
@@ -194,16 +197,22 @@ function rs_vt_left(): int {
 function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill = false, bool $low = false, bool $stick = false): bool {
     $keys = rs_vt_keys();
     if (!$keys) return false;
-    if ($low && rs_vt_left() <= RS_VT_KEEP_FOR_NEW) return false; // updates and finds leave room for submissions
+    $left = rs_vt_left();
+    if ($low && $left <= RS_VT_KEEP_FOR_NEW) return false; // updates and finds leave room for submissions
+    if ($backfill && $upload && $left <= RS_VT_BACKFILL_KEEP) return false; // (4.13) the store's own files: only with room to spare today
     if ($stick && !empty($GLOBALS['rs_vt_cur'])) $keys = array_values(array_filter($keys, fn($k) => $k['id'] === $GLOBALS['rs_vt_cur']['id']));
     $now = time();
+    // (4.13) Xarishark: balanced. Each request goes to the key that has sent the fewest today, so every
+    // key's count goes up together instead of one being used up before the next.
+    $st = [];
+    foreach ($keys as $k) $st[$k['id']] = rs_vt_kstate($k['id']);
+    usort($keys, fn($a, $b) => [$st[$a['id']]['n'], count($st[$a['id']]['min'])] <=> [$st[$b['id']]['n'], count($st[$b['id']]['min'])]);
     foreach ($keys as $k) {
-        $st = rs_vt_kstate($k['id']);
-        if ($st['hold'] > $now || count($st['min']) >= RS_VT_PER_MIN || $st['n'] >= RS_VT_PER_DAY) continue; // "too many" a moment ago, a full minute, or its day is used up
-        if ($backfill && $upload && $st['up'] >= RS_VT_BACKFILL_UPLOADS) continue;
+        $s = $st[$k['id']];
+        if ($s['hold'] > $now || count($s['min']) >= RS_VT_PER_MIN || $s['n'] >= RS_VT_PER_DAY) continue; // "too many" a moment ago, a full minute, or its day is used up
         if ($take) {
-            $st['min'][] = $now; $st['n']++; if ($upload) $st['up']++;
-            rs_vt_kput($k['id'], $st);
+            $s['min'][] = $now; $s['n']++; if ($upload) $s['up']++;
+            rs_vt_kput($k['id'], $s);
             $GLOBALS['rs_vt_cur'] = $k;
         }
         return true;
@@ -218,15 +227,9 @@ function rs_vt_backoff(int $sec): void {
 }
 // (4.8) Is any of today's VirusTotal allowance left (not counting the four-a-minute limit)?
 function rs_vt_day_ok(bool $upload = false, bool $backfill = false, bool $low = false): bool {
-    $left = 0; $upOk = false;
-    foreach (rs_vt_keys() as $k) {
-        $st = rs_vt_kstate($k['id']);
-        if ($st['n'] >= RS_VT_PER_DAY) continue;
-        $left += RS_VT_PER_DAY - $st['n'];
-        if (!($backfill && $upload && $st['up'] >= RS_VT_BACKFILL_UPLOADS)) $upOk = true;
-    }
+    $left = rs_vt_left();
     if ($left <= 0 || ($low && $left <= RS_VT_KEEP_FOR_NEW)) return false;
-    return $upOk;
+    return !($backfill && $upload && $left <= RS_VT_BACKFILL_KEEP);
 }
 // Requests sent today over every key.
 function rs_vt_today(): int {
@@ -377,6 +380,22 @@ function rs_vt_discover(bool $force = false): void {
 // lookup, then an upload while the day's backfill uploads last), ClamAV when VirusTotal can't.
 function rs_vt_backfill(): void {
     $db = rs_db();
+    // (4.13) Files players get that only ClamAV checked: back in line for VirusTotal's report (priority 6,
+    // the last), 20 a turn while the line is short and the day has room. Current versions first.
+    try {
+        $short = (int)$db->query("SELECT COUNT(*) FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND prio >= 5")->fetchColumn() < 30;
+        if ($short && rs_vt_left() > RS_VT_BACKFILL_KEEP) {
+            $cur = [];
+            foreach (rs_pc_apps() as $a) {
+                if ((string)($a['ok_tag'] ?? '') !== '') $cur[strtolower(rs_pc_key($a)) . '|' . $a['ok_tag']] = 1;
+                if (!empty($a['pending']['tag'])) $cur[strtolower(rs_pc_key($a)) . '|' . $a['pending']['tag']] = 1;
+            }
+            $ids = [];
+            foreach ($db->query("SELECT id, repo, tag FROM vt_files WHERE status = 'done' AND vt_redo = 1 AND scanner = 'clamav' ORDER BY updated DESC LIMIT 600")->fetchAll() as $r)
+                if (isset($cur[strtolower((string)$r['repo']) . '|' . (string)$r['tag']]) && count($ids) < 20) $ids[] = (int)$r['id'];
+            if ($ids) $db->exec("UPDATE vt_files SET status = 'new', prio = 6, tries = 0, next_at = NULL WHERE id IN (" . implode(',', $ids) . ')');
+        }
+    } catch (Throwable $e) { rs_errlog('vt redo', $e); }
     $have = [];
     foreach ($db->query('SELECT DISTINCT repo, tag FROM vt_files')->fetchAll() as $r) $have[strtolower((string)$r['repo']) . '|' . (string)$r['tag']] = 1;
     $n = 0;
@@ -422,6 +441,14 @@ function rs_vt_fetch(array $f, string $to): string {
 }
 
 function rs_vt_save(int $id, array $set): void {
+    // (4.13) A file waiting for its VirusTotal report that VirusTotal can't take (too big, failed):
+    // back to its ClamAV result, not "couldn't check".
+    if (in_array($set['status'] ?? '', ['error', 'big'], true)) {
+        $st = rs_db()->prepare('SELECT vt_redo, scanner FROM vt_files WHERE id = ?');
+        $st->execute([$id]);
+        $r = $st->fetch();
+        if ($r && (int)$r['vt_redo'] === 1 && $r['scanner'] === 'clamav') $set = ['status' => 'done', 'vt_redo' => 0, 'err' => mb_substr('VirusTotal couldn\'t take it: ' . (($set['status'] === 'big') ? 'too big to send' : (string)($set['err'] ?? '')), 0, 250)];
+    }
     $set['updated'] = gmdate('Y-m-d H:i:s');
     $cols = implode(', ', array_map(fn($k) => "$k = ?", array_keys($set)));
     rs_db()->prepare("UPDATE vt_files SET $cols WHERE id = ?")->execute(array_merge(array_values($set), [$id]));
@@ -443,6 +470,7 @@ function rs_vt_step(array $f): bool {
     $id = (int)$f['id'];
     $backfill = (int)$f['prio'] >= 5;
     $low = (int)$f['prio'] >= 3; // updates and finds: they leave room in the day for submissions
+    $redo = (int)($f['vt_redo'] ?? 0) === 1; // (4.13) ClamAV already answered: this is for VirusTotal's report only
     $tmp = rs_vt_tmp($id);
     if ($f['status'] === 'new') {
         if (empty($f['sha256'])) {
@@ -453,15 +481,15 @@ function rs_vt_step(array $f): bool {
             $f['sha256'] = hash_file('sha256', $tmp);
             rs_vt_save($id, ['sha256' => $f['sha256'], 'size' => (int)filesize($tmp)]);
         }
-        $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on(); // a submission: ClamAV only when VirusTotal is out for the day
+        $sub = !$redo && !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on(); // a submission: ClamAV only when VirusTotal is out for the day
         // (4.13) Finds and backfill can take ClamAV; an update only as the last resort, after waiting
         // RS_VT_CLAM_AFTER for VirusTotal. Players see a ClamAV result as Verified too, without the report link.
         $late = (int)$f['prio'] === 3 && time() - (int)strtotime((string)$f['created'] . ' UTC') >= RS_VT_CLAM_AFTER;
-        $clam = ((int)$f['prio'] >= 4 || $late) && rs_clam_on();
+        $clam = !$redo && ((int)$f['prio'] >= 4 || $late) && rs_clam_on();
         if (!rs_vt_budget(true, false, false, $low)) return ($clam || $sub) && !rs_vt_day_ok(false, false, $low) ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV (a full minute waits)
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
-            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
+            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'vt_redo' => 0, 'err' => ''] + rs_vt_results((array)($j['data']['attributes'] ?? []), 'last_analysis_stats'));
             @unlink($tmp);
             return true;
         }
@@ -474,8 +502,8 @@ function rs_vt_step(array $f): bool {
     }
     if ($f['status'] === 'upload') {
         if (!rs_vt_budget(false, true, $backfill, $low)) {
-            $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on() && !rs_vt_day_ok(true, $backfill, $low);
-            $last = $low && rs_clam_on() && !rs_vt_day_ok(true, $backfill, $low)
+            $sub = !$redo && !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on() && !rs_vt_day_ok(true, $backfill, $low);
+            $last = !$redo && $low && rs_clam_on() && !rs_vt_day_ok(true, $backfill, $low)
                 && ((int)$f['prio'] >= 4 || time() - (int)strtotime((string)$f['created'] . ' UTC') >= RS_VT_CLAM_AFTER); // (4.13) the last resort
             return $sub || $last ? rs_clam_check($f, $tmp) : false; // waiting for an upload VirusTotal can't take today (a full minute waits)
         }
@@ -507,7 +535,7 @@ function rs_vt_step(array $f): bool {
         [$code, $j] = rs_vt_call('GET', '/analyses/' . rawurlencode((string)$f['analysis']));
         $attr = (array)($j['data']['attributes'] ?? []);
         if ($code === 200 && ($attr['status'] ?? '') === 'completed') {
-            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt'] + rs_vt_results($attr, 'stats'));
+            rs_vt_save($id, ['status' => 'done', 'scanner' => 'vt', 'vt_redo' => 0] + rs_vt_results($attr, 'stats'));
             return true;
         }
         rs_vt_save($id, ['next_at' => gmdate('Y-m-d H:i:s', time() + 120)]);
