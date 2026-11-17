@@ -17,7 +17,7 @@ $doc = [
         'Click a card to open it. The drawer has its checks, what they sent, the conversation and the buttons.',
         'The line on each card is the most important thing about it: green is ready, orange needs a look, red stops it, blue is still being checked.',
         'The badge next to a name means a verified developer: someone we know, with a developer account linked to their GitHub. Use the Verified developers filter to see only them.',
-        'Check a link (top right) runs the same checks on any GitHub, GitLab or SourceForge project, as if it had been submitted.',
+        'Check a link (top right) runs the same checks on any GitHub, GitLab, SourceForge, Forgejo or Gitea project, as if it had been submitted.',
     ]],
     ['The buttons', [
         'Approve and check: sends it to Checking. Nothing goes live yet.',

@@ -86,7 +86,7 @@ function rs_auto_step(int $id, string $key, string $state, string $note = ''): v
 function rs_auto_start(string $link, string $who, bool $launch = true, int $subId = 0): int {
     rs_auto_tables();
     $l = rs_repo_from_link($link);
-    if (!$l) throw new RuntimeException('Paste a GitHub, GitLab or SourceForge link, like github.com/owner/name.');
+    if (!$l) throw new RuntimeException('Paste a GitHub, GitLab, SourceForge, Forgejo or Gitea link to the project, like github.com/owner/name.');
     $key = rs_repo_key($l['host'], $l['repo']);
     $st = rs_db()->prepare("SELECT id FROM pc_auto WHERE repo_key = ? AND status IN ('queued', 'running', 'review') ORDER BY id DESC LIMIT 1");
     $st->execute([$key]);

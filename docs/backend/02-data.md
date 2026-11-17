@@ -6,6 +6,7 @@ Tables create themselves the first time their code runs (`CREATE TABLE IF NOT EX
 
 - `settings` (k, v): every admin setting. Read with `rs_setting('key', default)`, write with `rs_set_setting`. Settings that are a group of values are stored as one JSON value (for example `bk_cfg` for Emergency backup, the Instant Gaming config).
 - `kv_cache` (k, v, at): small things that change often: "last run" times, "running" flags, counters, cached answers. `rs_kv_get($k)` returns `['v' => ..., 'age' => seconds]` or null; `rs_kv_put($k, $v)`.
+- Forgejo and Gitea servers (4.9): read only when on the list, Settings `forgejo_hosts` plus `forgejo_seen` (servers recognized from a pasted link: `rs_fj_detect` asks `/api/v1/version`, cached a day in kv `fjdet:<host>`). A request coming in only asks; checking a link to that server adds it to the list, even when the answer was cached (4.13, `rs_fj_remember`).
 - `gh_cache`: GitHub, GitLab, SourceForge and Forgejo answers, cached (`rs_host_releases($host, $repo, $maxAge)`). Most code reads through this, so a page never waits on GitHub twice.
 - `rate_tries`: rate limits (`rs_rate_over`, `rs_rate_hit`).
 - `admin_log`: the change log. Every POST in the admin is logged by `rs_check_csrf`, and code adds its own lines with `rs_log(area, item, text)`.

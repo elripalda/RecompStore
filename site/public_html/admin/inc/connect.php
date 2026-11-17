@@ -967,7 +967,12 @@ function rs_fj_detect(string $host, bool $remember = true): bool {
     if (in_array($host, rs_fj_hosts(), true)) return true;
     if (preg_match('/(^|\.)(github\.com|gitlab\.com|sourceforge\.net|githubusercontent\.com|recompstore\.com|recomplauncher\.com)$/', $host)) return false;
     $k = 'fjdet:' . $host;
-    if (function_exists('rs_kv_get') && ($c = rs_kv_get($k)) && $c['age'] < 86400) return $c['v'] === '1';
+    // (4.13) A server already found to be Forgejo (by a request coming in, which only asks) joins the
+    // list when a link to it is checked: before, the cached answer skipped that, and the link was refused.
+    if (function_exists('rs_kv_get') && ($c = rs_kv_get($k)) && $c['age'] < 86400) {
+        if ($c['v'] === '1' && $remember) rs_fj_remember($host);
+        return $c['v'] === '1';
+    }
     $ips = @gethostbynamel($host) ?: [];
     $public = $ips && !array_filter($ips, fn($ip) => !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE));
     $ok = false;
@@ -977,11 +982,13 @@ function rs_fj_detect(string $host, bool $remember = true): bool {
         $ok = is_array($j) && is_string($j['version'] ?? null) && $j['version'] !== '';
     }
     if (function_exists('rs_kv_put')) rs_kv_put($k, $ok ? '1' : '0');
-    if ($ok && $remember) {
-        $seen = array_filter(array_map('trim', explode(',', (string)rs_setting('forgejo_seen', ''))));
-        if (!in_array($host, $seen, true)) { $seen[] = $host; rs_set_setting('forgejo_seen', implode(', ', $seen)); }
-    }
+    if ($ok && $remember) rs_fj_remember($host);
     return $ok;
+}
+// A Forgejo or Gitea server on the list for good (Settings, forgejo_seen).
+function rs_fj_remember(string $host): void {
+    $seen = array_filter(array_map('trim', explode(',', (string)rs_setting('forgejo_seen', ''))));
+    if (!in_array($host, $seen, true)) { $seen[] = $host; rs_set_setting('forgejo_seen', implode(', ', $seen)); }
 }
 function rs_fj_path_ok(string $p): bool {
     if (strlen($p) > 150 || str_contains($p, '..')) return false;

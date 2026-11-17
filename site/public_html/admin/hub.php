@@ -839,7 +839,7 @@ rs_head('Submissions', true, ['assets/hub.css', 'assets/artpick.css']);
     <?php if ($store === 'pc'): ?><div class="sh-tools-r"><button type="button" class="sh-selbtn" data-select-toggle><?= HUB_IC['check'] ?>Select</button><button type="button" class="sh-add" data-open-add><?= HUB_IC['plus'] ?>Check a link</button></div><?php endif; ?>
   </div>
   <?php if ($store === 'pc'): ?><form class="sh-addbox card" data-addbox hidden>
-    <label>Links to check <span class="muted small">GitHub, GitLab or SourceForge, one per line. Each one is checked like a submission and lands on Checking.</span>
+    <label>Links to check <span class="muted small">GitHub, GitLab, SourceForge, Forgejo or Gitea, one per line. Each one is checked like a submission and lands on Checking.</span>
       <textarea name="links" rows="2" class="mono" spellcheck="false" placeholder="https://github.com/owner/name" required></textarea></label>
     <div class="sh-row"><button class="primary">Check them</button><button type="button" data-close-add>Cancel</button></div>
   </form><?php endif; ?>

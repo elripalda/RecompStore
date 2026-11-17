@@ -195,7 +195,7 @@ if ($reqView):
 <section class="head-row">
   <div>
     <h1>Auto-add</h1>
-    <p class="muted">Paste a GitHub, GitLab or SourceForge link and the server does the whole listing: it reads the repo and its newest release, makes the listing (hidden), looks inside the download for game files or an emulator in disguise, runs ClamAV and VirusTotal, has Claude write the name, game, page and setup from the README, builds the boot profile for Easy Setup and launcher settings when the project allows it, and picks the cover, banner, logo and game info. Each one lands below as a draft with what every step found. Look it over, change anything on its listing, then Publish.</p>
+    <p class="muted">Paste a GitHub, GitLab, SourceForge, Forgejo or Gitea link and the server does the whole listing: it reads the repo and its newest release, makes the listing (hidden), looks inside the download for game files or an emulator in disguise, runs ClamAV and VirusTotal, has Claude write the name, game, page and setup from the README, builds the boot profile for Easy Setup and launcher settings when the project allows it, and picks the cover, banner, logo and game info. Each one lands below as a draft with what every step found. Look it over, change anything on its listing, then Publish.</p>
   </div>
 </section>
 <div class="auto-top">
