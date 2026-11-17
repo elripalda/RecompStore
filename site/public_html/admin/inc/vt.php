@@ -155,6 +155,8 @@ function rs_vt_cfg(): array {
         'red_at' => max(1, min(20, (int)rs_setting('vt_red_at', '3'))),
         'auto' => rs_setting('vt_auto', '1') === '1',
         'clam_subs' => rs_setting('vt_clam_subs', '1') === '1',
+        // (4.14) Every game in the store checked too (its report link): off, so the day goes to updates and submissions.
+        'store_all' => rs_setting('vt_store_all', '0') === '1',
     ];
 }
 
@@ -380,6 +382,15 @@ function rs_vt_discover(bool $force = false): void {
 // lookup, then an upload while the day's backfill uploads last), ClamAV when VirusTotal can't.
 function rs_vt_backfill(): void {
     $db = rs_db();
+    // (4.14) Switched off on Security > Settings: nothing new goes in, and what's waiting leaves the line.
+    // A file waiting for VirusTotal's report keeps its ClamAV result (and its place for when it's back on).
+    if (!rs_vt_cfg()['store_all']) {
+        try {
+            $db->exec("DELETE FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND source = 'store' AND prio >= 5 AND scanner <> 'clamav'");
+            $db->exec("UPDATE vt_files SET status = 'done', prio = 5, next_at = NULL WHERE status IN ('new', 'upload', 'analyzing') AND prio >= 5 AND vt_redo = 1 AND scanner = 'clamav'");
+        } catch (Throwable $e) { rs_errlog('vt store off', $e); }
+        return;
+    }
     // (4.13) Files players get that only ClamAV checked: back in line for VirusTotal's report (priority 6,
     // the last), 20 a turn while the line is short and the day has room. Current versions first.
     try {
@@ -413,6 +424,47 @@ function rs_vt_backfill(): void {
             break;
         }
     }
+}
+
+// (4.14) Rescan, for a game hidden for security: reads its releases again (not the cached copy) and
+// checks the newest one first in line. The same file as before is sent back to VirusTotal to be
+// analysed again (engines that cleared it after a report show clean then); a new release is checked
+// like any update. -> [new tag, what happened, for the flash]
+function rs_vt_rescan(array $a): array {
+    rs_vt_tables();
+    $host = rs_pc_host($a);
+    $repo = (string)($a['repo'] ?? '');
+    if ($repo === '') throw new RuntimeException($a['name'] . ' has no project to read.');
+    $r = rs_vt_newest(rs_vt_list($host, $repo, 0));
+    if (!$r) throw new RuntimeException('Couldn\'t read ' . $a['name'] . '\'s releases right now. Try again in a minute.');
+    $tag = (string)$r['tag_name'];
+    $files = rs_vt_pick((array)($r['assets'] ?? []), rs_vt_main_patterns(['asset_win' => $a['asset_win'] ?? '', 'asset_linux' => $a['asset_linux'] ?? '', 'asset_mac' => $a['asset_mac'] ?? '']));
+    if (!$files) throw new RuntimeException('The newest release (' . $tag . ') has no download matching ' . $a['name'] . '\'s files.');
+    $key = rs_pc_key($a);
+    $db = rs_db();
+    $again = 0; $fresh = 0;
+    foreach ($files as $f) {
+        $st = $db->prepare('SELECT * FROM vt_files WHERE repo = ? AND tag = ? AND name = ?');
+        $st->execute([$key, $tag, (string)$f['name']]);
+        $row = $st->fetch();
+        if (!$row) { rs_vt_add($key, $tag, $f, 'update', 'pc:' . $a['id'], 1); $fresh++; continue; }
+        // Checked before: VirusTotal analyses the same file again (its answer then is today's engines).
+        if (!empty($row['sha256']) && rs_vt_budget(true)) {
+            [$code, $j] = rs_vt_call('POST', '/files/' . $row['sha256'] . '/analyse', []);
+            if ($code === 200 && !empty($j['data']['id'])) {
+                rs_vt_save((int)$row['id'], ['status' => 'analyzing', 'scanner' => 'vt', 'vt_redo' => 0, 'analysis' => (string)$j['data']['id'], 'prio' => 1, 'tries' => 0, 'err' => '', 'seen' => 0, 'next_at' => gmdate('Y-m-d H:i:s', time() + 120)]);
+                $again++;
+                continue;
+            }
+        }
+        // No room with VirusTotal right now (or it hadn't seen the file): back in line, first.
+        rs_vt_save((int)$row['id'], ['status' => 'new', 'prio' => 1, 'tries' => 0, 'err' => '', 'seen' => 0, 'next_at' => null]);
+        $again++;
+    }
+    $was = (string)($a['sec_hid']['tag'] ?? '');
+    $msg = $was !== '' && $was !== $tag ? 'Found a newer release, ' . $tag . ' (it was ' . $was . '). It\'s first in line for VirusTotal.'
+        : ($fresh ? $tag . ' is first in line for VirusTotal.' : 'VirusTotal is scanning ' . $tag . ' again with today\'s engines. The result shows here in a few minutes.');
+    return [$tag, $msg];
 }
 
 // ---- Checking -----------------------------------------------------------------------------------

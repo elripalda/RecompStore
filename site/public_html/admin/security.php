@@ -99,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_set_setting('vt_red_at', (string)max(1, min(20, (int)($_POST['red_at'] ?? 3))));
             rs_set_setting('vt_auto', !empty($_POST['auto']) ? '1' : '0');
             rs_set_setting('vt_clam_subs', !empty($_POST['clam_subs']) ? '1' : '0');
+            rs_set_setting('vt_store_all', !empty($_POST['store_all']) ? '1' : '0');
             rs_flash('Saved.', 'ok');
         } elseif ($act === 'approve' || $act === 'block') {
             $app = $byId((string)($_POST['id'] ?? ''));
@@ -179,6 +180,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_log('security', $app['id'], 'back on the store after a security hide');
                 rs_flash($app['name'] . ' is back in the store.', 'ok');
             }
+        } elseif ($act === 'sec-rescan') {
+            // (4.14) A hidden game's developer says it's fixed: its newest release, checked again first.
+            $app = $byId((string)($_POST['id'] ?? ''));
+            if (!$app || empty($app['sec_hid'])) throw new RuntimeException('That game isn\'t hidden for security any more.');
+            [$tag, $msg] = rs_vt_rescan($app);
+            $app['sec_hid']['tag'] = $tag;
+            $app['sec_hid']['rescan'] = time();
+            rs_pc_save($app);
+            rs_log('security', $app['id'], 'rescanned ' . $tag);
+            session_write_close();
+            rs_vt_run(20);
+            rs_flash($msg, 'ok');
         } elseif ($act === 'seen') {
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? '')]);
             rs_flash('Marked as seen.', 'ok');
@@ -318,9 +331,11 @@ rs_head('Security', true, ['assets/vt.css']);
     <?php foreach ($secHid as $x): $sh = $x['sec_hid']; $sRepo = (string)($sh['repo'] ?? rs_pc_key($x)); $sTag = (string)($sh['tag'] ?? ''); ?>
     <div class="vt-row red">
       <div class="vt-what"><strong><?= h($x['name']) ?></strong><small><?= h($sRepo) ?> · <?= h($sTag) ?></small><small class="vt-engines"><?= h((string)($sh['why'] ?? '')) ?></small></div>
-      <div class="vt-src"><span class="vt-chip">Hidden <?= h(gmdate('M j', (int)$sh['at'])) ?><?= (string)($sh['by'] ?? '') !== '' ? ' · ' . h((string)$sh['by']) : '' ?></span></div>
-      <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge($sRepo, $sTag)) ?></div>
+      <div class="vt-src"><span class="vt-chip">Hidden <?= h(gmdate('M j', (int)$sh['at'])) ?><?= (string)($sh['by'] ?? '') !== '' ? ' · ' . h((string)$sh['by']) : '' ?></span><?php if (!empty($sh['rescan'])): ?><span class="vt-chip">Rescanned <?= h($when(gmdate('Y-m-d H:i:s', (int)$sh['rescan']))) ?></span><?php endif; ?></div>
+      <?php $sb = rs_vt_repo_badge($sRepo, $sTag); ?>
+      <div class="vt-res"><?= rs_vt_badge_html($sb) ?><?php if ($sb && ($sb[0] ?? '') === 'green' && !empty($sh['rescan'])): ?><small class="vt-ok">Clean now. Put it back when you're ready.</small><?php endif; ?></div>
       <div class="vt-acts">
+        <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sec-rescan"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button title="Reads its newest release again and checks it first in line">Rescan</button></form>
         <form method="post" onsubmit="return confirm('Put <?= h(addslashes($x['name'])) ?> back in the store?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sec-unhide"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Put back in the store</button></form>
       </div>
       <?php $sf = null; try { $sf = $sTag !== '' ? rs_vt_worst($sRepo, $sTag) : null; } catch (Throwable $e) { }
@@ -443,6 +458,7 @@ rs_head('Security', true, ['assets/vt.css']);
     <label><span>Hold for you when flagged by</span><span class="vt-num"><input type="number" name="red_at" min="1" max="20" value="<?= $cfg['red_at'] ?>"> engines</span><small>Unsigned programs often get 1 or 2 flags that mean nothing. Those show yellow and don't hold anything.</small></label>
     <label class="vt-toggle"><input type="checkbox" name="auto" value="1"<?= $cfg['auto'] ? ' checked' : '' ?>><span><strong>Let clean updates out on their own</strong><small>Off: every held update waits for Let it out now.</small></span></label>
     <label class="vt-toggle"><input type="checkbox" name="clam_subs" value="1"<?= $cfg['clam_subs'] ? ' checked' : '' ?><?= $clam ? '' : ' disabled' ?>><span><strong>ClamAV for submissions too</strong><small>When the day's VirusTotal checks run out, submissions and pasted links are checked by ClamAV instead of waiting for tomorrow.</small></span></label>
+    <label class="vt-toggle"><input type="checkbox" name="store_all" value="1"<?= $cfg['store_all'] ? ' checked' : '' ?>><span><strong>Check every game in the store too</strong><small>Games that aren't updating get checked in the background, so each one has a VirusTotal report. Off: only updates and submissions are checked.</small></span></label>
     <div class="vt-save"><button class="primary">Save</button></div>
   </form>
   <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead. Updates always wait for VirusTotal, one a game a day' . ($cfg['clam_subs'] ? ', and so are submissions' : '') . '. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
