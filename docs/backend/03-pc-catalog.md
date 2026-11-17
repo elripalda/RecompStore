@@ -48,7 +48,7 @@ Each listing's `files` (from `rs_vt_catalog_files`) gives the release's checked 
 
 ## Titles (one game, many versions)
 
-`inc/titles.php`. A title is the game; every listing built from it is a version under it. `rs_titles_autogroup()` groups new ones on Publish. The site shows a game once in lists and lets you pick the version on its page. Trending and Emergency backup work per listing (each version on its own).
+`inc/titles.php`. A title is the game; every listing built from it is a version under it. `rs_titles_autogroup()` groups new ones on Publish. (4.14) A game is one title whatever console its versions come from: `rs_titles_merge_same()` folds titles with the same game name (`rs_auto_norm`) into the one with the most versions first, and a new listing joins the title of its game's name (its own console's title first). A title with `apart: true` (a remake that shares the name, like MediEvil 2019 or Ratchet & Clank 2016) is never merged and only takes listings from its own console. The site shows a game once in lists and lets you pick the version on its page. Trending and Emergency backup work per listing (each version on its own).
 
 **A release's game as a version** (4.13): a title can list one game of a release that carries several (COGBox, Athelas) by its full id, `<release id>--<game id>` (`cogbox--gow2`, checked with `rs_pc_game_of`). It counts toward the two versions a title needs, takes no art from the others, and is never the Recommended one (that stays a plain listing). `rs_title_catalog` puts the title's id on the release's `games[k].title`, which the launcher and playtime totals read. Add one on Admin > Games with versions by typing the full id.
 

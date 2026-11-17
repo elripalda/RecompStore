@@ -95,15 +95,48 @@ function rs_auto_find_notes(array $f): array {
 
 // ---- One game, one listing ----------------------------------------------------------------------
 
-// PC recomps of the same game from the same console go under one title: into the one it already
-// has, or a new one when there are two. -> how many were placed.
+// (4.14) Two titles with the same game name are one game, whatever console each was first grouped
+// from (Ocarina of Time from N64 and from Switch 2 were two titles, so the launcher showed its
+// versions apart). The one with the most versions keeps them all; the others are deleted. A title
+// marked `apart` (a remake that shares the name: MediEvil 2019, Ratchet & Clank 2016) stays its own.
+// -> how many titles were folded in.
+function rs_titles_merge_same(): int {
+    $groups = [];
+    foreach (rs_titles() as $t) {
+        if (!empty($t['apart'])) continue;
+        $k = rs_auto_norm($t['name']);
+        if ($k !== '') $groups[$k][] = $t;
+    }
+    $n = 0;
+    foreach ($groups as $list) {
+        if (count($list) < 2) continue;
+        usort($list, fn($x, $y) => [count($y['pc']) + count($y['ps5']), strlen($x['id'])] <=> [count($x['pc']) + count($x['ps5']), strlen($y['id'])]);
+        $keep = array_shift($list);
+        foreach ($list as $t) {
+            $keep['pc'] = array_values(array_unique(array_merge($keep['pc'], $t['pc'])));
+            $keep['ps5'] = array_values(array_unique(array_merge($keep['ps5'], $t['ps5'])));
+            if ($keep['pick'] === '' && $t['pick'] !== '') $keep['pick'] = $t['pick'];
+            rs_title_delete($t['id']);
+            rs_log('versions', $keep['id'], 'took in ' . $t['id'] . ' (same game)');
+            $n++;
+        }
+        rs_title_save($keep);
+    }
+    return $n;
+}
+
+// PC recomps of the same game go under one title: into the one it already has (the same console's
+// first, else any title of that name not kept apart), or a new one when there are two. -> how many were placed.
 function rs_titles_autogroup(): int {
+    rs_titles_merge_same();
     $titles = rs_titles();
     $taken = [];
     $byKey = [];
+    $byName = [];
     foreach ($titles as $t) {
         foreach ($t['pc'] as $id) $taken[$id] = $t['id'];
         $byKey[rs_auto_norm($t['name']) . '|' . $t['origin']] = $t['id'];
+        if (empty($t['apart'])) $byName[rs_auto_norm($t['name'])] ??= $t['id'];
     }
     $loose = [];
     foreach (rs_pc_apps() as $a) {
@@ -112,12 +145,20 @@ function rs_titles_autogroup(): int {
         if ($k === '') continue;
         $loose[$k . '|' . $a['origin']][] = $a;
     }
+    // (4.14) Same game from another console: a title of that name takes it, or they're grouped together.
     $n = 0;
+    $byNorm = [];
     foreach ($loose as $key => $apps) {
-        if (isset($byKey[$key])) {
-            foreach ($apps as $a) { rs_title_add_member($byKey[$key], 'pc', $a['id']); rs_log('versions', $a['id'], 'added to ' . $byKey[$key]); $n++; }
+        $nk = strstr($key, '|', true);
+        $to = $byKey[$key] ?? $byName[$nk] ?? '';
+        if ($to !== '') {
+            foreach ($apps as $a) { rs_title_add_member($to, 'pc', $a['id']); rs_log('versions', $a['id'], 'added to ' . $to); $n++; }
             continue;
         }
+        $byNorm[$nk] = array_merge($byNorm[$nk] ?? [], $apps);
+    }
+    $loose = $byNorm;
+    foreach ($loose as $key => $apps) {
         if (count($apps) < 2) continue;
         $name = $apps[0]['game'] !== '' ? $apps[0]['game'] : $apps[0]['name'];
         $t = rs_title_defaults();
