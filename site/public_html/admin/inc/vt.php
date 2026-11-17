@@ -800,7 +800,7 @@ function rs_vt_repo_badge(string $repo, string $tag = ''): ?array {
     $waiting = count(array_filter($rows, fn($r) => in_array($r['status'], ['new', 'upload', 'analyzing'], true)));
     $clamOnly = $rows && !array_filter($rows, fn($r) => ($r['scanner'] ?? 'vt') !== 'clamav');
     $text = $waiting ? 'Checking ' . count($rows) . ($waiting === 1 && count($rows) === 1 ? ' file' : ' files') . '…'
-        : ($clamOnly ? ($v === 'green' ? 'Clean (ClamAV)' : 'ClamAV found something')
+        : ($clamOnly ? ($v === 'red' ? 'ClamAV found something' : 'ClamAV only · waiting for VirusTotal')
         : ($v === 'green' ? 'Clean' . ($eng ? ' (0 of ' . $eng . ')' : '') : ($bad . ' of ' . $eng . ' engines flagged')));
     return [$waiting ? 'grey' : $v, $text . ' · ' . $tag, $link];
 }

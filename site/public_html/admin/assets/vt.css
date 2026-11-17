@@ -112,6 +112,7 @@ a.vt-badge:hover{filter:brightness(1.15)}
 .vt-keys li{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(var(--ink-rgb),.03)}
 .vt-keys li>div{flex:1;min-width:0;display:grid;gap:2px}
 .vt-keys form{margin:0}
+.vt-keyowner select{min-width:150px}
 .vt-keyuse{font:600 13px Figtree,sans-serif;color:var(--muted);white-space:nowrap}
 .vt-keyadd{margin-top:12px}
 .vt-keyadd>summary{display:inline-flex;list-style:none;cursor:pointer}

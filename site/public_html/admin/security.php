@@ -32,6 +32,12 @@ if ($a === 'check' || $a === 'poll') {
 }
 
 $byId = fn(string $id) => rs_pc_app($id);
+// (4.13) A key's owner from the form: a team member's id, or '' for nobody (a backup key). -> [id, name]
+$vtOwner = function (string $v): array {
+    if ($v === '' || $v === '0') return [0, ''];
+    foreach (rs_team() as $u) if ((int)$u['id'] === (int)$v && (int)$u['active']) return [(int)$u['id'], (string)($u['display_name'] ?: $u['username'])];
+    return [0, ''];
+};
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     rs_check_csrf();
     $act = (string)($_POST['action'] ?? '');
@@ -50,12 +56,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (count($all) >= 9) throw new RuntimeException('Ten keys is the most this page keeps.');
             $why = rs_vt_test($k);
             if ($why !== '') throw new RuntimeException($why);
-            $me = rs_me();
-            $all[] = ['id' => bin2hex(random_bytes(4)), 'owner' => (int)($me['id'] ?? 0), 'owner_name' => rs_me_name(),
-                'label' => mb_substr(trim((string)($_POST['label'] ?? '')) ?: rs_me_name() . '\'s key', 0, 60), 'key' => $k, 'added' => gmdate('c')];
+            [$oid, $oname] = $vtOwner((string)($_POST['owner'] ?? ''));
+            $all[] = ['id' => bin2hex(random_bytes(4)), 'owner' => $oid, 'owner_name' => $oname, 'by' => rs_me_name(),
+                'label' => mb_substr(trim((string)($_POST['label'] ?? '')) ?: ($oid ? $oname . '\'s key' : 'Backup key'), 0, 60), 'key' => $k, 'added' => gmdate('c')];
             rs_vt_extra_save($all);
             rs_log('security', 'vt-key', 'added a VirusTotal key (' . rs_me_name() . ')');
-            rs_flash('Key added and tested. It\'s used first while you\'re working here, and as a backup when the main key runs out.', 'ok');
+            rs_flash('Key added and tested. ' . ($oid ? 'It\'s used first while ' . $oname . ' is working here, and as a backup when the main key runs out.' : 'It\'s a backup for when the main key runs out.'), 'ok');
+        } elseif ($act === 'key_owner') {
+            // (4.13) Whose key it is: theirs goes first while they work; nobody's is a backup only.
+            if (!rs_is_owner()) throw new RuntimeException('Only the owner can change whose key it is.');
+            $id = (string)($_POST['kid'] ?? '');
+            $all = rs_vt_extra_keys();
+            [$oid, $oname] = $vtOwner((string)($_POST['owner'] ?? ''));
+            foreach ($all as &$x) if ((string)$x['id'] === $id) { $x['owner'] = $oid; $x['owner_name'] = $oname; if (preg_match('/\'s key$|^Backup key$/', (string)$x['label'])) $x['label'] = $oid ? $oname . '\'s key' : 'Backup key'; }
+            unset($x);
+            rs_vt_extra_save($all);
+            rs_flash($oid ? 'It\'s ' . $oname . '\'s key now: used first while they work, and as a backup.' : 'It\'s a backup key now, used when the main key runs out.', 'ok');
         } elseif ($act === 'key_remove') {
             $id = (string)($_POST['kid'] ?? '');
             $all = rs_vt_extra_keys();
@@ -278,7 +294,10 @@ rs_head('Security', true, ['assets/vt.css']);
       $hrs = rs_vt_trusted($x) ? $cfg['hold_verified'] : $cfg['hold']; $left = max(0, (int)strtotime((string)$p['since']) + $hrs * 60 - time()); ?>
     <div class="vt-row <?= $v ?>">
       <div class="vt-what"><strong><?= h($x['name']) ?></strong><small><?= h($x['version'] ?: '?') ?> → <?= h($p['version'] ?: $p['tag']) ?> · <?= rs_vt_trusted($x) ? 'verified developer' : 'not verified' ?></small></div>
-      <div class="vt-src"><span class="vt-chip"><?= $v === 'red' ? 'Waiting for you' : ($v === 'grey' ? 'Being checked' : ($left ? 'Out in ' . rs_vt_mins_text(max(1, (int)ceil($left / 60))) : 'Going out')) ?></span></div>
+      <?php // (4.13) One update a game a day: when its check may start
+        $nextAt = 0; foreach ($rows as $r) if (in_array($r['status'], ['new', 'upload'], true) && !empty($r['next_at'])) $nextAt = max($nextAt, (int)strtotime($r['next_at'] . ' UTC'));
+        $grey = $nextAt > time() ? 'Checked in ' . rs_vt_mins_text(max(1, (int)ceil(($nextAt - time()) / 60))) . ' (one update a day)' : 'Being checked · waiting ' . rs_vt_mins_text(max(1, (int)ceil((time() - (int)strtotime((string)$p['since'])) / 60))); ?>
+      <div class="vt-src"><span class="vt-chip"><?= $v === 'red' ? 'Waiting for you' : ($v === 'grey' ? h($grey) : ($left ? 'Out in ' . rs_vt_mins_text(max(1, (int)ceil($left / 60))) : 'Going out')) ?></span></div>
       <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge(rs_pc_key($x), (string)$p['tag'])) ?: '<span class="vt-badge grey"><span class="vt-dot">…</span>In line</span>' ?></div>
       <div class="vt-acts">
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Let it out now</button></form>
@@ -321,21 +340,23 @@ rs_head('Security', true, ['assets/vt.css']);
 </section>
 
 <?php if (rs_is_owner()): ?>
-<?php if ($on): $vtKeys = rs_vt_keys(); $meId = (int)(rs_me()['id'] ?? 0); usort($vtKeys, fn($x, $y) => ($x['id'] === 'main' ? 0 : 1) <=> ($y['id'] === 'main' ? 0 : 1)); ?>
+<?php if ($on): $vtKeys = rs_vt_keys(); $meId = (int)(rs_me()['id'] ?? 0); $vtTeam = array_values(array_filter(rs_team(), fn($u) => (int)$u['active'])); usort($vtKeys, fn($x, $y) => ($x['id'] === 'main' ? 0 : 1) <=> ($y['id'] === 'main' ? 0 : 1)); ?>
 <section class="card" id="keys">
   <h2>VirusTotal keys</h2>
-  <p class="muted">Each key gets VirusTotal's free 500 checks a day and keeps its own count. A key someone added is used first while that person is working here, and as a backup when the main key's day is used up.</p>
+  <p class="muted">Each key gets VirusTotal's free 500 checks a day and keeps its own count. A team member's key is used first while they're working here; every other key is a backup for when the main key's day is used up.</p>
   <ul class="vt-keys">
     <?php foreach ($vtKeys as $k): $ks = rs_vt_kstate($k['id']); ?>
     <li><div><strong><?= h($k['id'] === 'main' ? 'Main key' : ($k['label'] !== '' ? $k['label'] : 'Key')) ?></strong>
-      <small class="muted"><?= $k['id'] === 'main' ? 'The owner\'s' : 'Added by ' . h($k['owner_name'] ?: 'a team member') . ($k['added'] ?? '' ? ' · ' . h(substr((string)$k['added'], 0, 10)) : '') ?> · ends in <?= h(substr($k['key'], -4)) ?></small></div>
+      <small class="muted"><?= $k['id'] === 'main' ? 'The owner\'s' : ($k['owner'] ? h($k['owner_name']) . '\'s: used first while they work, and as a backup' : 'Backup: used when the main key runs out') . ($k['added'] ?? '' ? ' · added ' . h(substr((string)$k['added'], 0, 10)) : '') ?> · ends in <?= h(substr($k['key'], -4)) ?></small></div>
+      <?php if ($k['id'] !== 'main' && rs_is_owner()): ?><form method="post" class="vt-keyowner"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_owner"><input type="hidden" name="kid" value="<?= h($k['id']) ?>"><input type="hidden" name="back" value="keys">
+        <select name="owner" onchange="this.form.submit()" aria-label="Whose key"><option value="0"<?= $k['owner'] ? '' : ' selected' ?>>Backup only</option><?php foreach ($vtTeam as $u): ?><option value="<?= (int)$u['id'] ?>"<?= (int)$u['id'] === $k['owner'] ? ' selected' : '' ?>><?= h($u['display_name'] ?: $u['username']) ?></option><?php endforeach; ?></select></form><?php endif; ?>
       <span class="vt-keyuse"><?= (int)$ks['n'] ?> of <?= RS_VT_PER_DAY ?> today</span>
       <?php if ($k['id'] !== 'main' && (rs_is_owner() || (int)$k['owner'] === $meId)): ?><form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_remove"><input type="hidden" name="kid" value="<?= h($k['id']) ?>"><input type="hidden" name="back" value="keys"><button class="ghost">Remove</button></form><?php endif; ?></li>
     <?php endforeach; ?>
   </ul>
   <details class="vt-keyadd"><summary class="btn">+ Add a key</summary>
     <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_add"><input type="hidden" name="back" value="keys">
-      <input type="text" name="label" placeholder="Whose key (optional)" maxlength="60" autocomplete="off" style="flex:0 1 200px">
+      <select name="owner" aria-label="Whose key" style="flex:0 1 200px"><option value="0"<?= rs_is_owner() ? ' selected' : '' ?>>Backup only</option><?php foreach ($vtTeam as $u): ?><option value="<?= (int)$u['id'] ?>"<?= !rs_is_owner() && (int)$u['id'] === $meId ? ' selected' : '' ?>><?= h($u['display_name'] ?: $u['username']) ?></option><?php endforeach; ?></select>
       <input type="text" name="vt_key" placeholder="Paste the VirusTotal API key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc" required>
       <button class="primary">Add and test</button></form>
   </details>
