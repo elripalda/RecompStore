@@ -127,3 +127,6 @@ a.vt-badge:hover{filter:brightness(1.15)}
 .vt-fold:not([open])>summary::after{transform:rotate(-45deg);margin-top:0}
 .vt-sentlist{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;grid-column:1/-1}
 .vt-sent{display:inline-flex;align-items:center;gap:4px;font:600 12px Figtree,sans-serif;color:var(--ok,#2fbf71);background:rgba(47,191,113,.1);border:1px solid rgba(47,191,113,.3);border-radius:999px;padding:3px 10px}
+
+/* (4.14) Rescan on Hidden for security: clean again */
+.vt-res .vt-ok { display: block; margin-top: 4px; color: #3ccf91; font-size: 12px; }
