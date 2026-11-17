@@ -676,7 +676,7 @@ function rs_vt_block(array $a): void {
 }
 
 // (4.11) A release the team looked at and okayed despite a few minor flags (kv vtok:<md5>, the same
-// key the hub's check mark uses). Players see it as a Verified update.
+// key the hub's check mark uses). Players see it as a Verified Update.
 function rs_vt_okd(string $repoKey, string $tag): bool {
     $c = rs_kv_get('vtok:' . md5(strtolower($repoKey) . '|' . $tag));
     return $c && !empty(json_decode((string)$c['v'], true)['by']);
