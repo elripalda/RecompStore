@@ -219,7 +219,6 @@ try {
             foreach ($st->fetchAll() as $r) {
                 $v = rs_vt_verdict($r);
                 $clam = $r['scanner'] === 'clamav';
-                if ($clam && $v !== 'red') $v = 'grey'; // (4.13) only a VirusTotal pass counts; ClamAV alone shows as still checking
                 if ($v === 'grey') $waiting = true;
                 $for = [];
                 foreach ($sys as $k => $p) if ($p !== '' && rs_pattern_matches($p, (string)$r['name'])) $for[] = $k;

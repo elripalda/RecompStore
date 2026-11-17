@@ -2219,7 +2219,17 @@ function rs_pc_update_status(array $a): array {
         $ver = (string)($p['version'] ?: $p['tag']);
         $v = function_exists('rs_vt_release') ? rs_vt_release(rs_pc_key($a), (string)$p['tag'])[1] : 'grey';
         if ($v === 'red') return ['state' => 'review', 'version' => $ver, 'text' => 'Version ' . $ver . ' is waiting for a look from our team: the security scan flagged something. Players keep the version before it until then.'];
-        if ($v === 'grey') return ['state' => 'scanning', 'version' => $ver, 'text' => 'Version ' . $ver . ' is being scanned. It goes out the moment the scan is done.'];
+        if ($v === 'grey') {
+            // (4.13) One update a game is scanned a day: say when this one's turn comes.
+            $next = 0;
+            try {
+                $st = rs_db()->prepare("SELECT MAX(next_at) FROM vt_files WHERE repo = ? AND tag = ? AND status IN ('new', 'upload') AND next_at > UTC_TIMESTAMP()");
+                $st->execute([rs_pc_key($a), (string)$p['tag']]);
+                $next = (int)strtotime((string)$st->fetchColumn() . ' UTC');
+            } catch (Throwable $e) { }
+            if ($next > time()) return ['state' => 'scanning', 'version' => $ver, 'text' => 'Version ' . $ver . ' is next in line. Each recomp gets one update scanned a day, so its scan starts in about ' . max(1, (int)ceil(($next - time()) / 3600)) . ' h. A newer release before then takes its place.'];
+            return ['state' => 'scanning', 'version' => $ver, 'text' => 'Version ' . $ver . ' is being scanned with VirusTotal. It goes out the moment the scan is done, usually within a few hours.'];
+        }
         return ['state' => 'going', 'version' => $ver, 'text' => 'Version ' . $ver . ' passed the scan and is going out now.'];
     }
     $dl = (string)($a['dl_state'] ?? '');

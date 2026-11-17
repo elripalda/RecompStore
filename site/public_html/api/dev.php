@@ -550,7 +550,10 @@ try {
         // A fresh look at GitHub, not the cached one.
         try { $rp = (string)(rs_pc_app($id)['repo'] ?? ''); if ($rp !== '') rs_db()->prepare('DELETE FROM gh_cache WHERE k IN (?, ?)')->execute([$rp, $rp . '#info']); } catch (Throwable $e) { }
         rs_pc_refresh_github(25, 0, $id);
-        if (function_exists('rs_vt_run')) { try { rs_vt_run(12); } catch (Throwable $e) { } }
+        // (4.13) The scan gets its turn after the answer goes out: a big download used to keep this request
+        // open past the proxy's limit, and the developer saw "That didn't go through".
+        if (function_exists('rs_vt_discover')) { try { rs_vt_discover(true); } catch (Throwable $e) { } }
+        if (function_exists('rs_vt_after')) rs_vt_after();
         $p = rs_pc_app($id);
         rs_dev_out(200, ['ok' => true, 'upd' => $p ? rs_pc_update_status($p) : null]);
     }
