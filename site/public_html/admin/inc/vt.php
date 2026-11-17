@@ -10,7 +10,9 @@
 // time has passed. Several engines flagging a file holds it until the admin approves it.
 //
 // VirusTotal's free key allows 4 requests a minute and 500 a day; everything here waits its
-// turn. Files are found by their SHA-256 (GitHub publishes it for each release file), and only
+// turn. (4.13) Team members can add their own keys (Security > Keys): a signed-in member's own key
+// goes first for what runs while they're working, and the others are a backup for when the main
+// key's day is used up. Each key keeps its own count. Files are found by their SHA-256 (GitHub publishes it for each release file), and only
 // files VirusTotal has never seen are downloaded and sent to it.
 declare(strict_types=1);
 
@@ -18,7 +20,7 @@ const RS_VT_API = 'https://www.virustotal.com/api/v3';
 const RS_VT_PER_MIN = 4;
 const RS_VT_PER_DAY = 480;           // a little under the free key's 500
 const RS_VT_KEEP_FOR_NEW = 100;      // (3.8) of those, kept for submissions and "Check a link": updates stop before
-const RS_VT_GREY_HOURS = 12;         // (3.8) a held update the line couldn't reach in this long goes out anyway
+const RS_VT_UPDATE_EVERY = 86400;    // (4.13) a game's updates: one checked a day, the next waits its turn
 const RS_VT_BACKFILL_UPLOADS = 60;   // a day, for files already in the stores (new ones go first)
 const RS_VT_MAX_BYTES = 650 << 20;   // VirusTotal's largest upload
 const RS_VT_FILE_RE = '/\.(zip|7z|rar|exe|msi|appimage|dmg|deb|rpm|tar\.gz|tgz|tar\.xz|tar\.zst|pkg|elf|bin)$/i';
@@ -110,7 +112,27 @@ function rs_clam_check(array $f, string $tmp): bool {
 // ---- Settings -----------------------------------------------------------------------------------
 
 function rs_vt_key(): string { return function_exists('rs_secret_get') ? rs_secret_get('vt_key') : ''; }
-function rs_vt_on(): bool { return rs_vt_key() !== ''; }
+// (4.13) Keys team members added: [{id, owner (user id), owner_name, label, key, added}], locked away together.
+function rs_vt_extra_keys(): array {
+    if (!function_exists('rs_secret_get')) return [];
+    $j = json_decode(rs_secret_get('vt_keys') ?: '[]', true);
+    return is_array($j) ? array_values(array_filter($j, fn($k) => is_array($k) && (string)($k['key'] ?? '') !== '' && (string)($k['id'] ?? '') !== '')) : [];
+}
+function rs_vt_extra_save(array $keys): void { rs_secret_put('vt_keys', $keys ? (string)json_encode(array_values($keys)) : ''); }
+// Every key in the order they're used: the signed-in member's own first, then the main key, then the rest.
+function rs_vt_keys(): array {
+    $out = [];
+    $main = rs_vt_key();
+    if ($main !== '') $out[] = ['id' => 'main', 'owner' => 0, 'owner_name' => '', 'label' => 'Main key', 'key' => $main];
+    foreach (rs_vt_extra_keys() as $k) $out[] = ['id' => (string)$k['id'], 'owner' => (int)($k['owner'] ?? 0), 'owner_name' => (string)($k['owner_name'] ?? ''), 'label' => (string)($k['label'] ?? ''), 'key' => (string)$k['key'], 'added' => (string)($k['added'] ?? '')];
+    $me = function_exists('rs_me') && !empty($_SESSION['uid']) ? (int)(rs_me()['id'] ?? 0) : 0;
+    if ($me > 0) {
+        $mine = array_values(array_filter($out, fn($k) => $k['id'] !== 'main' && $k['owner'] === $me));
+        $out = array_merge($mine, array_values(array_filter($out, fn($k) => !($k['id'] !== 'main' && $k['owner'] === $me))));
+    }
+    return $out;
+}
+function rs_vt_on(): bool { return (bool)rs_vt_keys(); }
 function rs_vt_hold_mins(string $key, string $oldKey, int $oldDefault): int {
     $m = rs_setting($key, '');
     return max(0, min(10080, $m !== '' ? (int)$m : (int)rs_setting($oldKey, (string)$oldDefault) * 60));
@@ -145,50 +167,75 @@ function rs_vt_link(array $f): string { return !empty($f['sha256']) ? 'https://w
 
 // ---- What VirusTotal allows -----------------------------------------------------------------------
 
-function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill = false, bool $low = false): bool {
-    $c = rs_kv_get('vt_calls');
-    $now = time();
-    $x = $c ? (json_decode($c['v'], true) ?: []) : [];
-    $min = array_values(array_filter((array)($x['min'] ?? []), fn($t) => $now - (int)$t < 62));
-    $day = (string)($x['day'] ?? '') === gmdate('Y-m-d') ? (int)($x['n'] ?? 0) : 0;
-    $up = (string)($x['day'] ?? '') === gmdate('Y-m-d') ? (int)($x['up'] ?? 0) : 0;
-    $hold = (int)($x['hold'] ?? 0);
-    if ($hold > $now) return false; // VirusTotal said "too many" a moment ago
-    if (count($min) >= RS_VT_PER_MIN || $day >= RS_VT_PER_DAY) return false;
-    if ($low && $day >= RS_VT_PER_DAY - RS_VT_KEEP_FOR_NEW) return false;
-    if ($backfill && $upload && $up >= RS_VT_BACKFILL_UPLOADS) return false;
-    if ($take) {
-        $min[] = $now;
-        rs_kv_put('vt_calls', (string)json_encode(['min' => $min, 'day' => gmdate('Y-m-d'), 'n' => $day + 1, 'up' => $up + ($upload ? 1 : 0), 'hold' => $hold]));
-    }
-    return true;
-}
-function rs_vt_backoff(int $sec): void {
-    $c = rs_kv_get('vt_calls');
-    $x = $c ? (json_decode($c['v'], true) ?: []) : [];
-    $x['hold'] = time() + $sec;
-    rs_kv_put('vt_calls', (string)json_encode($x));
-}
-// (4.8) Is any of today's VirusTotal allowance left (not counting the four-a-minute limit)? ClamAV
-// stands in only when the day is used up; a full minute just means waiting for the next turn.
-function rs_vt_day_ok(bool $upload = false, bool $backfill = false, bool $low = false): bool {
-    $c = rs_kv_get('vt_calls');
+// (4.13) Each key's count today: {min: [times in the last minute], day, n, up, hold}. The main key keeps
+// the old kv name (vt_calls), so its count carries on.
+function rs_vt_kname(string $id): string { return $id === 'main' ? 'vt_calls' : 'vt_calls:' . $id; }
+function rs_vt_kstate(string $id): array {
+    $c = rs_kv_get(rs_vt_kname($id));
     $x = $c ? (json_decode($c['v'], true) ?: []) : [];
     $today = (string)($x['day'] ?? '') === gmdate('Y-m-d');
-    $day = $today ? (int)($x['n'] ?? 0) : 0;
-    $up = $today ? (int)($x['up'] ?? 0) : 0;
-    if ($day >= RS_VT_PER_DAY || ($low && $day >= RS_VT_PER_DAY - RS_VT_KEEP_FOR_NEW)) return false;
-    return !($backfill && $upload && $up >= RS_VT_BACKFILL_UPLOADS);
+    $now = time();
+    return ['min' => array_values(array_filter((array)($x['min'] ?? []), fn($t) => $now - (int)$t < 62)),
+        'n' => $today ? (int)($x['n'] ?? 0) : 0, 'up' => $today ? (int)($x['up'] ?? 0) : 0, 'hold' => (int)($x['hold'] ?? 0)];
 }
+function rs_vt_kput(string $id, array $s): void {
+    rs_kv_put(rs_vt_kname($id), (string)json_encode(['min' => $s['min'], 'day' => gmdate('Y-m-d'), 'n' => $s['n'], 'up' => $s['up'], 'hold' => $s['hold']]));
+}
+// Requests left today over every key.
+function rs_vt_left(): int {
+    $n = 0;
+    foreach (rs_vt_keys() as $k) $n += max(0, RS_VT_PER_DAY - rs_vt_kstate($k['id'])['n']);
+    return $n;
+}
+// Is there room for one more request? With $take it's counted on the key that has room, and the next
+// call uses that key. $stick: only the key the last call used (an upload link belongs to its key).
+function rs_vt_budget(bool $take = false, bool $upload = false, bool $backfill = false, bool $low = false, bool $stick = false): bool {
+    $keys = rs_vt_keys();
+    if (!$keys) return false;
+    if ($low && rs_vt_left() <= RS_VT_KEEP_FOR_NEW) return false; // updates and finds leave room for submissions
+    if ($stick && !empty($GLOBALS['rs_vt_cur'])) $keys = array_values(array_filter($keys, fn($k) => $k['id'] === $GLOBALS['rs_vt_cur']['id']));
+    $now = time();
+    foreach ($keys as $k) {
+        $st = rs_vt_kstate($k['id']);
+        if ($st['hold'] > $now || count($st['min']) >= RS_VT_PER_MIN || $st['n'] >= RS_VT_PER_DAY) continue; // "too many" a moment ago, a full minute, or its day is used up
+        if ($backfill && $upload && $st['up'] >= RS_VT_BACKFILL_UPLOADS) continue;
+        if ($take) {
+            $st['min'][] = $now; $st['n']++; if ($upload) $st['up']++;
+            rs_vt_kput($k['id'], $st);
+            $GLOBALS['rs_vt_cur'] = $k;
+        }
+        return true;
+    }
+    return false;
+}
+function rs_vt_backoff(int $sec): void {
+    $id = (string)($GLOBALS['rs_vt_cur']['id'] ?? 'main');
+    $st = rs_vt_kstate($id);
+    $st['hold'] = time() + $sec;
+    rs_vt_kput($id, $st);
+}
+// (4.8) Is any of today's VirusTotal allowance left (not counting the four-a-minute limit)?
+function rs_vt_day_ok(bool $upload = false, bool $backfill = false, bool $low = false): bool {
+    $left = 0; $upOk = false;
+    foreach (rs_vt_keys() as $k) {
+        $st = rs_vt_kstate($k['id']);
+        if ($st['n'] >= RS_VT_PER_DAY) continue;
+        $left += RS_VT_PER_DAY - $st['n'];
+        if (!($backfill && $upload && $st['up'] >= RS_VT_BACKFILL_UPLOADS)) $upOk = true;
+    }
+    if ($left <= 0 || ($low && $left <= RS_VT_KEEP_FOR_NEW)) return false;
+    return $upOk;
+}
+// Requests sent today over every key.
 function rs_vt_today(): int {
-    $c = rs_kv_get('vt_calls');
-    $x = $c ? (json_decode($c['v'], true) ?: []) : [];
-    return (string)($x['day'] ?? '') === gmdate('Y-m-d') ? (int)($x['n'] ?? 0) : 0;
+    $n = 0;
+    foreach (rs_vt_keys() as $k) $n += rs_vt_kstate($k['id'])['n'];
+    return $n;
 }
 
 // One call to VirusTotal. -> [status, json]
-function rs_vt_call(string $method, string $url, ?array $post = null): array {
-    $key = rs_vt_key();
+function rs_vt_call(string $method, string $url, ?array $post = null, string $useKey = ''): array {
+    $key = $useKey !== '' ? $useKey : (string)($GLOBALS['rs_vt_cur']['key'] ?? rs_vt_key());
     $ch = curl_init(str_starts_with($url, 'http') ? $url : RS_VT_API . $url);
     $o = [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 600, CURLOPT_CONNECTTIMEOUT => 15,
           CURLOPT_HTTPHEADER => ['x-apikey: ' . $key, 'accept: application/json'], CURLOPT_CUSTOMREQUEST => $method];
@@ -202,9 +249,10 @@ function rs_vt_call(string $method, string $url, ?array $post = null): array {
 }
 
 // Is the key right? -> '' or what went wrong.
-function rs_vt_test(): string {
-    if (!rs_vt_on()) return 'Paste the key first.';
-    [$code, $j] = rs_vt_call('GET', '/files/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f'); // the EICAR test file
+function rs_vt_test(string $key = ''): string {
+    if ($key === '') $key = rs_vt_key();
+    if ($key === '') return 'Paste the key first.';
+    [$code, $j] = rs_vt_call('GET', '/files/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f', null, $key); // the EICAR test file
     if ($code === 200) return '';
     if ($code === 401 || $code === 403) return 'VirusTotal turned the key down. Copy it again from your VirusTotal profile, API key.';
     return 'VirusTotal answered HTTP ' . $code . ($code === 0 ? ' (it couldn\'t be reached)' : '') . '.';
@@ -213,7 +261,7 @@ function rs_vt_test(): string {
 // ---- Adding files to check ------------------------------------------------------------------------
 
 // prio: 1 a link you pasted, 2 a submission, 3 a new release (update), 5 already in a store.
-function rs_vt_add(string $repo, string $tag, array $asset, string $source, string $ref, int $prio): void {
+function rs_vt_add(string $repo, string $tag, array $asset, string $source, string $ref, int $prio, int $notBefore = 0): void {
     rs_vt_tables();
     $name = (string)($asset['name'] ?? '');
     if ($name === '') return;
@@ -225,23 +273,24 @@ function rs_vt_add(string $repo, string $tag, array $asset, string $source, stri
     if ($row = $st->fetch()) {
         if ($prio < (int)$row['prio']) $db->prepare('UPDATE vt_files SET prio = ?, source = ?, ref = ?, updated = NOW() WHERE id = ?')->execute([$prio, $source, $ref, $row['id']]);
         // (4.7) A find checked at low priority got ClamAV only (new to VirusTotal). Asked for again at a
-        // priority that gets VirusTotal (Auto-add, a submission), it's checked again there.
-        if ($prio < 3 && (string)$row['status'] === 'done' && (string)($row['scanner'] ?? '') === 'clamav')
+        // priority that gets VirusTotal (Auto-add, a submission, an update since 4.13), it's checked again there.
+        if ($prio <= 3 && (string)$row['status'] === 'done' && (string)($row['scanner'] ?? '') === 'clamav')
             $db->prepare("UPDATE vt_files SET status = 'new', engines = 0, malicious = 0, suspicious = 0, flagged_by = '', err = '', tries = 0, next_at = NULL, updated = NOW() WHERE id = ?")->execute([$row['id']]);
         return;
     }
     // The same file checked before (another tag, another listing): its answer is copied.
     $done = null;
     if ($sha !== '') {
-        $q = $db->prepare("SELECT * FROM vt_files WHERE sha256 = ? AND status = 'done'" . ($prio < 3 ? " AND scanner <> 'clamav'" : '') . ' ORDER BY updated DESC LIMIT 1');
+        $q = $db->prepare("SELECT * FROM vt_files WHERE sha256 = ? AND status = 'done'" . ($prio <= 3 ? " AND scanner <> 'clamav'" : '') . ' ORDER BY updated DESC LIMIT 1');
         $q->execute([$sha]);
         $done = $q->fetch() ?: null;
     }
-    $db->prepare('INSERT INTO vt_files (repo, tag, name, url, size, sha256, source, ref, prio, status, malicious, suspicious, engines, flagged_by, created, updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([
+    $db->prepare('INSERT INTO vt_files (repo, tag, name, url, size, sha256, source, ref, prio, status, malicious, suspicious, engines, flagged_by, scanner, next_at, created, updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([
         $repo, $tag, mb_substr($name, 0, 255), mb_substr((string)($asset['browser_download_url'] ?? $asset['url'] ?? ''), 0, 1000), (int)($asset['size'] ?? 0),
         $sha !== '' ? $sha : null, $source, mb_substr($ref, 0, 80), $prio, $done ? 'done' : 'new',
-        $done ? (int)$done['malicious'] : 0, $done ? (int)$done['suspicious'] : 0, $done ? (int)$done['engines'] : 0, $done ? (string)$done['flagged_by'] : '']);
+        $done ? (int)$done['malicious'] : 0, $done ? (int)$done['suspicious'] : 0, $done ? (int)$done['engines'] : 0, $done ? (string)$done['flagged_by'] : '',
+        $done ? (string)($done['scanner'] ?? 'vt') : 'vt', !$done && $notBefore > time() ? gmdate('Y-m-d H:i:s', $notBefore) : null]);
 }
 
 // (3.8) The one file worth checking for a recomp's release: its Windows download when it has one
@@ -314,7 +363,7 @@ function rs_vt_discover(bool $force = false): void {
         if ($a['repo'] === '' || $tag === '') continue;
         foreach (rs_vt_peek_releases(rs_pc_key($a)) as $r) {
             if ((string)$r['tag_name'] !== $tag) continue;
-            foreach (rs_vt_pick((array)$r['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f) rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3);
+            foreach (rs_vt_pick((array)$r['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f) rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3, rs_vt_update_after($a));
         }
     }
     rs_vt_promote();
@@ -378,7 +427,7 @@ function rs_vt_step(array $f): bool {
             rs_vt_save($id, ['sha256' => $f['sha256'], 'size' => (int)filesize($tmp)]);
         }
         $sub = !$low && rs_vt_cfg()['clam_subs'] && rs_clam_on(); // a submission: ClamAV only when VirusTotal is out for the day
-        $clam = $low && rs_clam_on();
+        $clam = (int)$f['prio'] >= 4 && rs_clam_on(); // (4.13) finds and backfill only: an update always waits for VirusTotal
         if (!rs_vt_budget(true, false, false, $low)) return ($clam || $sub) && !rs_vt_day_ok(false, false, $low) ? rs_clam_check($f, $tmp) : false; // the day's requests are gone: ClamAV (a full minute waits)
         [$code, $j] = rs_vt_call('GET', '/files/' . $f['sha256']);
         if ($code === 200) {
@@ -411,7 +460,7 @@ function rs_vt_step(array $f): bool {
             if ($c !== 200 || empty($u['data'])) { rs_vt_save($id, ['err' => 'No upload link from VirusTotal (HTTP ' . $c . ')', 'tries' => (int)$f['tries'] + 1]); return $c !== 429; }
             $url = (string)$u['data'];
         }
-        if (!rs_vt_budget(true, true, $backfill, $low)) return false;
+        if (!rs_vt_budget(true, true, $backfill, $low, $url !== '/files')) return false;
         [$code, $j] = rs_vt_call('POST', $url, ['file' => new CURLFile($tmp, 'application/octet-stream', (string)$f['name'])]);
         if ($code === 200 && !empty($j['data']['id'])) {
             rs_vt_save($id, ['status' => 'analyzing', 'analysis' => (string)$j['data']['id'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 150), 'err' => '']); // most are done in two or three minutes
@@ -451,7 +500,7 @@ function rs_vt_run(float $seconds = 20): int {
         $subsToo = rs_vt_cfg()['clam_subs'];
         while (microtime(true) < $until) {
             $f = rs_db()->query("SELECT * FROM vt_files WHERE status IN ('new', 'upload', 'analyzing') AND (next_at IS NULL OR next_at <= UTC_TIMESTAMP())"
-                . ($onlyClam ? ($subsToo ? " AND status IN ('new', 'upload') AND prio <= 4" : " AND status = 'new' AND prio BETWEEN 3 AND 4") : '') . ' ORDER BY prio, created LIMIT 1')->fetch();
+                . ($onlyClam ? ($subsToo ? " AND status IN ('new', 'upload') AND prio <> 3 AND prio <= 4" : " AND status = 'new' AND prio = 4") : '') . ' ORDER BY prio, created LIMIT 1')->fetch();
             if (!$f) break;
             if (!rs_vt_step($f)) {
                 if ($onlyClam || !rs_clam_on()) break;
@@ -502,7 +551,8 @@ function rs_vt_release(string $repo, string $tag): array {
     $rows = $st->fetchAll();
     $v = $rows ? 'green' : 'grey';
     foreach ($rows as $r) {
-        $x = in_array($r['status'], ['big', 'error'], true) ? 'green' : rs_vt_verdict($r); // can't be checked: the hold decides
+        $x = in_array($r['status'], ['big', 'error', 'superseded'], true) ? 'green' : rs_vt_verdict($r); // can't be checked: the hold decides
+        if ($x !== 'red' && (string)($r['scanner'] ?? 'vt') === 'clamav') $x = 'grey'; // (4.13) ClamAV alone isn't a pass: it waits for VirusTotal
         if ($x === 'red') { $v = 'red'; break; }
         if ($x === 'grey') $v = 'grey';
         elseif ($x === 'yellow' && $v === 'green') $v = 'yellow';
@@ -514,11 +564,25 @@ function rs_vt_release(string $repo, string $tag): array {
 function rs_vt_hold(array $a, array $latest, array $r): array {
     $tag = (string)$latest['tag_name'];
     if ($tag === (string)($a['blocked_tag'] ?? '')) return $a;
+    // (4.13) A newer release replaced the one waiting: the old one's files leave the line.
+    $was = (string)($a['pending']['tag'] ?? '');
+    if ($was !== '' && $was !== $tag) rs_vt_supersede(rs_pc_key($a), $was);
     $a['pending'] = ['tag' => $tag, 'version' => (string)$r['version'], 'released' => (string)$r['released'],
         'size' => $r['size'] ? rs_human_size((int)$r['size']) : '', 'since' => (string)($a['pending']['tag'] ?? '') === $tag ? (string)$a['pending']['since'] : gmdate('c')];
     foreach (rs_vt_pick((array)$latest['assets'], rs_vt_main_patterns(['asset_win' => $a['asset_win'], 'asset_linux' => $a['asset_linux'], 'asset_mac' => $a['asset_mac']])) as $f)
-        rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3);
+        rs_vt_add(rs_pc_key($a), $tag, $f, 'update', 'pc:' . $a['id'], 3, rs_vt_update_after($a));
     return $a;
+}
+
+// (4.13) Xarishark: a game's updates are checked one a day, so every one gets a real VirusTotal scan.
+// -> when the next one may be checked (0: now). Set when an update goes out (vt_out_at).
+function rs_vt_update_after(array $a): int {
+    $t = (int)($a['vt_out_at'] ?? 0);
+    return $t > 0 && $t + RS_VT_UPDATE_EVERY > time() ? $t + RS_VT_UPDATE_EVERY : 0;
+}
+function rs_vt_supersede(string $repoKey, string $tag): void {
+    rs_vt_tables();
+    rs_db()->prepare("UPDATE vt_files SET status = 'superseded', err = 'A newer release replaced it', updated = NOW() WHERE repo = ? AND tag = ? AND source = 'update' AND status IN ('new', 'upload')")->execute([$repoKey, $tag]);
 }
 
 // Lets held releases through once they're checked and their time is up; tells you about red ones.
@@ -549,13 +613,9 @@ function rs_vt_promote(): void {
         if (!$cfg['auto']) continue;
         $secs = (rs_vt_trusted($a) ? $cfg['hold_verified'] : $cfg['hold']) * 60;
         $waited = time() - (int)strtotime((string)$p['since']);
-        // (3.8) Not checked yet: it waits, but not forever. A busy day can use up the free key, and
-        // players shouldn't be stuck on an old version because of that; it's still checked afterwards.
-        if ($v === 'grey' && $waited < max($secs, RS_VT_GREY_HOURS * 3600)) continue;
-        // (4.3) A SourceForge release never goes out unchecked: it waits for its check (or for you).
-        if ($v === 'grey' && rs_pc_host($a) === 'sourceforge') continue;
+        // (4.13) Not checked by VirusTotal yet (or ClamAV only): it waits for its check, or for you to let it out.
+        if ($v === 'grey') continue;
         if ($waited < $secs) continue;
-        if ($v === 'grey') rs_log('security', $a['id'], 'let out unchecked after ' . RS_VT_GREY_HOURS . ' h: ' . $p['tag']);
         rs_vt_release_go($a);
     }
 }
@@ -565,6 +625,7 @@ function rs_vt_release_go(array $a, string $who = 'auto'): void {
     $p = (array)($a['pending'] ?? []);
     if (empty($p['tag'])) return;
     $a['ok_tag'] = (string)$p['tag'];
+    $a['vt_out_at'] = time(); // (4.13) the next update is checked a day after this
     if ($p['version'] !== '') $a['version'] = (string)$p['version'];
     if ($p['released'] !== '') $a['released'] = (string)$p['released'];
     if ($p['size'] !== '') $a['size'] = (string)$p['size'];

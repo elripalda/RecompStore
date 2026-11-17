@@ -41,6 +41,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($k !== '') rs_secret_put('vt_key', $k);
             $why = rs_vt_test();
             rs_flash($why === '' ? 'VirusTotal is connected. Checks start on their own.' : $why, $why === '' ? 'ok' : 'err');
+        } elseif ($act === 'key_add') {
+            // (4.13) Another team member's own VirusTotal key: theirs first while they work, a backup otherwise.
+            $k = trim((string)($_POST['vt_key'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9]{40,100}$/', $k)) throw new RuntimeException('That doesn\'t look like a VirusTotal API key. Copy it again from the VirusTotal profile, API key.');
+            $all = rs_vt_extra_keys();
+            foreach (array_merge([rs_vt_key()], array_column($all, 'key')) as $have) if ($have !== '' && hash_equals($have, $k)) throw new RuntimeException('That key is already here.');
+            if (count($all) >= 9) throw new RuntimeException('Ten keys is the most this page keeps.');
+            $why = rs_vt_test($k);
+            if ($why !== '') throw new RuntimeException($why);
+            $me = rs_me();
+            $all[] = ['id' => bin2hex(random_bytes(4)), 'owner' => (int)($me['id'] ?? 0), 'owner_name' => rs_me_name(),
+                'label' => mb_substr(trim((string)($_POST['label'] ?? '')) ?: rs_me_name() . '\'s key', 0, 60), 'key' => $k, 'added' => gmdate('c')];
+            rs_vt_extra_save($all);
+            rs_log('security', 'vt-key', 'added a VirusTotal key (' . rs_me_name() . ')');
+            rs_flash('Key added and tested. It\'s used first while you\'re working here, and as a backup when the main key runs out.', 'ok');
+        } elseif ($act === 'key_remove') {
+            $id = (string)($_POST['kid'] ?? '');
+            $all = rs_vt_extra_keys();
+            $k = current(array_filter($all, fn($x) => (string)$x['id'] === $id));
+            if (!$k) throw new RuntimeException('That key isn\'t here any more.');
+            if (!rs_is_owner() && (int)$k['owner'] !== (int)(rs_me()['id'] ?? 0)) throw new RuntimeException('Only the owner or whoever added a key can remove it.');
+            rs_vt_extra_save(array_filter($all, fn($x) => (string)$x['id'] !== $id));
+            rs_log('security', 'vt-key', 'removed a VirusTotal key (' . rs_me_name() . ')');
+            rs_flash('Key removed.', 'ok');
         } elseif ($act === 'forget') {
             rs_secret_put('vt_key', '');
             rs_flash('The key is gone. Nothing is checked until you add one again.');
@@ -121,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_flash($n ? $n . ' checks done.' : 'Nothing could be checked right now: the line is empty, or VirusTotal\'s per-minute limit is used up.', 'ok');
         }
     } catch (Throwable $e) { rs_flash($e->getMessage(), 'err'); }
-    header('Location: security.php' . (($_POST['back'] ?? '') === 'settings' ? '#settings' : ''));
+    header('Location: security.php' . (in_array($_POST['back'] ?? '', ['settings', 'keys'], true) ? '#' . $_POST['back'] : ''));
     exit;
 }
 
@@ -144,7 +168,7 @@ $names = [];
 foreach (rs_pc_apps() as $x) $names['pc:' . $x['id']] = $x['name'];
 foreach (rs_games() as $g) $names['ps5:' . $g['id']] = $g['name'];
 $srcLabel = ['link' => 'Link', 'submission' => 'Submission', 'update' => 'Update', 'store' => 'In the store', 'finder' => 'GitHub find'];
-$stLabel = ['new' => 'In line', 'upload' => 'Sending', 'analyzing' => 'Scanning', 'big' => 'Too big to send', 'error' => 'Couldn\'t check'];
+$stLabel = ['new' => 'In line', 'upload' => 'Sending', 'analyzing' => 'Scanning', 'big' => 'Too big to send', 'error' => 'Couldn\'t check', 'superseded' => 'Replaced by a newer release'];
 $when = function (string $t): string {
     $s = time() - (int)strtotime($t . ' UTC');
     return $s < 90 ? 'just now' : ($s < 3600 ? round($s / 60) . ' min ago' : ($s < 86400 ? round($s / 3600) . ' h ago' : round($s / 86400) . ' d ago'));
@@ -164,7 +188,7 @@ rs_head('Security', true, ['assets/vt.css']);
     <h1>Security</h1>
     <p class="muted">New downloads are checked with VirusTotal: submissions as they arrive, and new releases of the games in the stores. A new release from a developer who isn't verified waits until it's checked. Paste any link below to check it.</p>
   </div>
-  <div class="vt-state <?= $on ? 'on' : '' ?>"><i></i><?= $on ? 'VirusTotal connected · ' . max(0, RS_VT_PER_DAY - rs_vt_today()) . ' checks left today' : 'VirusTotal not connected' ?></div>
+  <div class="vt-state <?= $on ? 'on' : '' ?>"><i></i><?= $on ? 'VirusTotal connected · ' . rs_vt_left() . ' checks left today' . (count(rs_vt_keys()) > 1 ? ' · ' . count(rs_vt_keys()) . ' keys' : '') : 'VirusTotal not connected' ?></div>
 </section>
 
 <?php if (!$on && !rs_is_owner()): ?>
@@ -297,6 +321,27 @@ rs_head('Security', true, ['assets/vt.css']);
 </section>
 
 <?php if (rs_is_owner()): ?>
+<?php if ($on): $vtKeys = rs_vt_keys(); $meId = (int)(rs_me()['id'] ?? 0); usort($vtKeys, fn($x, $y) => ($x['id'] === 'main' ? 0 : 1) <=> ($y['id'] === 'main' ? 0 : 1)); ?>
+<section class="card" id="keys">
+  <h2>VirusTotal keys</h2>
+  <p class="muted">Each key gets VirusTotal's free 500 checks a day and keeps its own count. A key someone added is used first while that person is working here, and as a backup when the main key's day is used up.</p>
+  <ul class="vt-keys">
+    <?php foreach ($vtKeys as $k): $ks = rs_vt_kstate($k['id']); ?>
+    <li><div><strong><?= h($k['id'] === 'main' ? 'Main key' : ($k['label'] !== '' ? $k['label'] : 'Key')) ?></strong>
+      <small class="muted"><?= $k['id'] === 'main' ? 'The owner\'s' : 'Added by ' . h($k['owner_name'] ?: 'a team member') . ($k['added'] ?? '' ? ' · ' . h(substr((string)$k['added'], 0, 10)) : '') ?> · ends in <?= h(substr($k['key'], -4)) ?></small></div>
+      <span class="vt-keyuse"><?= (int)$ks['n'] ?> of <?= RS_VT_PER_DAY ?> today</span>
+      <?php if ($k['id'] !== 'main' && (rs_is_owner() || (int)$k['owner'] === $meId)): ?><form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_remove"><input type="hidden" name="kid" value="<?= h($k['id']) ?>"><input type="hidden" name="back" value="keys"><button class="ghost">Remove</button></form><?php endif; ?></li>
+    <?php endforeach; ?>
+  </ul>
+  <details class="vt-keyadd"><summary class="btn">+ Add a key</summary>
+    <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key_add"><input type="hidden" name="back" value="keys">
+      <input type="text" name="label" placeholder="Whose key (optional)" maxlength="60" autocomplete="off" style="flex:0 1 200px">
+      <input type="text" name="vt_key" placeholder="Paste the VirusTotal API key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc" required>
+      <button class="primary">Add and test</button></form>
+  </details>
+</section>
+<?php endif; ?>
+
 <section class="card" id="settings">
   <h2>Settings</h2>
   <form method="post" class="vt-settings"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="settings"><input type="hidden" name="back" value="settings">
@@ -307,7 +352,7 @@ rs_head('Security', true, ['assets/vt.css']);
     <label class="vt-toggle"><input type="checkbox" name="clam_subs" value="1"<?= $cfg['clam_subs'] ? ' checked' : '' ?><?= $clam ? '' : ' disabled' ?>><span><strong>ClamAV for submissions too</strong><small>When the day's VirusTotal checks run out, submissions and pasted links are checked by ClamAV instead of waiting for tomorrow.</small></span></label>
     <div class="vt-save"><button class="primary">Save</button></div>
   </form>
-  <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'Updates and GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead' . ($cfg['clam_subs'] ? ', and so are submissions' : '') . '. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
+  <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead. Updates always wait for VirusTotal, one a game a day' . ($cfg['clam_subs'] ? ', and so are submissions' : '') . '. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
   <?php if ($on): ?>
   <form method="post" class="vt-keyform"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="key"><input type="hidden" name="back" value="settings">
     <input type="text" name="vt_key" placeholder="Saved. Paste a new key to replace it." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc">

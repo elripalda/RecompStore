@@ -213,16 +213,20 @@ try {
         $waiting = false;
         if ($full && $full['repo'] !== '') {
             rs_vt_tables();
-            $st = rs_db()->prepare('SELECT name, status, malicious, suspicious, engines, scanner FROM vt_files WHERE repo = ? AND tag = ? ORDER BY name');
+            $st = rs_db()->prepare('SELECT name, status, malicious, suspicious, engines, scanner, sha256 FROM vt_files WHERE repo = ? AND tag = ? ORDER BY name');
             $st->execute([rs_pc_key($full), $tag]);
             $sys = ['windows' => (string)$full['asset_win'], 'linux' => (string)$full['asset_linux'], 'macos' => (string)$full['asset_mac']];
             foreach ($st->fetchAll() as $r) {
                 $v = rs_vt_verdict($r);
+                $clam = $r['scanner'] === 'clamav';
+                if ($clam && $v !== 'red') $v = 'grey'; // (4.13) only a VirusTotal pass counts; ClamAV alone shows as still checking
                 if ($v === 'grey') $waiting = true;
                 $for = [];
                 foreach ($sys as $k => $p) if ($p !== '' && rs_pattern_matches($p, (string)$r['name'])) $for[] = $k;
-                $files[] = ['name' => (string)$r['name'], 'for' => $for, 'verdict' => $v, 'scanner' => $r['scanner'] === 'clamav' ? 'clamav' : 'virustotal',
-                    'engines' => (int)$r['engines'], 'found' => (int)$r['malicious'] + (int)$r['suspicious']];
+                $files[] = ['name' => (string)$r['name'], 'for' => $for, 'verdict' => $v, 'scanner' => $clam ? 'clamav' : 'virustotal',
+                    'engines' => (int)$r['engines'], 'found' => (int)$r['malicious'] + (int)$r['suspicious']]
+                    // (4.13) The VirusTotal report, for the launcher's Verified pill.
+                    + (!$clam && $r['status'] === 'done' && !empty($r['sha256']) ? ['link' => 'https://www.virustotal.com/gui/file/' . $r['sha256']] : []);
             }
         }
         // (4.11) A few engines flagged it and the team okayed it on the hub: said so on each such file.
