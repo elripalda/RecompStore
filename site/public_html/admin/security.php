@@ -132,13 +132,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $subId = (int)($_POST['sub'] ?? 0);
             rs_mail_log('reply', $to, $subject, $body, '', $subId ?: null);
             rs_log('security', $to, 'emailed about a flagged file: ' . $subject);
+            rs_vt_reach_add((string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? ''), 'mail', $to);
             rs_flash('Sent to ' . $to . '.', 'ok');
         } elseif ($act === 'contact-msg') {
             $acc = rs_dev_account((int)($_POST['dev'] ?? 0));
             if (!$acc) throw new RuntimeException('That developer account is gone.');
             rs_dev_msg_add('dm', (int)$acc['id'], true, (string)($_POST['body'] ?? ''));
             rs_log('security', 'dev:' . (int)$acc['id'], 'messaged about a flagged file');
+            rs_vt_reach_add((string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? ''), 'msg', (string)($acc['name'] ?: $acc['gh_login']));
             rs_flash('Sent. It\'s in ' . ($acc['name'] ?: $acc['gh_login']) . '\'s hub.', 'ok');
+        } elseif ($act === 'contact-click') {
+            // (4.13) "Open an issue" pressed: remembered so nobody opens a second one. Sent in the background.
+            rs_vt_reach_add((string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? ''), 'issue');
+            http_response_code(204);
+            exit;
+        } elseif ($act === 'sec-hide' || $act === 'sec-unhide') {
+            // (4.13) Emergencies: pull a listing from the store over a flagged scan, and put it back later.
+            $app = $byId((string)($_POST['id'] ?? ''));
+            if (!$app) throw new RuntimeException('That listing is gone.');
+            require_once __DIR__ . '/inc/repowatch.php';
+            if ($act === 'sec-hide') {
+                if (!empty($app['hidden'])) throw new RuntimeException($app['name'] . ' is already hidden.');
+                $tag = (string)($_POST['tag'] ?? '');
+                $app['hidden'] = true;
+                $app['sec_hid'] = ['at' => time(), 'by' => rs_me_name(), 'tag' => $tag, 'repo' => (string)($_POST['repo'] ?? ''), 'why' => mb_substr(trim((string)($_POST['why'] ?? '')), 0, 200) ?: 'a scan flagged ' . $tag];
+                rs_pc_save($app);
+                rs_watch_pc_out();
+                if ($tag !== '') rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), $tag]);
+                rs_log('security', $app['id'], 'hidden from the store for security: ' . $app['sec_hid']['why']);
+                rs_flash($app['name'] . ' is hidden from the store. It\'s under Hidden for security below, with a way to put it back.', 'ok');
+            } else {
+                if (empty($app['sec_hid'])) throw new RuntimeException($app['name'] . ' wasn\'t hidden here.');
+                $app['hidden'] = false;
+                unset($app['sec_hid']);
+                rs_pc_save($app);
+                rs_watch_pc_out();
+                rs_log('security', $app['id'], 'back on the store after a security hide');
+                rs_flash($app['name'] . ' is back in the store.', 'ok');
+            }
         } elseif ($act === 'seen') {
             rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? '')]);
             rs_flash('Marked as seen.', 'ok');
@@ -175,6 +206,7 @@ $red = $db->prepare("SELECT * FROM vt_files WHERE status = 'done' AND malicious 
 $red->execute([$cfg['red_at']]);
 $red = $red->fetchAll();
 $held = array_values(array_filter(rs_pc_apps(), fn($x) => !empty($x['pending']['tag'])));
+$secHid = array_values(array_filter(rs_pc_apps(), fn($x) => !empty($x['hidden']) && !empty($x['sec_hid']['at']))); // (4.13)
 $listFrom = (string)rs_setting('vt_list_from', '');
 $recent = $db->prepare("SELECT * FROM vt_files WHERE (status <> 'new' OR source IN ('submission', 'update', 'link')) AND updated > ? ORDER BY updated DESC LIMIT 40");
 $recent->execute([$listFrom !== '' ? $listFrom : '2000-01-01']);
@@ -241,7 +273,7 @@ rs_head('Security', true, ['assets/vt.css']);
 </section>
 
 <section class="card">
-  <div class="vt-head"><h2>Needs you</h2></div>
+  <details class="vt-fold" id="needs" open><summary class="vt-head"><h2>Needs you <span class="muted small"><?= count($red) ?></span></h2></summary>
   <?php if (!$red): ?><p class="vt-empty">Nothing needs you. Anything several engines flag shows up here, and its update waits.</p><?php else: ?>
   <div class="vt-list">
     <?php foreach ($red as $f): $app = str_starts_with($f['ref'], 'pc:') ? rs_pc_app(substr($f['ref'], 3)) : null; $isHeld = $app && (string)($app['pending']['tag'] ?? '') === $f['tag']; ?>
@@ -255,15 +287,45 @@ rs_head('Security', true, ['assets/vt.css']);
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= h($app['id']) ?>"><button>Approve</button></form>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="block"><input type="hidden" name="id" value="<?= h($app['id']) ?>"><button class="danger">Block</button></form>
         <?php elseif ($f['source'] === 'submission'): ?><a class="button" href="hub.php#<?= h(preg_replace('/^m(\d+)$/', 'sub:$1', (string)$f['ref'])) ?>">Open submission</a><?php endif; ?>
+        <?php if ($app && empty($app['hidden'])): // (4.13) emergencies: off the store in one press ?>
+        <form method="post" onsubmit="return confirm('Hide <?= h(addslashes($app['name'])) ?> from the store now? Players won\'t see or download it until you put it back.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sec-hide"><input type="hidden" name="id" value="<?= h($app['id']) ?>"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><input type="hidden" name="why" value="<?= h('VirusTotal: ' . ((int)$f['malicious'] + (int)$f['suspicious']) . ' of ' . (int)$f['engines'] . ' engines flagged ' . $f['name'] . ' (' . $f['tag'] . ')') ?>"><button class="danger">Hide from store</button></form>
+        <?php endif; ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="seen"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><button class="ghost">Mark seen</button></form>
       </div>
       <?php // (4.12) Their email or hub, with a message made from this scan
-        try { echo rs_vt_contact_html(rs_vt_contact($f, $app), 'r' . $f['id']); } catch (Throwable $e) { rs_errlog('vt contact', $e); } ?>
+        try { echo rs_vt_contact_html(rs_vt_contact($f, $app), 'r' . $f['id'], [$f['repo'], $f['tag']]); } catch (Throwable $e) { rs_errlog('vt contact', $e); } ?>
     </div>
     <?php endforeach; ?>
   </div>
   <?php endif; ?>
+  </details>
 </section>
+
+<?php if ($secHid): // (4.13) Pulled from the store over a flagged scan ?>
+<section class="card" id="sechid">
+  <details class="vt-fold" id="sechid-fold" open><summary class="vt-head"><h2>Hidden for security <span class="muted small"><?= count($secHid) ?></span></h2></summary>
+  <p class="muted">Pulled from the store here because a scan flagged them. Put one back once the developer has sorted it out.</p>
+  <div class="vt-list">
+    <?php foreach ($secHid as $x): $sh = $x['sec_hid']; $sRepo = (string)($sh['repo'] ?? rs_pc_key($x)); $sTag = (string)($sh['tag'] ?? ''); ?>
+    <div class="vt-row red">
+      <div class="vt-what"><strong><?= h($x['name']) ?></strong><small><?= h($sRepo) ?> · <?= h($sTag) ?></small><small class="vt-engines"><?= h((string)($sh['why'] ?? '')) ?></small></div>
+      <div class="vt-src"><span class="vt-chip">Hidden <?= h(gmdate('M j', (int)$sh['at'])) ?><?= (string)($sh['by'] ?? '') !== '' ? ' · ' . h((string)$sh['by']) : '' ?></span></div>
+      <div class="vt-res"><?= rs_vt_badge_html(rs_vt_repo_badge($sRepo, $sTag)) ?></div>
+      <div class="vt-acts">
+        <form method="post" onsubmit="return confirm('Put <?= h(addslashes($x['name'])) ?> back in the store?');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sec-unhide"><input type="hidden" name="id" value="<?= h($x['id']) ?>"><button>Put back in the store</button></form>
+      </div>
+      <?php $sf = null; try { $sf = $sTag !== '' ? rs_vt_worst($sRepo, $sTag) : null; } catch (Throwable $e) { }
+        $sc = null; if ($sf) { try { $sc = rs_vt_contact($sf, $x); } catch (Throwable $e) { rs_errlog('vt contact', $e); } }
+        if ($sc && !empty($sc['reach'])) echo rs_vt_contact_html($sc, 's' . $x['id'], [$sRepo, $sTag]);
+        else echo rs_vt_reach_html(rs_vt_reach_get($sRepo, $sTag));
+        $sl = array_values(array_filter(rs_pc_contact_links($x, 'Our security scan (VirusTotal) flagged a file in ' . $sTag . ', so it\'s off the store for now. It may well be a false alarm; could you take a look?'), fn($c) => $c[2] === 'gh'));
+        if ($sl): ?><div class="vt-contact"><span class="muted">On GitHub:</span> <?php foreach ($sl as [$cLabel, $cHref]): ?><a class="btn small" href="<?= h($cHref) ?>" target="_blank" rel="noopener"<?= str_starts_with($cLabel, 'Open an issue') ? ' data-reach-issue data-repo="' . h($sRepo) . '" data-tag="' . h($sTag) . '"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  </details>
+</section>
+<?php endif; ?>
 
 <?php $minor = rs_vt_minor_live(); ?>
 <section class="card" id="minor">
@@ -307,10 +369,11 @@ rs_head('Security', true, ['assets/vt.css']);
         // (4.12) Flagged: the prepared email or hub message. Their GitHub links stay next to it.
         $vc = null;
         if ($v === 'red') { try { $vc = rs_vt_contact(rs_vt_worst(rs_pc_key($x), (string)$p['tag']), $x); } catch (Throwable $e) { rs_errlog('vt contact', $e); } }
-        if ($vc) echo rs_vt_contact_html($vc, 'h' . $x['id']);
+        if ($vc) echo rs_vt_contact_html($vc, 'h' . $x['id'], [rs_pc_key($x), (string)$p['tag']]);
+        elseif ($v === 'red') echo rs_vt_reach_html(rs_vt_reach_get(rs_pc_key($x), (string)$p['tag']));
         $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.', $vc);
         if ($vc && !empty($vc['reach'])) $cl = array_values(array_filter($cl, fn($c) => $c[2] === 'gh'));
-        if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc && !empty($vc['reach']) ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
+        if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc && !empty($vc['reach']) ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?><?= str_starts_with($cLabel, 'Open an issue') ? ' data-reach-issue data-repo="' . h(rs_pc_key($x)) . '" data-tag="' . h((string)$p['tag']) . '"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
   </div>

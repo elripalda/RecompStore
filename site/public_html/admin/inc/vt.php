@@ -929,13 +929,45 @@ function rs_vt_worst(string $repoKey, string $tag): array {
     return $st->fetch(PDO::FETCH_ASSOC) ?: ['repo' => $repoKey, 'tag' => $tag, 'name' => '', 'ref' => '', 'malicious' => 0, 'suspicious' => 0, 'engines' => 0, 'flagged_by' => '', 'sha256' => null];
 }
 // The two buttons and their prepared message, for a row on Security. '' when there's no way to reach them.
-function rs_vt_contact_html(?array $c, string $key): string {
+// (4.13) Who already reached the developer about a flagged release (emailed, messaged, opened a GitHub
+// issue), so nobody sends twice. kv vt_reach:<hash of repo|tag>: [{kind, to, at, by}], the last 20.
+function rs_vt_reach_key(string $repo, string $tag): string { return 'vt_reach:' . substr(sha1(strtolower($repo) . '|' . $tag), 0, 24); }
+function rs_vt_reach_get(string $repo, string $tag): array {
+    if ($repo === '' || $tag === '') return [];
+    $r = rs_kv_get(rs_vt_reach_key($repo, $tag));
+    return $r ? (json_decode((string)$r['v'], true) ?: []) : [];
+}
+function rs_vt_reach_add(string $repo, string $tag, string $kind, string $to = ''): void {
+    if ($repo === '' || $tag === '') return;
+    $l = rs_vt_reach_get($repo, $tag);
+    $l[] = ['kind' => $kind, 'to' => mb_substr($to, 0, 120), 'at' => time(), 'by' => function_exists('rs_me_name') ? rs_me_name() : ''];
+    rs_kv_put(rs_vt_reach_key($repo, $tag), (string)json_encode(array_slice($l, -20)));
+}
+function rs_vt_reach_html(array $l): string {
+    if (!$l) return '';
+    $what = ['mail' => 'Email sent', 'msg' => 'Message sent', 'issue' => 'GitHub issue opened'];
+    $out = '';
+    foreach ($l as $x) {
+        $d = time() - (int)$x['at'];
+        $ago = $d < 90 ? 'just now' : ($d < 3600 ? round($d / 60) . ' min ago' : ($d < 86400 ? round($d / 3600) . ' h ago' : round($d / 86400) . ' d ago'));
+        $out .= '<span class="vt-sent" title="' . h(gmdate('M j, Y H:i', (int)$x['at']) . ' UTC' . ($x['to'] !== '' ? ' · ' . $x['to'] : '')) . '">✓ ' . h($what[$x['kind']] ?? 'Contacted') . ' · ' . h($ago) . ((string)$x['by'] !== '' ? ' · ' . h((string)$x['by']) : '') . '</span>';
+    }
+    return '<div class="vt-sentlist">' . $out . '</div>';
+}
+
+// $about: [repo, tag] of the flagged release, so a send is remembered against it.
+function rs_vt_contact_html(?array $c, string $key, array $about = []): string {
     if (!$c || empty($c['reach'])) return '';
     $k = preg_replace('/[^a-z0-9]/i', '', $key);
-    $form = function (string $kind, string $label) use ($c, $k): string {
+    [$aRepo, $aTag] = $about + ['', ''];
+    $sent = rs_vt_reach_get((string)$aRepo, (string)$aTag);
+    $did = fn(string $kind) => (bool)array_filter($sent, fn($x) => $x['kind'] === $kind);
+    $form = function (string $kind, string $label) use ($c, $k, $aRepo, $aTag, $did): string {
         $to = $kind === 'mail' ? $c['email'] : 'their developer hub';
-        return '<details class="vt-compose" id="vtc-' . $kind . '-' . h($k) . '"><summary class="btn small' . ($kind === 'mail' ? ' primary' : '') . '">' . h($label) . '</summary>'
-            . '<form method="post" class="vt-compose-form"><input type="hidden" name="csrf" value="' . h(rs_csrf()) . '"><input type="hidden" name="action" value="contact-' . $kind . '">'
+        $again = $did($kind);
+        return '<details class="vt-compose" id="vtc-' . $kind . '-' . h($k) . '"><summary class="btn small' . ($kind === 'mail' && !$again ? ' primary' : '') . '">' . h($again ? ($kind === 'mail' ? 'Email again' : 'Message again') : $label) . '</summary>'
+            . '<form method="post" class="vt-compose-form"' . ($again ? ' onsubmit="return confirm(\'' . ($kind === 'mail' ? 'An email about this was already sent' : 'A message about this was already sent') . '. Send another?\')"' : '') . '><input type="hidden" name="csrf" value="' . h(rs_csrf()) . '"><input type="hidden" name="action" value="contact-' . $kind . '">'
+            . '<input type="hidden" name="repo" value="' . h((string)$aRepo) . '"><input type="hidden" name="tag" value="' . h((string)$aTag) . '">'
             . ($kind === 'mail' ? '<input type="hidden" name="to" value="' . h($c['email']) . '"><input type="hidden" name="sub" value="' . (int)$c['sub'] . '">' : '<input type="hidden" name="dev" value="' . (int)$c['acc']['id'] . '">')
             . '<small class="muted">To ' . h($to) . ($kind === 'msg' ? ' (' . h($c['acc']['name']) . ')' : '') . '. Change anything you like, then send.</small>'
             . ($kind === 'mail' ? '<input name="subject" maxlength="200" value="' . h($c['subject']) . '">' : '')
@@ -945,5 +977,5 @@ function rs_vt_contact_html(?array $c, string $key): string {
     $out = '';
     if ($c['email'] !== '') $out .= $form('mail', 'Email ' . $c['who']);
     if ($c['acc']) $out .= $form('msg', 'Message in their hub');
-    return '<div class="vt-contact vt-contact2"><span class="muted">Reach the developer:</span> ' . $out . '</div>';
+    return '<div class="vt-contact vt-contact2"><span class="muted">Reach the developer:</span> ' . $out . '</div>' . rs_vt_reach_html($sent);
 }

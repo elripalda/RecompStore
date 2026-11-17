@@ -69,3 +69,9 @@ Once a week the refresh reads the README for "this project moved to …" (`rs_pc
 ## PS5 listing health (`inc/health.php`)
 
 The PS5 side's version of the download check: each listing checked about once a day the way a console would install it. A renamed PS5 download gets its file pattern fixed every morning (`inc/autopilot.php`).
+
+## Security page: emergencies (4.13)
+
+- **Hide from store** on a Needs you row pulls the listing off the store at once (`sec-hide`: `hidden` plus `sec_hid` = when, who, the flagged tag and repo, why; the catalog is rewritten and launchers are told). It marks that release's files seen, and the listing shows under **Hidden for security** with **Put back in the store** (`sec-unhide`). `rs_pc_hidden_why` says why on the PC list.
+- **Sent to the developer**: emails and hub messages sent from the contact panel, and presses on **Open an issue**, are remembered per flagged release (kv `vt_reach:<hash of repo|tag>`, `rs_vt_reach_*`). They show as green "Email sent · 2 h ago · ruben" marks, the buttons turn into **Email again** / **Message again**, and sending again asks first.
+- **Needs you** and **Hidden for security** fold up; the page remembers which are folded (per browser).

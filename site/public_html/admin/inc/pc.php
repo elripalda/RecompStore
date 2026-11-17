@@ -2150,6 +2150,8 @@ function rs_pc_publish(): int {
 // (4.10) Why a recomp is hidden, in a line, for the admin. -> '' when it's showing
 function rs_pc_hidden_why(array $a): string {
     if (empty($a['hidden'])) return '';
+    // (4.13) Pulled from the store on Security because a scan flagged it.
+    if (!empty($a['sec_hid']['at'])) return 'Hidden from the store for security ' . gmdate('M j', (int)$a['sec_hid']['at']) . ((string)($a['sec_hid']['by'] ?? '') !== '' ? ' by ' . $a['sec_hid']['by'] : '') . ': ' . (string)($a['sec_hid']['why'] ?? 'a scan flagged it') . '. Put it back on Security.';
     if (trim((string)($a['blocked_why'] ?? '')) !== '') return 'Not compatible yet: ' . trim((string)$a['blocked_why']);
     if ((string)($a['watch_hid'] ?? '') !== '') {
         $s = (string)$a['watch_hid'];

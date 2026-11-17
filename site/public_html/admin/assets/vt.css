@@ -118,3 +118,12 @@ a.vt-badge:hover{filter:brightness(1.15)}
 .vt-keyadd>summary{display:inline-flex;list-style:none;cursor:pointer}
 .vt-keyadd>summary::-webkit-details-marker{display:none}
 @media (max-width:640px){.vt-keys li{flex-wrap:wrap}.vt-keyform{flex-wrap:wrap}}
+
+/* (4.13) Folding sections, and what was already sent to the developer */
+.vt-fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px}
+.vt-fold>summary::-webkit-details-marker{display:none}
+.vt-fold>summary h2{margin:0}
+.vt-fold>summary::after{content:'';width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 auto;transition:transform .15s}
+.vt-fold:not([open])>summary::after{transform:rotate(-45deg);margin-top:0}
+.vt-sentlist{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;grid-column:1/-1}
+.vt-sent{display:inline-flex;align-items:center;gap:4px;font:600 12px Figtree,sans-serif;color:var(--ok,#2fbf71);background:rgba(47,191,113,.1);border:1px solid rgba(47,191,113,.3);border-radius:999px;padding:3px 10px}

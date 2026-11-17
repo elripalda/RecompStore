@@ -74,3 +74,24 @@
     }).catch(function () { out.innerHTML = '<p class="vt-empty">The server didn\'t answer. Try again in a moment.</p>'; });
   });
 })();
+
+// (4.13) Folded sections stay folded, and "Open an issue" is remembered so nobody opens a second one.
+(function () {
+  'use strict';
+  document.querySelectorAll('details.vt-fold[id]').forEach(function (d) {
+    var k = 'vt-fold-' + d.id;
+    try { if (localStorage.getItem(k) === '0') d.open = false; } catch (e) {}
+    d.addEventListener('toggle', function () { try { localStorage.setItem(k, d.open ? '1' : '0'); } catch (e) {} });
+  });
+  var csrf = document.querySelector('input[name="csrf"]');
+  document.querySelectorAll('[data-reach-issue]').forEach(function (a) {
+    a.addEventListener('click', function () {
+      if (!csrf) return;
+      var f = new FormData();
+      f.append('csrf', csrf.value); f.append('action', 'contact-click'); f.append('repo', a.dataset.repo || ''); f.append('tag', a.dataset.tag || '');
+      if (navigator.sendBeacon) navigator.sendBeacon('security.php', f); else fetch('security.php', { method: 'POST', body: f, credentials: 'same-origin', keepalive: true });
+      var note = document.createElement('span'); note.className = 'vt-sent'; note.textContent = '✓ GitHub issue opened · just now';
+      a.parentNode.appendChild(note);
+    });
+  });
+})();
