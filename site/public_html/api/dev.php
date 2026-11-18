@@ -549,7 +549,12 @@ try {
         rs_rate_hit('devcheck_' . $id);
         // A fresh look at GitHub, not the cached one.
         try { $rp = (string)(rs_pc_app($id)['repo'] ?? ''); if ($rp !== '') rs_db()->prepare('DELETE FROM gh_cache WHERE k IN (?, ?)')->execute([$rp, $rp . '#info']); } catch (Throwable $e) { }
-        rs_pc_refresh_github(25, 0, $id);
+        // (4.14) A failed GitHub read or a busy catalog write no longer turns into "hub isn't available":
+        // it's logged, and the half-hourly check picks the release up.
+        try { rs_pc_refresh_github(25, 0, $id); } catch (Throwable $e) {
+            rs_errlog('dev pc-check ' . $id, $e);
+            rs_dev_out(200, ['ok' => false, 'error' => 'GitHub didn\'t answer just now. Try again in a minute; it\'s also checked on its own every half hour.']);
+        }
         // (4.13) The scan gets its turn after the answer goes out: a big download used to keep this request
         // open past the proxy's limit, and the developer saw "That didn't go through".
         if (function_exists('rs_vt_discover')) { try { rs_vt_discover(true); } catch (Throwable $e) { } }
@@ -902,5 +907,6 @@ try {
     }
     rs_dev_out(400, ['ok' => false, 'error' => 'Unknown request.']);
 } catch (Throwable $e) {
+    rs_errlog('dev ' . ($a ?? ''), $e);
     rs_dev_out(503, ['ok' => false, 'error' => 'The developer hub isn\'t available right now. Try again later.']);
 }
