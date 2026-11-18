@@ -26,6 +26,8 @@ const RS_VT_BACKFILL_PER_TURN = 25; // (4.13) listings whose current version was
 const RS_VT_BACKFILL_KEEP = 200;    // (4.13) the store's own files upload only while more than this is left today over all keys
 const RS_VT_BACKFILL_UPLOADS = 60;   // a day, for files already in the stores (new ones go first)
 const RS_VT_MAX_BYTES = 650 << 20;   // VirusTotal's largest upload
+const RS_CLAM_MAX_BYTES = 1000 << 20; // (4.14) ClamAV here takes files up to clamd's MaxFileSize (1000M)
+const RS_CLAM_LAST_TRY = 9;           // (4.14) tries after which a file nothing could check is let through as before
 const RS_VT_FILE_RE = '/\.(zip|7z|rar|exe|msi|appimage|dmg|deb|rpm|tar\.gz|tgz|tar\.xz|tar\.zst|pkg|elf|bin)$/i';
 
 function rs_vt_tables(): void {
@@ -116,6 +118,28 @@ function rs_clam_check(array $f, string $tmp): bool {
     rs_vt_save($id, ['status' => 'done', 'scanner' => 'clamav', 'err' => '', 'engines' => 1, 'suspicious' => 0, 'vt_redo' => (string)($f['source'] ?? '') !== 'finder' ? 1 : 0,
         'malicious' => $r['found'] !== '' ? $red : 0, 'flagged_by' => $r['found'] !== '' ? 'ClamAV: ' . $r['found'] : '']);
     return true;
+}
+
+// (4.14) A file VirusTotal couldn't check (over its 650 MB, or it kept failing) no longer goes out as
+// clean unchecked: ClamAV here checks it (files up to 1000 MB). Only a file neither can take (bigger,
+// or a download that never works after RS_CLAM_LAST_TRY tries) is let through as before.
+function rs_clam_fallback(array $f): void {
+    $id = (int)$f['id'];
+    $tmp = rs_vt_tmp($id);
+    $why = rs_vt_fetch($f, $tmp, RS_CLAM_MAX_BYTES);
+    if ($why === 'big') { rs_vt_save($id, ['tries' => RS_CLAM_LAST_TRY, 'err' => 'Too big for VirusTotal and ClamAV']); return; }
+    if ($why !== '') { rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => $why, 'next_at' => gmdate('Y-m-d H:i:s', time() + 1800)]); return; }
+    $r = rs_clam_scan($tmp);
+    @unlink($tmp);
+    if (!$r['ok']) { rs_vt_save($id, ['tries' => (int)$f['tries'] + 1, 'err' => $r['err'], 'next_at' => gmdate('Y-m-d H:i:s', time() + 1800)]); return; }
+    $red = rs_vt_cfg()['red_at'];
+    rs_vt_save($id, ['status' => 'done', 'scanner' => 'clamav', 'vt_redo' => 0, 'engines' => 1, 'suspicious' => 0,
+        'err' => $f['status'] === 'big' ? 'Too big for VirusTotal: checked by ClamAV' : 'VirusTotal couldn\'t check it: checked by ClamAV',
+        'malicious' => $r['found'] !== '' ? $red : 0, 'flagged_by' => $r['found'] !== '' ? 'ClamAV: ' . $r['found'] : '']);
+}
+// Still has a ClamAV try coming: its release waits for it.
+function rs_vt_unchecked_wait(array $r): bool {
+    return in_array($r['status'], ['big', 'error'], true) && ($r['scanner'] ?? 'vt') === 'vt' && (int)$r['tries'] < RS_CLAM_LAST_TRY && rs_clam_on();
 }
 
 // ---- Settings -----------------------------------------------------------------------------------
@@ -473,7 +497,7 @@ function rs_vt_tmp(int $id): string { return sys_get_temp_dir() . '/rs-vt-' . $i
 
 // Downloads a file to check it. -> '' or the reason it couldn't. Any https link (or http) is fetched:
 // GitHub's release files, (3.9) a GitLab project's own release links, and links pasted by hand.
-function rs_vt_fetch(array $f, string $to): string {
+function rs_vt_fetch(array $f, string $to, int $max = RS_VT_MAX_BYTES): string {
     if ((string)$f['url'] === '') return 'No download link.';
     if (!preg_match('#^https?://#i', (string)$f['url'])) return 'Not a web link.';
     $fp = fopen($to, 'wb');
@@ -482,12 +506,12 @@ function rs_vt_fetch(array $f, string $to): string {
     curl_setopt_array($ch, [CURLOPT_FILE => $fp, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 6, CURLOPT_TIMEOUT => 900, CURLOPT_CONNECTTIMEOUT => 15,
         CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP,
         CURLOPT_USERAGENT => 'RecompStore-security', CURLOPT_NOPROGRESS => false,
-        CURLOPT_XFERINFOFUNCTION => function ($c, $dlTotal, $dl) use (&$got) { $got = $dl; return $dl > RS_VT_MAX_BYTES ? 1 : 0; }]);
+        CURLOPT_XFERINFOFUNCTION => function ($c, $dlTotal, $dl) use (&$got) { $got = $dl; return $dl > $max ? 1 : 0; }]);
     $ok = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
     fclose($fp);
-    if ($got > RS_VT_MAX_BYTES) { @unlink($to); return 'big'; }
+    if ($got > $max) { @unlink($to); return 'big'; }
     if (!$ok || $code >= 400) { @unlink($to); return 'The download didn\'t work (HTTP ' . $code . ').'; }
     return '';
 }
@@ -621,6 +645,14 @@ function rs_vt_run(float $seconds = 20): int {
             }
             $n++;
         }
+        // (4.14) Files VirusTotal couldn't take: ClamAV's turn, in the time left.
+        if (rs_clam_on()) while (microtime(true) < $until) {
+            $f = rs_db()->query("SELECT * FROM vt_files WHERE status IN ('big', 'error') AND scanner = 'vt' AND tries < " . RS_CLAM_LAST_TRY
+                . " AND source IN ('update', 'submission', 'link', 'auto') AND created > UTC_TIMESTAMP() - INTERVAL 30 DAY AND (next_at IS NULL OR next_at <= UTC_TIMESTAMP()) ORDER BY prio, created LIMIT 1")->fetch();
+            if (!$f) break;
+            rs_clam_fallback($f);
+            $n++;
+        }
         if ($n) rs_vt_promote();
     } finally { flock($lock, LOCK_UN); fclose($lock); }
     return $n;
@@ -663,7 +695,8 @@ function rs_vt_release(string $repo, string $tag): array {
     $rows = $st->fetchAll();
     $v = $rows ? 'green' : 'grey';
     foreach ($rows as $r) {
-        $x = in_array($r['status'], ['big', 'error', 'superseded'], true) ? 'green' : rs_vt_verdict($r); // can't be checked: the hold decides
+        // (4.14) Too big or failed for VirusTotal: grey while ClamAV still has its turn; green only when nothing can check it.
+        $x = $r['status'] === 'superseded' ? 'green' : (rs_vt_unchecked_wait($r) ? 'grey' : (in_array($r['status'], ['big', 'error'], true) ? 'green' : rs_vt_verdict($r)));
         if ($x === 'red') { $v = 'red'; break; }
         if ($x === 'grey') $v = 'grey';
         elseif ($x === 'yellow' && $v === 'green') $v = 'yellow';
@@ -687,9 +720,11 @@ function rs_vt_hold(array $a, array $latest, array $r): array {
 
 // (4.13) Xarishark: a game's updates are checked one a day, so every one gets a real VirusTotal scan.
 // -> when the next one may be checked (0: now). Set when an update goes out (vt_out_at).
+// (4.14) Xarishark: one update a day, not a 24-hour wait after the last one. An update that went out
+// today (UTC) makes the next one wait for tomorrow; anything from an earlier day doesn't hold it back.
 function rs_vt_update_after(array $a): int {
     $t = (int)($a['vt_out_at'] ?? 0);
-    return $t > 0 && $t + RS_VT_UPDATE_EVERY > time() ? $t + RS_VT_UPDATE_EVERY : 0;
+    return $t > 0 && gmdate('Y-m-d', $t) === gmdate('Y-m-d') ? strtotime('tomorrow 00:00 UTC') : 0;
 }
 function rs_vt_supersede(string $repoKey, string $tag): void {
     rs_vt_tables();
