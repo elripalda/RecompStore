@@ -59,19 +59,31 @@ function rs_rate_table(): void {
     $done = true;
 }
 
+// (4.14) The column holds 16 characters. A longer kind ("devcheck_" + a listing id) made the insert
+// fail, and every "Check for my new release now" on a listing with an id over 7 letters answered
+// "the developer hub isn't available". Long kinds now become a fixed 16-character key.
+function rs_rate_key(string $kind): string {
+    return strlen($kind) <= 16 ? $kind : substr($kind, 0, 6) . '~' . substr(md5($kind), 0, 9);
+}
+
 // True when this address already did $kind $max times in the last $seconds.
+// (4.14) A limit that can't be read never blocks the request: it's logged and let through.
 function rs_rate_over(string $kind, int $max, int $seconds): bool {
-    rs_rate_table();
-    $st = rs_db()->prepare('SELECT COUNT(*) FROM rate_tries WHERE kind = ? AND ip_hash = ? AND at > (NOW() - INTERVAL ? SECOND)');
-    $st->execute([$kind, rs_ip_hash(), $seconds]);
-    return (int)$st->fetchColumn() >= $max;
+    try {
+        rs_rate_table();
+        $st = rs_db()->prepare('SELECT COUNT(*) FROM rate_tries WHERE kind = ? AND ip_hash = ? AND at > (NOW() - INTERVAL ? SECOND)');
+        $st->execute([rs_rate_key($kind), rs_ip_hash(), $seconds]);
+        return (int)$st->fetchColumn() >= $max;
+    } catch (Throwable $e) { if (function_exists('rs_errlog')) rs_errlog('rate over ' . $kind, $e); return false; }
 }
 
 function rs_rate_hit(string $kind): void {
-    rs_rate_table();
-    $db = rs_db();
-    $db->prepare('INSERT INTO rate_tries (ip_hash, kind, at) VALUES (?, ?, NOW())')->execute([rs_ip_hash(), $kind]);
-    if (random_int(0, 50) === 0) $db->exec('DELETE FROM rate_tries WHERE at < (NOW() - INTERVAL 2 DAY)');
+    try {
+        rs_rate_table();
+        $db = rs_db();
+        $db->prepare('INSERT INTO rate_tries (ip_hash, kind, at) VALUES (?, ?, NOW())')->execute([rs_ip_hash(), rs_rate_key($kind)]);
+        if (random_int(0, 50) === 0) $db->exec('DELETE FROM rate_tries WHERE at < (NOW() - INTERVAL 2 DAY)');
+    } catch (Throwable $e) { if (function_exists('rs_errlog')) rs_errlog('rate hit ' . $kind, $e); }
 }
 
 // ---- Linking a phone or PC to a console ---------------------------------------------------------
