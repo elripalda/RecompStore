@@ -54,7 +54,6 @@ To install by hand instead, unzip `PPSA92000.zip` into `/data/homebrew/` over FT
 |---|---|
 | `app/` | The PS5 app (title ID PPSA92000): `src/` has the store (`store_*`) on the Porpoise foundation (`porpoise_*`, `ui_*`) |
 | `app/payload/` | The payloads the store hands to the loader: `copier` (game setup and installs at full drive speed), `launcher` (opens a game), `installer` (`RecompStore-Installer.elf`) |
-| `site/public_html/` | recompstore.com: the website, its catalog admin (`admin/`), and the bug report and submission inbox (`api/inbox.php`) |
 
 ## Building
 
@@ -74,10 +73,6 @@ That builds the three payloads into `app/assets/payloads/`, then the title into 
 3. Make a GitHub release tagged `vX.Y.Z` (not marked as a pre-release) and attach `PPSA92000.zip` and `app/payload/installer/RecompStore-Installer.elf`.
 
 Every copy of the store checks this repository's releases when it starts, and every six hours after that. It offers the update at the top of **Latest Updates**.
-
-## The website
-
-`site/public_html` runs on any host with PHP 8 and MySQL. Upload it, open `/admin/setup.php` once to connect the database and make your admin login, then add games and press **Publish** to write the `catalog.json` that the store and the site read. Bug reports, recomp submissions, messages from the Contact page and logs sent from the store land in the admin's **Inbox**. Under **Beta**, make codes for a game marked Beta; its zip stays on the site, outside `public_html`, and only consoles that redeemed a code can download it.
 
 ## License and credits
 
