@@ -101,11 +101,13 @@ function rs_auto_find_notes(array $f): array {
 // marked `apart` (a remake that shares the name: MediEvil 2019, Ratchet & Clank 2016) stays its own.
 // -> how many titles were folded in.
 function rs_titles_merge_same(): int {
+    $apps = [];
+    foreach (rs_pc_apps() as $a) $apps[$a['id']] = $a;
     $groups = [];
     foreach (rs_titles() as $t) {
         if (!empty($t['apart'])) continue;
         $k = rs_auto_norm($t['name']);
-        if ($k !== '') $groups[$k][] = $t;
+        if ($k !== '') $groups[$k . '|' . rs_title_console($t, $apps)][] = $t;
     }
     $n = 0;
     foreach ($groups as $list) {
@@ -124,51 +126,53 @@ function rs_titles_merge_same(): int {
     }
     return $n;
 }
+// (4.15) The console a title's PC versions come from (the most common one), else the title's own.
+function rs_title_console(array $t, array $apps): string {
+    $c = [];
+    foreach ($t['pc'] as $id) if (isset($apps[$id]) && $apps[$id]['origin'] !== '') $c[$apps[$id]['origin']] = ($c[$apps[$id]['origin']] ?? 0) + 1;
+    if (!$c) return (string)$t['origin'];
+    arsort($c);
+    return (string)array_key_first($c);
+}
 
-// PC recomps of the same game go under one title: into the one it already has (the same console's
-// first, else any title of that name not kept apart), or a new one when there are two. -> how many were placed.
+// PC recomps of the same game from the same console go under one title: the one it already has, or a
+// new one when there are two. (4.15) Another console's game of the same name is often a different game
+// (Ocarina of Time on N64 and on Switch 2), so versions from different consoles are only put together by hand.
+// -> how many were placed.
 function rs_titles_autogroup(): int {
     rs_titles_merge_same();
-    $titles = rs_titles();
+    $apps = [];
+    foreach (rs_pc_apps() as $a) $apps[$a['id']] = $a;
     $taken = [];
     $byKey = [];
-    $byName = [];
-    foreach ($titles as $t) {
+    foreach (rs_titles() as $t) {
         foreach ($t['pc'] as $id) $taken[$id] = $t['id'];
-        $byKey[rs_auto_norm($t['name']) . '|' . $t['origin']] = $t['id'];
-        if (empty($t['apart'])) $byName[rs_auto_norm($t['name'])] ??= $t['id'];
+        $byKey[rs_auto_norm($t['name']) . '|' . rs_title_console($t, $apps)] ??= $t['id'];
     }
     $loose = [];
-    foreach (rs_pc_apps() as $a) {
+    foreach ($apps as $a) {
         if (isset($taken[$a['id']]) || $a['origin'] === 'other' || $a['origin'] === '') continue;
         $k = rs_auto_norm($a['game'] !== '' ? $a['game'] : $a['name']);
         if ($k === '') continue;
         $loose[$k . '|' . $a['origin']][] = $a;
     }
-    // (4.14) Same game from another console: a title of that name takes it, or they're grouped together.
     $n = 0;
-    $byNorm = [];
-    foreach ($loose as $key => $apps) {
-        $nk = strstr($key, '|', true);
-        $to = $byKey[$key] ?? $byName[$nk] ?? '';
+    foreach ($loose as $key => $list) {
+        $to = $byKey[$key] ?? '';
         if ($to !== '') {
-            foreach ($apps as $a) { rs_title_add_member($to, 'pc', $a['id']); rs_log('versions', $a['id'], 'added to ' . $to); $n++; }
+            foreach ($list as $a) { rs_title_add_member($to, 'pc', $a['id']); rs_log('versions', $a['id'], 'added to ' . $to); $n++; }
             continue;
         }
-        $byNorm[$nk] = array_merge($byNorm[$nk] ?? [], $apps);
-    }
-    $loose = $byNorm;
-    foreach ($loose as $key => $apps) {
-        if (count($apps) < 2) continue;
-        $name = $apps[0]['game'] !== '' ? $apps[0]['game'] : $apps[0]['name'];
+        if (count($list) < 2) continue;
+        $name = $list[0]['game'] !== '' ? $list[0]['game'] : $list[0]['name'];
         $t = rs_title_defaults();
         $t['id'] = rs_title_new_id($name);
         $t['name'] = $name;
-        $t['origin'] = $apps[0]['origin'];
-        $t['pc'] = array_map(fn($a) => $a['id'], $apps);
+        $t['origin'] = $list[0]['origin'];
+        $t['pc'] = array_map(fn($a) => $a['id'], $list);
         rs_title_save($t);
         rs_log('versions', $t['id'], 'grouped ' . implode(', ', $t['pc']));
-        $n += count($apps);
+        $n += count($list);
     }
     return $n;
 }
