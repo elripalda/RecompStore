@@ -903,6 +903,18 @@ function rs_hub_shelved(): array {
     }
     return $out;
 }
+// (4.15) Submission cards on New whose check says it's already listed (live on RecompLauncher or on RecompStore). -> ids
+function rs_hub_new_dupes(array $cards): array {
+    $out = [];
+    foreach ($cards as $c) if (preg_match('/^sub:(\d+)$/', (string)$c['key'], $m) && preg_match('/^Already (on|live on) Recomp/', (string)$c['note'][1])) $out[] = (int)$m[1];
+    return $out;
+}
+// (4.15) PS5 submission cards on New whose checks all passed. -> ids
+function rs_hub_new_ready(array $cards): array {
+    $out = [];
+    foreach ($cards as $c) if (preg_match('/^sub:(\d+)$/', (string)$c['key'], $m) && $c['note'][0] === 'ok' && $c['note'][1] === 'Ready to approve') $out[] = (int)$m[1];
+    return $out;
+}
 // The drafts on Checking that stopped because their listing is already there, hidden. -> ids
 function rs_hub_listed_failed(): array {
     rs_auto_tables();
