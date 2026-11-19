@@ -127,9 +127,11 @@ function hub_board_html(string $store, array $b): string {
         // (4.15) New: submissions already in the catalog (dismiss them all), and PS5 ones ready to approve.
         $dupes = $k === 'new' ? count(rs_hub_new_dupes($cards)) : 0;
         $readyN = $k === 'new' && $store === 'ps5' ? count(rs_hub_new_ready($cards)) : 0;
+        $draftsN = $k === 'draft' && (rs_is_owner() || rs_can_page('index.php')) ? count($cards) : 0;
         $more = (int)($b['more'][$k] ?? 0);
         $o .= '<section class="sh-col sh-col-' . $k . '"><header><b>' . h($t) . '</b><span class="count">' . (count($cards) + $more) . '</span><small>' . h($sub) . '</small>'
             . ($good ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="publish_good" data-confirm="Click again to put ' . $good . ' live" title="Drafts from the finder, player requests and links that Claude and VirusTotal both passed. Submissions publish one by one so the developer can get the email.">' . HUB_IC['check'] . 'Publish ' . $good . ' that look good</button></div>' : '')
+            . ($draftsN ? '<div class="sh-row sh-col-act"><button type="button" class="small primary" data-act="publish_drafts" data-confirm="Click again to publish ' . $draftsN . '" title="Shows every draft here in PS5 games and publishes the PS5 store. Sign it in RecompStore Signer to send it out.">' . HUB_IC['check'] . 'Publish all ' . $draftsN . '</button></div>' : '')
             . ($readyN ? '<div class="sh-row sh-col-act"><button type="button" class="small primary" data-act="approve_ready" data-confirm="Click again to approve ' . $readyN . '" title="Every PS5 submission whose checks all passed goes into PS5 games as a hidden draft, ready for you to sign and publish.">' . HUB_IC['check'] . 'Approve ' . $readyN . ' ready</button></div>' : '')
             . ($dupes ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_dupes" data-confirm="Click again to dismiss ' . $dupes . '" title="Submissions for something that\'s already on RecompLauncher or RecompStore. They\'re marked done and go under Handled.">Dismiss ' . $dupes . ' already listed</button></div>' : '')
             . ($listed ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_listed" data-confirm="Click again to dismiss ' . $listed . '" title="Drafts that stopped because the recomp is already on RecompLauncher (hidden). They go under Dismissed, where you can put any back.">Dismiss ' . $listed . ' already listed</button></div>' : '')
@@ -481,6 +483,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if (!$n) throw new RuntimeException('Nothing to dismiss.');
                 $res['msg'] = $n . ' dismissed. They\'re under Handled.';
+                break;
+            }
+            // (4.15) Every PS5 draft on the board shown in PS5 games, then the PS5 store published.
+            case 'publish_drafts': {
+                if (!rs_hub_store_ok('ps5') || !($isOwner || rs_can_page('index.php'))) throw new RuntimeException('Publishing the PS5 store is for the owner.');
+                $names = [];
+                foreach (rs_hub_board('ps5')['cols']['draft'] as $c) {
+                    if (!preg_match('/^sub:(\d+)$/', (string)$c['key'], $m) || !($s2 = rs_hub_sub((int)$m[1]))) continue;
+                    $g = rs_game((string)($s2[1]['ps5_draft'] ?? ''));
+                    if (!$g || empty($g['hidden'])) continue;
+                    $g['hidden'] = false;
+                    rs_save_game($g);
+                    rs_log('hub', 'publish', $g['id'] . ' ' . $g['name']);
+                    $names[] = (string)$g['name'];
+                }
+                if (!$names) throw new RuntimeException('No drafts to publish.');
+                rs_publish();
+                $res['msg'] = count($names) . ' published: ' . implode(', ', $names) . '.' . (rs_sign_on() ? ' Sign it in RecompStore Signer on your PC to send it out.' : ' The PS5 store picks it up on its next load.');
+                $res['refresh'] = true;
                 break;
             }
             // (4.15) Every PS5 submission whose checks passed, into PS5 games as hidden drafts at once.
