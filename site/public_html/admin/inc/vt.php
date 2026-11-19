@@ -506,7 +506,7 @@ function rs_vt_fetch(array $f, string $to, int $max = RS_VT_MAX_BYTES): string {
     curl_setopt_array($ch, [CURLOPT_FILE => $fp, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 6, CURLOPT_TIMEOUT => 900, CURLOPT_CONNECTTIMEOUT => 15,
         CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP,
         CURLOPT_USERAGENT => 'RecompStore-security', CURLOPT_NOPROGRESS => false,
-        CURLOPT_XFERINFOFUNCTION => function ($c, $dlTotal, $dl) use (&$got) { $got = $dl; return $dl > $max ? 1 : 0; }]);
+        CURLOPT_XFERINFOFUNCTION => function ($c, $dlTotal, $dl) use (&$got, $max) { $got = $dl; return $dl > $max ? 1 : 0; }]);
     $ok = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
