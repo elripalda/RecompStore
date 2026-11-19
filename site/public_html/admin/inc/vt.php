@@ -653,7 +653,7 @@ function rs_vt_run(float $seconds = 20): int {
             rs_clam_fallback($f);
             $n++;
         }
-        if ($n) rs_vt_promote();
+        if ($n) { rs_vt_promote(); rs_vt_minor_auto(); }
     } finally { flock($lock, LOCK_UN); fclose($lock); }
     return $n;
 }
@@ -815,6 +815,88 @@ function rs_vt_minor_live(): array {
         $out[] = [$a, $tag, $f, $e, $link];
     }
     return $out;
+}
+
+// (4.15) Minor flags (yellow) are okayed on their own: they're nearly always unsigned programs. Covers
+// releases that are out, held updates and drafts (the hub's check mark reads the same kv). -> how many.
+function rs_vt_minor_auto(): int {
+    if (rs_setting('vt_minor_auto', '1') !== '1') return 0;
+    $red = rs_vt_cfg()['red_at'];
+    $st = rs_db()->prepare("SELECT DISTINCT repo, tag FROM vt_files WHERE status = 'done' AND malicious + suspicious > 0 AND malicious < ? AND updated > UTC_TIMESTAMP() - INTERVAL 30 DAY");
+    $st->execute([$red]);
+    $n = 0;
+    foreach ($st->fetchAll() as $r) {
+        if (rs_vt_okd((string)$r['repo'], (string)$r['tag'])) continue;
+        [, $v] = rs_vt_release((string)$r['repo'], (string)$r['tag']);
+        if ($v !== 'yellow') continue;
+        rs_vt_ok_mark((string)$r['repo'], (string)$r['tag'], 'auto');
+        rs_log('security', (string)$r['repo'], 'minor flags okayed on ' . $r['tag'] . ' (auto)');
+        $n++;
+    }
+    return $n;
+}
+
+// (4.15) The GitHub (or GitLab) issue for a flagged release, from a preset (no AI). Worded for what it is:
+// a held update, a game hidden over it, a submission or draft, or a release that's out. -> [title, body, url]
+// ('' url when the repo isn't on GitHub or GitLab).
+function rs_vt_issue(array $f, ?array $app = null): array {
+    $repo = (string)$f['repo'];
+    $tag = (string)$f['tag'];
+    if (!$app && str_starts_with((string)$f['ref'], 'pc:')) $app = rs_pc_app(substr((string)$f['ref'], 3));
+    $sub = (string)($f['source'] ?? '') === 'submission' || preg_match('/^(m\d+|auto:)/', (string)$f['ref']) || ($app && !empty($app['hidden']) && empty($app['live_at']) && empty($app['sec_hid']));
+    $state = $sub ? 'submission' : ($app && (string)($app['pending']['tag'] ?? '') === $tag ? 'update' : ($app && !empty($app['sec_hid']) ? 'hidden' : 'live'));
+    $name = (string)($app['name'] ?? '') ?: basename($repo);
+    $st = rs_db()->prepare("SELECT * FROM vt_files WHERE repo = ? AND tag = ? AND status = 'done' AND malicious + suspicious > 0 ORDER BY malicious + suspicious DESC");
+    $st->execute([$repo, $tag]);
+    $files = $st->fetchAll() ?: [$f];
+    $lines = [];
+    foreach ($files as $x) {
+        $hits = (int)$x['malicious'] + (int)$x['suspicious'];
+        $lines[] = '- ' . (string)$x['name'] . ': flagged by ' . $hits . ((int)$x['engines'] ? ' of ' . (int)$x['engines'] : '') . ' engines'
+            . (trim((string)($x['flagged_by'] ?? '')) !== '' ? ' (' . str_replace(' · ', ', ', (string)$x['flagged_by']) . ')' : '')
+            . (rs_vt_link($x) !== '' ? "\n  " . rs_vt_link($x) : '');
+    }
+    $old = (string)($app['version'] ?? '');
+    $intro = [
+        'update' => 'We scan every update before it goes out on RecompLauncher, and VirusTotal flagged your latest release (' . $tag . '). The update is on hold for now, so players stay on ' . ($old !== '' ? $old : 'the version before') . '.',
+        'hidden' => 'We scan every release on RecompLauncher, and VirusTotal flagged ' . $tag . ', so ' . $name . ' is off RecompLauncher for now.',
+        'submission' => 'Thanks for sending ' . $name . ' to RecompLauncher! We scan every submission before it goes up, and VirusTotal flagged your release (' . $tag . '), so we can\'t list it yet.',
+        'live' => 'We scan every release on RecompLauncher, and VirusTotal flagged your release ' . $tag . '.',
+    ][$state];
+    $after = ['update' => 'let the update out', 'hidden' => 'put ' . $name . ' back on RecompLauncher', 'submission' => 'get ' . $name . ' listed on RecompLauncher', 'live' => 'update the result on RecompLauncher'][$state];
+    $body = "Hi!\n\n" . $intro . "\n\nThe scan:\n" . implode("\n", $lines) . "\n\n"
+        . "Could you please take a look? If it's a false positive (common with unsigned programs), could you report it to the vendors that flagged it? Most of them have a false positive form on their website. If it isn't, a fixed release works too.\n\n"
+        . "Let us know once it's taken care of. We'll rescan it and " . $after . ".\n\nThanks!";
+    $title = $name . ' ' . $tag . ': flagged by VirusTotal';
+    $host = rs_host_norm(str_starts_with($repo, 'gitlab.com/') ? 'gitlab' : '');
+    $path = preg_replace('#^gitlab\.com/#', '', $repo);
+    $url = '';
+    if ($host === 'gitlab') $url = 'https://gitlab.com/' . $path . '/-/issues/new?issue%5Btitle%5D=' . rawurlencode($title) . '&issue%5Bdescription%5D=' . rawurlencode(mb_substr($body, 0, 6000));
+    elseif (preg_match('#^[\w.-]+/[\w.-]+$#', $repo)) $url = 'https://github.com/' . $repo . '/issues/new?title=' . rawurlencode($title) . '&body=' . rawurlencode(mb_substr($body, 0, 6000));
+    return [$title, $body, $url, $state];
+}
+// The "Open an issue" button for a Security row (remembered so nobody opens a second one).
+function rs_vt_issue_html(array $f, ?array $app = null): string {
+    [, , $url] = rs_vt_issue($f, $app);
+    if ($url === '') return '';
+    $done = (bool)array_filter(rs_vt_reach_get((string)$f['repo'], (string)$f['tag']), fn($x) => $x['kind'] === 'issue');
+    return '<a class="btn small' . ($done ? '' : ' primary') . '" href="' . h($url) . '" target="_blank" rel="noopener" data-reach-issue data-repo="' . h((string)$f['repo']) . '" data-tag="' . h((string)$f['tag']) . '">' . ($done ? 'Open another issue' : 'Open an issue') . '</a>';
+}
+// (4.15) Held or live games whose release 7 or more engines flagged (RS_VT_HIDE_AT), not hidden yet: [[app, file row]].
+const RS_VT_HIDE_AT = 7;
+function rs_vt_hide_candidates(): array {
+    $st = rs_db()->prepare("SELECT * FROM vt_files WHERE status = 'done' AND malicious >= ? AND ref LIKE 'pc:%' AND updated > UTC_TIMESTAMP() - INTERVAL 60 DAY ORDER BY malicious DESC");
+    $st->execute([RS_VT_HIDE_AT]);
+    $out = [];
+    foreach ($st->fetchAll() as $f) {
+        $a = rs_pc_app(substr((string)$f['ref'], 3));
+        if (!$a || !empty($a['hidden']) || isset($out[$a['id']])) continue;
+        // Only the release that's waiting or out now, not an old one.
+        if ((string)$f['tag'] !== (string)($a['pending']['tag'] ?? '') && (string)$f['tag'] !== (string)($a['ok_tag'] ?? '')) continue;
+        if (rs_vt_okd(rs_pc_key($a), (string)$f['tag'])) continue;
+        $out[$a['id']] = [$a, $f];
+    }
+    return array_values($out);
 }
 
 // For the catalog: the checked files of the release that's out, so the launcher can match them.

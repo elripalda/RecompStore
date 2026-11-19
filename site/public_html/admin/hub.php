@@ -124,9 +124,14 @@ function hub_board_html(string $store, array $b): string {
         // together; submissions stay one by one so the developer gets the "you're live" email.
         $good = $k === 'ready' && $store === 'pc' ? count(array_filter($cards, fn($c) => str_starts_with((string)$c['key'], 'job:') && $c['src'] !== 'Submission' && $c['note'][0] === 'ok')) : 0;
         $listed = $k === 'check' && $store === 'pc' ? count(rs_hub_listed_failed()) : 0;
+        // (4.15) New: submissions already in the catalog (dismiss them all), and PS5 ones ready to approve.
+        $dupes = $k === 'new' ? count(rs_hub_new_dupes($cards)) : 0;
+        $readyN = $k === 'new' && $store === 'ps5' ? count(rs_hub_new_ready($cards)) : 0;
         $more = (int)($b['more'][$k] ?? 0);
         $o .= '<section class="sh-col sh-col-' . $k . '"><header><b>' . h($t) . '</b><span class="count">' . (count($cards) + $more) . '</span><small>' . h($sub) . '</small>'
             . ($good ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="publish_good" data-confirm="Click again to put ' . $good . ' live" title="Drafts from the finder, player requests and links that Claude and VirusTotal both passed. Submissions publish one by one so the developer can get the email.">' . HUB_IC['check'] . 'Publish ' . $good . ' that look good</button></div>' : '')
+            . ($readyN ? '<div class="sh-row sh-col-act"><button type="button" class="small primary" data-act="approve_ready" data-confirm="Click again to approve ' . $readyN . '" title="Every PS5 submission whose checks all passed goes into PS5 games as a hidden draft, ready for you to sign and publish.">' . HUB_IC['check'] . 'Approve ' . $readyN . ' ready</button></div>' : '')
+            . ($dupes ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_dupes" data-confirm="Click again to dismiss ' . $dupes . '" title="Submissions for something that\'s already on RecompLauncher or RecompStore. They\'re marked done and go under Handled.">Dismiss ' . $dupes . ' already listed</button></div>' : '')
             . ($listed ? '<div class="sh-row sh-col-act"><button type="button" class="small" data-act="dismiss_listed" data-confirm="Click again to dismiss ' . $listed . '" title="Drafts that stopped because the recomp is already on RecompLauncher (hidden). They go under Dismissed, where you can put any back.">Dismiss ' . $listed . ' already listed</button></div>' : '')
             . '</header><div class="sh-cards">';
         // (4.13) Xarishark: nothing should sit in Ready for days. Over a day old, its age shows in red.
@@ -448,6 +453,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_log('hub', $act, rs_hub_job_path((string)$j['repo_key']));
                 if ($act === 'dismiss') { $res['msg'] = 'Dismissed. It\'s under Dismissed if you want it back.'; $res['close'] = true; }
                 else { $res['msg'] = 'Back on the board.'; $res['refresh'] = true; }
+                break;
+            }
+            // (4.15) One submission that's already listed, or every one on New at once: marked done.
+            case 'dismiss_dupe': {
+                [$id, $r, $d] = $needSub();
+                $d['handled'] = ['reason' => 'Already listed', 'at' => gmdate('c'), 'by' => rs_me_name()];
+                unset($d['declined']);
+                rs_hub_sub_save($id, $d, 'done');
+                rs_log('submission-done', (string)$id, 'Already listed');
+                $res['msg'] = 'Dismissed. It\'s under Handled.';
+                $res['close'] = true;
+                break;
+            }
+            case 'dismiss_dupes': {
+                $store = (string)($_POST['store'] ?? $_GET['store'] ?? 'pc') === 'ps5' ? 'ps5' : 'pc';
+                if (!rs_hub_store_ok($store)) throw new RuntimeException('That board is for a store you don\'t work on.');
+                $n = 0;
+                foreach (rs_hub_new_dupes(rs_hub_board($store)['cols']['new']) as $sid) {
+                    $s2 = rs_hub_sub($sid);
+                    if (!$s2) continue;
+                    $d2 = $s2[1];
+                    $d2['handled'] = ['reason' => 'Already listed', 'at' => gmdate('c'), 'by' => rs_me_name()];
+                    rs_hub_sub_save($sid, $d2, 'done');
+                    rs_log('submission-done', (string)$sid, 'Already listed');
+                    $n++;
+                }
+                if (!$n) throw new RuntimeException('Nothing to dismiss.');
+                $res['msg'] = $n . ' dismissed. They\'re under Handled.';
+                break;
+            }
+            // (4.15) Every PS5 submission whose checks passed, into PS5 games as hidden drafts at once.
+            case 'approve_ready': {
+                if (!rs_hub_store_ok('ps5')) throw new RuntimeException('These are for the PS5 store.');
+                @set_time_limit(300);
+                $ok = []; $bad = [];
+                foreach (rs_hub_new_ready(rs_hub_board('ps5')['cols']['new']) as $sid) {
+                    $s2 = rs_hub_sub($sid);
+                    if (!$s2) continue;
+                    $r2 = rs_db()->prepare('SELECT * FROM inbox WHERE id = ?');
+                    $r2->execute([$sid]);
+                    $row = $r2->fetch();
+                    if (!$row || $row['status'] === 'done') continue;
+                    try {
+                        $gid = rs_hub_ps5_apply($sid, $row, $s2[1]);
+                        $ok[] = (string)($s2[1]['name'] ?? $gid);
+                        if (!$isOwner) rs_hub_flag_add('sub:' . $sid, (string)$s2[1]['name'], 'ps5', 'Approved and added to PS5 games as a hidden draft (' . $gid . '). Ready for you to check, sign and publish.');
+                    } catch (Throwable $e) { $bad[] = (string)($s2[1]['name'] ?? $sid) . ' (' . $e->getMessage() . ')'; }
+                }
+                if (!$ok && !$bad) throw new RuntimeException('Nothing is ready to approve.');
+                rs_log('hub', 'approve', count($ok) . ' PS5 ready');
+                $res['msg'] = ($ok ? count($ok) . ' added to PS5 games as hidden drafts: ' . implode(', ', $ok) . '. They go out with the next PS5 store update.' : 'Nothing was added.') . ($bad ? ' Couldn\'t add: ' . implode('; ', $bad) . '.' : '');
+                $res['ok'] = (bool)$ok;
                 break;
             }
             case 'dismiss_listed': {

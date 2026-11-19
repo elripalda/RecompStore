@@ -33,6 +33,14 @@ if ($a === 'check' || $a === 'poll') {
 
 $byId = fn(string $id) => rs_pc_app($id);
 // (4.13) A key's owner from the form: a team member's id, or '' for nobody (a backup key). -> [id, name]
+// (4.13) Off the store over a flagged scan (sec_hid keeps why, so it can go back later).
+$secHide = function (array $app, string $repo, string $tag, string $why): void {
+    $app['hidden'] = true;
+    $app['sec_hid'] = ['at' => time(), 'by' => rs_me_name(), 'tag' => $tag, 'repo' => $repo, 'why' => mb_substr(trim($why), 0, 200) ?: 'a scan flagged ' . $tag];
+    rs_pc_save($app);
+    if ($tag !== '') rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([$repo, $tag]);
+    rs_log('security', $app['id'], 'hidden from the store for security: ' . $app['sec_hid']['why']);
+};
 $vtOwner = function (string $v): array {
     if ($v === '' || $v === '0') return [0, ''];
     foreach (rs_team() as $u) if ((int)$u['id'] === (int)$v && (int)$u['active']) return [(int)$u['id'], (string)($u['display_name'] ?: $u['username'])];
@@ -100,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rs_set_setting('vt_auto', !empty($_POST['auto']) ? '1' : '0');
             rs_set_setting('vt_clam_subs', !empty($_POST['clam_subs']) ? '1' : '0');
             rs_set_setting('vt_store_all', !empty($_POST['store_all']) ? '1' : '0');
+            rs_set_setting('vt_minor_auto', !empty($_POST['minor_auto']) ? '1' : '0');
             rs_flash('Saved.', 'ok');
         } elseif ($act === 'approve' || $act === 'block') {
             $app = $byId((string)($_POST['id'] ?? ''));
@@ -163,13 +172,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_once __DIR__ . '/inc/repowatch.php';
             if ($act === 'sec-hide') {
                 if (!empty($app['hidden'])) throw new RuntimeException($app['name'] . ' is already hidden.');
-                $tag = (string)($_POST['tag'] ?? '');
-                $app['hidden'] = true;
-                $app['sec_hid'] = ['at' => time(), 'by' => rs_me_name(), 'tag' => $tag, 'repo' => (string)($_POST['repo'] ?? ''), 'why' => mb_substr(trim((string)($_POST['why'] ?? '')), 0, 200) ?: 'a scan flagged ' . $tag];
-                rs_pc_save($app);
+                $secHide($app, (string)($_POST['repo'] ?? ''), (string)($_POST['tag'] ?? ''), (string)($_POST['why'] ?? ''));
                 rs_watch_pc_out();
-                if ($tag !== '') rs_db()->prepare('UPDATE vt_files SET seen = 1 WHERE repo = ? AND tag = ?')->execute([(string)($_POST['repo'] ?? ''), $tag]);
-                rs_log('security', $app['id'], 'hidden from the store for security: ' . $app['sec_hid']['why']);
                 rs_flash($app['name'] . ' is hidden from the store. It\'s under Hidden for security below, with a way to put it back.', 'ok');
             } else {
                 if (empty($app['sec_hid'])) throw new RuntimeException($app['name'] . ' wasn\'t hidden here.');
@@ -180,6 +184,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rs_log('security', $app['id'], 'back on the store after a security hide');
                 rs_flash($app['name'] . ' is back in the store.', 'ok');
             }
+        } elseif ($act === 'sec-hide-all') {
+            // (4.15) Every game whose waiting or current release 7+ engines flagged, off the store at once.
+            require_once __DIR__ . '/inc/repowatch.php';
+            $n = 0;
+            foreach (rs_vt_hide_candidates() as [$app, $f]) {
+                $secHide($app, (string)$f['repo'], (string)$f['tag'], 'VirusTotal: ' . ((int)$f['malicious'] + (int)$f['suspicious']) . ' of ' . (int)$f['engines'] . ' engines flagged ' . $f['name'] . ' (' . $f['tag'] . ')');
+                $n++;
+            }
+            if (!$n) throw new RuntimeException('Nothing to hide.');
+            rs_watch_pc_out();
+            rs_flash($n . ' hidden from the store. They\'re under Hidden for security below, with a way to put each back.', 'ok');
         } elseif ($act === 'sec-rescan') {
             // (4.14) A hidden game's developer says it's fixed: its newest release, checked again first.
             $app = $byId((string)($_POST['id'] ?? ''));
@@ -295,7 +310,9 @@ rs_head('Security', true, ['assets/vt.css']);
 </section>
 
 <section class="card">
-  <details class="vt-fold" id="needs" open><summary class="vt-head"><h2>Needs you <span class="muted small"><?= count($red) ?></span></h2></summary>
+  <?php $toHide = rs_vt_hide_candidates(); ?>
+  <details class="vt-fold" id="needs" open><summary class="vt-head"><h2>Needs you <span class="muted small"><?= count($red) ?></span></h2>
+    <?php if ($toHide): ?><div class="vt-acts"><form method="post" onsubmit="return confirm('Hide all <?= count($toHide) ?> from the store? <?= h(addslashes(implode(', ', array_map(fn($x) => $x[0]['name'], array_slice($toHide, 0, 8))))) ?><?= count($toHide) > 8 ? ' and more' : '' ?>. Players won\'t see or download them until you put them back.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="sec-hide-all"><button class="danger" title="Games whose waiting or current release <?= RS_VT_HIDE_AT ?> or more engines flagged">Hide all flagged by <?= RS_VT_HIDE_AT ?>+ (<?= count($toHide) ?>)</button></form></div><?php endif; ?></summary>
   <?php if (!$red): ?><p class="vt-empty">Nothing needs you. Anything several engines flag shows up here, and its update waits.</p><?php else: ?>
   <div class="vt-list">
     <?php foreach ($red as $f): $app = str_starts_with($f['ref'], 'pc:') ? rs_pc_app(substr($f['ref'], 3)) : null; $isHeld = $app && (string)($app['pending']['tag'] ?? '') === $f['tag']; ?>
@@ -314,8 +331,9 @@ rs_head('Security', true, ['assets/vt.css']);
         <?php endif; ?>
         <form method="post"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="seen"><input type="hidden" name="repo" value="<?= h($f['repo']) ?>"><input type="hidden" name="tag" value="<?= h($f['tag']) ?>"><button class="ghost">Mark seen</button></form>
       </div>
-      <?php // (4.12) Their email or hub, with a message made from this scan
-        try { echo rs_vt_contact_html(rs_vt_contact($f, $app), 'r' . $f['id'], [$f['repo'], $f['tag']]); } catch (Throwable $e) { rs_errlog('vt contact', $e); } ?>
+      <?php // (4.12) Their email or hub, with a message made from this scan. (4.15) And a GitHub issue from the preset.
+        try { echo rs_vt_contact_html(rs_vt_contact($f, $app), 'r' . $f['id'], [$f['repo'], $f['tag']]); } catch (Throwable $e) { rs_errlog('vt contact', $e); }
+        try { $ih = rs_vt_issue_html($f, $app); if ($ih !== '') echo '<div class="vt-contact"><span class="muted">On GitHub:</span> ' . $ih . '</div>'; } catch (Throwable $e) { rs_errlog('vt issue', $e); } ?>
     </div>
     <?php endforeach; ?>
   </div>
@@ -343,6 +361,7 @@ rs_head('Security', true, ['assets/vt.css']);
         if ($sc && !empty($sc['reach'])) echo rs_vt_contact_html($sc, 's' . $x['id'], [$sRepo, $sTag]);
         else echo rs_vt_reach_html(rs_vt_reach_get($sRepo, $sTag));
         $sl = array_values(array_filter(rs_pc_contact_links($x, 'Our security scan (VirusTotal) flagged a file in ' . $sTag . ', so it\'s off the store for now. It may well be a false alarm; could you take a look?'), fn($c) => $c[2] === 'gh'));
+        if ($sf) { $iu = rs_vt_issue($sf, $x)[2]; if ($iu !== '') foreach ($sl as &$c) if (str_starts_with($c[0], 'Open an issue')) $c[1] = $iu; unset($c); }
         if ($sl): ?><div class="vt-contact"><span class="muted">On GitHub:</span> <?php foreach ($sl as [$cLabel, $cHref]): ?><a class="btn small" href="<?= h($cHref) ?>" target="_blank" rel="noopener"<?= str_starts_with($cLabel, 'Open an issue') ? ' data-reach-issue data-repo="' . h($sRepo) . '" data-tag="' . h($sTag) . '"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
@@ -355,7 +374,7 @@ rs_head('Security', true, ['assets/vt.css']);
 <section class="card" id="minor">
   <div class="vt-head"><h2>Minor flags to okay <span class="pill<?= $minor ? ' warn' : '' ?>"><?= count($minor) ?></span></h2>
     <?php if (count($minor) > 1): ?><div class="vt-acts"><form method="post" onsubmit="return confirm('Okay all <?= count($minor) ?>? Players will see them as Verified Updates.');"><input type="hidden" name="csrf" value="<?= h(rs_csrf()) ?>"><input type="hidden" name="action" value="minor-ok-all"><button>Okay all (<?= count($minor) ?>)</button></form></div><?php endif; ?></div>
-  <p class="muted">Releases that are out with 1 or 2 flags, usually unsigned programs. RecompLauncher shows them as "Checking" until you look. Once you okay one, players see a Verified Update.</p>
+  <p class="muted">Releases that are out with a few flags, usually unsigned programs. <?= rs_setting('vt_minor_auto', '1') === '1' ? 'These are okayed on their own as they\'re checked (Settings below), so this list is usually empty.' : 'RecompLauncher shows them as "Checking" until you look. Once you okay one, players see a Verified Update.' ?></p>
   <?php if (!$minor): ?><p class="vt-empty">Nothing to look at.</p><?php else: ?>
   <div class="vt-list">
     <?php foreach ($minor as [$ma, $mt, $mf, $me, $ml]): ?>
@@ -397,6 +416,7 @@ rs_head('Security', true, ['assets/vt.css']);
         elseif ($v === 'red') echo rs_vt_reach_html(rs_vt_reach_get(rs_pc_key($x), (string)$p['tag']));
         $cl = rs_pc_contact_links($x, $v === 'red' ? 'Our security scan (VirusTotal) flagged a file in ' . ($p['version'] ?: $p['tag']) . ', so it\'s on hold for now. It may well be a false alarm; could you take a look?' : 'Your release ' . ($p['version'] ?: $p['tag']) . ' is waiting on our side.', $vc);
         if ($vc && !empty($vc['reach'])) $cl = array_values(array_filter($cl, fn($c) => $c[2] === 'gh'));
+        if ($v === 'red') { $iu = rs_vt_issue(rs_vt_worst(rs_pc_key($x), (string)$p['tag']), $x)[2]; if ($iu !== '') foreach ($cl as &$c) if (str_starts_with($c[0], 'Open an issue')) $c[1] = $iu; unset($c); }
         if ($cl): ?><div class="vt-contact"><span class="muted"><?= $vc && !empty($vc['reach']) ? 'On GitHub:' : 'Ask the developer:' ?></span> <?php foreach ($cl as [$cLabel, $cHref, $cKind]): ?><a class="btn small" href="<?= h($cHref) ?>"<?= $cKind === 'gh' ? ' target="_blank" rel="noopener"' : '' ?><?= str_starts_with($cLabel, 'Open an issue') ? ' data-reach-issue data-repo="' . h(rs_pc_key($x)) . '" data-tag="' . h((string)$p['tag']) . '"' : '' ?>><?= h($cLabel) ?></a> <?php endforeach; ?></div><?php endif; ?>
     </div>
     <?php endforeach; ?>
@@ -459,6 +479,7 @@ rs_head('Security', true, ['assets/vt.css']);
     <label class="vt-toggle"><input type="checkbox" name="auto" value="1"<?= $cfg['auto'] ? ' checked' : '' ?>><span><strong>Let clean updates out on their own</strong><small>Off: every held update waits for Let it out now.</small></span></label>
     <label class="vt-toggle"><input type="checkbox" name="clam_subs" value="1"<?= $cfg['clam_subs'] ? ' checked' : '' ?><?= $clam ? '' : ' disabled' ?>><span><strong>ClamAV for submissions too</strong><small>When the day's VirusTotal checks run out, submissions and pasted links are checked by ClamAV instead of waiting for tomorrow.</small></span></label>
     <label class="vt-toggle"><input type="checkbox" name="store_all" value="1"<?= $cfg['store_all'] ? ' checked' : '' ?>><span><strong>Check every game in the store too</strong><small>Games that aren't updating get checked in the background, so each one has a VirusTotal report. Off: only updates and submissions are checked.</small></span></label>
+    <label class="vt-toggle"><input type="checkbox" name="minor_auto" value="1"<?= rs_setting('vt_minor_auto', '1') === '1' ? ' checked' : '' ?>><span><strong>Okay minor flags on their own</strong><small>Releases only a few engines flag (usually unsigned programs) are okayed as soon as they're checked, so players see a Verified Update.</small></span></label>
     <div class="vt-save"><button class="primary">Save</button></div>
   </form>
   <p class="vt-line"><span class="vt-state<?= $clam ? ' on' : '' ?>"><i></i><?= $clam ? 'ClamAV is on' : 'ClamAV isn\'t installed' ?></span><small class="muted"><?= $clam ? 'GitHub finds VirusTotal doesn\'t know yet, or that come in after the day\'s VirusTotal requests are used up, are checked by ClamAV on this server instead. Updates always wait for VirusTotal, one a game a day' . ($cfg['clam_subs'] ? ', and so are submissions' : '') . '. No daily limit.' : 'Install it on the server (clamav-daemon) and updates get checked here when VirusTotal is busy.' ?></small></p>
